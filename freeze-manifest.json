@@ -1898,13 +1898,14 @@
     },
     {
       "path": "README.md",
-      "sha256": "fe77c23476a9786d74bc0bb8b3095603a5ad519dfa41d3e90e33c7bde82f8110",
-      "size": 4143,
+      "sha256": "9e6039b312874e7880869b037ed201082be3ddf36532f8f620299251da440819",
+      "size": 3896,
       "origin": {
         "repository": "GakuMotion",
         "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
         "path": "README.md",
-        "adaptation": "Restore existing documentation; adapt current build interface, links and historical placement."
+        "adaptation": "Restore existing documentation; adapt current build interface, links and historical placement.",
+        "documentation_followup": "Move dated acceptance narration from product entry pages into existing historical version notes."
       },
       "classification": "restored_product_documentation_with_explicit_adaptations"
     },
@@ -1943,13 +1944,14 @@
     },
     {
       "path": "docs/USAGE.md",
-      "sha256": "b242c429bdba8a1fc789ad45b437731503644c7a9868c980bf3fc271f62caa67",
-      "size": 6884,
+      "sha256": "bbcd9bce869d777becd981344f7c547d9c34cd7d3966b8f7313624cba2cc13b9",
+      "size": 6745,
       "origin": {
         "repository": "GakuMotion",
         "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
         "path": "docs/USAGE.md",
-        "adaptation": "Restore existing documentation; adapt current build interface, links and historical placement."
+        "adaptation": "Restore existing documentation; adapt current build interface, links and historical placement.",
+        "documentation_followup": "Move dated acceptance narration from product entry pages into existing historical version notes."
       },
       "classification": "restored_product_documentation_with_explicit_adaptations"
     },
@@ -2027,13 +2029,14 @@
     },
     {
       "path": "docs/history/README.md",
-      "sha256": "15ac6c64088eba587031e93470be3f77824053970107e07b0d12fd4c50d212e6",
-      "size": 638,
+      "sha256": "9b62eb3f10ab5fa9ec9e06db0e913ff34419de9c139a2f3f5d5a5959bbc4b2a9",
+      "size": 825,
       "origin": {
         "repository": "GakuMotion",
         "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
         "path": "docs/README.md",
-        "adaptation": "Restore separate navigation for selected existing historical text records; no raw evidence copied."
+        "adaptation": "Restore separate navigation for selected existing historical text records; no raw evidence copied.",
+        "documentation_followup": "Move dated acceptance narration from product entry pages into existing historical version notes."
       },
       "classification": "restored_product_documentation_with_explicit_adaptations"
     },

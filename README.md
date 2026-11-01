@@ -39,8 +39,6 @@ GakuMotion 通过 [GakuLoader](https://github.com/crested-ezios/GakuLoader) 加�
 - 目标腿部几何重烘焙尚未移植到原生导入器；请求该操作会报错并保留已有资源。
 - VR 模式下的 Motion 运镜仍有已知兼容问题，见 [VRify 共存记录](docs/USAGE.md#已知兼容性)。
 
-2026-11-01，用户已确认其当时使用版本的游戏内验收通过。后续本地修订、可选实验和新打包产物分别记录验证范围；各版本的离线结果、部署状态与实机证据见 [文档索引](docs/README.md)。
-
 ## 开发接入
 
 运行时与导入器的分工见 [架构](docs/ARCHITECTURE.md)，动作与镜头的读写契约见 [文件格式](docs/formats/ACTION_FORMATS.md)。宿主插件开发从 [GakuLoader 插件指南](https://github.com/crested-ezios/GakuLoader/blob/main/docs/PLUGIN_DEVELOPMENT.md) 开始，Motion 使用的 ABI 见 [GakuPlugin.h](include/GakuPlugin.h)。
