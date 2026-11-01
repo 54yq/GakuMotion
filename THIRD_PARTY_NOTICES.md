@@ -1,8 +1,8 @@
-# Third-party notices for this source staging
+# Third-party notices for GakuMotion
 
-GakuMotion's selected first-party software is covered by the root MIT `LICENSE`.
-This staging omits the data-bearing inputs listed in `SOURCE_REVIEW.md`; it does
-not grant a license to omitted game assets, models, captures or derived datasets.
+GakuMotion's first-party software is covered by the root MIT `LICENSE`.
+The source and static-parameter provenance is recorded in `SOURCE_REVIEW.md`.
+Original models, textures, motions, audio, recordings and training inputs are not bundled.
 
 ## Dear ImGui and embedded stb components
 
@@ -44,4 +44,4 @@ BSD-3-Clause third-party adaptation, not wholly first-party MIT code.
 
 Retain `candidate/csharp/THIRD_PARTY_NOTICES.md` and
 `candidate/csharp/third_party/numpy/LICENSE.txt` with relevant source and any
-future derived binaries. No NumPy binary or Python runtime is included here.
+derived binaries. No NumPy binary or Python runtime is included here.

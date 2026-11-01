@@ -1928,11 +1928,12 @@
       "path": "THIRD_PARTY_NOTICES.md",
       "origin": {
         "type": "new staging-only documentation/build control",
-        "source_algorithm_modified": false
+        "source_algorithm_modified": false,
+        "complete_candidate_update": "Align notice wording with the restored complete source/static-parameter scope."
       },
       "classification": "new_local_staging_control_or_documentation",
-      "sha256": "c77b9e2cfa041b2904d28c6d2f2174096bbe6cda43b3d0e9b3f828b5fe1fc2e0",
-      "size": 2372
+      "sha256": "38ad8cf04d28cd15cf28aa5660921a8ba092bf1bc32a639546f8843c641bd0b9",
+      "size": 2353
     },
     {
       "path": "docs/INSTALLATION.md",
