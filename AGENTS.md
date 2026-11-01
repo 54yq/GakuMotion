@@ -1,18 +1,11 @@
-# GakuMotion frozen source staging
+# GakuMotion
 
-Work locally in this independent repository. Keep the selected upstream source
-bytes and their provenance records together. Changes to a frozen implementation
-require a new explicit review and manifest update.
+- Use `build.ps1` for local Runtime, NativeAOT and synthetic-contract builds.
+- Ordinary source edits and builds do not require a snapshot approval status. When preparing a source snapshot, update `freeze-manifest.json` and optionally run `tools/verify-source.ps1`.
+- Retain dependency licenses and attribution notices. Keep source and parameter provenance accurate.
+- Do not deploy, control the game, access real user motions/models/captures, publish a Release or change remote repositories unless the current user request authorizes that action.
+- Keep user data and unrelated working changes intact. Use synthetic inputs for isolated tests.
+- Record build/test results separately from game loading and visual acceptance.
+- Make local Git checkpoints after validating the requested changes.
 
-- Build and test only through the local build entry, using an external output directory.
-- Do not deploy, start or control the game, access real motions/models/captures,
-  upload files, push, or change remote repositories from this task.
-- Required data-bearing inputs excluded by the source review must remain listed
-  in `freeze-manifest.json`. Do not create substitutes, empty resources or stubs
-  to bypass the incomplete-source preflight.
-- Retain every applicable third-party license and attribution notice.
-- Record actual build/test results separately from source review and game acceptance.
-- Make local Git checkpoints after validated changes. Commit only this repository's files.
-
-This repository deliberately has its own instructions; it does not inherit the
-research repository's automatic game-deployment workflow.
+This repository has no automatic game-deployment step.

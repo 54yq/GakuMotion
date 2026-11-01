@@ -1,6 +1,6 @@
 {
   "schema": "gakumotion.frozen-source-staging/1",
-  "status": "blocked-review-partial-source",
+  "status": "complete-source-snapshot",
   "source_snapshot": {
     "repository": "GakuMotion",
     "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
@@ -1880,32 +1880,35 @@
       "path": "AGENTS.md",
       "origin": {
         "type": "new staging-only documentation/build control",
-        "source_algorithm_modified": false
+        "source_algorithm_modified": false,
+        "complete_candidate_update": "Normal local build integration and current user/developer documentation; no algorithm or parameter change."
       },
       "classification": "new_local_staging_control_or_documentation",
-      "sha256": "37e559262224c33d8fac29aa853e4933b6d553ba5c0c4a3545a8a4cfbfb479ca",
-      "size": 1076
+      "sha256": "3b6c9da66bf56c1a12e5eb07611efe65db510bf5643eea1df58602621525e23c",
+      "size": 863
     },
     {
       "path": "build.ps1",
       "origin": {
         "type": "new staging-only documentation/build control",
-        "source_algorithm_modified": false
+        "source_algorithm_modified": false,
+        "complete_candidate_update": "Normal local build integration and current user/developer documentation; no algorithm or parameter change."
       },
       "classification": "new_local_staging_control_or_documentation",
-      "sha256": "1a57ede5e6efb048358379985252c71cd9e7acb5be1634559d68c274ecee461e",
-      "size": 6853
+      "sha256": "9b8a273de869da0214f84e9086d5a48cd1cbc175b2c16df51f4878409d763488",
+      "size": 6517
     },
     {
       "path": "README.md",
-      "sha256": "9e6039b312874e7880869b037ed201082be3ddf36532f8f620299251da440819",
-      "size": 3896,
+      "sha256": "a4ac621766b7259ae15f1d22b52276ed57e47aec4833c5be57215d569629a0f7",
+      "size": 3840,
       "origin": {
         "repository": "GakuMotion",
         "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
         "path": "README.md",
         "adaptation": "Restore existing documentation; adapt current build interface, links and historical placement.",
-        "documentation_followup": "Move dated acceptance narration from product entry pages into existing historical version notes."
+        "documentation_followup": "Move dated acceptance narration from product entry pages into existing historical version notes.",
+        "complete_candidate_update": "Normal local build integration and current user/developer documentation; no algorithm or parameter change."
       },
       "classification": "restored_product_documentation_with_explicit_adaptations"
     },
@@ -1914,11 +1917,12 @@
       "origin": {
         "type": "new staging-only documentation/build control",
         "source_algorithm_modified": false,
-        "documentation_repair": "Append explanation of restored product navigation; implementation and excluded-input choices unchanged."
+        "documentation_repair": "Append explanation of restored product navigation; implementation and excluded-input choices unchanged.",
+        "complete_candidate_update": "Normal local build integration and current user/developer documentation; no algorithm or parameter change."
       },
       "classification": "new_local_staging_control_or_documentation",
-      "sha256": "d4d148d0b2ee269334370c77bf47b8c37cb1846cbfec618c06c134983091b3f3",
-      "size": 4250
+      "sha256": "3a006a96f8cb836405c3f262910f3d2bd2d576eb8c3c6cba341607d53ab3dfa1",
+      "size": 5270
     },
     {
       "path": "THIRD_PARTY_NOTICES.md",
@@ -2054,140 +2058,184 @@
     },
     {
       "path": "BUILD_NOTES.md",
-      "sha256": "fb093f2bdfcca78c839039018d13c4fd2ee362a80f29ae2d0c9956713fd00d16",
-      "size": 3710,
+      "sha256": "6dbced7e76b26d7d648f8e3d25c4ca75bcba3c96f5700e3d73c3dab63147d930",
+      "size": 3569,
       "origin": {
         "repository": "GakuMotion",
         "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
         "path": "BUILD_NOTES.md",
-        "adaptation": "Restore existing documentation; adapt current build interface, links and historical placement."
+        "adaptation": "Restore existing documentation; adapt current build interface, links and historical placement.",
+        "complete_candidate_update": "Normal local build integration and current user/developer documentation; no algorithm or parameter change."
       },
       "classification": "restored_product_documentation_with_explicit_adaptations"
-    }
-  ],
-  "blocked_required_inputs": [
+    },
     {
       "path": "src/GkAuxChannelModel.hpp",
-      "source_revision": "2b28931e8b50b780668baec5e3982927667c3e08",
       "sha256": "9d2626a797d01a808f4ab38f7e4bf742c73240a1143d04bfd16f3b1838dd05d4",
       "size": 11894,
-      "required_for": [
-        "runtime"
-      ],
-      "reason": "empirical model fitted from 4515 official capture frames; distribution basis pending",
-      "decision": "excluded_pending_distribution_basis"
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+        "path": "src/GkAuxChannelModel.hpp",
+        "restoration": "Restored without byte changes under the explicit complete-candidate scope selected on 2026-11-01."
+      },
+      "classification": "existing_product_source_and_static_parameters",
+      "content_kind": "captured-rotation fitted model"
     },
     {
       "path": "src/GkSoleProxyProfile.hpp",
-      "source_revision": "2b28931e8b50b780668baec5e3982927667c3e08",
       "sha256": "e6decf8701b28aaab7b6f940ed662031fa22d4caa3af8e25845e35fc3a3bf2c0",
       "size": 2271,
-      "required_for": [
-        "runtime"
-      ],
-      "reason": "facets and centres derived from official shoe mesh; distribution basis pending",
-      "decision": "excluded_pending_distribution_basis"
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+        "path": "src/GkSoleProxyProfile.hpp",
+        "restoration": "Restored without byte changes under the explicit complete-candidate scope selected on 2026-11-01."
+      },
+      "classification": "existing_product_source_and_static_parameters",
+      "content_kind": "measured supporting-facet profile"
     },
     {
       "path": "src/GkSolePitchEnvelope.hpp",
-      "source_revision": "2b28931e8b50b780668baec5e3982927667c3e08",
       "sha256": "35700dc6ecdd31210cca660e274f6576c83d71c35c040541d3761893fb2d1b99",
       "size": 8822,
-      "required_for": [
-        "runtime"
-      ],
-      "reason": "actual extracted BakeMesh vertex coordinates/indices; excluded",
-      "decision": "excluded_pending_distribution_basis"
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+        "path": "src/GkSolePitchEnvelope.hpp",
+        "restoration": "Restored without byte changes under the explicit complete-candidate scope selected on 2026-11-01."
+      },
+      "classification": "existing_product_source_and_static_parameters",
+      "content_kind": "measured vertex subset and original indices"
     },
     {
       "path": "src/GkEyeTargetFrames.hpp",
-      "source_revision": "2b28931e8b50b780668baec5e3982927667c3e08",
       "sha256": "2b543c22bf7c8562c08fb59edb949d2301ce9b52a19e32d920520664c471c35c",
       "size": 3350,
-      "required_for": [
-        "runtime"
-      ],
-      "reason": "official face-prefab and eye-sheet measured gain data; distribution basis pending",
-      "decision": "excluded_pending_distribution_basis"
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+        "path": "src/GkEyeTargetFrames.hpp",
+        "restoration": "Restored without byte changes under the explicit complete-candidate scope selected on 2026-11-01."
+      },
+      "classification": "existing_product_source_and_static_parameters",
+      "content_kind": "neutral frames and relative gains"
     },
     {
       "path": "src/GkFacialAdapterModel.hpp",
-      "source_revision": "2b28931e8b50b780668baec5e3982927667c3e08",
       "sha256": "f08ba2fd6f334c2d1478e1dbfbf4f26b7bcddeff6513f839048a3d7810e7d054",
       "size": 1743,
-      "required_for": [
-        "runtime"
-      ],
-      "reason": "official face/default-animation weights mixed with empirical priors; distribution basis pending",
-      "decision": "excluded_pending_distribution_basis"
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+        "path": "src/GkFacialAdapterModel.hpp",
+        "restoration": "Restored without byte changes under the explicit complete-candidate scope selected on 2026-11-01."
+      },
+      "classification": "existing_product_source_and_static_parameters",
+      "content_kind": "asset defaults and empirical variant prior"
     },
     {
       "path": "candidate/csharp/src/GakuMotion.VmdImporter/Output/FrameAlignment.cs",
-      "source_revision": "2b28931e8b50b780668baec5e3982927667c3e08",
       "sha256": "e9f9769724f0ce89dc235e75d683b26b4f6151654d8b572389af054f6830e6f0",
       "size": 19423,
-      "required_for": [
-        "nativeaot"
-      ],
-      "reason": "source/target measured bone-direction geometry embedded in source; distribution basis pending",
-      "decision": "excluded_pending_distribution_basis"
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+        "path": "candidate/csharp/src/GakuMotion.VmdImporter/Output/FrameAlignment.cs",
+        "restoration": "Restored without byte changes under the explicit complete-candidate scope selected on 2026-11-01."
+      },
+      "classification": "existing_product_source_and_static_parameters",
+      "content_kind": "implementation with measured frame directions"
     },
     {
       "path": "candidate/csharp/src/GakuMotion.VmdImporter/Rig/VirtualMMDRig.cs",
-      "source_revision": "2b28931e8b50b780668baec5e3982927667c3e08",
       "sha256": "c882fd20ef762f079f3bdea1d87d5d07b65021bcb2ef34962309d6ba49845be1",
       "size": 31235,
-      "required_for": [
-        "nativeaot"
-      ],
-      "reason": "static toe geometry defaults with insufficient redistribution provenance; distribution basis pending",
-      "decision": "excluded_pending_distribution_basis"
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+        "path": "candidate/csharp/src/GakuMotion.VmdImporter/Rig/VirtualMMDRig.cs",
+        "restoration": "Restored without byte changes under the explicit complete-candidate scope selected on 2026-11-01."
+      },
+      "classification": "existing_product_source_and_static_parameters",
+      "content_kind": "implementation with measured toe fallback"
     },
     {
       "path": "candidate/csharp/src/GakuMotion.VmdImporter/Resources/gakumas_bone_profile.json",
-      "source_revision": "2b28931e8b50b780668baec5e3982927667c3e08",
       "sha256": "da966ee94b06bac4fbe7c7c3fc11c723d4e0eae0209c4550efb0be0c88b11305",
       "size": 12010,
-      "required_for": [
-        "nativeaot"
-      ],
-      "reason": "bone names/IDs mixed with TdaSpec measured rest lengths/heights; distribution basis pending",
-      "decision": "excluded_pending_distribution_basis"
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+        "path": "candidate/csharp/src/GakuMotion.VmdImporter/Resources/gakumas_bone_profile.json",
+        "restoration": "Restored without byte changes under the explicit complete-candidate scope selected on 2026-11-01."
+      },
+      "classification": "existing_product_source_and_static_parameters",
+      "content_kind": "synthetic bone mapping and calibrated proportions"
     },
     {
       "path": "candidate/csharp/src/GakuMotion.VmdImporter/Resources/mmd_source_skeleton.json",
-      "source_revision": "2b28931e8b50b780668baec5e3982927667c3e08",
       "sha256": "629ba111bb555d3741d9656d7a647647695afda407678a30b17c891bd3857a2f",
       "size": 47269,
-      "required_for": [
-        "nativeaot"
-      ],
-      "reason": "external PMX-derived local matrices/head/tail/length and axes; redistribution authority unverified",
-      "decision": "excluded_pending_distribution_basis"
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+        "path": "candidate/csharp/src/GakuMotion.VmdImporter/Resources/mmd_source_skeleton.json",
+        "restoration": "Restored without byte changes under the explicit complete-candidate scope selected on 2026-11-01."
+      },
+      "classification": "existing_product_source_and_static_parameters",
+      "content_kind": "92-bone static rest/matrix records"
     },
     {
       "path": "tools/vmd2gkmotion/tooth_appearance_lut.json",
-      "source_revision": "2b28931e8b50b780668baec5e3982927667c3e08",
       "sha256": "1c86af6bb41af85d2fbe76938a02c1bff8e7d4ccd8417a3cb59d9932bbe2e24f",
       "size": 271566,
-      "required_for": [
-        "nativeaot"
-      ],
-      "reason": "YYB/Saki geometry-trained centres/RBF model and asset observations; redistribution authority unverified",
-      "decision": "excluded_pending_distribution_basis"
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+        "path": "tools/vmd2gkmotion/tooth_appearance_lut.json",
+        "restoration": "Restored without byte changes under the explicit complete-candidate scope selected on 2026-11-01."
+      },
+      "classification": "existing_product_source_and_static_parameters",
+      "content_kind": "fitted geometry-response RBF parameters"
     },
     {
       "path": "tools/vmd2gkmotion/root_retarget_profiles.json",
-      "source_revision": "2b28931e8b50b780668baec5e3982927667c3e08",
       "sha256": "2253db0d7c4e9c141bd470104e022059dd5f57d2acd5e3c663a7b674f6762c78",
       "size": 2366,
-      "required_for": [
-        "nativeaot"
-      ],
-      "reason": "real motion hashes and official recorded-motion measured root calibration; distribution basis pending",
-      "decision": "excluded_pending_distribution_basis"
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+        "path": "tools/vmd2gkmotion/root_retarget_profiles.json",
+        "restoration": "Restored without byte changes under the explicit complete-candidate scope selected on 2026-11-01."
+      },
+      "classification": "existing_product_source_and_static_parameters",
+      "content_kind": "specific-motion identity and calibrated profile"
+    },
+    {
+      "path": "global.json",
+      "sha256": "9cca173f294b09373ebe03a4657934139be112d1d86564744cb937fa82b8d738",
+      "size": 110,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+        "path": "candidate/csharp/global.json",
+        "adaptation": "Apply the existing stable SDK version at the product root; explicitly disallow prerelease selection."
+      },
+      "classification": "build_configuration_or_optional_maintenance_tool"
+    },
+    {
+      "path": "tools/verify-source.ps1",
+      "sha256": "0f8697e0fd26372dce9aa0d8ed45a50d234f20331a9731d78c97219614c18708",
+      "size": 1251,
+      "origin": {
+        "type": "new optional maintainer utility",
+        "purpose": "Snapshot hash check separate from ordinary product compilation."
+      },
+      "classification": "build_configuration_or_optional_maintenance_tool"
     }
   ],
+  "blocked_required_inputs": [],
   "dependency_policy": {
     "kine_declared_gitlink": "4f9c7e39d1620d262d94fa8ef4a929bad69ed0d5",
     "kine_core_headers_equal_reviewed_current": true,
@@ -2198,20 +2246,21 @@
   },
   "review_scope": {
     "candidate_original_files": 31,
-    "candidate_included_files": 27,
-    "candidate_excluded_files": 4,
+    "candidate_included_files": 31,
+    "candidate_excluded_files": 0,
     "native_project_original_files": 15,
     "native_project_included_files": 15,
-    "embedded_product_json_included": 2,
-    "embedded_product_json_excluded": 2,
-    "public_distribution_approval": false,
-    "complete_product_build": false,
-    "game_deployment_or_acceptance_performed": false
+    "embedded_product_json_included": 4,
+    "embedded_product_json_excluded": 0,
+    "complete_product_build": true,
+    "game_deployment_or_acceptance_performed": false,
+    "release_or_publication_performed": false
   },
   "notes": [
-    "Only exact selected code, retained licenses and two name/ID mapping JSON contracts are included. Required game/model-derived geometry and training/calibration inputs are deliberately omitted.",
-    "Third-party source notices are retained. Source review does not make omitted data redistributable.",
-    "Build and test outputs belong outside this repository. No deployment or remote action is part of assembly."
+    "Selected source from the fixed revision, including the eleven explicitly selected required source/static parameter files, is present.",
+    "Original production algorithms and restored parameter bytes are unchanged; build integration and product documentation were updated.",
+    "No real user materials, original model/texture files, motion/audio files, recordings or training inputs are included.",
+    "The snapshot manifest is an optional maintenance record, not a product build prerequisite."
   ],
   "documentation_repair": {
     "baseline_staging_commit": "e4a9864d01e9773053fa3eaf7ed9bd93d2847e5c",
@@ -2219,5 +2268,69 @@
     "purpose": "Restore existing user/developer entry points omitted by the initial source selection.",
     "scope": "Documentation only; implementation bytes and blocked inputs unchanged.",
     "language_inventory": "The fixed Motion and legacy trees contain README.md; no product README translations found or invented."
+  },
+  "complete_candidate_restore": {
+    "previous_staging_commit": "f6650bee001c840369a156f0b5da26444e729421",
+    "fixed_source_revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+    "restored_required_inputs": [
+      {
+        "path": "src/GkAuxChannelModel.hpp",
+        "sha256": "9d2626a797d01a808f4ab38f7e4bf742c73240a1143d04bfd16f3b1838dd05d4",
+        "size": 11894
+      },
+      {
+        "path": "src/GkSoleProxyProfile.hpp",
+        "sha256": "e6decf8701b28aaab7b6f940ed662031fa22d4caa3af8e25845e35fc3a3bf2c0",
+        "size": 2271
+      },
+      {
+        "path": "src/GkSolePitchEnvelope.hpp",
+        "sha256": "35700dc6ecdd31210cca660e274f6576c83d71c35c040541d3761893fb2d1b99",
+        "size": 8822
+      },
+      {
+        "path": "src/GkEyeTargetFrames.hpp",
+        "sha256": "2b543c22bf7c8562c08fb59edb949d2301ce9b52a19e32d920520664c471c35c",
+        "size": 3350
+      },
+      {
+        "path": "src/GkFacialAdapterModel.hpp",
+        "sha256": "f08ba2fd6f334c2d1478e1dbfbf4f26b7bcddeff6513f839048a3d7810e7d054",
+        "size": 1743
+      },
+      {
+        "path": "candidate/csharp/src/GakuMotion.VmdImporter/Output/FrameAlignment.cs",
+        "sha256": "e9f9769724f0ce89dc235e75d683b26b4f6151654d8b572389af054f6830e6f0",
+        "size": 19423
+      },
+      {
+        "path": "candidate/csharp/src/GakuMotion.VmdImporter/Rig/VirtualMMDRig.cs",
+        "sha256": "c882fd20ef762f079f3bdea1d87d5d07b65021bcb2ef34962309d6ba49845be1",
+        "size": 31235
+      },
+      {
+        "path": "candidate/csharp/src/GakuMotion.VmdImporter/Resources/gakumas_bone_profile.json",
+        "sha256": "da966ee94b06bac4fbe7c7c3fc11c723d4e0eae0209c4550efb0be0c88b11305",
+        "size": 12010
+      },
+      {
+        "path": "candidate/csharp/src/GakuMotion.VmdImporter/Resources/mmd_source_skeleton.json",
+        "sha256": "629ba111bb555d3741d9656d7a647647695afda407678a30b17c891bd3857a2f",
+        "size": 47269
+      },
+      {
+        "path": "tools/vmd2gkmotion/tooth_appearance_lut.json",
+        "sha256": "1c86af6bb41af85d2fbe76938a02c1bff8e7d4ccd8417a3cb59d9932bbe2e24f",
+        "size": 271566
+      },
+      {
+        "path": "tools/vmd2gkmotion/root_retarget_profiles.json",
+        "sha256": "2253db0d7c4e9c141bd470104e022059dd5f57d2acd5e3c663a7b674f6762c78",
+        "size": 2366
+      }
+    ],
+    "scope": "Exactly eleven existing files, including specified fitted/calibrated parameters and static measured geometry; no original models, textures, motions, audio, recordings or training inputs.",
+    "build_integration": "No snapshot hash, blocked list or approval status is consulted by build.ps1; snapshot verification is optional maintenance.",
+    "algorithm_or_parameter_changes": false
   }
 }

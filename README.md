@@ -21,7 +21,7 @@ GakuMotion 通过 [GakuLoader](https://github.com/crested-ezios/GakuLoader) 加�
 
 准备 GakuLoader，以及同一配套版本的 `GakuMotion.dll` 和 `GakuMotion.VmdImporter.Native.dll`。退出游戏后，将两个 DLL 放入 `gakumas-local/plugins/`，再启动游戏。
 
-安装需要维护者提供的同版本配套 DLL。当前仓库尚无可直接下载的配套安装包，源码也暂不能构建完整插件。完整目录、配置与更新方法见 [安装指南](docs/INSTALLATION.md)；源码开发见 [构建指南](BUILD_NOTES.md)。
+当前尚未发布可直接下载的配套安装包。可使用同版本配套 DLL，或按 [构建指南](BUILD_NOTES.md) 自行编译。完整目录、配置与更新方法见 [安装指南](docs/INSTALLATION.md)。
 
 ### 导入第一支动作
 
