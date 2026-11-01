@@ -1898,23 +1898,26 @@
     },
     {
       "path": "README.md",
+      "sha256": "fe77c23476a9786d74bc0bb8b3095603a5ad519dfa41d3e90e33c7bde82f8110",
+      "size": 4143,
       "origin": {
-        "type": "new staging-only documentation/build control",
-        "source_algorithm_modified": false
+        "repository": "GakuMotion",
+        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+        "path": "README.md",
+        "adaptation": "Restore existing documentation; adapt current build interface, links and historical placement."
       },
-      "classification": "new_local_staging_control_or_documentation",
-      "sha256": "5bfc8b0daedb6ab361ad1f4d33068a8c240744c08c7d76ad9b5b041028e9bd09",
-      "size": 2691
+      "classification": "restored_product_documentation_with_explicit_adaptations"
     },
     {
       "path": "SOURCE_REVIEW.md",
       "origin": {
         "type": "new staging-only documentation/build control",
-        "source_algorithm_modified": false
+        "source_algorithm_modified": false,
+        "documentation_repair": "Append explanation of restored product navigation; implementation and excluded-input choices unchanged."
       },
       "classification": "new_local_staging_control_or_documentation",
-      "sha256": "0b2a7ed5f90b77b2713df91c874b21337bdedf8984ec0b6595cbec232b6ec503",
-      "size": 3766
+      "sha256": "d4d148d0b2ee269334370c77bf47b8c37cb1846cbfec618c06c134983091b3f3",
+      "size": 4250
     },
     {
       "path": "THIRD_PARTY_NOTICES.md",
@@ -1925,6 +1928,138 @@
       "classification": "new_local_staging_control_or_documentation",
       "sha256": "c77b9e2cfa041b2904d28c6d2f2174096bbe6cda43b3d0e9b3f828b5fe1fc2e0",
       "size": 2372
+    },
+    {
+      "path": "docs/INSTALLATION.md",
+      "sha256": "f6d582cb112afbb1a9ee592ef33091c06438f14b6cc83d9b82d8b056b8ba2942",
+      "size": 3981,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+        "path": "docs/INSTALLATION.md",
+        "adaptation": "Restore existing documentation; adapt current build interface, links and historical placement."
+      },
+      "classification": "restored_product_documentation_with_explicit_adaptations"
+    },
+    {
+      "path": "docs/USAGE.md",
+      "sha256": "b242c429bdba8a1fc789ad45b437731503644c7a9868c980bf3fc271f62caa67",
+      "size": 6884,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+        "path": "docs/USAGE.md",
+        "adaptation": "Restore existing documentation; adapt current build interface, links and historical placement."
+      },
+      "classification": "restored_product_documentation_with_explicit_adaptations"
+    },
+    {
+      "path": "docs/TROUBLESHOOTING.md",
+      "sha256": "8882134bb5d809a258be9b03b2172d70267a5f1e95e25ee43b0756088d4b0047",
+      "size": 6428,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+        "path": "docs/TROUBLESHOOTING.md",
+        "adaptation": "Restore existing documentation; adapt current build interface, links and historical placement."
+      },
+      "classification": "restored_product_documentation_with_explicit_adaptations"
+    },
+    {
+      "path": "docs/ARCHITECTURE.md",
+      "sha256": "c32b2523d754a977d935bf7fac6e4ae634d104cb704ea681c8611976f9cf593c",
+      "size": 5456,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+        "path": "docs/ARCHITECTURE.md",
+        "adaptation": "Restore existing documentation; adapt current build interface, links and historical placement."
+      },
+      "classification": "restored_product_documentation_with_explicit_adaptations"
+    },
+    {
+      "path": "docs/formats/ACTION_FORMATS.md",
+      "sha256": "0c416ef32a79bcda87ec6c0f3ebd8ab46d986ea248b7a745a4a8c980c6046fa9",
+      "size": 5666,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+        "path": "docs/formats/ACTION_FORMATS.md",
+        "adaptation": "Restore existing documentation; adapt current build interface, links and historical placement."
+      },
+      "classification": "restored_product_documentation_with_explicit_adaptations"
+    },
+    {
+      "path": "docs/formats/NATIVE_FACIAL_TAIL.md",
+      "sha256": "fb1fd66d76b846ebf8b76b7620d72f1d9cc1672d6d24c48b5452496e6d803d75",
+      "size": 8085,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+        "path": "docs/formats/NATIVE_FACIAL_TAIL.md",
+        "adaptation": "Restore existing documentation; adapt current build interface, links and historical placement."
+      },
+      "classification": "restored_product_documentation_with_explicit_adaptations"
+    },
+    {
+      "path": "docs/history/DEVREVIEW_MINIMAL_PREVIEW_20261027.md",
+      "sha256": "4c4054f3353269f8411c61e05cd06a03962661e0f9913df5c386fab8481d11b6",
+      "size": 9857,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+        "path": "docs/DEVREVIEW_MINIMAL_PREVIEW_20261027.md",
+        "adaptation": "Restore existing documentation; adapt current build interface, links and historical placement."
+      },
+      "classification": "restored_product_documentation_with_explicit_adaptations"
+    },
+    {
+      "path": "docs/history/VRIFY_CAMERA_BEGIN_20261027.md",
+      "sha256": "797f7c0b3eee4bcfd2fb3a7770b381dab6f63d488e907d0e4ab3c2c802e9f22d",
+      "size": 2474,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+        "path": "docs/VRIFY_CAMERA_BEGIN_20261027.md",
+        "adaptation": "Restore existing documentation; adapt current build interface, links and historical placement."
+      },
+      "classification": "restored_product_documentation_with_explicit_adaptations"
+    },
+    {
+      "path": "docs/history/README.md",
+      "sha256": "15ac6c64088eba587031e93470be3f77824053970107e07b0d12fd4c50d212e6",
+      "size": 638,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+        "path": "docs/README.md",
+        "adaptation": "Restore separate navigation for selected existing historical text records; no raw evidence copied."
+      },
+      "classification": "restored_product_documentation_with_explicit_adaptations"
+    },
+    {
+      "path": "docs/README.md",
+      "sha256": "b09e8c52ff597c81311ad66cbdeae5dea0880e6f4ea4d387035394f3658b07d4",
+      "size": 1448,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+        "path": "docs/README.md",
+        "adaptation": "Restore existing user/developer navigation; include present documentation, with historical records separately grouped."
+      },
+      "classification": "restored_product_documentation_with_explicit_adaptations"
+    },
+    {
+      "path": "BUILD_NOTES.md",
+      "sha256": "fb093f2bdfcca78c839039018d13c4fd2ee362a80f29ae2d0c9956713fd00d16",
+      "size": 3710,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+        "path": "BUILD_NOTES.md",
+        "adaptation": "Restore existing documentation; adapt current build interface, links and historical placement."
+      },
+      "classification": "restored_product_documentation_with_explicit_adaptations"
     }
   ],
   "blocked_required_inputs": [
@@ -2074,5 +2209,12 @@
     "Only exact selected code, retained licenses and two name/ID mapping JSON contracts are included. Required game/model-derived geometry and training/calibration inputs are deliberately omitted.",
     "Third-party source notices are retained. Source review does not make omitted data redistributable.",
     "Build and test outputs belong outside this repository. No deployment or remote action is part of assembly."
-  ]
+  ],
+  "documentation_repair": {
+    "baseline_staging_commit": "e4a9864d01e9773053fa3eaf7ed9bd93d2847e5c",
+    "source_document_revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+    "purpose": "Restore existing user/developer entry points omitted by the initial source selection.",
+    "scope": "Documentation only; implementation bytes and blocked inputs unchanged.",
+    "language_inventory": "The fixed Motion and legacy trees contain README.md; no product README translations found or invented."
+  }
 }

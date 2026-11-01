@@ -1,45 +1,54 @@
-# GakuMotion 源码冻结候选
+# GakuMotion
 
-本目录是独立的本地源码审核仓，原始 GakuMotion 快照为
-`2b28931e8b50b780668baec5e3982927667c3e08`。
-作者程序代码、接口映射、必要的第三方源码及许可证按显式清单冻结；没有复制研发整仓、
-真实动作、模型、权重、捕获记录、游戏文件或原仓库的协作历史。
+在《学园偶像大师》PC DMM 版中回放 MMD 动作、表情、运镜与音频。
 
-**当前状态为 `blocked-review-partial-source`。完整 Runtime 与 NativeAOT 源码构建尚不可用。**
-11 个必需文件含实机几何、模型导出结构或训练／校准数据，尚缺分发依据，因此没有纳入。
-构建入口会逐项报告缺项并停止，不会生成空资源或替代实现。详见
-[来源审核](SOURCE_REVIEW.md) 与 `freeze-manifest.json`。
+GakuMotion 通过 [GakuLoader](https://github.com/crested-ezios/GakuLoader) 加载，在偶像摄影及符合准入条件的更衣室中驱动角色，不改写游戏可执行文件或 AssetBundle。VMD 导入由配套 NativeAOT 导入器完成，日常导入和播放无需安装 Python 或 .NET 运行时。
 
-## 本地验证
+[安装](docs/INSTALLATION.md) · [使用指南](docs/USAGE.md) · [常见问题](docs/TROUBLESHOOTING.md) · [源码构建](BUILD_NOTES.md) · [全部文档](docs/README.md)
 
-需要 Windows x64、带 C++ 桌面开发工具的 Visual Studio/MSVC 和 Windows SDK。
-NativeAOT 完整构建还需要 .NET 8 SDK、NativeAOT 工具链及审核通过的全部必需输入。
-脚本没有部署步骤；产物默认写到本目录旁的 `GakuMotion-build/`，也可显式指定输出位置。
+## 功能概览
 
-```powershell
-# 校验冻结文件并列出完整构建的待审输入；当前预期退出码为 2。
-pwsh -NoProfile -File build.ps1 -Target Preflight
+- **动作与表情**：导入 VMD 身体动作、表情和眼动，支持编辑已有曲目的资源。
+- **曲库与播放**：浏览、搜索和刷新曲库；加载静止预览或播放；按时间、采样帧定位及逐帧查看。
+- **镜头与音频**：导入 VMD 运镜，选择固定、跟随或注视模式，配合 PCM WAV 同步播放。
+- **角色与场景**：调整角色初始位置、骨骼覆盖与表情适配，设置背景和舞台，选择次级物理后端。
 
-# 仅构建并运行合成的舞台加载边界契约测试，不启动游戏。
-pwsh -NoProfile -File build.ps1 -Target Contracts
+表情、眼动和服装物理的表现受角色、源动作与适配数据影响；实验功能在面板中单独标识。
 
-# 当前会在同一缺项预检处停止。
-pwsh -NoProfile -File build.ps1 -Target Runtime
-pwsh -NoProfile -File build.ps1 -Target NativeAOT
-```
+## 开始使用
 
-本次审核使用的外部输出位置为工作区的 `build/staging_validation/GakuMotion/`。
-本仓库不依赖原研发目录或目录链接，也不携带 `.gitmodules`。
+### 安装插件
 
-## 依赖与范围
+准备 GakuLoader，以及同一配套版本的 `GakuMotion.dll` 和 `GakuMotion.VmdImporter.Native.dll`。退出游戏后，将两个 DLL 放入 `gakumas-local/plugins/`，再启动游戏。
 
-- KineTexture 仅包含生产构建所需的 8 个核心头及 Apache LICENSE／NOTICE。
-  代码取自原 gitlink `4f9c7e39d1620d262d94fa8ef4a929bad69ed0d5`，与已审阅新版头文件逐字节一致；
-  NOTICE 单独保留了已纠正的历史来源引用，具体版本在冻结清单中记录。
-- Dear ImGui 只包含 4 个核心 `.cpp`、必要头和 MIT 许可证。本地快照没有可解析的独立 Git 对象，
-  因而记录实际文件哈希与原仓声明的 gitlink，不声称已证明上游 commit 字节完全一致。
-- MinHook／HDE 的源码版权头及完整 BSD-2-Clause 文本保留。
-- Candidate 中 NumPy 标量三角运算的 C# 转录保留 BSD-3-Clause 许可证及专门说明。
+安装需要维护者提供的同版本配套 DLL。当前仓库尚无可直接下载的配套安装包，源码也暂不能构建完整插件。完整目录、配置与更新方法见 [安装指南](docs/INSTALLATION.md)；源码开发见 [构建指南](BUILD_NOTES.md)。
 
-以前用户确认通过的游戏内验收不因本次源码整理而被推翻；本候选没有部署，也没有进行新的
-游戏内加载或画面验收。合成契约测试只证明所测边界，不能代替完整插件构建或游戏内验收。
+### 导入第一支动作
+
+进入偶像摄影，按 **Ctrl+M** 唤出控制面板，在“曲库”中导入 VMD，可同时添加表情、镜头和音频。选择曲目后点击“加载预览”查看首帧，或点击“播放选中”开始表演。
+
+**F9** 播放或暂停，**F10** 停止并释放接管。导入、曲目管理和镜头设置见 [使用指南](docs/USAGE.md)。
+
+### 遇到问题
+
+从 [常见问题](docs/TROUBLESHOOTING.md) 检查页面准入、配套 DLL、曲库文件和日志。开发者可继续查看 [架构](docs/ARCHITECTURE.md) 与 [文件格式](docs/formats/ACTION_FORMATS.md)。
+
+## 使用范围
+
+- 控制面板与接管限定在确认过的摄影和更衣室页面；主页、Live、培育及未知页面不开放。GM 接管期间，已识别的官方手动拍照入口会被阻断；自动与公共 capture 保持原始行为。规则见 [页面准入与拍照边界](docs/USAGE.md#打开面板)。
+- 目标腿部几何重烘焙尚未移植到原生导入器；请求该操作会报错并保留已有资源。
+- VR 模式下的 Motion 运镜仍有已知兼容问题，见 [VRify 共存记录](docs/USAGE.md#已知兼容性)。
+
+2026-11-01，用户已确认其当时使用版本的游戏内验收通过。后续本地修订、可选实验和新打包产物分别记录验证范围；各版本的离线结果、部署状态与实机证据见 [文档索引](docs/README.md)。
+
+## 开发接入
+
+运行时与导入器的分工见 [架构](docs/ARCHITECTURE.md)，动作与镜头的读写契约见 [文件格式](docs/formats/ACTION_FORMATS.md)。宿主插件开发从 [GakuLoader 插件指南](https://github.com/crested-ezios/GakuLoader/blob/main/docs/PLUGIN_DEVELOPMENT.md) 开始，Motion 使用的 ABI 见 [GakuPlugin.h](include/GakuPlugin.h)。
+
+## 相关项目
+
+[GakuLoader](https://github.com/crested-ezios/GakuLoader) 提供插件宿主、主线程调度和控制窗口；[KineTexture](https://github.com/crested-ezios/KineTexture) 提供共享动作计算能力；[GakuBurstBridge](https://github.com/crested-ezios/GakuBurstBridge) 是实验性原生物理的可选伴生组件，基础播放不依赖它。GakuMotion 使用的 Dear ImGui、MinHook 等组件及其许可见 [第三方通知](THIRD_PARTY_NOTICES.md)。
+
+## 许可
+
+GakuMotion 源码采用 [MIT License](LICENSE)。第三方组件遵循各自许可；游戏名称、角色与资产权利归原权利人所有。
