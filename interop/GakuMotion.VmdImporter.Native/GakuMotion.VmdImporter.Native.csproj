@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>GakuMotion.VmdImporter.Native</RootNamespace>
+    <AssemblyName>GakuMotion.VmdImporter.Native</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <IsAotCompatible>true</IsAotCompatible>
+    <EnableNETAnalyzers>false</EnableNETAnalyzers>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+
+    <!-- Windows x64 native shared library (NativeAOT). -->
+    <PublishAot>true</PublishAot>
+    <NativeLib>Shared</NativeLib>
+    <StripSymbols>true</StripSymbols>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <UseSystemResourceKeys>false</UseSystemResourceKeys>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The parity harness runs the same product wiring in-process so the
+         managed and AOT artifacts can be compared on identical input. -->
+    <InternalsVisibleTo Include="GakuMotion.ParityHarness" />
+    <!-- Timebase suite drives ImportPipeline.Run and ClipTimebase directly. -->
+    <InternalsVisibleTo Include="GakuMotion.TimebaseTests" />
+    <InternalsVisibleTo Include="GakuMotion.CameraImportTests" />
+    <InternalsVisibleTo Include="GakuMotion.EditTrackTests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Frozen Candidate B, referenced read-only; its sources are never edited here. -->
+    <ProjectReference Include="..\..\candidate\csharp\src\GakuMotion.VmdImporter\GakuMotion.VmdImporter.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Facial/camera tables are embedded straight out of the Python golden tree,
+      so this DLL cannot carry a copy that drifts from tools/vmd2gkmotion.
+      LogicalName pins the manifest name the loader asks for.
+    -->
+    <EmbeddedResource Include="..\..\tools\vmd2gkmotion\gakumas_morph_map.json"
+                      LogicalName="GakuMotion.VmdImporter.Native.Resources.gakumas_morph_map.json" />
+    <EmbeddedResource Include="..\..\tools\vmd2gkmotion\tooth_appearance_lut.json"
+                      LogicalName="GakuMotion.VmdImporter.Native.Resources.tooth_appearance_lut.json" />
+    <EmbeddedResource Include="..\..\tools\vmd2gkmotion\vmd_eye_profile.json"
+                      LogicalName="GakuMotion.VmdImporter.Native.Resources.vmd_eye_profile.json" />
+    <EmbeddedResource Include="..\..\tools\vmd2gkmotion\root_retarget_profiles.json"
+                      LogicalName="GakuMotion.VmdImporter.Native.Resources.root_retarget_profiles.json" />
+  </ItemGroup>
+
+</Project>

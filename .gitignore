@@ -1,0 +1,14 @@
+build/
+bin/
+obj/
+.vs/
+*.user
+*.pdb
+*.dll
+*.exe
+*.obj
+*.lib
+*.exp
+*.ilk
+*.iobj
+*.ipdb

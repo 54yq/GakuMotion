@@ -1,0 +1,282 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- GakuMotion.vcxproj : Visual Studio 2026 (v18) project for GakuMotion.dll -->
+<!-- Toolchain : MSVC 14.52, PlatformToolset v143, C++20, /utf-8, /MT(d)      -->
+<!-- Output    : build\GakuMotion.dll, x64 DLL, 6 GakumasPlugin_* exports     -->
+<!-- ImGui     : enabled via "Release ImGui" / "Debug ImGui" configurations    -->
+<!-- Libs      : winmm.lib user32.lib comdlg32.lib                             -->
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- ======================================================================
+       Project configurations: Release / Debug, with and without ImGui
+       ====================================================================== -->
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release ImGui|x64">
+      <Configuration>Release ImGui</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug ImGui|x64">
+      <Configuration>Debug ImGui</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <!-- ======================================================================
+       Global properties
+       ====================================================================== -->
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <RootNamespace>GakuMotion</RootNamespace>
+    <!-- VS 2026 Insiders ships with PlatformToolset v143 (MSVC 14.52).
+         If a v144 toolset is released, update this value. -->
+    <PlatformToolset>v145</PlatformToolset>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <!-- ImGui include dir: defaults to submodule deps\imgui -->
+    <ImGuiIncludeDir Condition="'$(ImGuiIncludeDir)' == ''">$(ProjectDir)deps\imgui</ImGuiIncludeDir>
+    <!-- KineTexture include dir: defaults to submodule deps\KineTexture\src -->
+    <KineTextureIncludeDir Condition="'$(KineTextureIncludeDir)' == ''">$(ProjectDir)deps\KineTexture\src</KineTextureIncludeDir>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <!-- ======================================================================
+       Configuration-level property groups
+       ====================================================================== -->
+  <!-- Release -->
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <CharacterSet>Unicode</CharacterSet>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+  </PropertyGroup>
+  <!-- Debug -->
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <!-- Release ImGui -->
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release ImGui|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <CharacterSet>Unicode</CharacterSet>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+  </PropertyGroup>
+  <!-- Debug ImGui -->
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug ImGui|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <!-- ======================================================================
+       Output directories (mirrors build.ps1: output goes to build\)
+       ====================================================================== -->
+  <PropertyGroup>
+    <OutDir>$(ProjectDir)build\</OutDir>
+    <IntDir>$(ProjectDir)build\obj-msvc\$(Configuration)\</IntDir>
+    <TargetName>GakuMotion</TargetName>
+    <TargetExt>.dll</TargetExt>
+  </PropertyGroup>
+  <!-- Explicit local DevReview build; never shares Release intermediates. -->
+  <PropertyGroup Condition="'$(GkCaptureDiagnostics)'=='true'">
+    <OutDir>$(ProjectDir)build\diagnostic\</OutDir>
+    <IntDir>$(ProjectDir)build\obj-msvc\capture-diagnostic\$(Configuration)\</IntDir>
+  </PropertyGroup>
+  <!-- ======================================================================
+       Compiler / linker settings - Release - ====================================================================== -->
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <!-- /utf-8 is MANDATORY: sources are UTF-8 w/o BOM and contain CJK comments -->
+      <AdditionalOptions>/utf-8 /std:c++20 %(AdditionalOptions)</AdditionalOptions>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <AdditionalIncludeDirectories>$(ProjectDir)include;$(ProjectDir)src;$(KineTextureIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ExceptionHandling>Sync</ExceptionHandling>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <AdditionalDependencies>winmm.lib;user32.lib;comdlg32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <!-- ======================================================================
+       Compiler / linker settings - Debug - ====================================================================== -->
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <AdditionalOptions>/utf-8 /std:c++20 %(AdditionalOptions)</AdditionalOptions>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <AdditionalIncludeDirectories>$(ProjectDir)include;$(ProjectDir)src;$(KineTextureIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ExceptionHandling>Sync</ExceptionHandling>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <AdditionalDependencies>winmm.lib;user32.lib;comdlg32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <!-- ======================================================================
+       Compiler / linker settings - Release ImGui - ====================================================================== -->
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release ImGui|x64'">
+    <ClCompile>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <AdditionalOptions>/utf-8 /std:c++20 %(AdditionalOptions)</AdditionalOptions>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <AdditionalIncludeDirectories>$(ProjectDir)include;$(ProjectDir)src;$(KineTextureIncludeDir);$(ImGuiIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;_USRDLL;GKMOTION_ENABLE_IMGUI;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ExceptionHandling>Sync</ExceptionHandling>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <AdditionalDependencies>winmm.lib;user32.lib;comdlg32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <!-- ======================================================================
+       Compiler / linker settings - Debug ImGui - ====================================================================== -->
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug ImGui|x64'">
+    <ClCompile>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <AdditionalOptions>/utf-8 /std:c++20 %(AdditionalOptions)</AdditionalOptions>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <AdditionalIncludeDirectories>$(ProjectDir)include;$(ProjectDir)src;$(KineTextureIncludeDir);$(ImGuiIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;_USRDLL;GKMOTION_ENABLE_IMGUI;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ExceptionHandling>Sync</ExceptionHandling>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <AdditionalDependencies>winmm.lib;user32.lib;comdlg32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(GkCaptureDiagnostics)'=='true'">
+    <ClCompile>
+      <PreprocessorDefinitions>GKMOTION_CAPTURE_DIAGNOSTICS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <!-- ======================================================================
+       Source files
+       ====================================================================== -->
+  <ItemGroup>
+    <!-- Primary translation unit (single .cpp, all headers included from it) -->
+    <ClCompile Include="src\GakuMotionPlugin.cpp" />
+    <!-- ImGui translation units: compiled only for the ImGui configurations -->
+    <ClCompile Include="$(ImGuiIncludeDir)\imgui.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)'=='Release' Or '$(Configuration)'=='Debug'">true</ExcludedFromBuild>
+      <!-- /utf-8 not required for upstream imgui sources, but harmless -->
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <ClCompile Include="$(ImGuiIncludeDir)\imgui_draw.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)'=='Release' Or '$(Configuration)'=='Debug'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="$(ImGuiIncludeDir)\imgui_widgets.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)'=='Release' Or '$(Configuration)'=='Debug'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="$(ImGuiIncludeDir)\imgui_tables.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)'=='Release' Or '$(Configuration)'=='Debug'">true</ExcludedFromBuild>
+    </ClCompile>
+  </ItemGroup>
+  <!-- ======================================================================
+       Header files (src\)
+       ====================================================================== -->
+  <ItemGroup>
+    <ClInclude Include="src\GakuMotion.hpp" />
+    <ClInclude Include="src\GkAuxChannelModel.hpp" />
+    <ClInclude Include="src\GkBlendshapePlayer.hpp" />
+    <ClInclude Include="src\GkBoneOverride.hpp" />
+    <ClInclude Include="src\GkBurstBridgeClient.hpp" />
+    <ClInclude Include="src\GkCamera.hpp" />
+    <ClInclude Include="src\GkCameraBridge.hpp" />
+    <ClInclude Include="src\GkCsharpImport.hpp" />
+    <ClInclude Include="src\GkExperimentalSolePitch.hpp" />
+    <ClInclude Include="src\GkFaceRuntime.hpp" />
+    <ClInclude Include="src\GkFallbackPhysics.hpp" />
+    <ClInclude Include="src\GkGroundAnchor.hpp" />
+    <ClInclude Include="src\GkGuiOverlay.hpp" />
+    <ClInclude Include="src\gui\GkGuiStatusBar.hpp" />
+    <ClInclude Include="src\gui\GkGuiTabMotion.hpp" />
+    <ClInclude Include="src\gui\GkGuiTabGaze.hpp" />
+    <ClInclude Include="src\gui\GkGuiTabCamera.hpp" />
+    <ClInclude Include="src\gui\GkGuiTabStage.hpp" />
+    <ClInclude Include="src\gui\GkGuiTabBone.hpp" />
+    <ClInclude Include="src\gui\GkGuiTabSole.hpp" />
+    <ClInclude Include="src\gui\GkGuiTabExperimentalSolePitch.hpp" />
+    <ClInclude Include="src\gui\GkGuiTabConfig.hpp" />
+    <ClInclude Include="src\gui\GuiOverlayCommon.hpp" />
+    <ClInclude Include="src\gui\GuiTransportBar.hpp" />
+    <ClInclude Include="src\gui\GuiLibraryPage.hpp" />
+    <ClInclude Include="src\gui\GuiMotionPage.hpp" />
+    <ClInclude Include="src\gui\GuiCameraPage.hpp" />
+    <ClInclude Include="src\gui\GuiStagePage.hpp" />
+    <ClInclude Include="src\gui\GuiSettingsPage.hpp" />
+    <ClInclude Include="src\gui\GuiDeveloperPage.hpp" />
+    <ClInclude Include="src\gui\GuiOverlayShell.hpp" />
+    <ClInclude Include="src\GkHotkey.hpp" />
+    <ClInclude Include="src\GkIdolController.hpp" />
+    <ClInclude Include="src\GkJsonLite.hpp" />
+    <ClInclude Include="src\GkLookAtManager.hpp" />
+    <ClInclude Include="src\GkMotionData.hpp" />
+    <ClInclude Include="src\GkMotionPlayer.hpp" />
+    <ClInclude Include="src\GkPlaylist.hpp" />
+    <ClInclude Include="src\GkRootHeightCalibration.hpp" />
+    <ClInclude Include="src\GkRuntimeConfig.hpp" />
+    <ClInclude Include="src\GkShoeMeshProbe.hpp" />
+    <ClInclude Include="src\GkSoleMeasurement.hpp" />
+    <ClInclude Include="src\GkSolePitchEnvelope.hpp" />
+    <ClInclude Include="src\GkSoleProxyProfile.hpp" />
+    <ClInclude Include="src\GkStageManager.hpp" />
+    <ClInclude Include="src\GkWaistSupport.hpp" />
+  </ItemGroup>
+  <!-- ======================================================================
+       Header files (include\)
+       ====================================================================== -->
+  <ItemGroup>
+    <ClInclude Include="include\GakuBurstBridge.h" />
+    <ClInclude Include="include\GakuFaceDiagnostics.h" />
+    <ClInclude Include="include\GakuPlugin.h" />
+    <ClInclude Include="include\GakuPhysicsDiagnostics.h" />
+    <ClInclude Include="include\GakuSafeBoneLookup.h" />
+    <!-- MinHook bundled header -->
+    <ClInclude Include="include\minhook\include\MinHook.h" />
+  </ItemGroup>
+  <!-- ======================================================================
+       MinHook C sources (bundled, always compiled)
+       ====================================================================== -->
+  <ItemGroup>
+    <ClCompile Include="include\minhook\src\buffer.c" />
+    <ClCompile Include="include\minhook\src\hook.c" />
+    <ClCompile Include="include\minhook\src\trampoline.c" />
+    <ClCompile Include="include\minhook\src\hde\hde32.c" />
+    <ClCompile Include="include\minhook\src\hde\hde64.c" />
+  </ItemGroup>
+  <!-- ======================================================================
+       None items: scripts / data visible in Solution Explorer
+       ====================================================================== -->
+  <ItemGroup>
+    <None Include="build.ps1" />
+    <None Include="tests\run_tests.ps1" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

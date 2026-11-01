@@ -1,0 +1,13 @@
+KineTexture developer preview
+
+This candidate contains newly authored preview code and scalar math extracted
+from the GakuMotion project at baseline/pre-motionweave-20261019
+(source commit c4a9e6588eff730e93efe8cfcc1b9be68cd7b2b0).
+The extracted scalar formulas retain their previous evaluation order; pose, FK,
+input validation, packaging and export contracts were added for this preview.
+Original contribution history remains in the private source repository.
+
+Apache-2.0 applies only to the files named in the candidate release receipt.
+It does not relicense other GakuMotion repositories, game resources, motions,
+profiles, third-party tools, model weights or captured datasets.
+No game assets or external runtime libraries are bundled in this candidate.
