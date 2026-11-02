@@ -47,6 +47,18 @@ pwsh -NoProfile -File build.ps1 -Target Contracts
 
 该目标编译并运行合成的舞台加载边界测试，不读取游戏、模型、动作或录制。它不代替完整插件构建、真实导入链检查或游戏效果验证。
 
+## 分类路径的合成检查
+
+以下检查只生成小型临时安装树，不读取真实游戏素材：
+
+```powershell
+pwsh -NoProfile -File tests/run_layout_tests.ps1
+pwsh -NoProfile -File tests/test_layout_migration.ps1
+pwsh -NoProfile -File tests/run_unicode_path_tests.ps1
+```
+
+默认布局检查不加载游戏或实际导入器；Unicode 检查仅打开、查询和关闭自有静音 WAV，不播放声音。可选实际 NativeAOT 桥接检查还需要调用方明确提供实际 DLL 目录和旧 ABI 负向夹具目录。上述扩展检查不属于普通 `-Target All` 构建的前置门禁。
+
 ## 可选的源码快照校验
 
 维护者准备固定源码快照时可执行：

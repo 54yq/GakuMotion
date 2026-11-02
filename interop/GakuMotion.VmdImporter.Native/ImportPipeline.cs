@@ -244,10 +244,11 @@ internal static class ImportPipeline
                     .Any(name => File.Exists(Path.Combine(target, name))))
                 throw new InvalidDataException("目标必须是包含动作文件的已有曲目目录");
             string library = Path.GetDirectoryName(target) ?? throw new InvalidDataException("不能编辑文件系统根目录");
-            string stagingParent = Path.GetDirectoryName(library) ?? library;
+            string stagingParent = TransactionParent(request.TransactionRoot, library);
             work = Path.Combine(stagingParent, "gkmotion-cs-edit-" + Guid.NewGuid().ToString("N"));
             string stage = Path.Combine(work, "track");
             backup = Path.Combine(work, "original");
+            WriteTransaction(work, "edit", target, "staging");
             log.Progress(5, "INIT", "正在准备曲目修改...");
             IReadOnlyList<EditTreeEntry> original = CaptureEditSignature(target);
             CopyEditTree(target, stage);
@@ -355,7 +356,10 @@ internal static class ImportPipeline
             WriteEditInfo(stage, info);
 
             log.Progress(96, "PACK", "正在保存曲目修改...");
+            WriteTransaction(work, "edit", target, "publish_pending");
             PublishEditedTrack(stage, target, backup, original);
+            try { WriteTransaction(work, "edit", target, "committed"); }
+            catch (Exception ex) { log.Line("曲目已保存；事务状态记录失败: " + ex.Message); }
             TryDelete(backup);
             total.Stop();
             timing.TotalMs = total.Elapsed.TotalMilliseconds;
@@ -729,9 +733,7 @@ internal static class ImportPipeline
         string commit = NewTrackDestination(request, vmdPath, out string title);
         EnsureNewTrackAvailable(commit);
 
-        string parent = Path.GetDirectoryName(
-                            motionsRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
-                        ?? motionsRoot;
+        string parent = TransactionParent(request.TransactionRoot, motionsRoot);
         string stage = Path.Combine(parent, "gkmotion-cs-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(stage);
 
@@ -831,6 +833,39 @@ internal static class ImportPipeline
         title = string.IsNullOrWhiteSpace(request.Title)
             ? Path.GetFileNameWithoutExtension(vmdPath) : request.Title.Trim();
         return Path.Combine(Path.GetFullPath(request.MotionsRoot), SafeTrackName(title));
+    }
+
+    private static string TransactionParent(string requested, string library)
+    {
+        string fallback = Path.GetDirectoryName(library.TrimEnd(Path.DirectorySeparatorChar,
+            Path.AltDirectorySeparatorChar)) ?? library;
+        if (string.IsNullOrWhiteSpace(requested)) return fallback;
+        string root = Path.GetFullPath(requested);
+        // Publish uses directory rename, never a cross-volume copy fallback.
+        if (!string.Equals(Path.GetPathRoot(root), Path.GetPathRoot(library), StringComparison.OrdinalIgnoreCase))
+            throw new IOException("事务临时目录必须与曲库同卷；未修改曲目");
+        if (string.Equals(root.TrimEnd(Path.DirectorySeparatorChar), library.TrimEnd(Path.DirectorySeparatorChar),
+            StringComparison.OrdinalIgnoreCase) || root.StartsWith(library.TrimEnd(Path.DirectorySeparatorChar) +
+            Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new IOException("事务临时目录不能位于曲库扫描目录内；未修改曲目");
+        Directory.CreateDirectory(root);
+        return root;
+    }
+
+    private static void WriteTransaction(string work, string kind, string target, string state)
+    {
+        Directory.CreateDirectory(work);
+        string path = Path.Combine(work, "transaction.json");
+        string temporary = path + ".tmp";
+        using var buffer = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartObject(); writer.WriteNumber("schemaVersion", 1);
+            writer.WriteString("kind", kind); writer.WriteString("target", target);
+            writer.WriteString("state", state); writer.WriteEndObject();
+        }
+        File.WriteAllBytes(temporary, buffer.ToArray());
+        File.Move(temporary, path, overwrite: true);
     }
 
     private static void EnsureNewTrackAvailable(string destination)

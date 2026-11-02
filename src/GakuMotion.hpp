@@ -12,6 +12,8 @@
 #include "GkLibraryTrash.hpp"
 #include "GkInjectionPolicy.hpp"
 #include "GkCaptureSafety.hpp"
+#include "GkStageLoadSettings.hpp"
+#include "GkDataLayout.hpp"
 
 #include <cstdarg>
 #include <cstdio>
@@ -71,6 +73,7 @@ namespace GakuMotion
 		LookAtManager lookAt;
 		GuiOverlay gui;
 		StageManager stageManager;
+		std::string stageLoadNotice;
 		injection::Policy injectionPolicy;
 		// The runtime enables enforcement before initialization. Offline consumers
 		// may exercise the playback core without a game or native hook service.
@@ -244,6 +247,8 @@ namespace GakuMotion
 		std::string localRoot;
 		std::string motionsRoot;
 		std::string configRoot;
+		std::string logsRoot, diagnosticsRoot, transactionRoot;
+		DataLayout dataLayout;
 		std::string globalOverridePath;
 
 		// ---- 运行时状态 ----
@@ -299,7 +304,7 @@ namespace GakuMotion
 			BeforeQuartzExperiment,
 			StageSettings, StagePreset, ToggleStageCandidate, ScanStageCandidates,
 			MountCustomStage, UnloadCustomStage, RestoreCameraSkybox,
-			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, RestoreDeleted
+			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, RestoreDeleted, StageLoadReplacement
 		};
 
 		std::atomic<int> guiPhysicsBackend{1};
@@ -445,6 +450,13 @@ namespace GakuMotion
 			QueueGui(std::move(cmd));
 		}
 
+		void QueueStageLoadReplacement(const std::string& key)
+		{
+			GuiCommand cmd{GuiAction::StageLoadReplacement};
+			cmd.key = key;
+			QueueGui(std::move(cmd));
+		}
+
 		void QueueStagePreset(int presetIndex)
 		{
 			GuiCommand cmd{GuiAction::StagePreset};
@@ -482,6 +494,21 @@ namespace GakuMotion
 			QueueGui({GuiAction::RestoreCameraSkybox});
 		}
 
+		void ProcessPendingStageLoadCommands()
+		{
+			std::deque<GuiCommand> commands;
+			{
+				std::lock_guard<std::mutex> lock(guiCommandMutex);
+				for (auto it = guiCommands.begin(); it != guiCommands.end();)
+				{
+					if (it->action != GuiAction::StageLoadReplacement) { ++it; continue; }
+					commands.push_back(std::move(*it));
+					it = guiCommands.erase(it);
+				}
+			}
+			for (const auto& command : commands) SetStageLoadReplacement(command.key);
+		}
+
 		void ProcessPendingGuiCommands()
 		{
 			std::deque<GuiCommand> commands;
@@ -491,6 +518,13 @@ namespace GakuMotion
 			}
 			for (const auto& cmd : commands)
 			{
+				// This command stores a future Photography-load preference only.
+				// It never touches Unity, playback or the current background.
+				if (cmd.action == GuiAction::StageLoadReplacement)
+				{
+					SetStageLoadReplacement(cmd.key);
+					continue;
+				}
 				// Never replay controls queued before a scene/capture boundary.
 				if (!InjectionAllowed()) continue;
 				const bool canStartInjection = cmd.action == GuiAction::Play || cmd.action == GuiAction::Resume ||
@@ -585,7 +619,7 @@ namespace GakuMotion
 						if (!camera.settings.enabled) camera.Release();
 						camera.Publish();
 						if ((prevMode != cmd.cameraSettings.mode || prevBehavior != cmd.cameraSettings.followBehavior) &&
-							!configRoot.empty() && std::filesystem::exists(configRoot + "/camera.json"))
+							!configRoot.empty() && std::filesystem::exists(MotionPathFromUtf8(configRoot + "/camera.json")))
 						{
 							SaveCameraSettings();
 						}
@@ -638,7 +672,13 @@ namespace GakuMotion
 						break;
 					}
 				case GuiAction::StageSettings:
-					stageManager.ApplySettings(cmd.stageSettings);
+					{
+						StageSettings settings = cmd.stageSettings;
+						// A stale visual-settings snapshot cannot overwrite the separately
+						// saved load-time selection from the dedicated control.
+						settings.loadReplacementKey = stageManager.GetLoadReplacementKey();
+						stageManager.ApplySettings(settings);
+					}
 					break;
 				case GuiAction::StagePreset:
 					stageManager.ApplyPreset(cmd.stagePresetIndex);
@@ -706,7 +746,7 @@ namespace GakuMotion
 		// =========================================================================
 		// 生命周期
 		// =========================================================================
-		void Initialize(const std::string& rootPath)
+		void Initialize(const std::string& rootPath, const DataLayout* selectedLayout = nullptr)
 		{
 			if (initialized) return;
 
@@ -720,9 +760,14 @@ namespace GakuMotion
 			};
 
 			localRoot = rootPath;
-			motionsRoot = rootPath + "/motions";
-			configRoot = rootPath + "/GakuMotion";
-			playlistPath = configRoot + "/playlist.json";
+			dataLayout = selectedLayout ? *selectedLayout : DataLayout::Legacy(rootPath);
+			motionsRoot = dataLayout.Motions();
+			configRoot = dataLayout.configs;
+			logsRoot = dataLayout.logs;
+			diagnosticsRoot = dataLayout.managed ? logsRoot + "/diagnostics" : configRoot;
+			transactionRoot = dataLayout.managed ? dataLayout.temp + "/transactions" : "";
+			LoadStageLoadSettings();
+			playlistPath = dataLayout.Playlist();
 			initialPositionPath = configRoot + "/initial_position.json";
 			LoadInitialPosition();
 			globalOverridePath = configRoot + "/bone_overrides.json";
@@ -743,7 +788,7 @@ namespace GakuMotion
 			const bool createdOverrides = EnsureGlobalOverrideTemplate();
 
 			// 3. 曲目库
-			if (std::filesystem::exists(playlistPath)) playlist.Load(playlistPath, playlistNotice);
+			if (std::filesystem::exists(MotionPathFromUtf8(playlistPath))) playlist.Load(playlistPath, playlistNotice);
 			player.loop = playlist.mode == PlaylistMode::SingleLoop;
 			RefreshMotionLibrary();
 
@@ -1262,7 +1307,8 @@ namespace GakuMotion
 			}
 
 			request.motionsRoot = motionsRoot;
-			request.log = configRoot + "/import.log";
+			request.transactionRoot = transactionRoot;
+			request.log = logsRoot + "/import.log";
 			request.useCsharp = true;
 			if (request.useCsharp)
 			{
@@ -1315,7 +1361,7 @@ namespace GakuMotion
 				return;
 			}
 			request.motionDirectory = motions[index].dir;
-			request.log = configRoot + "/camera_import.log";
+			request.log = logsRoot + "/camera_import.log";
 			cameraImportDirectory = request.motionDirectory;
 			++libraryMutationGeneration;
 			cameraImportBusy = fnStartCameraImport(request, cameraNotice);
@@ -1337,10 +1383,56 @@ namespace GakuMotion
 			cameraNotice = result;
 		}
 
+		bool LoadStageLoadSettings()
+		{
+			stage_load::Settings saved;
+			std::string error;
+			const auto path = configRoot + "/stage.json";
+			std::error_code ec;
+			const bool exists = std::filesystem::exists(MotionPathFromUtf8(path), ec);
+			const bool loaded = exists && !ec && saved.Load(path, error);
+			StageSettings settings = stageManager.settings;
+			settings.loadReplacementKey = loaded ? saved.key : "";
+			stageManager.ApplySettings(settings);
+			if (ec || (exists && !loaded))
+			{
+				stageLoadNotice = "舞台设置读取失败，已使用原生背景: " + (ec ? ec.message() : error);
+				LogWarn("[GakuMotion][StageLoad] saved settings rejected: " + (ec ? ec.message() : error));
+				return false;
+			}
+			stageLoadNotice = loaded ? "摄影背景选择已载入；下次进入偶像摄影时生效" :
+				"将使用原生背景；可预设下次进入偶像摄影时使用的舞台";
+			return loaded;
+		}
+
+		bool SetStageLoadReplacement(const std::string& key)
+		{
+			if ((!key.empty() && !stage_load::IsTarget(key)) || configRoot.empty())
+			{
+				stageLoadNotice = "舞台选择未保存：选项无效或配置目录尚未就绪";
+				return false;
+			}
+			stage_load::Settings saved{key};
+			std::string error;
+			if (!saved.Save(configRoot + "/stage.json", error))
+			{
+				stageLoadNotice = "舞台选择保存失败，保留原有选择: " + error;
+				LogWarn("[GakuMotion][StageLoad] cannot save settings: " + error);
+				return false;
+			}
+			StageSettings settings = stageManager.settings;
+			settings.loadReplacementKey = key;
+			stageManager.ApplySettings(settings);
+			stageLoadNotice = key.empty() ? "已记住恢复原生背景；下次进入偶像摄影时生效" :
+				"舞台选择已保存；下次进入偶像摄影时生效（跨区域和重启保留）";
+			LogInfo("[GakuMotion][StageLoad] saved next Photography key=" + (key.empty() ? std::string("native") : key));
+			return true;
+		}
+
 		bool LoadCameraSettings()
 		{
 			const auto path = configRoot + "/camera.json";
-			if (!std::filesystem::exists(path)) return false;
+			if (!std::filesystem::exists(MotionPathFromUtf8(path))) return false;
 			RuntimeConfig savedConfig;
 			savedConfig.path = path;
 			if (!savedConfig.Reload() || !savedConfig.cameraDeclared || !savedConfig.camera.IsValid())
@@ -1363,14 +1455,14 @@ namespace GakuMotion
 				return false;
 			}
 			std::error_code ec;
-			std::filesystem::create_directories(configRoot, ec);
+			std::filesystem::create_directories(MotionPathFromUtf8(configRoot), ec);
 			if (ec)
 			{
 				cameraNotice = "镜头设置保存失败: " + ec.message();
 				return false;
 			}
 			const auto path = configRoot + "/camera.json", temporary = path + ".tmp";
-			std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
+			std::ofstream out(MotionPathFromUtf8(temporary), std::ios::binary | std::ios::trunc);
 			auto vector = [&](const Vector3& v)
 			{
 				out << '[' << jsonlite::FormatNumber(v.x, 6) << ", " << jsonlite::FormatNumber(v.y, 6)
@@ -1415,13 +1507,13 @@ namespace GakuMotion
 				cameraNotice = "镜头设置保存失败：无法写入文件";
 				return false;
 			}
-			std::filesystem::copy_file(temporary, path, std::filesystem::copy_options::overwrite_existing, ec);
+			std::filesystem::copy_file(MotionPathFromUtf8(temporary), MotionPathFromUtf8(path), std::filesystem::copy_options::overwrite_existing, ec);
 			if (ec)
 			{
 				cameraNotice = "镜头设置保存失败: " + ec.message();
 				return false;
 			}
-			std::filesystem::remove(temporary, ec);
+			std::filesystem::remove(MotionPathFromUtf8(temporary), ec);
 			cameraNotice = "镜头设置已保存，下次启动自动载入";
 			return true;
 		}
@@ -1536,18 +1628,18 @@ namespace GakuMotion
 			}
 			content += "]}\n";
 			std::error_code ec;
-			std::filesystem::create_directories(configRoot, ec);
+			std::filesystem::create_directories(MotionPathFromUtf8(diagnosticsRoot), ec);
 			if (ec) return;
-			const auto path = configRoot + "/sole_pitch_snapshot.json", temporary = path + ".tmp";
+			const auto path = diagnosticsRoot + "/sole_pitch_snapshot.json", temporary = path + ".tmp";
 			{
-				std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
+				std::ofstream out(MotionPathFromUtf8(temporary), std::ios::binary | std::ios::trunc);
 				out << content;
 				out.flush();
 				if (!out) return;
 			}
-			std::filesystem::copy_file(temporary, path, std::filesystem::copy_options::overwrite_existing, ec);
+			std::filesystem::copy_file(MotionPathFromUtf8(temporary), MotionPathFromUtf8(path), std::filesystem::copy_options::overwrite_existing, ec);
 			if (ec) return;
-			std::filesystem::remove(temporary, ec);
+			std::filesystem::remove(MotionPathFromUtf8(temporary), ec);
 			solePitchSnapshotPending = false;
 			LogInfo("[GakuMotion][SolePitchCheck] snapshot saved seq=" + std::to_string(solePitchSnapshotCommandSeq));
 		}
@@ -1697,7 +1789,7 @@ namespace GakuMotion
 		bool LoadSoleSettings()
 		{
 			const auto path = configRoot + "/sole_measurement.json";
-			if (!std::filesystem::exists(path)) return false;
+			if (!std::filesystem::exists(MotionPathFromUtf8(path))) return false;
 			jsonlite::Value root;
 			std::string error;
 			SoleMeasurementSettings next;
@@ -1724,14 +1816,14 @@ namespace GakuMotion
 				return false;
 			}
 			std::error_code ec;
-			std::filesystem::create_directories(configRoot, ec);
+			std::filesystem::create_directories(MotionPathFromUtf8(configRoot), ec);
 			if (ec)
 			{
 				soleNotice = "鞋底测量保存失败: " + ec.message();
 				return false;
 			}
 			const auto path = configRoot + "/sole_measurement.json", temporary = path + ".tmp";
-			std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
+			std::ofstream out(MotionPathFromUtf8(temporary), std::ios::binary | std::ios::trunc);
 			out << content;
 			out.close();
 			if (!out)
@@ -1739,13 +1831,13 @@ namespace GakuMotion
 				soleNotice = "鞋底测量保存失败：无法写入文件";
 				return false;
 			}
-			std::filesystem::copy_file(temporary, path, std::filesystem::copy_options::overwrite_existing, ec);
+			std::filesystem::copy_file(MotionPathFromUtf8(temporary), MotionPathFromUtf8(path), std::filesystem::copy_options::overwrite_existing, ec);
 			if (ec)
 			{
 				soleNotice = "鞋底测量保存失败: " + ec.message();
 				return false;
 			}
-			std::filesystem::remove(temporary, ec);
+			std::filesystem::remove(MotionPathFromUtf8(temporary), ec);
 			soleNotice = "鞋底测量设置已保存";
 			return true;
 		}
@@ -1753,7 +1845,7 @@ namespace GakuMotion
 		bool LoadInitialPosition()
 		{
 			std::error_code ec;
-			if (!std::filesystem::exists(initialPositionPath, ec)) return false;
+			if (!std::filesystem::exists(MotionPathFromUtf8(initialPositionPath), ec)) return false;
 			jsonlite::Value root;
 			std::string error;
 			if (!jsonlite::ParseFile(initialPositionPath, root, error))
@@ -1784,14 +1876,14 @@ namespace GakuMotion
 				return false;
 			}
 			std::error_code ec;
-			std::filesystem::create_directories(configRoot, ec);
+			std::filesystem::create_directories(MotionPathFromUtf8(configRoot), ec);
 			if (ec)
 			{
 				initialPositionNotice = "初始位置保存失败: " + ec.message();
 				return false;
 			}
 			const auto temporary = initialPositionPath + ".tmp";
-			std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
+			std::ofstream out(MotionPathFromUtf8(temporary), std::ios::binary | std::ios::trunc);
 			out << "{\n  \"version\": 1,\n  \"space\": \"world\",\n  \"offset_m\": ["
 				<< jsonlite::FormatNumber(offset.x, 6) << ", " << jsonlite::FormatNumber(offset.y, 6) << ", "
 				<< jsonlite::FormatNumber(offset.z, 6) << "]\n}\n";
@@ -1801,14 +1893,14 @@ namespace GakuMotion
 				initialPositionNotice = "初始位置保存失败：无法写入文件";
 				return false;
 			}
-			std::filesystem::copy_file(temporary, initialPositionPath,
+			std::filesystem::copy_file(MotionPathFromUtf8(temporary), MotionPathFromUtf8(initialPositionPath),
 			                           std::filesystem::copy_options::overwrite_existing, ec);
 			if (ec)
 			{
 				initialPositionNotice = "初始位置保存失败: " + ec.message();
 				return false;
 			}
-			std::filesystem::remove(temporary, ec);
+			std::filesystem::remove(MotionPathFromUtf8(temporary), ec);
 			initialPositionNotice = "初始位置已保存，下次启动自动载入";
 			return true;
 		}
@@ -2668,11 +2760,7 @@ namespace GakuMotion
 				default: return;
 				}
 				std::string path = key ? key : "";
-				if ((action == 3 || action == 4) && !path.empty())
-				{
-					std::u8string utf8(path.begin(), path.end());
-					path = std::filesystem::path(utf8).string();
-				}
+				// File-dialog paths already use UTF-8. Do not convert through ACP.
 				GuiCommand queued{command, static_cast<float>(value), command == GuiAction::DeleteFiles && value == 1, path};
 				queued.libraryRevision = c.libraryRevision;
 				c.QueueGui(std::move(queued));
@@ -2784,6 +2872,11 @@ namespace GakuMotion
 			ctx.stageSceneName = stageManager.currentSceneName;
 			ctx.stageMountedKey = stageManager.mountedStageKey;
 			ctx.stageStatusNotice = stageManager.statusNotice;
+			ctx.stageLoadNotice = stageLoadNotice;
+			ctx.fnSetStageLoadReplacement = [](void* self, const char* key)
+			{
+				static_cast<Core*>(self)->QueueStageLoadReplacement(key ? key : "");
+			};
 			ctx.fnSetStageSettings = [](void* self, const StageSettings& settings)
 			{
 				static_cast<Core*>(self)->QueueStageSettings(settings);
@@ -2835,20 +2928,17 @@ namespace GakuMotion
 		// 相对路径一律相对 localRoot 解析；绝对路径原样返回
 		std::string ResolvePath(const std::string& candidate, const std::string& fallback) const
 		{
-			if (candidate.empty()) return fallback;
-			std::filesystem::path p(candidate);
-			if (p.is_absolute()) return p.string();
-			return (std::filesystem::path(localRoot) / p).string();
+			return dataLayout.ResolveOverride(candidate, fallback);
 		}
 
 		// 生成「不启用」的全局覆盖模板，便于用户发现该能力
 		bool EnsureGlobalOverrideTemplate()
 		{
 			std::error_code ec;
-			if (std::filesystem::exists(globalOverridePath, ec)) return false;
+			if (std::filesystem::exists(MotionPathFromUtf8(globalOverridePath), ec)) return false;
 
-			std::filesystem::create_directories(configRoot, ec);
-			std::ofstream out(globalOverridePath, std::ios::binary);
+			std::filesystem::create_directories(MotionPathFromUtf8(configRoot), ec);
+			std::ofstream out(MotionPathFromUtf8(globalOverridePath), std::ios::binary);
 			if (!out.is_open()) return false;
 			out <<
 				"// GakuMotion 全局骨骼旋转覆盖表（热加载）\n"

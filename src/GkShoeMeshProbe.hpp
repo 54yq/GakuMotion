@@ -332,7 +332,7 @@ namespace ShoeMeshProbe
 		WriteJson(text, trace);
 		text << '\n';
 		const auto bytes = text.str();
-		const std::filesystem::path target(tracePath), temporary(tracePath + ".tmp");
+		const auto target = GakuMotion::MotionPathFromUtf8(tracePath), temporary = GakuMotion::MotionPathFromUtf8(tracePath + ".tmp");
 		HANDLE file = CreateFileW(temporary.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL,
 		                          nullptr);
 		if (file == INVALID_HANDLE_VALUE)
@@ -443,7 +443,7 @@ namespace ShoeMeshProbe
 			officialNextPoll = now + std::chrono::seconds(1);
 			officialCachedRequest = Json{};
 			std::error_code ec;
-			const auto size = std::filesystem::file_size(path, ec);
+			const auto size = std::filesystem::file_size(GakuMotion::MotionPathFromUtf8(path), ec);
 			std::string error;
 			if (!ec && size > 0 && size <= 16384 && !
 				GakuMotion::jsonlite::ParseFile(path, officialCachedRequest, error))officialCachedRequest = Json{};
@@ -458,7 +458,7 @@ namespace ShoeMeshProbe
 		// may Resolve, so a removed/replaced/malformed request cannot enable it.
 		Json current;
 		std::error_code ec;
-		const auto size = std::filesystem::file_size(path, ec);
+		const auto size = std::filesystem::file_size(GakuMotion::MotionPathFromUtf8(path), ec);
 		if (ec || size == 0 || size > 16384 || !GakuMotion::jsonlite::ParseFile(path, current, error) || !current.
 			IsObject() ||
 			!MatchRequest(current, actor, &context, error) || !Sequence(current, seq) || seq <= lastSeq || !ParseStage(
@@ -466,9 +466,9 @@ namespace ShoeMeshProbe
 			return false;
 		const Json* costume = current.Find("costume_id");
 		context.costumeId = costume ? costume->stringValue : "";
-		if (std::filesystem::exists(directory + "/shoe_mesh_probe_" + std::to_string(seq) + ".json", ec) || ec)return
+		if (std::filesystem::exists(GakuMotion::MotionPathFromUtf8(directory + "/shoe_mesh_probe_" + std::to_string(seq) + ".json"), ec) || ec)return
 			false;
-		if (std::filesystem::exists(directory + "/shoe_mesh_probe_" + std::to_string(seq) + ".trace.json", ec) || ec)
+		if (std::filesystem::exists(GakuMotion::MotionPathFromUtf8(directory + "/shoe_mesh_probe_" + std::to_string(seq) + ".trace.json"), ec) || ec)
 			return false;
 		return true;
 	}
@@ -1671,7 +1671,7 @@ namespace ShoeMeshProbe
 		nextPoll = now + std::chrono::seconds(1);
 		const std::string requestPath = configDirectory + "/shoe_mesh_probe.request.json";
 		std::error_code ec;
-		const auto size = std::filesystem::file_size(requestPath, ec);
+		const auto size = std::filesystem::file_size(GakuMotion::MotionPathFromUtf8(requestPath), ec);
 		if (ec || size == 0 || size > 16384)return;
 		Json request;
 		std::string error;
@@ -1681,9 +1681,9 @@ namespace ShoeMeshProbe
 		if (!Sequence(request, seq) || seq <= lastSeq)return;
 		lastSeq = seq;
 		const std::string output = configDirectory + "/shoe_mesh_probe_" + std::to_string(seq) + ".json";
-		if (std::filesystem::exists(output, ec))return; // Re-loading the DLL must not repeat the same request.
+		if (std::filesystem::exists(GakuMotion::MotionPathFromUtf8(output), ec))return; // Re-loading the DLL must not repeat the same request.
 		const std::string trace = configDirectory + "/shoe_mesh_probe_" + std::to_string(seq) + ".trace.json";
-		if (std::filesystem::exists(trace, ec))return; // Native crash is not permission to replay the same seq.
+		if (std::filesystem::exists(GakuMotion::MotionPathFromUtf8(trace), ec))return; // Native crash is not permission to replay the same seq.
 		auto stage = Stage::Handle;
 		const bool validStage = ParseStage(request, stage, error);
 		SnapshotContext currentContext = context ? *context : SnapshotContext{};
@@ -1759,7 +1759,7 @@ namespace ShoeMeshProbe
 		traceActive = false;
 		const std::string temporary = output + ".tmp";
 		{
-			std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
+			std::ofstream file(GakuMotion::MotionPathFromUtf8(temporary), std::ios::binary | std::ios::trunc);
 			if (!file)
 			{
 				if (g_hostContext.logWarn)g_hostContext.
@@ -1775,7 +1775,7 @@ namespace ShoeMeshProbe
 				return;
 			}
 		}
-		std::filesystem::rename(temporary, output, ec);
+		std::filesystem::rename(GakuMotion::MotionPathFromUtf8(temporary), GakuMotion::MotionPathFromUtf8(output), ec);
 		if (ec)
 		{
 			if (g_hostContext.logWarn)g_hostContext.logWarn("[GakuMotion][ShoeMeshProbe] evidence rename failed: %s",

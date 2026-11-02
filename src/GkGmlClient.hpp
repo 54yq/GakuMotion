@@ -1,5 +1,6 @@
 #pragma once
 #include "GakuPlugin.h"
+#include "GakuPaths.hpp"
 #include "GakuMotionServices.h"
 #include <cstdarg>
 #include <cstdio>
@@ -20,6 +21,7 @@ inline GakuDesktopWindowService desktopWindow{};
 inline GakuFileDialogService fileDialog{};
 inline GakuHotkeyService hotkeys{};
 inline GakuAppearanceService appearance{};
+inline GakuPathsV1 paths{};
 inline bool active = false;
 inline std::atomic_bool motionPlaying{false};
 using PlaybackService = GakuMotionPlaybackService;
@@ -70,6 +72,8 @@ inline GakuStatus Connect(const GakuHostApi* host) {
     appearance = {};
     Query(GAKU_SERVICE_APPEARANCE, appearance);
     if (!appearance.getAppearance) appearance = {};
+    paths = {};
+    GakuPaths::Query(host, paths); // Optional; legacy installations keep their layout.
     active = true;
     return GAKU_OK;
 }

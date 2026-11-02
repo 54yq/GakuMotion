@@ -111,35 +111,11 @@ namespace GakuMotion
 			ImGui::Spacing();
 		}
 
-		ImGui::TextUnformatted("摄影背景替换（下次载入）");
-		static constexpr const char* replacementKeys[] = {
-			"", "env_3d_live_all001-00-noon", "env_3d_prod_hifstage-00-00-noon",
-			"env_3d_live_courtyard-00-00-noon"
-		};
-		static constexpr const char* replacementNames[] = {
-			"原生摄影背景", "通用 Live 舞台", "初星舞台", "中庭舞台（日中）"
-		};
-		int replacementIndex = 0;
-		for (int i = 1; i < 4; ++i)
-			if (settings.loadReplacementKey == replacementKeys[i]) replacementIndex = i;
-		if (ImGui::BeginCombo("替换舞台##load_replacement", replacementNames[replacementIndex]))
+		if (!settings.loadReplacementKey.empty())
 		{
-			for (int i = 0; i < 4; ++i)
-			{
-				const bool selected = replacementIndex == i;
-				if (ImGui::Selectable(replacementNames[i], selected))
-				{
-					settings.loadReplacementKey = replacementKeys[i];
-					stageChanged = true;
-				}
-				if (selected) ImGui::SetItemDefaultFocus();
-			}
-			ImGui::EndCombo();
+			ImGui::TextWrapped("已保留实验舞台选择；请在 [开发] 页的“摄影舞台替换”中修改或恢复原生背景。");
+			ImGui::Spacing();
 		}
-		ImGui::TextWrapped("选择后，请使用游戏原生功能切换摄影背景，或退出后重新进入摄影。恢复原生背景也需重新载入。");
-		ImGui::Spacing();
-		ImGui::Separator();
-		ImGui::Spacing();
 
 		// =========================================================================
 		// 1. 普通模式：基础视觉与环境控制

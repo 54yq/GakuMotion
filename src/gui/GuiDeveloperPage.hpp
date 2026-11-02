@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// GuiDeveloperPage.hpp — 开发者页面（仅开发者模式显示：遥测/诊断/鞋底测量/Pitch/资产挂载）
+// GuiDeveloperPage.hpp — 开发者页面（仅开发者模式显示：遥测/诊断/鞋底测量/Pitch/摄影舞台）
 // =============================================================================
 
 #include "GuiOverlayCommon.hpp"
@@ -91,40 +91,11 @@ namespace GakuMotion
 				ImGui::EndTabItem();
 			}
 
-			// ---- 子页面 4：自定义舞台资产挂载 ----
-			if (ImGui::BeginTabItem("舞台资产挂载"))
+			// ---- 子页面 4：尚未完成的载入替换设置，仅开发者可见 ----
+			if (ImGui::BeginTabItem("摄影舞台替换"))
 			{
 				ImGui::Spacing();
-				ImGui::TextUnformatted("官方 3D 舞台资产挂载");
-				if (!ctx.stageMountedKey.empty())
-				{
-					ImGui::TextColored(GuiTheme::SuccessColor(), "当前已挂载: %s", ctx.stageMountedKey.c_str());
-				}
-				else
-				{
-					ImGui::TextDisabled("当前未挂载自定义舞台资产");
-				}
-
-				static char s_mountKeyBuf[128] = "env_3d_live_all001-00-noon";
-				ImGui::SetNextItemWidth(260.0f);
-				ImGui::InputText("舞台 Asset Key##mount_key", s_mountKeyBuf, sizeof(s_mountKeyBuf));
-				ImGui::SameLine();
-				if (ImGui::Button("挂载舞台##btn_mount"))
-				{
-					if (ctx.fnMountCustomStage && s_mountKeyBuf[0])
-					{
-						ctx.fnMountCustomStage(ctx.self, s_mountKeyBuf);
-					}
-				}
-				ImGui::SameLine();
-				if (ImGui::Button("卸载舞台##btn_unmount"))
-				{
-					if (ctx.fnUnloadCustomStage)
-					{
-						ctx.fnUnloadCustomStage(ctx.self);
-					}
-				}
-
+				DrawStageLoadReplacementControl(ctx);
 				ImGui::EndTabItem();
 			}
 

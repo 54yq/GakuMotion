@@ -144,7 +144,7 @@ namespace EyeGazeProbe
                 << ",\"immediate_render_end_error_deg\":" << Angle(sample.immediate[i], final[i]) << '}';
         }
         out << "],\"scope\":\"CPU eye localRotation after whole normal SRP loop return; optional camera is a main-camera reference only; not GPU or visual acceptance\"}\n";
-        std::ofstream file(outputRoot + "/eye_gaze_probe.jsonl", std::ios::binary | std::ios::app);
+        std::ofstream file(GakuMotion::MotionPathFromUtf8(outputRoot + "/eye_gaze_probe.jsonl"), std::ios::binary | std::ios::app);
         if (file) file << out.str();
         if (!file) ++ioFailures;
         --remaining; sample.written = false; lastSample = Clock::now(); lastReject.clear();
@@ -194,7 +194,7 @@ namespace EyeGazeProbe
         { remaining = 0; sample = {}; Status("timeout"); }
         else if (remaining) Status("armed");
         outputRoot = GakuMotion::Core::Instance().configRoot;
-        std::ifstream file(outputRoot + "/eye_gaze_probe.request.json", std::ios::binary | std::ios::ate);
+        std::ifstream file(GakuMotion::MotionPathFromUtf8(outputRoot + "/eye_gaze_probe.request.json"), std::ios::binary | std::ios::ate);
         if (!file) return;
         const auto size = file.tellg();
         if (size <= 0 || size > 65536) return;

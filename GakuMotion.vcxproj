@@ -238,6 +238,8 @@
     <ClInclude Include="src\GkJsonLite.hpp" />
     <ClInclude Include="src\GkLookAtManager.hpp" />
     <ClInclude Include="src\GkMotionData.hpp" />
+    <ClInclude Include="src\GkDataLayout.hpp" />
+    <ClInclude Include="src\GkWindowsPaths.hpp" />
     <ClInclude Include="src\GkMotionPlayer.hpp" />
     <ClInclude Include="src\GkPlaylist.hpp" />
     <ClInclude Include="src\GkRootHeightCalibration.hpp" />
@@ -256,6 +258,8 @@
     <ClInclude Include="include\GakuBurstBridge.h" />
     <ClInclude Include="include\GakuFaceDiagnostics.h" />
     <ClInclude Include="include\GakuPlugin.h" />
+    <ClInclude Include="include\GakuPaths.h" />
+    <ClInclude Include="include\GakuPaths.hpp" />
     <ClInclude Include="include\GakuPhysicsDiagnostics.h" />
     <ClInclude Include="include\GakuSafeBoneLookup.h" />
     <!-- MinHook bundled header -->

@@ -19,7 +19,7 @@
 
 ## 曲库为空或文件更新没有生效
 
-每个曲目应位于 `gakumas-local/motions/` 的直接子目录，包含 `motion.gkclip`、`motion.gkmotion` 或 `motion.gk_world_dump`。多套一层目录会导致扫描不到曲目。
+每个曲目应位于当前曲库根的直接子目录，包含 `motion.gkclip`、`motion.gkmotion` 或 `motion.gk_world_dump`。未迁移时根为 `gakumas-local/motions/`；完成[分类目录迁移](MIGRATION_LAYOUT.md)后为 `gakumas-local/UserData/gakumotion/motions/`。多套一层目录会导致扫描不到曲目。活动回执损坏或根不匹配时会拒绝加载，不会改读旧目录；先保留回执和迁移清单再排障。
 
 外部增删文件后使用“刷新曲库”。刷新只更新列表，不替换已经加载到内存的表演；当前曲目的文件变化需再点击“重新加载当前曲目”。重新加载保留时间，并保持暂停或预览。若提示源文件已移除，先恢复文件再重载。
 
@@ -44,6 +44,8 @@
 
 曲目音频的播放文件名为 `song.wav`，位于曲目目录。检查是否选择了“不导入”、是否开启静音，以及输入文件是否为 PCM WAV。自动音频选项只查找身体 VMD 同名 WAV 或旁边的 `song.wav`。
 
+音频路径使用 Windows 宽字符接口；部分旧 waveaudio 驱动仍拒绝特殊 Unicode。新版只读尝试同文件已有的短路径别名，没有可用别名时保留明确 MCI 错误，不会改名或复制用户音频。
+
 逐帧、加载预览和暂停定位保持静默。有声播放跟随音频时钟，改变动作预览速度不会改变歌曲速度。外部替换音乐后，需要重新加载当前曲目才能使用新文件。
 
 ## 镜头不动或不能手动取景
@@ -64,7 +66,7 @@ VR 与桌面镜头的调度有不同边界，桌面模式可用不能推导 VR �
 
 ## 日志与问题反馈
 
-以下路径相对游戏根目录：
+以下为旧布局路径，相对游戏根目录。迁移后 Motion 的 `import.log`、`camera_import.log` 和时间记录位于 `gakumas-local/Logs/gakumotion/`，诊断位于其 `diagnostics/` 子目录；宿主日志按对应 Loader 版本说明定位：
 
 | 文件 | 内容 |
 | --- | --- |

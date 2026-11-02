@@ -31,6 +31,10 @@ flowchart LR
 | [`deps/KineTexture/`](../deps/KineTexture/) | 通用动作计算、采样、变换与重定向核心 |
 | [`src/gui/`](../src/gui/) | 用户界面与操作入口 |
 
+## 数据路径
+
+可选 `gakuloader.paths` v1 只组织协作插件的类别根，不是文件 I/O 沙箱。`GkDataLayout.hpp` 根据当前安装的有效活动回执一次选择配置、用户内容、持久状态、日志和临时事务根；没有回执保留旧布局，有活动回执就不回旧残留。迁移由独立 `tools/migrate-layout.ps1` 预检和复制，不在 activate 中暗自执行。完整目录与恢复边界见[迁移说明](MIGRATION_LAYOUT.md)。
+
 ## 导入边界
 
 导入器接收 UTF-8 JSON 请求，返回结构化结果。身体与独立镜头导入共用互斥门，同一时间只执行一个任务；C++ 侧在工作线程中调用，界面轮询进度日志。

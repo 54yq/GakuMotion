@@ -26,6 +26,7 @@ internal sealed class ImportRequest
     public string ToothChannel { get; init; } = string.Empty;
     public string LogPath { get; init; } = string.Empty;
     public string TimingJsonl { get; init; } = string.Empty;
+    public string TransactionRoot { get; init; } = string.Empty;
 
     public static ImportRequest Parse(ReadOnlySpan<byte> utf8Json)
     {
@@ -79,7 +80,8 @@ internal sealed class ImportRequest
             CameraRootRegistration = Optional("camera_root_registration"),
             ToothChannel = Optional("tooth_channel"),
             LogPath = Optional("log_path"),
-            TimingJsonl = Optional("timing_jsonl")
+            TimingJsonl = Optional("timing_jsonl"),
+            TransactionRoot = Optional("transaction_root")
         };
     }
 }

@@ -23,7 +23,9 @@ GakuMotion 面向《学园偶像大师》PC DMM 版，在 Windows x64 上由 Gak
 4. 启动游戏，进入偶像摄影，按 `Ctrl+M` 唤出 GakuMotion 面板。
 5. 在“曲库”添加 VMD，或放入已有动作文件夹后点击“刷新曲库”。
 
-典型目录如下。`GakuMotion/` 保存配置与导入日志，首次运行会生成所需的基础配置；动作文件夹由导入器创建，也可以从已有动作库复制。
+未执行布局迁移时，目录如下。新版支持 GakuLoader 的可选 paths v1 服务：停止游戏、独立备份并完成[一次性复制迁移](MIGRATION_LAYOUT.md)后，配置使用 `Configs/gakumotion`，完整曲库使用 `UserData/gakumotion/motions`，播放列表使用 `PluginData/gakumotion`，导入日志使用 `Logs/gakumotion`。有效活动回执才会切换，覆盖 DLL 不会暗自搬素材；活动回执损坏或与安装不符时明确报错。
+
+旧布局的 `GakuMotion/` 保存配置与导入日志，首次运行会生成基础配置。可选 Bridge 的程序位置仍按下图保留，不随用户数据移动。
 
 ```text
 <游戏根目录>/
@@ -49,13 +51,13 @@ GakuMotion 面向《学园偶像大师》PC DMM 版，在 Windows x64 上由 Gak
 
 1. 正常退出游戏，备份现有的两个 DLL。
 2. 用同一构建的新版本同时替换两个 DLL。
-3. 保留 `GakuMotion/` 配置目录和 `motions/` 动作库，重新启动游戏。
+3. 保留全部配置和用户数据。未迁移时保留 `GakuMotion/`、`motions/`；已迁移时保留分类目录、活动回执、完整曲库及恢复区。重新启动游戏。
 
 DLL 不支持通过覆盖文件在已运行的游戏中换版；文件已替换与进程已加载新版是两件事。若需要回退，退出游戏后恢复配套的两个旧 DLL。
 
 ## 配置与卸载
 
-普通使用优先通过面板调整。配置集中在 `gakumas-local/GakuMotion/`：
+普通使用优先通过面板调整。未迁移时配置位于 `gakumas-local/GakuMotion/`；已迁移时除 `playlist.json` 位于 `PluginData/gakumotion` 外，下表配置位于 `Configs/gakumotion`：
 
 | 文件 | 用途 |
 | --- | --- |
@@ -65,6 +67,7 @@ DLL 不支持通过覆盖文件在已运行的游戏中换版；文件已替换�
 | `camera.json` | 保存的镜头参数 |
 | `bone_overrides.json` | 全局骨骼微调 |
 | `sole_measurement.json` | 开发者鞋底测量配置 |
+| `stage.json` | 下一次进入摄影时使用的背景选择 |
 
 停止使用 GakuMotion 时，退出游戏后移走两个 GakuMotion DLL 即可；动作和配置可以保留。GakuLoader 的卸载方式以其自身说明为准。
 

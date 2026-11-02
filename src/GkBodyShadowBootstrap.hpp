@@ -9,7 +9,7 @@ namespace BodyShadowBootstrap
 
 	inline bool Request(const std::string& root, uint64_t& sequence)
 	{
-		std::ifstream file(root + "/body_shadow_probe.request.json", std::ios::binary | std::ios::ate);
+		std::ifstream file(GakuMotion::MotionPathFromUtf8(root + "/body_shadow_probe.request.json"), std::ios::binary | std::ios::ate);
 		if (!file) return false;
 		const auto length = file.tellg();
 		if (length <= 0 || length > 65536) return false;

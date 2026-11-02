@@ -246,7 +246,7 @@ namespace GroundShadowProbeBootstrap
 	}
 	inline bool Request(const std::string& root, uint64_t& sequence)
 	{
-		std::ifstream file(root + "/ground_shadow_probe.request.json", std::ios::binary | std::ios::ate);
+		std::ifstream file(GakuMotion::MotionPathFromUtf8(root + "/ground_shadow_probe.request.json"), std::ios::binary | std::ios::ate);
 		if (!file) return false;
 		const auto length = file.tellg();
 		if (length <= 0 || length > 65536) return false;
@@ -269,7 +269,7 @@ namespace GroundShadowProbeBootstrap
 	}
 	inline bool Write(const std::string& path, const std::string& contents)
 	{
-		std::ofstream file(path, std::ios::binary | std::ios::trunc);
+		std::ofstream file(GakuMotion::MotionPathFromUtf8(path), std::ios::binary | std::ios::trunc);
 		if (!file) return false;
 		file << contents;
 		file.flush();

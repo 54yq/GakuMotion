@@ -23,6 +23,8 @@ GakuMotion 通过 [GakuLoader](https://github.com/crested-ezios/GakuLoader) 加�
 
 当前尚未发布可直接下载的配套安装包。可使用同版本配套 DLL，或按 [构建指南](BUILD_NOTES.md) 自行编译。完整目录、配置与更新方法见 [安装指南](docs/INSTALLATION.md)。
 
+已有安装可先备份，再按[数据布局与一次性迁移](docs/MIGRATION_LAYOUT.md)将配置、曲库与日志移入分类目录；覆盖 DLL 不会自动搬动用户素材。
+
 ### 导入第一支动作
 
 进入偶像摄影，按 **Ctrl+M** 唤出控制面板，在“曲库”中导入 VMD，可同时添加表情、镜头和音频。选择曲目后点击“加载预览”查看首帧，或点击“播放选中”开始表演。

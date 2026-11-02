@@ -225,7 +225,7 @@ namespace BodyShadowProbe
 		lastPoll = now;
 		if (remaining && now-started > std::chrono::seconds(30)) remaining = 0;
 		uint64_t seq = 0;
-		std::ifstream file(root + "/body_shadow_probe.request.json", std::ios::binary | std::ios::ate);
+		std::ifstream file(GakuMotion::MotionPathFromUtf8(root + "/body_shadow_probe.request.json"), std::ios::binary | std::ios::ate);
 		if (!file) return;
 		const auto length = file.tellg();
 		if (length <= 0 || length > 65536) return;
@@ -326,7 +326,7 @@ namespace BodyShadowProbe
 					<< ",\"pose_serial\":" << (matched ? lastUpdate.poseSerial : 0)
 					<< ",\"body_native_bounds\":" << (matched && lastUpdate.consumed ? GroundShadowProbe::BoundsJson(lastUpdate.native) : "null")
 					<< ",\"body_draw_bounds\":" << (matched && lastUpdate.consumed ? GroundShadowProbe::BoundsJson(lastUpdate.draw) : "null") << "}\n";
-				std::ofstream file(root + "/body_shadow_probe.jsonl", std::ios::binary | std::ios::app);
+				std::ofstream file(GakuMotion::MotionPathFromUtf8(root + "/body_shadow_probe.jsonl"), std::ios::binary | std::ios::app);
 				if (file) { file << out.str() << producer.str(); file.flush(); }
 				if (!file) ++ioFailures;
 				--remaining; lastSample = Clock::now();

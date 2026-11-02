@@ -584,13 +584,13 @@ namespace GakuMotion
 		{
 			std::error_code ec;
 			if (path.empty()) return false;
-			if (std::filesystem::exists(path, ec))
+			if (std::filesystem::exists(MotionPathFromUtf8(path), ec))
 			{
 				fileFound = true;
 				return false;
 			}
-			std::filesystem::create_directories(std::filesystem::path(path).parent_path(), ec);
-			std::ofstream out(path, std::ios::binary);
+			std::filesystem::create_directories(MotionPathFromUtf8(path).parent_path(), ec);
+			std::ofstream out(MotionPathFromUtf8(path), std::ios::binary);
 			if (!out.is_open())
 			{
 				lastError = "cannot create control file: " + path;

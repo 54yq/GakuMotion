@@ -1,4 +1,4 @@
-﻿#ifndef NOMINMAX
+#ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include "GkCaptureGuard.hpp"
@@ -33,6 +33,7 @@
 #include <sstream>
 #include <iomanip>
 #include <locale>
+#include "GkWindowsPaths.hpp"
 
 namespace
 {
@@ -665,32 +666,23 @@ namespace
 	}
 
 	// -----------------------------------------------------------------------------
-	// 路径字符串转换：宿主以宽字符（UTF-16）提供 localRoot，而本插件的配置层、
-	// std::filesystem 与 ifstream 全部使用窄字符串路径（在 Windows 上等价于
-	// ANSI / 系统代码页）。此处显式执行 WideCharToMultiByte(CP_ACP)：
-	//   1. 与 std::filesystem::path(std::string) 在 Windows 上的窄路径解释一致；
-	//   2. 取代原先 std::string(w.begin(), w.end()) 的逐字符截断——该写法会把
-	//      非 ASCII 路径（如中文用户名目录）静默损坏，并被 MSVC 报 C4244。
-	// 局限：ACP 无法表示的字符仍会退化为 '?'；彻底修复需将宽字符串贯穿配置层，
-	//       记录为后续工作项（见 DevAgents/ADR-0001）。
+	// The host owns UTF-16 paths; all Motion string paths are UTF-8. Filesystem
+	// streams use MotionPathFromUtf8 rather than the Windows ANSI code page.
 	// -----------------------------------------------------------------------------
 	std::string WidePathToNarrow(const wchar_t* wide)
 	{
 		if (!wide || !*wide) return std::string();
-		const int needed = WideCharToMultiByte(CP_ACP, 0, wide, -1, nullptr, 0, nullptr, nullptr);
-		if (needed <= 0) return std::string();
-		std::string out(static_cast<size_t>(needed), '\0');
-		WideCharToMultiByte(CP_ACP, 0, wide, -1, out.data(), needed, nullptr, nullptr);
-		out.resize(static_cast<size_t>(needed - 1));
+		std::string out;
+		if (!GakuMotion::windows_path::ToUtf8(wide, out)) return {};
 		return out;
 	}
 
 	std::wstring ToWide(const std::string& text, UINT codePage)
 	{
 		if (text.empty()) return {};
-		const int n = MultiByteToWideChar(codePage, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
-		std::wstring out(static_cast<size_t>(n), L'\0');
-		MultiByteToWideChar(codePage, 0, text.data(), static_cast<int>(text.size()), out.data(), n);
+		if (codePage != CP_UTF8) return {};
+		std::wstring out;
+		if (!GakuMotion::windows_path::FromUtf8(text, out)) return {};
 		return out;
 	}
 
@@ -829,7 +821,7 @@ namespace
 	void DrainImportProgressLog(GakuMotion::ImportProgressState* progress)
 	{
 		if (g_importLog.empty()) return;
-		HANDLE h = CreateFileW(ToWide(g_importLog, CP_ACP).c_str(), GENERIC_READ,
+		HANDLE h = CreateFileW(ToWide(g_importLog, CP_UTF8).c_str(), GENERIC_READ,
 		                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
 		                       nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
 		if (h == INVALID_HANDLE_VALUE) return;
@@ -943,7 +935,7 @@ namespace
 	std::string g_lastAudioPath{};
 	GakuMotion::audio::Observation g_audioObservation{};
 	MCIERROR g_audioCommandError{0}; // A successful status query cannot erase a failed transport.
-	decltype(&mciSendStringA) g_sendMciAudio = &mciSendStringA;
+	decltype(&mciSendStringA) g_sendMciAudio = &GakuMotion::windows_path::SendMciUtf8;
 	GakuMotion::bgm::Lease g_bgmLease;
 	GakuMotion::bgm::Lease g_voiceLease;
 
@@ -1430,6 +1422,7 @@ namespace
 		const auto ownerObservation = SceneOwnerRuntime::Read(name, forceOwnerRead || g_pendingProtectionFault.load(std::memory_order_acquire));
 		g_sceneOwner = ownerObservation.owner;
 		g_verifiedOwnerSceneName = ownerObservation.sceneName;
+		StageLoadOverride::ObserveActiveScene(g_verifiedActiveSceneHandle, name);
 		core.injectionPolicy.SetContext(g_activeSceneVerified ? ownerObservation.context :
 			GakuMotion::injection::Context::Unknown);
 		g_motionSceneAllowed = core.InjectionAllowed();
@@ -1614,6 +1607,43 @@ bool InitializeMotion()
 	}
 
 	std::string localRoot = WidePathToNarrow(g_hostContext.localRoot ? g_hostContext.localRoot : L"gakumas-local");
+	if (localRoot.empty()) return false;
+	GakuMotion::DataLayout offered, selected;
+	const GakuMotion::DataLayout* available = nullptr;
+	if (GakuMotion::host::paths.getRoot)
+	{
+		offered.localRoot = localRoot;
+		const std::pair<GakuPathKind, std::string*> roots[] = {
+			{GAKU_PATH_CONFIGS, &offered.configs}, {GAKU_PATH_USER_DATA, &offered.userData},
+			{GAKU_PATH_PLUGIN_DATA, &offered.pluginData}, {GAKU_PATH_LOGS, &offered.logs},
+			{GAKU_PATH_TEMP, &offered.temp}};
+		for (const auto& entry : roots)
+		{
+			std::filesystem::path native;
+			if (GakuPaths::GetRoot(GakuMotion::host::paths, entry.first, native) != GAKU_OK)
+			{
+				if (g_hostContext.logError) g_hostContext.logError("[GakuMotion][Paths] Cannot resolve managed category %u; no old-root fallback", entry.first);
+				return false;
+			}
+			*entry.second = GakuMotion::MotionPathToUtf8(native);
+		}
+		available = &offered;
+	}
+	std::string layoutError;
+	if (!GakuMotion::SelectDataLayout(localRoot, available, selected, layoutError))
+	{
+		if (g_hostContext.logError) g_hostContext.logError("[GakuMotion][Paths] %s", layoutError.c_str());
+		return false;
+	}
+	if (selected.managed)
+	{
+		for (const auto kind : {GAKU_PATH_CONFIGS, GAKU_PATH_PLUGIN_DATA, GAKU_PATH_LOGS})
+			if (GakuMotion::host::paths.ensureRoot(GakuMotion::host::paths.context, kind) != GAKU_OK)
+				return false;
+		std::error_code ec;
+		std::filesystem::create_directories(GakuMotion::MotionPathFromUtf8(selected.logs + "/diagnostics"), ec);
+		if (ec) return false;
+	}
 
 	// Phase 0：先探测宿主能力，任何回调都可能缺失，必须先验后调
 	ValidateHostContext();
@@ -1648,7 +1678,9 @@ bool InitializeMotion()
 	player.fnObserveAudio = HelperAudioObserve;
 	player.fnCanPlay = HelperCanPlay;
 
-	GakuMotion::Initialize(localRoot);
+	core.Initialize(localRoot, &selected);
+	if (g_hostContext.logInfo) g_hostContext.logInfo("[GakuMotion][Paths] layout=%s configs=%s motions=%s",
+		selected.managed ? "gakuloader-v1" : "legacy-unmigrated", core.configRoot.c_str(), core.motionsRoot.c_str());
 	if (g_hostContext.pluginsRoot)
 	{
 		// Only records the directory; the companion DLL is loaded on first use so
@@ -2193,7 +2225,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	{
 		// Metadata/native windows precede this module's shadow hook. They do
 		// not require an active motion or call any generated game method.
-		try { BodyShadowBootstrap::Capture(g_gameAssembly, core.configRoot); }
+		try { BodyShadowBootstrap::Capture(g_gameAssembly, core.diagnosticsRoot); }
 		catch (...) { if (g_hostContext.logWarn) g_hostContext.logWarn("[GakuMotion][BodyShadow] bootstrap failed; native rendering preserved"); }
 	}
 	// UnityReady may be dispatched by a loader worker. Install on the first
@@ -2487,7 +2519,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 					{
 						std::string localRoot = WidePathToNarrow(
 							g_hostContext.localRoot ? g_hostContext.localRoot : L"gakumas-local");
-						player.LoadMotion(localRoot + "/motions/test_motion");
+						player.LoadMotion(GakuMotion::Core::Instance().motionsRoot + "/test_motion");
 					}
 				}
 				player.Play();
@@ -2732,7 +2764,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	{
 		const auto seq = core.burstTraceRequestedSeq;
 		core.burstTraceRequestedSeq = 0;
-		const std::filesystem::path directory(core.configRoot);
+		const std::filesystem::path directory(core.diagnosticsRoot);
 		const int result = g_burstBridge.DumpTraces((directory / "before_quartz_trace.json").wstring().c_str());
 		LARGE_INTEGER qpc{}; QueryPerformanceCounter(&qpc);
 		char json[1024]{};
@@ -2762,7 +2794,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	{
 		if (!shoeProbeResolved)
 		{
-			ShoeMeshProbe::Resolve(g_gameAssembly, core.configRoot);
+			ShoeMeshProbe::Resolve(g_gameAssembly, core.diagnosticsRoot);
 			shoeProbeResolved = true;
 		}
 		ShoeMeshProbe::Tick(activeActor, unityFrame, player.currentTime);
@@ -2777,11 +2809,11 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 		context.processId = GetCurrentProcessId();
 		context.sceneHandle = sceneHandle;
 		context.sceneName = g_shoeProbeSceneName;
-		if (ShoeMeshProbe::OfficialRequestReady(core.configRoot, activeActor, context))
+		if (ShoeMeshProbe::OfficialRequestReady(core.diagnosticsRoot, activeActor, context))
 		{
 			if (!shoeProbeResolved)
 			{
-				ShoeMeshProbe::Resolve(g_gameAssembly, core.configRoot);
+				ShoeMeshProbe::Resolve(g_gameAssembly, core.diagnosticsRoot);
 				shoeProbeResolved = true;
 			}
 			// The custom player's time cannot describe an official animation.
@@ -2965,8 +2997,13 @@ GakuStatus MotionActivate(const GakuHostApi* host, void** pluginState)
 // MotionActorTick.
 void MotionTick(void*, float)
 {
-	// Frame-scoped work. Today the only frame-level need is finishing the
-	// deferred managed type handles even when no actor is present.
+	// Persist only the future Photography background selection outside actor
+	// callbacks. General playback and scene commands retain their actor timing.
+	{
+		auto& core = GakuMotion::Core::Instance();
+		std::lock_guard<std::recursive_mutex> lock(core.stateMutex);
+		core.ProcessPendingStageLoadCommands();
+	}
 	if (g_runtimeReady.load(std::memory_order_acquire))
 	{
 		ResolveDeferredManagedTypes();

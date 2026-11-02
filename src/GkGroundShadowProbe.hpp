@@ -265,7 +265,7 @@ namespace GroundShadowProbe
 	inline void WriteNativeSnapshot()
 	{
 		if (nativeSnapshot.empty()) return;
-		std::ofstream out(outputRoot + "/ground_shadow_methods.json", std::ios::binary | std::ios::trunc);
+		std::ofstream out(GakuMotion::MotionPathFromUtf8(outputRoot + "/ground_shadow_methods.json"), std::ios::binary | std::ios::trunc);
 		if (!out) { ++ioFailures; return; }
 		out << nativeSnapshot;
 		if (!out) ++ioFailures;
@@ -357,7 +357,7 @@ namespace GroundShadowProbe
 		if (boundsConsumed && boundsScopeActor == actor)
 			out << ",\"ao_native_bounds\":" << BoundsJson(consumedNative) << ",\"ao_draw_bounds\":" << BoundsJson(consumedDraw);
 		out << ",\"io_failures\":" << ioFailures << "}\n";
-		std::ofstream file(outputRoot + "/ground_shadow_probe.jsonl", std::ios::binary | std::ios::app);
+		std::ofstream file(GakuMotion::MotionPathFromUtf8(outputRoot + "/ground_shadow_probe.jsonl"), std::ios::binary | std::ios::app);
 		if (file) file << out.str();
 		if (!file) ++ioFailures;
 		if (!remaining && !completionLogged)

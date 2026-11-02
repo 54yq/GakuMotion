@@ -35,6 +35,7 @@ namespace GakuMotion
 		bool clearCamera{false};  // True when user clears camera in edit mode
 		bool clearAudio{false};   // True when user selects (留空) for audio
 		std::string motionsRoot, script, log;
+		std::string transactionRoot; // Optional managed scratch; same volume as library.
 		float fps{0.0f}; // 0 = auto-detect
 		// 兼容旧请求结构；产品始终使用 NativeAOT，不再回落解释器。
 		bool useCsharp{true};
@@ -117,7 +118,7 @@ namespace GakuMotion
 		{
 			error.clear();
 			std::error_code ec;
-			const std::filesystem::path destination(path);
+			const std::filesystem::path destination(MotionPathFromUtf8(path));
 			if (!destination.parent_path().empty()) std::filesystem::create_directories(destination.parent_path(), ec);
 			if (ec)
 			{

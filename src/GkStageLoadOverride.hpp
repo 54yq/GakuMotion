@@ -15,6 +15,30 @@ namespace StageLoadOverride
     inline const char* (*className)(void*) = nullptr;
     inline uint32_t samples = 0, changes = 0;
     inline std::atomic<uint32_t> entries[3]{};
+    inline int observedReplacementScene = 0;
+
+    inline void ObserveActiveScene(int sceneHandle, const std::string& name)
+    {
+        if (!sceneHandle || !g_activeSceneVerified ||
+            g_sceneOwner.AllowedContext() != GakuMotion::injection::Context::Photography) return;
+        const bool replacement = GakuMotion::stage_load::IsTarget(name) &&
+            GakuMotion::stage_load::receipt.Context(name, g_verifiedOwnerSceneName, g_sceneOwner) ==
+                GakuMotion::injection::Context::Photography;
+        if (replacement && observedReplacementScene != sceneHandle)
+        {
+            observedReplacementScene = sceneHandle;
+            GakuMotion::host::Info("[GakuMotion][StageLoad] replacement Active Scene=%s handle=%d owner_scene=%d (visual acceptance pending)",
+                name.c_str(), sceneHandle, g_sceneOwner.sceneHandle);
+        }
+        else if (!replacement && observedReplacementScene &&
+            GakuMotion::injection::PreviewContext(name, g_verifiedOwnerSceneName, g_sceneOwner) ==
+                GakuMotion::injection::Context::Photography)
+        {
+            observedReplacementScene = 0;
+            GakuMotion::host::Info("[GakuMotion][StageLoad] native photography Active Scene=%s handle=%d owner_scene=%d",
+                name.c_str(), sceneHandle, g_sceneOwner.sceneHandle);
+        }
+    }
 
     inline bool ReadKey(void* value, std::string& key)
     {

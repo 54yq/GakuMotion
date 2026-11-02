@@ -118,6 +118,8 @@ namespace GakuMotion
 		std::string stageSceneName;
 		std::string stageMountedKey;
 		std::string stageStatusNotice;
+		std::string stageLoadNotice;
+		void (*fnSetStageLoadReplacement)(void*, const char*){nullptr};
 		void (*fnSetStageSettings)(void*, const StageSettings&){nullptr};
 		void (*fnSetStagePreset)(void*, int){nullptr};
 		void (*fnToggleStageCandidate)(void*, int, bool){nullptr};
@@ -173,6 +175,8 @@ namespace GakuMotion
 	class GuiOverlay;
 	void DrawShell(GuiOverlay& overlay, const GuiContext& ctx);
 	void DrawLibraryPage(GuiOverlay& overlay, const GuiContext& ctx);
+	void DrawStagePage(GuiOverlay& overlay, const GuiContext& ctx);
+	void DrawStageLoadReplacementControl(const GuiContext& ctx);
 
 	class GuiOverlay
 	{
@@ -337,6 +341,17 @@ namespace GakuMotion
 					ImGui::TextWrapped("%s", ctx.injectionNotice.empty()
 						? "GakuMotion 当前已禁用。仅在偶像摄影或更衣室且截图保护就绪时可用；已保存的设置保持不变。"
 						: ctx.injectionNotice.c_str());
+					ImGui::Spacing();
+					ImGui::Separator();
+					ImGui::Spacing();
+					if (!ctx.stageSettings.loadReplacementKey.empty())
+						ImGui::TextWrapped("已保留实验舞台选择；可在下方开发者选项中修改或恢复原生背景。");
+					if (ImGui::CollapsingHeader("开发者选项"))
+					{
+						ImGui::Checkbox("开发者模式", &developerMode);
+						if (developerMode) DrawStageLoadReplacementControl(ctx);
+						else ImGui::TextWrapped("开启开发者模式后可配置尚未完成的摄影舞台替换。");
+					}
 				}
 				if (!hostedPanel) ImGui::End();
 				return;
@@ -497,6 +512,7 @@ namespace GakuMotion
 
 // 机械拆分的 Tab 渲染实现包含
 #ifdef GKMOTION_GUI_ACTIVE
+#include "gui/GuiStageLoadReplacement.hpp"
 #include "gui/GkGuiStatusBar.hpp"
 #include "gui/GkGuiTabMotion.hpp"
 #include "gui/GkGuiTabGaze.hpp"

@@ -429,6 +429,8 @@ namespace GakuMotion::csharp_import
 		json += request.disableMorph ? "true" : "false";
 		json += ",\"motions_root\":";
 		detail::AppendJsonString(json, request.motionsRoot);
+		json += ",\"transaction_root\":";
+		detail::AppendJsonString(json, request.transactionRoot);
 		json += ",\"title\":";
 		detail::AppendJsonString(json, request.title);
 		char fpsBuffer[64]{};
