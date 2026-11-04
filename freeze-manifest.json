@@ -130,8 +130,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "e3f5403b2214c03899c1657426833d0c339a8a38c90b27419cbf645dba6601cf",
-      "size": 4335,
+      "sha256": "a68b6884bb06d7eb34827528739b28cab7d21125649ca5b813fb376a2c208f5d",
+      "size": 7725,
       "origin": {
         "type": "local staging product documentation or synthetic test",
         "source_algorithm_modified": false
@@ -165,7 +165,55 @@
           },
           "classification": "product_documentation_with_explicit_adaptations"
         }
-      ]
+      ],
+      "documentation_history": [
+        {
+          "date": "2026-11-04",
+          "previous": {
+            "path": "README.md",
+            "sha256": "e3f5403b2214c03899c1657426833d0c339a8a38c90b27419cbf645dba6601cf",
+            "size": 4335,
+            "origin": {
+              "type": "local staging product documentation or synthetic test",
+              "source_algorithm_modified": false
+            },
+            "classification": "new_local_staging_control_or_documentation",
+            "origin_history": [
+              {
+                "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
+                "sha256": "a4ac621766b7259ae15f1d22b52276ed57e47aec4833c5be57215d569629a0f7",
+                "size": 3840,
+                "origin": {
+                  "repository": "GakuMotion",
+                  "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+                  "path": "README.md",
+                  "adaptation": "Restore existing documentation; adapt current build interface, links and historical placement.",
+                  "documentation_followup": "Move dated acceptance narration from product entry pages into existing historical version notes.",
+                  "complete_candidate_update": "Normal local build integration and current user/developer documentation; no algorithm or parameter change."
+                },
+                "classification": "restored_product_documentation_with_explicit_adaptations"
+              }
+            ],
+            "history": [
+              {
+                "sha256": "1ca1e0ab2850245750f6b2e2beebb8d48f1621ee1ad65605f1f2f3a0fc208ccb",
+                "size": 4025,
+                "origin": {
+                  "type": "staging product documentation adaptation",
+                  "base_staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
+                  "product_source_revision": "102df32c515e49d78f086c9467ec591a93716442",
+                  "purpose": "Keep the user homepage and build integration; describe managed paths and preserved-data migration."
+                },
+                "classification": "product_documentation_with_explicit_adaptations"
+              }
+            ]
+          }
+        }
+      ],
+      "documentation_repair": {
+        "review": "Reviewed technical facts and conditions against current staged code; humanizer-zh expression pass.",
+        "runtime_changed": false
+      }
     },
     {
       "path": "SOURCE_REVIEW.md",
@@ -4615,5 +4663,17 @@
     ],
     "source_user_acceptance": "User confirmed camera effects recovered for the paired development deployment; no generalized VR or scenario acceptance.",
     "staging_game_deployed": false
+  },
+  "documentation_repair_20261104": {
+    "date": "2026-11-04",
+    "base_staging_commit": "8bd7d1954f2fc6f17ef02a8444eed3ab53c0680c",
+    "previous_manifest_sha256": "b5ae306579f5c481500cf6f768809253b2cba4372a7536860469ac6de15ab6a3",
+    "scope": "Authorized README/documentation corrections and humanizer-zh review against this staged code; no runtime, test, algorithm, parameter or vendor changes.",
+    "runtime_rebuilt": false,
+    "game_acceptance_added": false,
+    "remote_updated": false,
+    "changed_payload_files": [
+      "README.md"
+    ]
   }
 }
