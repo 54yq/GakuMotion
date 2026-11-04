@@ -41,6 +41,21 @@ static void TestCameraCoreWorkflow(const std::string& repoRoot)
 	core.QueueCameraSettings(settings);
 	core.ProcessPendingGuiCommands();
 	Check(!core.camera.settings.enabled && !core.camera.owned, "disable releases camera ownership");
+	Core gameCameraReopened;
+	gameCameraReopened.configRoot = core.configRoot;
+	Check(gameCameraReopened.LoadCameraSettings() && !gameCameraReopened.camera.settings.enabled,
+	      "game camera selection persists even when mode and follow behavior are unchanged");
+	settings.enabled = true;
+	core.QueueCameraSettings(settings);
+	core.ProcessPendingGuiCommands();
+	Check(gameCameraReopened.LoadCameraSettings() && gameCameraReopened.camera.settings.enabled,
+	      "returning from game to the same GM camera mode persists ownership selection");
+	RuntimeConfig legacyHold;
+	legacyHold.path = core.configRoot + "/legacy-hold.json";
+	WriteTextFile(legacyHold.path, R"({"camera":{"mode":1,"enabled":true,"follow_fov":51}})");
+	Check(legacyHold.Reload() && legacyHold.camera.mode == CameraMode::Track && legacyHold.camera.enabled &&
+	      legacyHold.camera.followFov == 51,
+	      "retired fixed-camera files migrate to VMD without changing other camera parameters");
 
 	static CameraImportRequest received;
 	core.fnStartCameraImport = [](const CameraImportRequest& r, std::string&)-> bool

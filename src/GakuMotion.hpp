@@ -626,10 +626,11 @@ namespace GakuMotion
 					{
 						const auto prevMode = camera.settings.mode;
 						const auto prevBehavior = camera.settings.followBehavior;
+						const bool prevEnabled = camera.settings.enabled;
 						camera.settings = cmd.cameraSettings;
 						if (!camera.settings.enabled) camera.Release();
 						camera.Publish();
-						if ((prevMode != cmd.cameraSettings.mode || prevBehavior != cmd.cameraSettings.followBehavior) &&
+						if ((prevEnabled != cmd.cameraSettings.enabled || prevMode != cmd.cameraSettings.mode || prevBehavior != cmd.cameraSettings.followBehavior) &&
 							!configRoot.empty() && std::filesystem::exists(MotionPathFromUtf8(configRoot + "/camera.json")))
 						{
 							SaveCameraSettings();

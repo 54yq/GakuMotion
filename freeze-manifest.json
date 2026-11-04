@@ -170,12 +170,16 @@
     {
       "path": "SOURCE_REVIEW.md",
       "origin": {
-        "type": "local staging product documentation or synthetic test",
-        "source_algorithm_modified": false
+        "repository": "GakuMotion",
+        "revision": "3a33452a09aa9eea8e97eb2e58ac2710ee1e4f5e",
+        "path": "SOURCE_REVIEW.md",
+        "selected_raw_git_blob": false,
+        "adaptation": "Camera-only changes on the existing staging implementation/documentation; excludes Control API, Clock, Timeline and workspace changes.",
+        "base_staging_revision": "8fe8af16536ee70312d52118d66ad518723d0877"
       },
-      "classification": "new_local_staging_control_or_documentation",
-      "sha256": "11329f8104ebf379a39618b50e8a3caf076cfcce825b27d3dc548ec099023f31",
-      "size": 7881,
+      "classification": "camera_product_documentation_with_explicit_adaptations",
+      "sha256": "1f2ce9fb68f83c5b1b683c91deec9d9e6ce55c186c218a6a3e5409ced657a953",
+      "size": 8944,
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -201,6 +205,15 @@
             "purpose": "Keep the user homepage and build integration; describe managed paths and preserved-data migration."
           },
           "classification": "product_documentation_with_explicit_adaptations"
+        },
+        {
+          "origin": {
+            "type": "local staging product documentation or synthetic test",
+            "source_algorithm_modified": false
+          },
+          "classification": "new_local_staging_control_or_documentation",
+          "sha256": "11329f8104ebf379a39618b50e8a3caf076cfcce825b27d3dc548ec099023f31",
+          "size": 7881
         }
       ]
     },
@@ -970,6 +983,20 @@
       ]
     },
     {
+      "path": "docs/CAMERA_MODE_RECOVERY_20261104.md",
+      "sha256": "2a603a7e4e3f6ed37786bfbecaafe744347babe8aabdf6816dab1659fea15174",
+      "size": 1382,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "3a33452a09aa9eea8e97eb2e58ac2710ee1e4f5e",
+        "path": "docs/CAMERA_MODE_RECOVERY_20261104.md",
+        "selected_raw_git_blob": false,
+        "adaptation": "Camera-only changes on the existing staging implementation/documentation; excludes Control API, Clock, Timeline and workspace changes.",
+        "base_staging_revision": "8fe8af16536ee70312d52118d66ad518723d0877"
+      },
+      "classification": "camera_product_documentation_with_explicit_adaptations"
+    },
+    {
       "path": "docs/INSTALLATION.md",
       "sha256": "975dcdf8a8b8318b60b5cbc78a20392fd12d0db46df3d74b0d54437a26a7c8c8",
       "size": 4728,
@@ -1083,13 +1110,17 @@
     },
     {
       "path": "docs/USAGE.md",
-      "sha256": "195b787749f9c6eee7488321268a8e89f3290e923e8b6aecbbcf3185dcaaa113",
-      "size": 8781,
+      "sha256": "1297e70873501406d2aac4da8e846a8ef28dcca4c3c425806883160b79b18c07",
+      "size": 8799,
       "origin": {
-        "type": "local staging product documentation or synthetic test",
-        "source_algorithm_modified": false
+        "repository": "GakuMotion",
+        "revision": "3a33452a09aa9eea8e97eb2e58ac2710ee1e4f5e",
+        "path": "docs/USAGE.md",
+        "selected_raw_git_blob": false,
+        "adaptation": "Camera-only changes on the existing staging implementation/documentation; excludes Control API, Clock, Timeline and workspace changes.",
+        "base_staging_revision": "8fe8af16536ee70312d52118d66ad518723d0877"
       },
-      "classification": "new_local_staging_control_or_documentation",
+      "classification": "camera_product_documentation_with_explicit_adaptations",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -1116,6 +1147,15 @@
             "purpose": "Keep the user homepage and build integration; describe managed paths and preserved-data migration."
           },
           "classification": "product_documentation_with_explicit_adaptations"
+        },
+        {
+          "sha256": "195b787749f9c6eee7488321268a8e89f3290e923e8b6aecbbcf3185dcaaa113",
+          "size": 8781,
+          "origin": {
+            "type": "local staging product documentation or synthetic test",
+            "source_algorithm_modified": false
+          },
+          "classification": "new_local_staging_control_or_documentation"
         }
       ]
     },
@@ -1857,15 +1897,17 @@
     },
     {
       "path": "src/GakuMotion.hpp",
-      "sha256": "82717ec0209e250d303d8238f7c0635c48d7871c37f1b59a31da2f2ba223aadb",
-      "size": 119974,
+      "sha256": "79bd032670eec05754bb5c0bd7713070eeb90a6b760f217e9c8962aa1da34acc",
+      "size": 120075,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "revision": "3a33452a09aa9eea8e97eb2e58ac2710ee1e4f5e",
         "path": "src/GakuMotion.hpp",
-        "selected_raw_git_blob": true
+        "selected_raw_git_blob": false,
+        "adaptation": "Camera-only changes on the existing staging implementation/documentation; excludes Control API, Clock, Timeline and workspace changes.",
+        "base_staging_revision": "8fe8af16536ee70312d52118d66ad518723d0877"
       },
-      "classification": "selected_first_party_or_retained_license_source",
+      "classification": "selected_first_party_camera_code_or_synthetic_test",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -1891,6 +1933,17 @@
             "selection": "fixed product closure"
           },
           "classification": "first_party_product_code_or_synthetic_support"
+        },
+        {
+          "sha256": "82717ec0209e250d303d8238f7c0635c48d7871c37f1b59a31da2f2ba223aadb",
+          "size": 119974,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+            "path": "src/GakuMotion.hpp",
+            "selected_raw_git_blob": true
+          },
+          "classification": "selected_first_party_or_retained_license_source"
         }
       ]
     },
@@ -2739,15 +2792,15 @@
     },
     {
       "path": "src/GkRuntimeConfig.hpp",
-      "sha256": "b49d9161bf0b255ea144e22380ef81816da222e47c89f5b3197a62fccffeb092",
-      "size": 45962,
+      "sha256": "0a7a2516922f309ad7a0c7fd159d4f94c1ff775cdb5480577974895efc45c78c",
+      "size": 46163,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "revision": "3a33452a09aa9eea8e97eb2e58ac2710ee1e4f5e",
         "path": "src/GkRuntimeConfig.hpp",
         "selected_raw_git_blob": true
       },
-      "classification": "selected_first_party_or_retained_license_source",
+      "classification": "selected_first_party_camera_code_or_synthetic_test",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -2773,6 +2826,17 @@
             "selection": "fixed product closure"
           },
           "classification": "first_party_product_code_or_synthetic_support"
+        },
+        {
+          "sha256": "b49d9161bf0b255ea144e22380ef81816da222e47c89f5b3197a62fccffeb092",
+          "size": 45962,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+            "path": "src/GkRuntimeConfig.hpp",
+            "selected_raw_git_blob": true
+          },
+          "classification": "selected_first_party_or_retained_license_source"
         }
       ]
     },
@@ -3040,15 +3104,15 @@
     },
     {
       "path": "src/gui/GkGuiTabCamera.hpp",
-      "sha256": "59a806642c4ca041382cf40359b8fa43c7870d6cc06928b78d07afdb984d80dc",
-      "size": 12416,
+      "sha256": "03067ec6c9767e7123de2628c6515be823e48362a62811f53afcb0396848c78e",
+      "size": 12095,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "revision": "3a33452a09aa9eea8e97eb2e58ac2710ee1e4f5e",
         "path": "src/gui/GkGuiTabCamera.hpp",
         "selected_raw_git_blob": true
       },
-      "classification": "selected_first_party_or_retained_license_source",
+      "classification": "selected_first_party_camera_code_or_synthetic_test",
       "history": [
         {
           "sha256": "62a442935d6c6a740e18083a48e27be93aa8b89e1a55ba96258222acdc2a33e9",
@@ -3059,6 +3123,17 @@
             "path": "src/gui/GkGuiTabCamera.hpp"
           },
           "classification": "selected_first_party_code_for_private_review"
+        },
+        {
+          "sha256": "59a806642c4ca041382cf40359b8fa43c7870d6cc06928b78d07afdb984d80dc",
+          "size": 12416,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+            "path": "src/gui/GkGuiTabCamera.hpp",
+            "selected_raw_git_blob": true
+          },
+          "classification": "selected_first_party_or_retained_license_source"
         }
       ]
     },
@@ -3181,16 +3256,28 @@
       "classification": "selected_first_party_code_for_private_review"
     },
     {
-      "path": "src/gui/GuiCameraPage.hpp",
-      "sha256": "e4eb1fab577278e688c2ec2d8861983de7adf69ae9aa80dd200d71ee4ae715ed",
-      "size": 14488,
+      "path": "src/gui/GuiCameraMode.hpp",
+      "sha256": "77664a4f461d43a922ca96c307fbfc987e1fe2e3540579bcc69bbe644a3e2024",
+      "size": 1293,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "revision": "3a33452a09aa9eea8e97eb2e58ac2710ee1e4f5e",
+        "path": "src/gui/GuiCameraMode.hpp",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_camera_code_or_synthetic_test"
+    },
+    {
+      "path": "src/gui/GuiCameraPage.hpp",
+      "sha256": "38b68d424677652c479a86488a3199c002c2fed7f7ae0f224c6a6d16998585a5",
+      "size": 13663,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "3a33452a09aa9eea8e97eb2e58ac2710ee1e4f5e",
         "path": "src/gui/GuiCameraPage.hpp",
         "selected_raw_git_blob": true
       },
-      "classification": "selected_first_party_or_retained_license_source",
+      "classification": "selected_first_party_camera_code_or_synthetic_test",
       "history": [
         {
           "sha256": "ceedb572d2be1920597f9f6cde0c826152184e2f1a24ddf25303a4cc5e2e1f3c",
@@ -3201,6 +3288,17 @@
             "path": "src/gui/GuiCameraPage.hpp"
           },
           "classification": "selected_first_party_code_for_private_review"
+        },
+        {
+          "sha256": "e4eb1fab577278e688c2ec2d8861983de7adf69ae9aa80dd200d71ee4ae715ed",
+          "size": 14488,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+            "path": "src/gui/GuiCameraPage.hpp",
+            "selected_raw_git_blob": true
+          },
+          "classification": "selected_first_party_or_retained_license_source"
         }
       ]
     },
@@ -3416,15 +3514,15 @@
     },
     {
       "path": "src/gui/GuiTransportBar.hpp",
-      "sha256": "5fac30f16bd4ecede1a69df7af5a08ae89c6fdb0c498e6a8edc711b3596d1a44",
-      "size": 22783,
+      "sha256": "13bdf46415afc21b78d5968863fa74802e770ae1089d03c7a0f53c240286cc4a",
+      "size": 22287,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "revision": "3a33452a09aa9eea8e97eb2e58ac2710ee1e4f5e",
         "path": "src/gui/GuiTransportBar.hpp",
         "selected_raw_git_blob": true
       },
-      "classification": "selected_first_party_or_retained_license_source",
+      "classification": "selected_first_party_camera_code_or_synthetic_test",
       "history": [
         {
           "sha256": "2e900e4884f4ca4cbd93790c309ced4dc7717fcc03ce47c566d945210241c2d6",
@@ -3435,6 +3533,17 @@
             "path": "src/gui/GuiTransportBar.hpp"
           },
           "classification": "selected_first_party_code_for_private_review"
+        },
+        {
+          "sha256": "5fac30f16bd4ecede1a69df7af5a08ae89c6fdb0c498e6a8edc711b3596d1a44",
+          "size": 22783,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+            "path": "src/gui/GuiTransportBar.hpp",
+            "selected_raw_git_blob": true
+          },
+          "classification": "selected_first_party_or_retained_license_source"
         }
       ]
     },
@@ -3572,15 +3681,28 @@
     },
     {
       "path": "tests/test_camera_core.hpp",
-      "sha256": "7f619a594eb6795b84c4919e1e396de09cb7c1b3cf81c2ba2b02924d6dda94bd",
-      "size": 10693,
+      "sha256": "b7a7d26f608e7a995169786945b3320a2dff6a1c737ec0b19b412d85e6983a36",
+      "size": 11653,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "revision": "3a33452a09aa9eea8e97eb2e58ac2710ee1e4f5e",
         "path": "tests/test_camera_core.hpp",
         "selected_raw_git_blob": true
       },
-      "classification": "selected_first_party_or_retained_license_source"
+      "classification": "selected_first_party_camera_code_or_synthetic_test",
+      "history": [
+        {
+          "sha256": "7f619a594eb6795b84c4919e1e396de09cb7c1b3cf81c2ba2b02924d6dda94bd",
+          "size": 10693,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+            "path": "tests/test_camera_core.hpp",
+            "selected_raw_git_blob": true
+          },
+          "classification": "selected_first_party_or_retained_license_source"
+        }
+      ]
     },
     {
       "path": "tests/test_data_layout.cpp",
@@ -3621,15 +3743,28 @@
     },
     {
       "path": "tests/test_gui_ux.cpp",
-      "sha256": "77c67f7905a2bf30a07a0ce828401add3cca9926ecab0d489461c97ef68e9539",
-      "size": 50611,
+      "sha256": "1143d5f409cf43f669db91f26ed140de1cb3329e18f41c34480326625f12c0f2",
+      "size": 53239,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "revision": "3a33452a09aa9eea8e97eb2e58ac2710ee1e4f5e",
         "path": "tests/test_gui_ux.cpp",
         "selected_raw_git_blob": true
       },
-      "classification": "selected_first_party_or_retained_license_source"
+      "classification": "selected_first_party_camera_code_or_synthetic_test",
+      "history": [
+        {
+          "sha256": "77c67f7905a2bf30a07a0ce828401add3cca9926ecab0d489461c97ef68e9539",
+          "size": 50611,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+            "path": "tests/test_gui_ux.cpp",
+            "selected_raw_git_blob": true
+          },
+          "classification": "selected_first_party_or_retained_license_source"
+        }
+      ]
     },
     {
       "path": "tests/test_layout_migration.ps1",
@@ -4447,5 +4582,38 @@
       "enc_temp_folder"
     ],
     "game_deployment_or_acceptance_performed": false
+  },
+  "camera_recovery_refresh": {
+    "date": "2026-11-04",
+    "base_staging_revision": "8fe8af16536ee70312d52118d66ad518723d0877",
+    "fixed_product_revision": "3a33452a09aa9eea8e97eb2e58ac2710ee1e4f5e",
+    "selected_raw_git_blobs": [
+      "src/GkRuntimeConfig.hpp",
+      "src/gui/GkGuiTabCamera.hpp",
+      "src/gui/GuiCameraPage.hpp",
+      "src/gui/GuiTransportBar.hpp",
+      "src/gui/GuiCameraMode.hpp",
+      "tests/test_camera_core.hpp",
+      "tests/test_gui_ux.cpp"
+    ],
+    "adapted_files": [
+      "src/GakuMotion.hpp",
+      "docs/USAGE.md",
+      "SOURCE_REVIEW.md",
+      "docs/CAMERA_MODE_RECOVERY_20261104.md"
+    ],
+    "paired_vrify_source_revision": "b6fe8ac",
+    "existing_readme_workspace_diff_preserved": true,
+    "excluded": [
+      "Control API",
+      "Performance Clock",
+      "Timeline",
+      "Director",
+      "DevAgents",
+      "real motions or captures",
+      "unrelated workspace modifications"
+    ],
+    "source_user_acceptance": "User confirmed camera effects recovered for the paired development deployment; no generalized VR or scenario acceptance.",
+    "staging_game_deployed": false
   }
 }

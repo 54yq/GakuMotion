@@ -82,3 +82,11 @@ KineTexture 的源头、许可证与头文件一致性已核对。Dear ImGui 的
 公开 GakuPlugin.h 和 GakuFileDrop.h 使用 GakuLoader ed5ad70819907c0a0f5acc25e804b0aea205fa57 的 canonical LF 版本，与宿主共用SDK。其余生产改动按上述固定源码的原始 Git blob 导出；具体来源、旧文件身份和本次字节身份均写入清单。
 
 测试只使用自有合成夹具。聚焦核心入口从现有单测去除录制向量与真实曲目执行项；不把它称为原仓完整测试套件。新增 ABI 3 合成导入/reader 入口 tests/run_import_e2e.py。没有纳入 SP/牙齿研究工具、录制、素材、Control API/Clock/Timeline/Director 原型、工作区鞋底文案或临时目录。构建与测试回执在独立输出目录记录，不等同游戏加载或视觉验收。
+
+## 2026-11-04 镜头选择与配套恢复
+
+选择活动源码提交 `3a33452` 的镜头四项选择、Game 状态保存、旧 Hold 文件迁移及其合成/ImGui 交互测试。七个源文件按原始 Git blob 导出；`GakuMotion.hpp` 只在 staging 既有 GUI 消费分支添加 enabled 保存条件，未引入 Control API 重构。使用文档仅更新镜头段，保留 staging 路径与构建约定。
+
+此次应与 VRify 的空共享目标修复一同进入候选，避免只改界面却保留导致接口未就绪的启动故障。用户已确认开发版这次镜头效果恢复；该确认不扩展为全部 VR、角色、场景或配置矩阵验收。staging 本轮只做离线构建和合成测试，未部署游戏。
+
+未引入 Control API、Clock、Timeline、Director、DevAgents、真实输入或工作区其他改动。README 的既有未提交文案保留；冻结清单仍记录其提交版本，不能用当前工作树全文哈希冒充任务源码。具体范围与回执见 [镜头候选说明](docs/CAMERA_MODE_RECOVERY_20261104.md)。

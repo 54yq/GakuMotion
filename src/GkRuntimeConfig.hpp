@@ -820,7 +820,9 @@ namespace GakuMotion
 					lastError = "invalid camera mode, bounds, follow factor, follow rate or FOV";
 					return false;
 				}
-				next.mode = static_cast<CameraMode>(mode);
+				// Hold is retired from user camera selection. Preserve its numeric
+				// ABI slot, but migrate old files to the VMD mode on load.
+				next.mode = mode == static_cast<int>(CameraMode::Hold) ? CameraMode::Track : static_cast<CameraMode>(mode);
 				next.followBehavior = static_cast<FollowBehavior>(followBehavior);
 				camera = next;
 				cameraDeclared = true;

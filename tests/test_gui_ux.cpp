@@ -367,30 +367,70 @@ namespace
 				"actual camera body-part choices reach Core without changing camera or target offsets");
 		}
 		app.Click("跟随部位"); app.Click("头部"); app.Settle();
-		app.Click("##camera_mode"); app.Click("注视角色"); app.Settle();
+		app.Click("##camera_mode"); app.Click("注视"); app.Settle();
 		Check(app.core.camera.settings.followBehavior == FollowBehavior::LookAt &&
 			app.core.camera.settings.followTarget == CameraFollowTarget::Head && app.ItemWithLabel("跟随部位"),
 			"switching the real camera mode to LookAt preserves its shared selected body part");
 		app.Click("跟随部位"); app.Click("胸部"); app.Settle();
-		app.Click("##camera_mode"); app.Click("跟随角色"); app.Settle();
+		app.Click("##camera_mode"); app.Click("跟随"); app.Settle();
 		Check(app.core.camera.settings.followBehavior == FollowBehavior::FollowMove &&
 			app.core.camera.settings.followTarget == CameraFollowTarget::Chest,
 			"FollowMove reuses the body part selected by the real LookAt controls");
-		for (const char* mode : {"VMD 镜头", "固定接管时镜头"})
+		for (const char* mode : {"VMD", "游戏"})
 		{
 			app.Click("##camera_mode"); app.Click(mode); app.Settle();
 			app.core.camera.settings.followActor = true;
 			app.core.camera.Publish(); app.Settle();
 			Check(app.core.camera.settings.followTarget == CameraFollowTarget::Chest && !app.ItemWithLabel("跟随部位"),
-				"VMD and Hold preserve the shared body part but hide its selector even while translating with hips");
+				"VMD and Game preserve the shared body part but hide its selector even while translating with hips");
 		}
-		app.Click("##camera_mode"); app.Click("注视角色"); app.Settle();
+		app.Click("##camera_mode"); app.Click("注视"); app.Settle();
 		Check(app.core.camera.settings.followTarget == CameraFollowTarget::Chest && app.ItemWithLabel("跟随部位"),
 			"returning to a follow camera restores access to the retained body-part selection");
 		app.contextPatch = [](GuiContext& context) { context.cameraSnapshot.followTargetError = "selected follow bone unavailable"; };
 		const auto errorText = app.Text();
 		Check(errorText.find("跟随目标错误") != std::string::npos && errorText.find("selected follow bone unavailable") != std::string::npos,
 			"camera page displays follow-target binding failures separately from track errors");
+	}
+
+	void TestUnifiedCameraModeControls(const std::filesystem::path& root)
+	{
+		Harness app(root);
+		app.core.gui.activePage = GuiPage::Camera;
+		app.core.camera.settings.enabled = true;
+		app.core.camera.settings.mode = CameraMode::Track;
+		app.core.camera.settings.transformTrack.position = {0.2f, 0.3f, 0.4f};
+		app.core.camera.Publish();
+		app.Settle();
+		Check(!app.ItemWithLabel("启用 GakuMotion 镜头接管") && !app.ItemWithLabel("启用 MMD 镜头接管"),
+			"camera page has no separate takeover checkbox");
+		app.Click("##camera_mode");
+		Check(app.ItemWithLabel("游戏") && app.ItemWithLabel("VMD") && app.ItemWithLabel("跟随") &&
+			app.ItemWithLabel("注视") && !app.ItemWithLabel("固定接管时镜头"),
+			"camera page offers the same four modes as the player without Hold");
+		const auto lagging = app.core.camera.ReadSnapshot().settings;
+		app.contextPatch = [lagging](GuiContext& context) { context.cameraSnapshot.settings = lagging; };
+		app.Click("跟随"); app.Settle();
+		Check(app.core.camera.settings.enabled && app.core.camera.settings.mode == CameraMode::Follow &&
+			app.core.camera.settings.followBehavior == FollowBehavior::FollowMove &&
+			CameraControlModeIndex(app.core.gui.cameraDraft) == 2 && app.core.gui.cameraSettingsPending &&
+			app.Text().find("镜头: 跟随") != std::string::npos,
+			"page selection reaches Core and both controls retain the pending choice while snapshots lag");
+		app.Click("##camera_quick_mode"); app.Click("镜头: 注视"); app.Settle();
+		Check(app.core.camera.settings.enabled && app.core.camera.settings.followBehavior == FollowBehavior::LookAt &&
+			CameraControlModeIndex(app.core.gui.cameraDraft) == 3 &&
+			app.core.gui.cameraExpected == app.core.camera.settings,
+			"player mode changes update the camera page's pending draft without reverting to an old snapshot");
+		app.contextPatch = {};
+		app.core.camera.Publish(); app.Settle();
+		Check(!app.core.gui.cameraSettingsPending && CameraControlModeIndex(app.core.gui.cameraDraft) == 3,
+			"both camera entry points acknowledge the new mode after the runtime snapshot arrives");
+		app.Click("##camera_mode"); app.Click("游戏"); app.Settle();
+		const auto* advanced = app.ItemWithLabel("高级镜头设置");
+		Check(!app.core.camera.settings.enabled && !app.ItemWithLabel("##cam_pos_x") && !app.ItemWithLabel("##rate_x") &&
+			advanced && (advanced->flags & ImGuiItemFlags_Disabled) &&
+			app.Text().find("镜头: 游戏") != std::string::npos,
+			"page Game selection releases takeover, synchronizes the player and disables inactive camera parameters");
 	}
 }
 
@@ -440,6 +480,7 @@ int main(int argc, char** argv)
 	TestPlaybackAndTrackTimingGui(root);
 	TestCameraPursuitControls(root);
 	TestCameraFollowTargetControls(root);
+	TestUnifiedCameraModeControls(root);
 	{
 		const ImGuiConfigFlags originalConfigFlags = io.ConfigFlags;
 		io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // Escape closes native combo popups.
@@ -555,12 +596,14 @@ int main(int argc, char** argv)
 				"actual physics combo value reaches the Core consumer");
 		}
 
-		app.Click("##camera_quick_mode"); app.Click("镜头: 固定");
-		Check(app.core.camera.settings.enabled && app.core.camera.settings.mode == CameraMode::Hold && !app.core.camera.settings.followActor,
-			"quick fixed-camera choice consumes real Hold mode");
-		Check(app.Text().find("镜头: 固定") != std::string::npos, "quick camera displays actual Hold rather than VMD");
+		app.Click("##camera_quick_mode");
+		Check(!app.ItemWithLabel("镜头: 固定") && app.ItemWithLabel("镜头: 游戏") && app.ItemWithLabel("镜头: VMD") &&
+			app.ItemWithLabel("镜头: 跟随") && app.ItemWithLabel("镜头: 注视"),
+			"quick camera offers four modes and removes the fixed-camera choice");
+		app.Click("镜头: 注视");
 		app.Click("##camera_quick_mode"); app.Click("镜头: 游戏");
-		Check(!app.core.camera.settings.enabled && app.core.camera.settings.mode == CameraMode::Hold,
+		Check(!app.core.camera.settings.enabled && app.core.camera.settings.mode == CameraMode::Follow &&
+			app.core.camera.settings.followBehavior == FollowBehavior::LookAt,
 			"quick game-camera choice disables takeover while preserving GM mode");
 		Check(app.Text().find("镜头: 游戏") != std::string::npos, "quick camera displays disabled takeover as game camera");
 		app.Click("##camera_quick_mode"); app.Click("镜头: VMD");

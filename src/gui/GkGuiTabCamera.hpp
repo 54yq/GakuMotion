@@ -3,6 +3,7 @@
 #include "../GkGuiOverlay.hpp"
 #include "../GkCamera.hpp"
 #include "GkGuiThemeColors.hpp"
+#include "GuiCameraMode.hpp"
 
 #ifdef GKMOTION_GUI_ACTIVE
 namespace GakuMotion
@@ -47,20 +48,12 @@ namespace GakuMotion
 		if (!ctx.cameraSnapshot.followTargetError.empty())
 			ImGui::TextColored(GuiTheme::ErrorColor(), "跟随目标错误: %s", ctx.cameraSnapshot.followTargetError.c_str());
 		ImGui::Separator();
-		bool changed = ImGui::Checkbox("启用 MMD 镜头接管", &settings.enabled);
-		int mode = static_cast<int>(settings.mode);
-		changed |= ImGui::Combo("镜头模式", &mode, "VMD 运镜（无轨道时固定）\0固定当前镜头\0跟随角色\0");
-		settings.mode = static_cast<CameraMode>(mode);
-		ImGui::BeginDisabled(settings.mode != CameraMode::Follow);
-		int followBehavior = static_cast<int>(settings.followBehavior);
-		if (ImGui::Combo("跟随行为", &followBehavior, "LookAt：固定镜头，移动注视点\0FollowMove：镜头与注视点一起移动\0"))
-		{
-			settings.followBehavior = static_cast<FollowBehavior>(followBehavior);
-			changed = true;
-		}
-		ImGui::EndDisabled();
+		int selection = CameraControlModeIndex(settings);
+		bool changed = ImGui::Combo("镜头模式", &selection, kCameraControlModes, IM_ARRAYSIZE(kCameraControlModes));
+		if (changed) SetCameraControlMode(settings, selection);
+		ImGui::BeginDisabled(!settings.enabled);
 		ImGui::BeginDisabled(settings.mode == CameraMode::Follow);
-		changed |= ImGui::Checkbox("运镜 / 固定镜头随角色平移", &settings.followActor);
+		changed |= ImGui::Checkbox("运镜随角色平移", &settings.followActor);
 		ImGui::EndDisabled();
 		changed |= ImGui::Checkbox("镜头限定在场景范围内", &settings.limitToScene);
 		if (settings.mode == CameraMode::Follow)
@@ -73,6 +66,7 @@ namespace GakuMotion
 			}
 		}
 
+		ImGui::EndDisabled();
 		ImGui::Spacing();
 		static const char* const shadowModes[] = {
 			"0: 原生默认 (Native Default)",
@@ -94,6 +88,7 @@ namespace GakuMotion
 			ImGui::TextColored(GuiTheme::WarningColor(), "已绕过阴影 Pass：不渲染 ActorShadow，用于完全隔离硬切。");
 		}
 		ImGui::Spacing();
+		ImGui::BeginDisabled(!settings.enabled);
 		float lo[] = {settings.boundsMin.x, settings.boundsMin.y, settings.boundsMin.z};
 		float hi[] = {settings.boundsMax.x, settings.boundsMax.y, settings.boundsMax.z};
 		changed |= ImGui::InputFloat3("场景最小坐标（世界）", lo);
@@ -167,6 +162,7 @@ namespace GakuMotion
 		ImGui::SameLine();
 		ImGui::SetNextItemWidth(160.0f);
 		changed |= ImGui::SliderFloat("##fov_slider", &settings.followFov, 1.0f, 179.0f, "%.1f°");
+		ImGui::EndDisabled();
 
 		bool valid = CameraFinite(settings.followFactor) &&
 			settings.followFactor.x >= 0.0f && settings.followFactor.x <= 1.0f &&
@@ -209,7 +205,7 @@ namespace GakuMotion
 			settings = CameraSettings{};
 			apply();
 		}
-		ImGui::TextDisabled("修改立即生效；保存后下次启动自动载入。停用镜头接管即可恢复手动控制。");
+		ImGui::TextDisabled("修改立即生效；保存后下次启动自动载入。选择游戏镜头即可恢复手动控制。");
 		ImGui::Separator();
 		ImGui::TextWrapped("播放和暂停期间拦截键鼠镜头移动；停止后恢复。跟随目标沿用角色选择，全部角色时跟随首个角色。场景范围需按当前场景设置，边界限制不检测墙体碰撞。");
 		ImGui::Separator();

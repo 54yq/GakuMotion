@@ -5,6 +5,7 @@
 // =============================================================================
 
 #include "GuiOverlayCommon.hpp"
+#include "GuiCameraMode.hpp"
 #include "../GkGuiOverlay.hpp"
 #include "../GkCamera.hpp"
 #include "../GkTransportTime.hpp"
@@ -15,7 +16,7 @@ namespace GakuMotion
 {
 	enum class TransportBtnIcon { Prev, Play, Pause, Stop, Next };
 	inline constexpr const char* kTransportPlayModes[] = {"播放一次", "单曲循环", "列表循环", "随机播放"};
-	inline constexpr const char* kTransportCameraModes[] = {"镜头: 游戏", "镜头: VMD", "镜头: 跟随", "镜头: 注视", "镜头: 固定"};
+	inline constexpr const auto& kTransportCameraModes = kCameraControlQuickModes;
 	inline constexpr float kTransportPlaybackSpeeds[] = {0.1f, 0.2f, 0.5f, 0.8f, 1.0f, 1.2f, 1.5f, 2.0f, 3.0f};
 	inline constexpr const char* kTransportPlaybackSpeedLabels[] = {
 		"倍速: 0.1x", "倍速: 0.2x", "倍速: 0.5x", "倍速: 0.8x", "倍速: 1.0x",
@@ -343,54 +344,28 @@ namespace GakuMotion
 			TransportSameLineIfRoom(cameraModeWidth, 18.0f);
 
 			// 镜头模式快捷切换（仅切换模式，不暴露参数）
-			int currentCamIndex = 0;
-			const auto camMode = ctx.cameraSnapshot.settings.mode;
-			if (!ctx.cameraSnapshot.settings.enabled)
+			if (overlay.cameraSettingsPending && ctx.cameraSnapshot.settings == overlay.cameraExpected)
 			{
-				currentCamIndex = 0;
+				overlay.cameraSettingsPending = false;
+				overlay.cameraLastSnapshot = ctx.cameraSnapshot.settings;
 			}
-			else if (camMode == CameraMode::Follow)
-			{
-				if (ctx.cameraSnapshot.settings.followBehavior == FollowBehavior::LookAt)
-					currentCamIndex = 3;
-				else
-					currentCamIndex = 2;
-			}
-			else
-			{
-				currentCamIndex = camMode == CameraMode::Hold ? 4 : 1;
-			}
+			const CameraSettings& selectionSettings = overlay.cameraSettingsPending
+				? overlay.cameraDraft : ctx.cameraSnapshot.settings;
+			int currentCamIndex = CameraControlModeIndex(selectionSettings);
 
 			ImGui::SetNextItemWidth(cameraModeWidth);
 			if (ImGui::Combo("##camera_quick_mode", &currentCamIndex, kTransportCameraModes, IM_ARRAYSIZE(kTransportCameraModes)))
 			{
-				CameraSettings next = ctx.cameraSnapshot.settings;
-				next.enabled = currentCamIndex != 0;
-				if (currentCamIndex == 1)
+				CameraSettings next = selectionSettings;
+				SetCameraControlMode(next, currentCamIndex);
+				if (ctx.fnSetCameraSettings)
 				{
-					next.mode = CameraMode::Track;
-					next.followActor = false;
+					ctx.fnSetCameraSettings(ctx.self, next);
+					overlay.cameraDraft = overlay.cameraExpected = next;
+					overlay.cameraDraftReady = overlay.cameraSettingsPending = true;
 				}
-				else if (currentCamIndex == 2)
-				{
-					next.mode = CameraMode::Follow;
-					next.followActor = true;
-					next.followBehavior = FollowBehavior::FollowMove;
-				}
-				else if (currentCamIndex == 3)
-				{
-					next.mode = CameraMode::Follow;
-					next.followActor = true;
-					next.followBehavior = FollowBehavior::LookAt;
-				}
-				else if (currentCamIndex == 4)
-				{
-					next.mode = CameraMode::Hold;
-					next.followActor = false;
-				}
-				if (ctx.fnSetCameraSettings) ctx.fnSetCameraSettings(ctx.self, next);
 			}
-			if (ImGui::IsItemHovered()) ImGui::SetTooltip("快速切换镜头模式；游戏镜头会释放接管并保留 GM 参数，固定保持接管时机位");
+			if (ImGui::IsItemHovered()) ImGui::SetTooltip("快速切换镜头模式；游戏镜头会释放接管并保留 GakuMotion 参数");
 
 			// Precision controls bind their drafts to the actual loaded generation.
 			// Enter or the adjacent button commits; Escape cancels. Drafts survive

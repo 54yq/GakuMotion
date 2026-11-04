@@ -6,6 +6,7 @@
 
 #include "GuiOverlayCommon.hpp"
 #include "GkGuiIcons.hpp"
+#include "GuiCameraMode.hpp"
 #include "../GkGuiOverlay.hpp"
 #include "../GkCamera.hpp"
 
@@ -58,7 +59,18 @@ namespace GakuMotion
 		// =========================================================================
 		// 1. 镜头模式选择 (Camera Mode)
 		// =========================================================================
-		if (ImGui::Checkbox("启用 GakuMotion 镜头接管", &settings.enabled)) changed = true;
+		int selection = CameraControlModeIndex(settings);
+		ImGui::TextUnformatted("镜头模式");
+		ImGui::SetNextItemWidth((std::min)(260.0f, ImGui::GetContentRegionAvail().x));
+		if (ImGui::Combo("##camera_mode", &selection, kCameraControlModes, IM_ARRAYSIZE(kCameraControlModes)))
+		{
+			upgradePerMode();
+			SetCameraControlMode(settings, selection);
+			changed = true;
+		}
+		// Parameter sections retain their existing Track / FollowMove / LookAt
+		// indices; Game has no active GM parameter section.
+		const int userMode = selection - 1;
 		ImGui::TextWrapped("镜头接管: %s | 运镜轨道: %s",
 			ctx.cameraSnapshot.owned ? "已生效" : "未接管",
 			ctx.cameraSnapshot.hasTrack ? "已加载" : "无");
@@ -81,46 +93,13 @@ namespace GakuMotion
 			ImGui::PopStyleColor();
 		}
 		if (overlay.cameraSettingsPending) ImGui::TextDisabled("正在应用镜头设置…");
-		ImGui::TextWrapped("停用接管可恢复游戏手动镜头；镜头模式和参数会保留。");
-		ImGui::Spacing();
-		ImGui::TextUnformatted("镜头模式");
-
-		// 对应用户感知的模式：
-		// 0: VMD 镜头 (VMD 运镜轨道 Track)
-		// 1: 跟随角色 (FollowMove: 镜头与注视点协同移动)
-		// 2: 注视角色 (LookAt: 镜头固定位置，视线追随角色)
-		// 3: 固定接管时镜头 (Hold)
-		int userMode = 0;
-		if (settings.mode == CameraMode::Follow)
-		{
-			if (settings.followBehavior == FollowBehavior::LookAt)
-				userMode = 2;
-			else
-				userMode = 1;
-		}
-		else if (settings.mode == CameraMode::Hold)
-		{
-			userMode = 3;
-		}
-
-		static const char* modeOptions[] = {"VMD 镜头", "跟随角色", "注视角色", "固定接管时镜头"};
-		ImGui::SetNextItemWidth((std::min)(260.0f, ImGui::GetContentRegionAvail().x));
-		if (ImGui::Combo("##camera_mode", &userMode, modeOptions, IM_ARRAYSIZE(modeOptions)))
-		{
-			upgradePerMode();
-			settings.mode = userMode == 0 ? CameraMode::Track : userMode == 3 ? CameraMode::Hold : CameraMode::Follow;
-			settings.followActor = userMode == 1 || userMode == 2;
-			if (userMode == 1) settings.followBehavior = FollowBehavior::FollowMove;
-			if (userMode == 2) settings.followBehavior = FollowBehavior::LookAt;
-			changed = true;
-		}
+		ImGui::TextWrapped("选择“游戏”恢复游戏手动镜头，并保留 GakuMotion 镜头参数。");
 		if (userMode == 0 && !ctx.cameraSnapshot.hasTrack)
 		{
 			ImGui::PushStyleColor(ImGuiCol_Text, GuiTheme::WarningColor());
 			ImGui::TextWrapped("当前曲目没有可用运镜轨道，VMD 模式将保持固定机位。");
 			ImGui::PopStyleColor();
 		}
-		if (userMode == 3) ImGui::TextWrapped("保持接管时捕获的机位；高级设置可启用随角色平移。需要重新取景时先停用接管，再操作游戏镜头。");
 
 		ImGui::Spacing();
 		ImGui::Separator();
@@ -130,7 +109,7 @@ namespace GakuMotion
 		// 2. 基础 Transform (位置 / 旋转)
 		// =========================================================================
 		const float dragItemWidth = (std::max)(40.0f, (ImGui::GetContentRegionAvail().x - 36.0f) / 3.0f);
-		if (userMode != 3)
+		if (settings.enabled)
 		{
 			ImGui::TextUnformatted("镜头位置与旋转偏移");
 
@@ -221,7 +200,7 @@ namespace GakuMotion
 		// =========================================================================
 		// 3. 跟随响应 (Target Rate)
 		// =========================================================================
-		if (userMode == 1 || userMode == 2 || settings.followActor)
+		if (settings.enabled && (userMode == 1 || userMode == 2 || settings.followActor))
 		{
 			if (settings.mode == CameraMode::Follow)
 			{
@@ -267,12 +246,13 @@ namespace GakuMotion
 		// =========================================================================
 		// 4. 高级镜头设置 (折叠)
 		// =========================================================================
+		ImGui::BeginDisabled(!settings.enabled);
 		if (ImGui::CollapsingHeader("高级镜头设置"))
 		{
 			ImGui::Indent(10.0f);
 
 			// VMD 模式下专属选项
-			if (userMode == 0 || userMode == 3)
+			if (userMode == 0)
 			{
 				if (ImGui::Checkbox("镜头随角色平移", &settings.followActor))
 					changed = true;
@@ -342,6 +322,8 @@ namespace GakuMotion
 
 			ImGui::Unindent(10.0f);
 		}
+
+		ImGui::EndDisabled();
 
 		// 提交镜头修改
 		if (changed)
