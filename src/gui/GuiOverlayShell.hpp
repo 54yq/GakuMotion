@@ -5,6 +5,8 @@
 // =============================================================================
 
 #include "GuiOverlayCommon.hpp"
+#include "GkGuiBranding.hpp"
+#include "GkGuiIcons.hpp"
 #include "GuiTransportBar.hpp"
 #include "GuiLibraryPage.hpp"
 #include "GuiMotionPage.hpp"
@@ -87,7 +89,7 @@ namespace GakuMotion
 		const float contentAreaHeight = (std::max)(120.0f, availHeight - transportHeight);
 
 		// ---- 上半部：左侧 Sidebar + 中间 Content ----
-		const float sidebarWidth = 115.0f;
+		const float sidebarWidth = (std::max)(115.0f, ImGui::GetFontSize() * 6.4f);
 		const float mainContentWidth = ImGui::GetContentRegionAvail().x - sidebarWidth - 10.0f;
 
 		// 1. 左侧 Sidebar
@@ -98,13 +100,13 @@ namespace GakuMotion
 		                      ImGuiWindowFlags_NoScrollbar))
 		{
 			ImGui::Spacing();
-			ImGui::TextColored(GuiTheme::HighlightColor(), " GakuMotion");
-			ImGui::TextDisabled("   Developer Preview");
+			GuiBranding::DrawSidebarIcon(ImGui::GetContentRegionAvail().x - 30.0f);
+			ImGui::TextDisabled("    Tech Preview");
 			ImGui::Spacing();
 			ImGui::Separator();
 			ImGui::Spacing();
 
-			auto NavItem = [&](const char* label, GuiPage page)
+			auto NavItem = [&](const char* label, GuiPage page, GuiIcons::Icon icon)
 			{
 				const bool isSelected = (overlay.activePage == page);
 				if (isSelected)
@@ -116,18 +118,18 @@ namespace GakuMotion
 					ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
 				}
 
-				if (ImGui::Button(label, ImVec2(sidebarWidth - 14.0f, 30.0f)))
+				if (GuiIcons::Button(label, icon, ImVec2(ImGui::GetContentRegionAvail().x, 30.0f)))
 				{
 					overlay.activePage = page;
 				}
 				ImGui::PopStyleColor();
 			};
 
-			NavItem("  曲库", GuiPage::Library);
-			NavItem("  动作", GuiPage::Motion);
-			NavItem("  镜头", GuiPage::Camera);
-			NavItem("  舞台", GuiPage::Stage);
-			NavItem("  设置", GuiPage::Settings);
+			NavItem("曲库", GuiPage::Library, GuiIcons::Icon::Library);
+			NavItem("动作", GuiPage::Motion, GuiIcons::Icon::Motion);
+			NavItem("镜头", GuiPage::Camera, GuiIcons::Icon::Camera);
+			NavItem("舞台", GuiPage::Stage, GuiIcons::Icon::Stage);
+			NavItem("设置", GuiPage::Settings, GuiIcons::Icon::Settings);
 
 			// 开发者模式下额外显示 [开发]
 			if (overlay.developerMode)
@@ -135,7 +137,7 @@ namespace GakuMotion
 				ImGui::Spacing();
 				ImGui::Separator();
 				ImGui::Spacing();
-				NavItem("  [开发]", GuiPage::Developer);
+				NavItem("  [开发]", GuiPage::Developer, GuiIcons::Icon::Developer);
 			}
 		}
 		ImGui::EndChild();

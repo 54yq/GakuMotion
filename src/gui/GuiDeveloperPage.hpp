@@ -6,6 +6,7 @@
 
 #include "GuiOverlayCommon.hpp"
 #include "../GkGuiOverlay.hpp"
+#include "GuiMotionExperiments.hpp"
 
 #ifdef GKMOTION_GUI_ACTIVE
 namespace GakuMotion
@@ -17,6 +18,22 @@ namespace GakuMotion
 
 		if (ImGui::BeginTabBar("##developer_sub_tabs"))
 		{
+			if (ImGui::BeginTabItem("动作"))
+			{
+				DrawMotionExperiments(ctx);
+				bool waistSupport = ctx.experimentalWaistSupport;
+				if (ImGui::Checkbox("实验：腰部支撑（默认开启）", &waistSupport))
+				{
+					if (ctx.fnSetExperimentalWaistSupport) ctx.fnSetExperimentalWaistSupport(ctx.self, waistSupport);
+				}
+				ImGui::TextWrapped("驱动 Waist_H 腰部辅助骨；关闭时恢复原姿态。开关在本次运行中生效，重启后读取 control.json。");
+				ImGui::Spacing();
+				ImGui::Separator();
+				ImGui::Spacing();
+				overlay.DrawGazeTab(ctx);
+				ImGui::EndTabItem();
+			}
+
 			// ---- 子页面 1：运行时诊断与遥测 ----
 			if (ImGui::BeginTabItem("遥测与诊断"))
 			{

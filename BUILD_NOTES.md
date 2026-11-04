@@ -83,3 +83,14 @@ pwsh -NoProfile -File tools/verify-source.ps1
 | DLL 加载或导入失败 | 按[故障排查](docs/TROUBLESHOOTING.md)核对配套 DLL、ABI 和日志 |
 
 构建成功、文件部署、进程加载与游戏效果分别记录。更换安装 DLL 后需正常退出并重新启动游戏。
+
+## 交互功能的合成回归
+
+```powershell
+powershell -NoProfile -File tests/run_release_tests.ps1
+powershell -NoProfile -File tests/run_gui_ux_tests.ps1
+dotnet run --project interop/MikuRawSourceTests/GakuMotion.MikuRawSourceTests.csproj -c Release
+dotnet run --project interop/EditTrackTests/GakuMotion.EditTrackTests.csproj -c Release
+```
+
+这些测试使用自有内存对象与合成输入，不读取真实曲目或启动游戏。原生导入桥接测试位于 `tests/native_import_bridge/`，可对构建出的 NativeAOT DLL 检查 ABI 3、Unicode 导入、时序编辑、事务与失败保留。Runtime 与 NativeAOT 应从同一次源码提交成对构建。

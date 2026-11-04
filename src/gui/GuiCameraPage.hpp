@@ -5,6 +5,7 @@
 // =============================================================================
 
 #include "GuiOverlayCommon.hpp"
+#include "GkGuiIcons.hpp"
 #include "../GkGuiOverlay.hpp"
 #include "../GkCamera.hpp"
 
@@ -71,6 +72,12 @@ namespace GakuMotion
 		{
 			ImGui::PushStyleColor(ImGuiCol_Text, GuiTheme::ErrorColor());
 			ImGui::TextWrapped("镜头轨道错误: %s", ctx.cameraSnapshot.error.c_str());
+			ImGui::PopStyleColor();
+		}
+		if (!ctx.cameraSnapshot.followTargetError.empty())
+		{
+			ImGui::PushStyleColor(ImGuiCol_Text, GuiTheme::ErrorColor());
+			ImGui::TextWrapped("跟随目标错误: %s", ctx.cameraSnapshot.followTargetError.c_str());
 			ImGui::PopStyleColor();
 		}
 		if (overlay.cameraSettingsPending) ImGui::TextDisabled("正在应用镜头设置…");
@@ -185,7 +192,7 @@ namespace GakuMotion
 				changed = true;
 			}
 
-			if (ImGui::Button("重置位置与旋转偏移", ImVec2(160, 24)))
+			if (GuiIcons::Button("重置位置与旋转偏移", GuiIcons::Icon::Reset, ImVec2(160, 24)))
 			{
 				upgradePerMode();
 				if (userMode == 0)
@@ -212,32 +219,45 @@ namespace GakuMotion
 		}
 
 		// =========================================================================
-		// 3. 跟随模式专属设置 (Follow Factor)
+		// 3. 跟随响应 (Target Rate)
 		// =========================================================================
-		if (userMode == 1 || userMode == 2)
+		if (userMode == 1 || userMode == 2 || settings.followActor)
 		{
-			ImGui::TextUnformatted("跟随幅度（各轴向跟随位移比例）");
-
-			ImGui::TextUnformatted("比例");
-			ImGui::SetNextItemWidth(dragItemWidth);
-			if (ImGui::DragFloat("##ff_x", &settings.followFactor.x, 0.01f, 0.0f, 1.0f, "X: %.2f"))
-				changed = true;
-
-			ImGui::SameLine();
-			ImGui::SetNextItemWidth(dragItemWidth);
-			if (ImGui::DragFloat("##ff_y", &settings.followFactor.y, 0.01f, 0.0f, 1.0f, "Y: %.2f"))
-				changed = true;
-
-			ImGui::SameLine();
-			ImGui::SetNextItemWidth(dragItemWidth);
-			if (ImGui::DragFloat("##ff_z", &settings.followFactor.z, 0.01f, 0.0f, 1.0f, "Z: %.2f"))
-				changed = true;
-
-			if (ImGui::Button("重置跟随幅度", ImVec2(120, 24)))
+			if (settings.mode == CameraMode::Follow)
 			{
-				settings.followFactor = Vector3(1.0f, 1.0f, 1.0f);
+				int target = static_cast<int>(settings.followTarget);
+				ImGui::SetNextItemWidth((std::min)(260.0f, ImGui::GetContentRegionAvail().x));
+				if (ImGui::Combo("跟随部位", &target, "髋部\0胸部\0头部\0"))
+				{
+					settings.followTarget = static_cast<CameraFollowTarget>(target);
+					changed = true;
+				}
+			}
+			ImGui::TextUnformatted("追随速率 (Target Rate)");
+			ImGui::TextWrapped("0 停止追随，0.1 平滑追随，1 即时追随。数值越小，追赶越慢。");
+			ImGui::TextWrapped("X / Y / Z 为接管时镜头的右 / 上 / 前方向；正速率会持续追近当前目标。");
+
+			ImGui::SetNextItemWidth(dragItemWidth);
+			if (ImGui::DragFloat("##rate_x", &settings.followRate.x, 0.01f, 0.0f, 1.0f, "X: %.2f", ImGuiSliderFlags_AlwaysClamp))
+				changed = true;
+
+			ImGui::SameLine();
+			ImGui::SetNextItemWidth(dragItemWidth);
+			if (ImGui::DragFloat("##rate_y", &settings.followRate.y, 0.01f, 0.0f, 1.0f, "Y: %.2f", ImGuiSliderFlags_AlwaysClamp))
+				changed = true;
+
+			ImGui::SameLine();
+			ImGui::SetNextItemWidth(dragItemWidth);
+			if (ImGui::DragFloat("##rate_z", &settings.followRate.z, 0.01f, 0.0f, 1.0f, "Z: %.2f", ImGuiSliderFlags_AlwaysClamp))
+				changed = true;
+
+			if (GuiIcons::Button("重置追随速率", GuiIcons::Icon::Reset, ImVec2(120, 24)))
+			{
+				settings.followRate = Vector3(0.1f, 0.1f, 0.1f);
 				changed = true;
 			}
+			if (settings.followFactor.x != 1.0f || settings.followFactor.y != 1.0f || settings.followFactor.z != 1.0f)
+				ImGui::TextWrapped("高级设置中的位移比例未全开，追随目标会按该比例缩放。");
 
 			ImGui::Spacing();
 			ImGui::Separator();
@@ -258,10 +278,29 @@ namespace GakuMotion
 					changed = true;
 			}
 
+			if (userMode == 1 || userMode == 2 || settings.followActor)
+			{
+				ImGui::TextUnformatted("位移比例（旧版跟随幅度）");
+				ImGui::TextWrapped("缩放最终跟随的角色位移：0 不跟随该轴，0.5 跟一半，1 完整跟随。此项决定目标幅度，追随速率决定追赶快慢。");
+				ImGui::SetNextItemWidth(dragItemWidth);
+				if (ImGui::DragFloat("##ff_x", &settings.followFactor.x, 0.01f, 0.0f, 1.0f, "X: %.2f", ImGuiSliderFlags_AlwaysClamp)) changed = true;
+				ImGui::SameLine();
+				ImGui::SetNextItemWidth(dragItemWidth);
+				if (ImGui::DragFloat("##ff_y", &settings.followFactor.y, 0.01f, 0.0f, 1.0f, "Y: %.2f", ImGuiSliderFlags_AlwaysClamp)) changed = true;
+				ImGui::SameLine();
+				ImGui::SetNextItemWidth(dragItemWidth);
+				if (ImGui::DragFloat("##ff_z", &settings.followFactor.z, 0.01f, 0.0f, 1.0f, "Z: %.2f", ImGuiSliderFlags_AlwaysClamp)) changed = true;
+				if (GuiIcons::Button("恢复完整位移", GuiIcons::Icon::Reset, ImVec2(120, 24)))
+				{
+					settings.followFactor = {1.0f, 1.0f, 1.0f};
+					changed = true;
+				}
+			}
+
 			if (userMode == 1 || userMode == 2)
 			{
 				// 注视目标偏移
-				ImGui::TextUnformatted("注视目标偏移 (Target Offset)");
+				ImGui::TextUnformatted("注视目标偏移 (Target Offset，相对所选部位)");
 				ImGui::SetNextItemWidth(dragItemWidth);
 				if (ImGui::DragFloat("##to_x", &settings.targetOffset.x, 0.01f, -5.0f, 5.0f, "X: %.2f")) changed = true;
 				ImGui::SameLine();
@@ -321,7 +360,7 @@ namespace GakuMotion
 
 		ImGui::Spacing();
 		ImGui::BeginDisabled(!settings.IsValid() || !ctx.fnSaveCameraSettings);
-		if (ImGui::Button("保存镜头设置", ImVec2(120, 24))) ctx.fnSaveCameraSettings(ctx.self);
+		if (GuiIcons::Button("保存镜头设置", GuiIcons::Icon::Save, ImVec2(120, 24))) ctx.fnSaveCameraSettings(ctx.self);
 		ImGui::EndDisabled();
 		ImGui::TextWrapped("修改立即生效；保存后下次启动自动载入，作用于全部曲目。");
 		if (!ctx.cameraNotice.empty())

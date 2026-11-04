@@ -58,14 +58,13 @@ namespace GakuMotion
 		return q.Normalized();
 	}
 
-	// Scale hip displacement in the camera's captured local XYZ frame, then
-	// return it to world space. The basis stays fixed for the ownership session.
-	inline Vector3 CameraBasisFollowDelta(const Vector3& worldDelta, const Quaternion& cameraBasis,
-									 const Vector3& factor)
+	// Rate is the fraction of remaining error removed in 1/60 second, not a
+	// fraction of displacement from the capture pose. Compensate for tick rate.
+	inline float CameraFollowAlpha(float rate, float dt)
 	{
-		const Quaternion basis = cameraBasis.Normalized();
-		const Vector3 local = basis.Inverse().Rotate(worldDelta);
-		return basis.Rotate({local.x * factor.x, local.y * factor.y, local.z * factor.z});
+		if (!std::isfinite(dt) || dt <= 0.0f || rate <= 0.0f) return 0.0f;
+		if (rate >= 1.0f) return 1.0f;
+		return -std::expm1(std::log1p(-rate) * (60.0f * dt));
 	}
 
 	struct CameraFrame
@@ -143,6 +142,40 @@ namespace GakuMotion
 
 	enum class CameraMode : int { Track = 0, Hold = 1, Follow = 2 };
 	enum class FollowBehavior : int { LookAt = 0, FollowMove = 1 };
+	enum class CameraFollowTarget : int { Hips = 0, Chest = 1, Head = 2 };
+
+	inline const char* CameraFollowTargetName(CameraFollowTarget target)
+	{
+		switch (target)
+		{
+		case CameraFollowTarget::Hips: return "hips";
+		case CameraFollowTarget::Chest: return "chest";
+		case CameraFollowTarget::Head: return "head";
+		}
+		return "unknown";
+	}
+
+	inline const char* CameraFollowTargetLabel(CameraFollowTarget target)
+	{
+		switch (target)
+		{
+		case CameraFollowTarget::Hips: return "髋部";
+		case CameraFollowTarget::Chest: return "胸部";
+		case CameraFollowTarget::Head: return "头部";
+		}
+		return "未知部位";
+	}
+
+	inline int CameraFollowTargetBoneId(CameraFollowTarget target)
+	{
+		switch (target)
+		{
+		case CameraFollowTarget::Hips: return 0;
+		case CameraFollowTarget::Chest: return 8;
+		case CameraFollowTarget::Head: return 10;
+		}
+		return -1;
+	}
 
 	struct CameraModeTransform
 	{
@@ -169,12 +202,14 @@ namespace GakuMotion
 		bool enabled{true};
 		CameraMode mode{CameraMode::Track};
 		FollowBehavior followBehavior{FollowBehavior::FollowMove};
+		CameraFollowTarget followTarget{CameraFollowTarget::Hips};
 		bool followActor{false}; // also translate the VMD path with the selected actor
 		bool limitToScene{false};
 		Vector3 boundsMin{-5, 0.05f, -5}, boundsMax{5, 5, 5}; // world-space AABB, opt-in
-		Vector3 followOffset{0, 0.6f, 3}, targetOffset{0, 0.4f, 0}; // relative to hips
+		Vector3 followOffset{0, 0.6f, 3}, targetOffset{0, 0.4f, 0}; // captured hips camera offset / selected part aim offset
 		Vector3 vmdOffset{0, 0, 0}; // initial offset in actor coordinate frame (e.g. height adjustment for shorter idols)
 		Vector3 followFactor{1.0f, 1.0f, 1.0f}; // captured camera-local X/Y/Z displacement fractions
+		Vector3 followRate{0.1f, 0.1f, 0.1f}; // per-axis response at 60 Hz: 0 freezes, 1 tracks immediately
 		float followFov{45};
 		bool srpFinalOverwriteFallback{false};
 		int actorShadowExperimentMode{0}; // 0: Default, 1: Anchor near actor, 2: Bypass
@@ -211,6 +246,7 @@ namespace GakuMotion
 			const int modeValue = static_cast<int>(mode);
 			const int followBehaviorValue = static_cast<int>(followBehavior);
 			return modeValue >= 0 && modeValue <= 2 && followBehaviorValue >= 0 && followBehaviorValue <= 1 &&
+				CameraFollowTargetBoneId(followTarget) >= 0 &&
 				CameraFinite(boundsMin) && CameraFinite(boundsMax) &&
 				boundsMin.x <= boundsMax.x && boundsMin.y <= boundsMax.y && boundsMin.z <= boundsMax.z &&
 				CameraFinite(followOffset) && CameraFinite(targetOffset) &&
@@ -219,6 +255,10 @@ namespace GakuMotion
 				followFactor.x >= 0.0f && followFactor.x <= 1.0f &&
 				followFactor.y >= 0.0f && followFactor.y <= 1.0f &&
 				followFactor.z >= 0.0f && followFactor.z <= 1.0f &&
+				CameraFinite(followRate) &&
+				followRate.x >= 0.0f && followRate.x <= 1.0f &&
+				followRate.y >= 0.0f && followRate.y <= 1.0f &&
+				followRate.z >= 0.0f && followRate.z <= 1.0f &&
 				std::isfinite(followFov) && followFov >= 1 && followFov <= 179 &&
 				actorShadowExperimentMode >= 0 && actorShadowExperimentMode <= 2 &&
 				transformTrack.IsValid() &&
@@ -229,12 +269,12 @@ namespace GakuMotion
 		bool operator==(const CameraSettings& b) const
 		{
 			auto same = [](Vector3 a, Vector3 b) { return a.x == b.x && a.y == b.y && a.z == b.z; };
-			return enabled == b.enabled && mode == b.mode && followBehavior == b.followBehavior &&
+			return enabled == b.enabled && mode == b.mode && followBehavior == b.followBehavior && followTarget == b.followTarget &&
 				followActor == b.followActor &&
 				limitToScene == b.limitToScene && same(boundsMin, b.boundsMin) && same(boundsMax, b.boundsMax) &&
 				same(followOffset, b.followOffset) && same(targetOffset, b.targetOffset) &&
 				same(vmdOffset, b.vmdOffset) &&
-				same(followFactor, b.followFactor) && followFov == b.followFov &&
+				same(followFactor, b.followFactor) && same(followRate, b.followRate) && followFov == b.followFov &&
 				srpFinalOverwriteFallback == b.srpFinalOverwriteFallback &&
 				actorShadowExperimentMode == b.actorShadowExperimentMode &&
 				transformTrack == b.transformTrack &&
@@ -268,6 +308,8 @@ namespace GakuMotion
 		bool (*fnRead)(void*, void*, CameraFrame&){nullptr};
 		void (*fnWrite)(void*, void*, const CameraFrame&){nullptr};
 		bool (*fnActorPose)(void*, Vector3&, Quaternion&, Vector3&){nullptr};
+		// Read only on the Unity-thread tick; Hips already comes from fnActorPose.
+		bool (*fnFollowTarget)(void*, CameraFollowTarget, Vector3&){nullptr};
 		void (*fnReleaseVcam)(bool){nullptr};
 		// Includes virtual-camera/brain/focus mutations beyond CameraFrame.
 		CaptureRestoreStatus (*fnReleaseVcamForCapture)(){nullptr};
@@ -281,6 +323,7 @@ namespace GakuMotion
 			bool available{false};
 			Vector3 position;
 			float fov{45};
+			std::string followTargetError;
 		};
 
 		Snapshot ReadSnapshot() const
@@ -295,7 +338,7 @@ namespace GakuMotion
 			snapshot_ = {
 				settings, owned, !track.frames.empty(), track.error,
 				fnGetCamera && fnGetTransform && fnAlive && fnRead && fnWrite && fnActorPose,
-				desired.position, desired.fov
+				desired.position, desired.fov, followTargetError_
 			};
 		}
 
@@ -310,6 +353,9 @@ namespace GakuMotion
 			captureRestorePending = false;
 			camera = transform = actor = nullptr;
 			followCaptured = false;
+			followLocal_ = {};
+			lastFollowFrame_ = 0;
+			followTargetError_.clear();
 			Publish();
 		}
 
@@ -351,6 +397,9 @@ namespace GakuMotion
 			captureRestorePending = !result.confirmed;
 			if (result.confirmed) camera = transform = actor = nullptr;
 			followCaptured = false;
+			followLocal_ = {};
+			lastFollowFrame_ = 0;
+			followTargetError_.clear();
 			Publish();
 			return result;
 		}
@@ -411,9 +460,8 @@ namespace GakuMotion
 			Publish();
 		}
 
-		void Tick(bool active, float time, float dt, void* targetActor)
+		void Tick(bool active, float time, float dt, void* targetActor, uint64_t physicalFrame = 0)
 		{
-			(void)dt;
 			if (!active || !settings.enabled || !settings.IsValid() || !targetActor)
 			{
 				Release();
@@ -434,6 +482,17 @@ namespace GakuMotion
 				Release();
 				return;
 			}
+			Vector3 followTarget = hips;
+			if (settings.mode == CameraMode::Follow && settings.followTarget != CameraFollowTarget::Hips &&
+				(!fnFollowTarget || !fnFollowTarget(targetActor, settings.followTarget, followTarget) || !CameraFinite(followTarget)))
+			{
+				followTargetError_ = std::string("跟随部位（") + CameraFollowTargetLabel(settings.followTarget) +
+					"）当前不可用；" + (owned ? "保持上次镜头，等待目标恢复。" : "等待目标恢复后接管镜头。");
+				if (owned) fnWrite(camera, transform, desired);
+				Publish();
+				return;
+			}
+			followTargetError_.clear();
 			if (!owned)
 			{
 				void* tr = fnGetTransform(next);
@@ -470,6 +529,25 @@ namespace GakuMotion
 				frame.rotation = (saved.rotation * qRot).Normalized();
 			}
 			const bool followMode = settings.mode == CameraMode::Follow;
+			Vector3 followDelta{};
+			if (followMode || settings.followActor)
+			{
+				const Quaternion basis = saved.rotation.Normalized();
+				// Integrate once per physical frame. Render callbacks only reapply
+				// desired; paused playback still chases using real elapsed time.
+				if (physicalFrame == 0 || physicalFrame != lastFollowFrame_)
+				{
+					const Vector3 local = basis.Inverse().Rotate(followTarget - followOrigin);
+					const Vector3 goal{local.x * settings.followFactor.x,
+						local.y * settings.followFactor.y, local.z * settings.followFactor.z};
+					followLocal_.x += (goal.x - followLocal_.x) * CameraFollowAlpha(settings.followRate.x, dt);
+					followLocal_.y += (goal.y - followLocal_.y) * CameraFollowAlpha(settings.followRate.y, dt);
+					followLocal_.z += (goal.z - followLocal_.z) * CameraFollowAlpha(settings.followRate.z, dt);
+					lastFollowFrame_ = physicalFrame;
+				}
+				followDelta = basis.Rotate(followLocal_);
+			}
+			else followLocal_ = {};
 			Vector3 followLookTarget{};
 			if (followMode)
 			{
@@ -478,7 +556,6 @@ namespace GakuMotion
 					const CameraModeTransform tf = settings.EffectiveFollowMoveTransform();
 					const Quaternion qRot = Quaternion::FromEulerDegreesXYZ(tf.rotation.x, tf.rotation.y, tf.rotation.z);
 					const Vector3 basePos = followOrigin + originRotation.Rotate(tf.position);
-					const Vector3 followDelta = CameraBasisFollowDelta(hips - followOrigin, saved.rotation, settings.followFactor);
 					frame.position = basePos + followDelta;
 					Vector3 baseForward = originRotation.Rotate(settings.targetOffset - Vector3{0.0f, 0.6f, 3.0f});
 					if (baseForward.x == 0.0f && baseForward.y == 0.0f && baseForward.z == 0.0f)
@@ -493,7 +570,6 @@ namespace GakuMotion
 					const Quaternion qRot = Quaternion::FromEulerDegreesXYZ(tf.rotation.x, tf.rotation.y, tf.rotation.z);
 					const Vector3 basePos = followOrigin + originRotation.Rotate(tf.position);
 					const Vector3 baseLook = followOrigin + originRotation.Rotate(settings.targetOffset);
-					const Vector3 followDelta = CameraBasisFollowDelta(hips - followOrigin, saved.rotation, settings.followFactor);
 					followLookTarget = baseLook + followDelta;
 					frame.position = basePos;
 					frame.rotation = (CameraLookRotation(followLookTarget - frame.position) * qRot).Normalized();
@@ -503,8 +579,7 @@ namespace GakuMotion
 			}
 			else if (settings.followActor && followCaptured)
 			{
-				frame.position = frame.position + CameraBasisFollowDelta(hips - followOrigin, saved.rotation,
-														settings.followFactor);
+				frame.position = frame.position + followDelta;
 			}
 			if (settings.limitToScene)
 			{
@@ -545,6 +620,9 @@ namespace GakuMotion
 		bool BlocksCamera(void* c) const { return owned && c == camera; }
 
 	private:
+		Vector3 followLocal_{}; // filtered displacement in the captured camera basis
+		uint64_t lastFollowFrame_{0};
+		std::string followTargetError_;
 		bool trackDirty_{false};
 		mutable std::mutex snapshotMutex_;
 		Snapshot snapshot_;

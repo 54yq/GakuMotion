@@ -15,6 +15,7 @@
 #include <cstring>
 #include <cmath>
 #include <functional>
+#include <atomic>
 
 namespace GakuMotion
 {
@@ -438,11 +439,22 @@ namespace GakuMotion
 		bool captureCheckEnforced{false};
 		bool captureRestoreUnconfirmed{false};
 		bool facialEnableBaseline{true};
+		bool facialMikuMouthFit{true};
+		struct FacialUiSnapshot
+		{
+			std::atomic<unsigned> value{0};
+			FacialUiSnapshot() = default;
+			FacialUiSnapshot(const FacialUiSnapshot& other) : value(other.load()) {}
+			FacialUiSnapshot& operator=(const FacialUiSnapshot& other) { store(other.load()); return *this; }
+			unsigned load(std::memory_order order = std::memory_order_relaxed) const { return value.load(order); }
+			void store(unsigned next, std::memory_order order = std::memory_order_relaxed) { value.store(next, order); }
+		};
+		FacialUiSnapshot guiMikuFitSnapshot; // Coherent GUI read; preserves controller fixture copy semantics.
 		float facialBaselineMultiplier{1.0f};
 		std::string facialCharacterOverride{"auto"};
 
 	private:
-		bool experimentalWaistSupportEnabled{false};
+		bool experimentalWaistSupportEnabled{true};
 
 		bool WaistSupportApisAvailable() const noexcept
 		{
@@ -920,6 +932,7 @@ namespace GakuMotion
 				existing.face.enableBaseline = facialEnableBaseline;
 				existing.face.baselineMultiplier = facialBaselineMultiplier;
 				existing.face.characterOverride = facialCharacterOverride;
+				existing.face.enableMikuMouthFit = facialMikuMouthFit;
 				existing.face.Prepare(actor, clip, faceApi);
 				currentBinding = it->second;
 				return;
@@ -939,6 +952,7 @@ namespace GakuMotion
 			b.face.enableBaseline = facialEnableBaseline;
 			b.face.baselineMultiplier = facialBaselineMultiplier;
 			b.face.characterOverride = facialCharacterOverride;
+			b.face.enableMikuMouthFit = facialMikuMouthFit;
 			b.face.Prepare(actor, clip, faceApi);
 			if (animator) b.cachedAnimator = animator;
 			cachedAnimator = b.cachedAnimator;
@@ -1459,6 +1473,7 @@ namespace GakuMotion
 
 		void DiscardBindings()
 		{
+			guiMikuFitSnapshot.store(0, std::memory_order_relaxed);
 			captureRestoreUnconfirmed = false;
 			bindings.clear();
 			currentBinding.Reset();
@@ -2059,7 +2074,8 @@ namespace GakuMotion
 			return res;
 		}
 
-		void ApplyMotionToBinding(IdolBoneBinding& b, const MotionClip& clip, float currentTimeSeconds)
+		void ApplyMotionToBinding(IdolBoneBinding& b, const MotionClip& clip, float currentTimeSeconds,
+		                          float facialTimeSeconds = -1.0f)
 		{
 			if (!b.actor || !b.bindPoseCaptured || b.boneTransforms.empty()) return;
 
@@ -2075,10 +2091,27 @@ namespace GakuMotion
 			Vector3 vmdRootPos;
 			std::vector<Quaternion> vmdRotations;
 			clip.Sample(currentTimeSeconds, vmdRootPos, vmdRotations);
+			if (facialTimeSeconds < 0.0f) facialTimeSeconds = currentTimeSeconds;
+			if (facialTimeSeconds != currentTimeSeconds && std::any_of(clip.bones.begin(), clip.bones.end(),
+				[](const auto& bone) { return bone.head_space_eye_delta; }))
+			{
+				// Eye rotations imported from the facial VMD share the pose stream,
+				// but must follow that file's timing together with its morphs.
+				Vector3 unusedRoot;
+				std::vector<Quaternion> facialRotations;
+				clip.Sample(facialTimeSeconds, unusedRoot, facialRotations);
+				for (size_t i = 0; i < clip.bones.size(); ++i)
+					if (clip.bones[i].head_space_eye_delta) vmdRotations[i] = facialRotations[i];
+			}
 			b.face.enableBaseline = facialEnableBaseline;
 			b.face.baselineMultiplier = facialBaselineMultiplier;
 			b.face.characterOverride = facialCharacterOverride;
-			b.face.Apply(b.actor, clip, currentTimeSeconds, faceApi);
+			b.face.enableMikuMouthFit = facialMikuMouthFit;
+			b.face.Apply(b.actor, clip, facialTimeSeconds, faceApi);
+			unsigned fittedRole = 0;
+			if (const auto* profile = FindMikuMouthFace(b.face.boundFaceName))
+				fittedRole = static_cast<unsigned>(profile-kMikuMouthFits.data())+1;
+			guiMikuFitSnapshot.store(static_cast<unsigned>(b.face.mikuFitDecision) | (fittedRole << 8), std::memory_order_relaxed);
 
 			// 1. Current Actor World Transform
 			Vector3 curActorPos = b.restActorPos;
@@ -3417,14 +3450,15 @@ namespace GakuMotion
 			return true;
 		}
 
-		void ApplyMotion(const MotionClip& clip, float currentTimeSeconds, void* actor = nullptr)
+		void ApplyMotion(const MotionClip& clip, float currentTimeSeconds, void* actor = nullptr,
+		                 float facialTimeSeconds = -1.0f)
 		{
 			if (actor)
 			{
 				auto it = bindings.find(actor);
 				if (it != bindings.end())
 				{
-					ApplyMotionToBinding(it->second, clip, currentTimeSeconds);
+					ApplyMotionToBinding(it->second, clip, currentTimeSeconds, facialTimeSeconds);
 					currentBinding = it->second;
 					return;
 				}
@@ -3438,7 +3472,7 @@ namespace GakuMotion
 			// binding for rather than silently doing nothing.
 			if (currentBinding.actor && currentBinding.bindPoseCaptured)
 			{
-				ApplyMotionToBinding(currentBinding, clip, currentTimeSeconds);
+				ApplyMotionToBinding(currentBinding, clip, currentTimeSeconds, facialTimeSeconds);
 			}
 		}
 	};

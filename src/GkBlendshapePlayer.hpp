@@ -1,7 +1,9 @@
 #pragma once
+#include "GkCharacterNames.hpp"
 #include "GkMotionData.hpp"
 #include "GakuFaceDiagnostics.h"
 #include "GkFacialAdapter.hpp"
+#include "GkMikuFacialFit.hpp"
 #include "GkRestoreChecks.hpp"
 #include <chrono>
 #include <cstring>
@@ -29,6 +31,8 @@ namespace GakuMotion
 		void* (*getTalk)(void* actor, int slot){nullptr};
 		bool (*readTalk)(void* talk, bool& enabled){nullptr};
 		bool (*writeTalk)(void* talk, bool enabled){nullptr};
+		std::string (*getModelName)(void* model){nullptr}; // Existing Unity Object identity, bind-time only.
+		void (*reportMikuMouthFit)(const char* decision, const char* faceName){nullptr};
 
 		bool Ready() const { return getModel && getCount && getName && getWeight && setWeight; }
 	};
@@ -92,6 +96,10 @@ namespace GakuMotion
 		std::string characterOverride;
 		std::string boundCharacterOverride;
 		std::string detectedCharacter;
+		bool enableMikuMouthFit{false}, boundMikuMouthFit{false};
+		std::string boundFaceName;
+		MikuFitDecision mikuFitDecision{MikuFitDecision::Disabled};
+		uint32_t mikuReportedDecisions{0}; // Each distinct decision once per binding, never per-frame spam.
 		const CharacterBaselineProfile* activeProfile{nullptr};
 		std::chrono::steady_clock::time_point observerUntil{};
 		uint64_t diagnosticSequence{0}, diagnosticTicks{0};
@@ -159,10 +167,12 @@ namespace GakuMotion
 			const bool keepEnableBaseline = enableBaseline;
 			const float keepMultiplier = baselineMultiplier;
 			const std::string keepOverride = characterOverride;
+			const bool keepMikuFit = enableMikuMouthFit;
 			*this = BlendshapeBinding{};
 			enableBaseline = keepEnableBaseline;
 			baselineMultiplier = keepMultiplier;
 			characterOverride = keepOverride;
+			enableMikuMouthFit = keepMikuFit;
 		}
 
 		CaptureRestoreStatus RestoreForCapture(void* actor, const FaceApi& api)
@@ -221,7 +231,8 @@ namespace GakuMotion
 		{
 			if (!api.Ready()) return;
 			void* current = api.getModel(actor);
-			if (current != model || names != clip.blendshape_names || boundCharacterOverride != characterOverride)
+			if (current != model || names != clip.blendshape_names || boundCharacterOverride != characterOverride ||
+				boundMikuMouthFit != enableMikuMouthFit)
 			{
 				// Preserve this observer frame across the binding reset. Stop() still
 				// clears it, so an old write cannot masquerade as active playback.
@@ -247,14 +258,22 @@ namespace GakuMotion
 				model = current;
 				names = clip.blendshape_names;
 				boundCharacterOverride = characterOverride;
+				boundMikuMouthFit = enableMikuMouthFit;
+				boundFaceName = api.getModelName ? api.getModelName(model) : "";
 				indices.assign(names.size(), -1);
 				std::vector<std::string> modelNames;
 				unsigned families = 0;
 
 				std::string charId = characterOverride;
-				if ((charId.empty() || charId == "auto") && api.getActorName) charId = api.getActorName(actor);
+				if (charId.empty() || charId == "auto")
+				{
+					// A replacement can retain the scene actor's original name. Adapt
+					// the loaded face first, as the scene-role menu does.
+					charId = DetectIdolCharacterCode(boundFaceName);
+					if (charId.empty() && api.getActorName) charId = DetectIdolCharacterCode(api.getActorName(actor));
+				}
 				activeProfile = FindCharacterBaseline(charId);
-				detectedCharacter = activeProfile ? activeProfile->code : "";
+				detectedCharacter = DetectIdolCharacterCode(charId);
 
 				// Name matching is per actor, per face model. File order and game
 				// blendshape indices are intentionally unrelated.
@@ -281,6 +300,17 @@ namespace GakuMotion
 						break;
 					}
 				}
+				// Raw-source names are metadata, not native indices. A verified
+				// profile still owns the entire mouth family so omitted siblings
+				// cannot add the photography smile/default to fitted or zero output.
+				if (enableMikuMouthFit && HasMikuRawSource(names))
+				{
+					const auto* fitted = FindMikuMouthFace(boundFaceName);
+					bool complete = fitted != nullptr;
+					if (fitted) for (const char* name : fitted->shapes)
+						complete = complete && std::count(modelNames.begin(), modelNames.end(), name) == 1;
+					if (complete) families |= 4;
+				}
 				for (int j = 0; j < count; ++j)
 				{
 					const auto found = std::find(names.begin(), names.end(), modelNames[j]);
@@ -299,6 +329,8 @@ namespace GakuMotion
 
 		void Apply(void* actor, const MotionClip& clip, float time, const FaceApi& api)
 		{
+			mikuFitDecision = !enableMikuMouthFit ? MikuFitDecision::Disabled
+				: HasMikuRawSource(clip.blendshape_names) ? MikuFitDecision::UnknownFace : MikuFitDecision::MissingRawSource;
 			const bool observe = std::chrono::steady_clock::now() < observerUntil;
 			if (observe)
 			{
@@ -335,8 +367,17 @@ namespace GakuMotion
 			if (observe) diagnosticStatus = GAKU_FACE_BOUND;
 			std::vector<float> weights;
 			clip.SampleBlendshapes(time, weights);
-			const auto adapted = EvaluateFacialAdapter(clip.blendshape_names, weights, ownedNames,
+			auto adapted = EvaluateFacialAdapter(clip.blendshape_names, weights, ownedNames,
 			                                         activeProfile, enableBaseline, baselineMultiplier);
+			mikuFitDecision = enableMikuMouthFit
+				? TryApplyMikuMouthFit(clip.blendshape_names, weights, ownedNames, boundFaceName, characterOverride, adapted)
+				: MikuFitDecision::Disabled;
+			const uint32_t decisionBit = 1u << static_cast<unsigned>(mikuFitDecision);
+			if (enableMikuMouthFit && api.reportMikuMouthFit && !(mikuReportedDecisions & decisionBit))
+			{
+				api.reportMikuMouthFit(MikuFitDecisionName(mikuFitDecision), boundFaceName.c_str());
+				mikuReportedDecisions |= decisionBit;
+			}
 
 			for (size_t i = 0; i < ownedIndices.size(); ++i)
 			{

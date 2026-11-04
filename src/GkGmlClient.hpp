@@ -1,5 +1,6 @@
 #pragma once
 #include "GakuPlugin.h"
+#include "GakuFileDrop.h"
 #include "GakuPaths.hpp"
 #include "GakuMotionServices.h"
 #include <cstdarg>
@@ -19,6 +20,7 @@ inline GakuHookService hooks{};
 inline GakuDesktopUiService desktop{};
 inline GakuDesktopWindowService desktopWindow{};
 inline GakuFileDialogService fileDialog{};
+inline GakuFileDropService fileDrop{};
 inline GakuHotkeyService hotkeys{};
 inline GakuAppearanceService appearance{};
 inline GakuPathsV1 paths{};
@@ -63,6 +65,9 @@ inline GakuStatus Connect(const GakuHostApi* host) {
     fileDialog = {};
     Query(GAKU_SERVICE_FILE_DIALOG, fileDialog);
     if (!fileDialog.beginOpen || !fileDialog.poll || !fileDialog.release) fileDialog = {};
+    fileDrop = {};
+    Query(GAKU_SERVICE_FILE_DROP, fileDrop);
+    if (!fileDrop.setTarget || !fileDrop.poll) fileDrop = {};
     // Hotkeys are optional: older hosts still load, they just cannot open the
     // controls panel with a key.
     hotkeys = {};

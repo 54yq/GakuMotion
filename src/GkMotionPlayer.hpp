@@ -79,10 +79,86 @@ namespace GakuMotion
 		bool audioStarted{false};
 		std::string currentMotionDir;
 
-		// 播放速度倍率（方案 C）：仅作用于本地墙钟推进（无音频曲目、音频查询失败、
-		// 以及 settle 帧的本地推进）；音频为主时钟时动作与音频保持同步，倍率无效。
-		// 默认 1.0x；由 control.json 的 playback_speed_multiplier 热加载更新。
+		// The performance clock advances at this rate; each file maps that clock
+		// through its own speed and offset. MCI cannot stretch audio.
 		float playbackSpeedMultiplier{1.0f};
+		PerformanceTiming timing;
+		float cameraSourceDuration{0.0f};
+		float audioSourceDuration{0.0f};
+		bool audioWaitingForTiming{false};
+
+		float MotionSourceTime() const { return TrackSourceTime(currentTime, timing.motion); }
+		float FacialSourceTime() const { return TrackSourceTime(currentTime, timing.facial); }
+		float CameraSourceTime() const { return TrackSourceTime(currentTime, timing.camera); }
+		float AudioSourceTime() const { return TrackSourceTime(currentTime, timing.audio); }
+		float TimelineDuration() const
+		{
+			float duration = TrackTimelineDuration(clip.duration_seconds, timing.motion);
+			if (!clip.blendshape_names.empty() || std::any_of(clip.bones.begin(), clip.bones.end(),
+				[](const auto& bone) { return bone.head_space_eye_delta; }))
+				duration = (std::max)(duration, TrackTimelineDuration(clip.duration_seconds, timing.facial));
+			if (cameraSourceDuration > 0.0f)
+				duration = (std::max)(duration, TrackTimelineDuration(cameraSourceDuration, timing.camera));
+			if (audioSourceDuration > 0.0f)
+				duration = (std::max)(duration, TrackTimelineDuration(audioSourceDuration, timing.audio));
+			return duration;
+		}
+		bool AudioRateSupported() const
+		{
+			return ValidTrackTiming(timing.audio) && std::isfinite(playbackSpeedMultiplier) &&
+				std::fabs(static_cast<double>(playbackSpeedMultiplier) * timing.audio.speed - 1.0) <= 1e-6;
+		}
+		bool AudioEligible() const
+		{
+			return !muted && AudioRateSupported() && currentTime >= timing.audio.offsetSeconds &&
+				(audioSourceDuration <= 0.0f || AudioSourceTime() < audioSourceDuration);
+		}
+		void ResetAudioClock()
+		{
+			audioSeekOffset = 0.0f;
+			audioSyncSettleFrames = fnGetAudioTime ? kAudioSettleFrames : 0;
+		}
+		bool StartAudioAtCurrentTime()
+		{
+			if (!AudioEligible()) { audioWaitingForTiming = !muted; return true; }
+			if (fnPlayAudio && fnCanOpenAudio && !fnCanOpenAudio(audioOpenGuardContext)) return false;
+			audioWaitingForTiming = false;
+			if (fnPlayAudio)
+			{
+				fnPlayAudio(AudioPath());
+				audioStarted = true;
+				RefreshAudioStarted();
+			}
+			if (fnSeekAudio && AudioSourceTime() > 0.001f) fnSeekAudio(AudioSourceTime());
+			ResetAudioClock();
+			return true;
+		}
+		void UpdateAudioTiming()
+		{
+			if (!AudioEligible())
+			{
+				if (audioStarted && fnStopAudio) fnStopAudio();
+				audioStarted = false;
+				audioWaitingForTiming = !muted;
+				audioSyncSettleFrames = 0;
+			}
+			else if (audioWaitingForTiming && state == PlaybackState::Playing && !scrubbing)
+			{
+				if (!StartAudioAtCurrentTime()) Pause();
+			}
+		}
+		void SetPlaybackSpeed(float speed)
+		{
+			if (!std::isfinite(speed)) return;
+			speed = std::clamp(speed, 0.1f, 5.0f);
+			if (playbackSpeedMultiplier == speed) return;
+			playbackSpeedMultiplier = speed;
+			if (audioStarted && fnStopAudio) fnStopAudio();
+			audioStarted = false;
+			audioWaitingForTiming = true;
+			ResetAudioClock();
+			UpdateAudioTiming();
+		}
 
 		// Optional audio synchronization callback
 		using GetAudioTimeFn = float (*)();
@@ -121,7 +197,7 @@ namespace GakuMotion
 		}
 		bool HasEffectiveCustomAudio() const
 		{
-			return state == PlaybackState::Playing && !muted && ObserveAudio().EffectivePlaying();
+			return state == PlaybackState::Playing && AudioEligible() && ObserveAudio().EffectivePlaying();
 		}
 
 		// -------------------------------------------------------------------------
@@ -179,6 +255,13 @@ namespace GakuMotion
 			// Reload even when absent/invalid: another song's trim must not leak.
 			controller.LoadRootHeightCalibration(motionDirectory + "/root_height_calibration.json", clip);
 			audioStarted = false;
+			audioWaitingForTiming = false;
+			jsonlite::Value metadata;
+			std::string metadataError;
+			timing = jsonlite::ParseFile(motionDirectory + "/info.json", metadata, metadataError)
+				? ReadPerformanceTiming(metadata) : PerformanceTiming{};
+			cameraSourceDuration = 0.0f;
+			audioSourceDuration = audio::PcmWavDuration(MotionPathFromUtf8(AudioPath()));
 			scrubbing = false;
 			finished = false;
 
@@ -201,36 +284,18 @@ namespace GakuMotion
 		bool LoadMotionByIndex(const std::vector<MotionEntry>& library, int index)
 		{
 			if (index < 0 || index >= static_cast<int>(library.size())) return false;
-			return LoadMotion(library[index].dir);
+			if (!LoadMotion(library[index].dir)) return false;
+			timing = library[index].timing;
+			return true;
 		}
 
 		void Play()
 		{
 			if (clip.total_frames == 0 || (fnCanPlay && !fnCanPlay())) return;
-			if (!muted && fnPlayAudio && fnCanOpenAudio && !fnCanOpenAudio(audioOpenGuardContext)) return;
-			state = PlaybackState::Playing;
-
 			finished = false;
 			scrubbing = false;
-			if (fnPlayAudio && !muted)
-			{
-				fnPlayAudio(AudioPath());
-				audioStarted = true;
-				RefreshAudioStarted();
-			}
-
-			if (!muted && currentTime > 0.001f && fnSeekAudio)
-			{
-				// 从非零位置起播（例如先拖了进度再按播放）：音频必须一并推到位
-				fnSeekAudio(currentTime);
-				audioSeekOffset = 0.0f;
-				audioSyncSettleFrames = kAudioSettleFrames;
-			}
-			else
-			{
-				audioSeekOffset = 0.0f;
-				audioSyncSettleFrames = (fnGetAudioTime != nullptr) ? kAudioSettleFrames : 0;
-			}
+			if (!StartAudioAtCurrentTime()) return;
+			state = PlaybackState::Playing;
 		}
 
 		void Pause()
@@ -250,7 +315,7 @@ namespace GakuMotion
 			// 修复既有缺陷：原实现调用 fnPlayAudio（内部为 "play ... from 0"），
 			// 导致「暂停后继续」实际是从曲子开头重放，音画立即失步。
 			scrubbing = false;
-			if (muted) return;
+			if (!AudioEligible()) { UpdateAudioTiming(); return; }
 			if (!audioStarted)
 			{
 				Play();
@@ -258,13 +323,13 @@ namespace GakuMotion
 			}
 			if (fnResumeAudio)
 			{
-				fnResumeAudio(currentTime);
+				fnResumeAudio(AudioSourceTime());
 			}
 			else if (fnPlayAudio)
 			{
 				if (fnCanOpenAudio && !fnCanOpenAudio(audioOpenGuardContext)) { Pause(); return; }
 				fnPlayAudio(AudioPath());
-				if (currentTime > 0.001f && fnSeekAudio) fnSeekAudio(currentTime);
+				if (AudioSourceTime() > 0.001f && fnSeekAudio) fnSeekAudio(AudioSourceTime());
 			}
 			RefreshAudioStarted();
 			audioSyncSettleFrames = (fnGetAudioTime != nullptr) ? kAudioSettleFrames : 0;
@@ -272,6 +337,7 @@ namespace GakuMotion
 
 		void Stop()
 		{
+			audioWaitingForTiming = false;
 			navigationFrame = -1;
 			scrubbing = false;
 			finished = false;
@@ -292,6 +358,7 @@ namespace GakuMotion
 
 		void AbandonScene()
 		{
+			audioWaitingForTiming = false;
 			navigationFrame = -1;
 			state = PlaybackState::Stopped;
 			currentTime = 0.0f;
@@ -309,20 +376,21 @@ namespace GakuMotion
 		// 若只改 currentTime，播放中的下一帧就会被音频主时钟覆盖回原处。
 		void Seek(float timeSeconds)
 		{
-			SeekPosition(timeSeconds, clip.duration_seconds);
+			SeekPosition(timeSeconds, TimelineDuration());
 		}
 
 		void SeekFrame(int64_t frame)
 		{
-			if (!ValidTransportTimeline(clip.total_frames, clip.fps)) return;
+			if (!ValidTransportTimeline(clip.total_frames, clip.fps) || timing.motion.speed <= 0.0f) return;
 			frame = std::clamp(frame, int64_t{0}, static_cast<int64_t>(clip.total_frames - 1));
-			const float time = static_cast<float>(static_cast<double>(frame) / clip.fps);
+			const float time = static_cast<float>((std::max)(0.0, static_cast<double>(frame) /
+				clip.fps / timing.motion.speed + timing.motion.offsetSeconds));
 			Pause(); // A frame inspection never starts or resumes audio.
 			// Legacy files may have a shorter header duration than their samples.
 			// Frame inspection still reaches every stored frame; ordinary time seek
 			// and playback keep the existing header-duration contract.
-			SeekPosition(time, (std::max)(clip.duration_seconds, time));
-			navigationFrame = frame;
+			SeekPosition(time, (std::max)(TimelineDuration(), time));
+			navigationFrame = static_cast<int64_t>(TransportFramePosition(MotionSourceTime(), clip.fps, clip.total_frames));
 			navigationFrameTime = currentTime;
 		}
 
@@ -332,7 +400,7 @@ namespace GakuMotion
 			const int64_t target = navigationFrame >= 0 && currentTime == navigationFrameTime
 				? std::clamp(navigationFrame + static_cast<int64_t>(delta), int64_t{0},
 					static_cast<int64_t>(clip.total_frames - 1))
-				: TransportSteppedFrame(currentTime, clip.fps, clip.total_frames, delta);
+				: TransportSteppedFrame(MotionSourceTime(), clip.fps, clip.total_frames, delta);
 			SeekFrame(target);
 		}
 
@@ -363,8 +431,13 @@ namespace GakuMotion
 			      fnSeekAudio ? 1 : 0, fnGetAudioTime ? 1 : 0, audioSyncSettleFrames);
 
 			if (state == PlaybackState::Stopped) state = PlaybackState::Preview;
-			if (!muted && state == PlaybackState::Playing && fnSeekAudio) fnSeekAudio(clamped);
-			if (!muted && state == PlaybackState::Paused && fnSeekPausedAudio) fnSeekPausedAudio(clamped);
+			const bool hadAudio = audioStarted;
+			UpdateAudioTiming();
+			if (AudioEligible() && (hadAudio || !audioStarted))
+			{
+				if (state == PlaybackState::Playing && fnSeekAudio) fnSeekAudio(AudioSourceTime());
+				if (state == PlaybackState::Paused && fnSeekPausedAudio) fnSeekPausedAudio(AudioSourceTime());
+			}
 		}
 
 		void SeekRelative(float deltaSeconds) { Seek(currentTime + deltaSeconds); }
@@ -421,7 +494,7 @@ namespace GakuMotion
 			scrubbing = true;
 			if (state == PlaybackState::Stopped) state = PlaybackState::Preview;
 			if (!muted && state == PlaybackState::Playing && fnPauseAudio) fnPauseAudio();
-			const float clamped = std::max(0.0f, std::min(clip.duration_seconds, timeSeconds));
+			const float clamped = std::max(0.0f, std::min(TimelineDuration(), timeSeconds));
 			currentTime = clamped;
 			audioSeekOffset = 0.0f;
 			audioSyncSettleFrames = 0;
@@ -439,7 +512,7 @@ namespace GakuMotion
 				Probe("[GakuMotion][ProbeS1][PLY] UPDATE req=%.3f DROPPED (not scrubbing)", timeSeconds);
 				return;
 			}
-			const float clamped = std::max(0.0f, std::min(clip.duration_seconds, timeSeconds));
+			const float clamped = std::max(0.0f, std::min(TimelineDuration(), timeSeconds));
 			currentTime = clamped;
 		}
 
@@ -466,14 +539,7 @@ namespace GakuMotion
 				audioStarted = false;
 				if (fnStopAudio) fnStopAudio();
 			}
-			else if (state == PlaybackState::Playing)
-			{
-				if (fnPlayAudio && fnCanOpenAudio && !fnCanOpenAudio(audioOpenGuardContext)) { muted = true; return; }
-				if (fnPlayAudio) fnPlayAudio(AudioPath());
-				audioStarted = fnPlayAudio != nullptr;
-				if (fnSeekAudio) fnSeekAudio(currentTime);
-				RefreshAudioStarted();
-			}
+			else if (state == PlaybackState::Playing && !StartAudioAtCurrentTime()) muted = true;
 		}
 
 		// Called every frame during LateUpdate / Pre-Physics Hook
@@ -508,20 +574,16 @@ namespace GakuMotion
 					AdvanceClock(deltaTime);
 
 					// Loop handling
-					if (currentTime >= clip.duration_seconds)
+					if (currentTime >= TimelineDuration())
 					{
 						if (loop)
 						{
 							currentTime = 0.0f;
 							audioSeekOffset = 0.0f;
 							audioSyncSettleFrames = (fnGetAudioTime != nullptr) ? kAudioSettleFrames : 0;
-							if (fnPlayAudio && !muted)
-							{
-								if (fnCanOpenAudio && !fnCanOpenAudio(audioOpenGuardContext)) { Pause(); return; }
-								fnPlayAudio(AudioPath());
-								audioStarted = true;
-								RefreshAudioStarted();
-							}
+							if (fnStopAudio) fnStopAudio();
+							audioStarted = false;
+							if (!StartAudioAtCurrentTime()) { Pause(); return; }
 						}
 						else
 						{
@@ -534,7 +596,7 @@ namespace GakuMotion
 			}
 
 			// Apply pose
-			if (actorBound) controller.ApplyMotion(clip, currentTime, actor);
+			if (actorBound) controller.ApplyMotion(clip, MotionSourceTime(), actor, FacialSourceTime());
 		}
 
 		// 主时钟推进：音频可用时以音频为基准，并处理跳转后的 settle 校正。
@@ -547,11 +609,14 @@ namespace GakuMotion
 		// currentTime 被拉回，日志里紧跟 END 的那一行会直接指出凶手分支。
 		void AdvanceClock(float deltaTime)
 		{
+			if (!std::isfinite(deltaTime) || deltaTime < 0.0f) return;
 			const float advanced = currentTime + deltaTime * playbackSpeedMultiplier;
+			UpdateAudioTiming();
 
-			if (!fnGetAudioTime || muted)
+			if (!fnGetAudioTime || !AudioEligible() || (fnObserveAudio && !ObserveAudio().EffectivePlaying()))
 			{
 				currentTime = advanced;
+				UpdateAudioTiming();
 				lastClockSource = "local(no-audio)";
 				return;
 			}
@@ -581,7 +646,8 @@ namespace GakuMotion
 							sum += audioT3;
 							++samples;
 						}
-						audioSeekOffset = currentTime - (sum / static_cast<float>(samples));
+						audioSeekOffset = currentTime - ((sum / static_cast<float>(samples)) /
+							timing.audio.speed + timing.audio.offsetSeconds);
 						lastSyncCorrectionSeconds = audioSeekOffset;
 						Probe("[GakuMotion][ProbeS1][PLY] settle-done audioT=%.3f -> offset=%.3f time=%.3f",
 						      sum / static_cast<float>(samples), audioSeekOffset, currentTime);
@@ -594,7 +660,8 @@ namespace GakuMotion
 			//   - 采样时间不早于「当前时间 - 容差」才采信，随音频前进；
 			//   - 采样时间回退（MCI 抖动）时保持 currentTime 不变，等待音频追上；
 			//   - 音频查询失败（未打开/设备忙）时退回本地墙钟推进。
-			const float audioT = fnGetAudioTime();
+			const float rawAudioT = fnGetAudioTime();
+			const float audioT = rawAudioT >= 0.0f ? rawAudioT / timing.audio.speed + timing.audio.offsetSeconds : -1.0f;
 			if (audioT >= 0.0f)
 			{
 				if (audioT + audioSeekOffset >= currentTime - kAudioBackwardToleranceSeconds)
@@ -634,8 +701,8 @@ namespace GakuMotion
 
 		float ProgressRatio() const noexcept
 		{
-			if (clip.duration_seconds <= 0.0f) return 0.0f;
-			float r = currentTime / clip.duration_seconds;
+			if (TimelineDuration() <= 0.0f) return 0.0f;
+			float r = currentTime / TimelineDuration();
 			return (r < 0.0f) ? 0.0f : ((r > 1.0f) ? 1.0f : r);
 		}
 	};

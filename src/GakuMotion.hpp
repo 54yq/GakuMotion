@@ -228,8 +228,10 @@ namespace GakuMotion
 		std::string cameraNotice, cameraImportDirectory;
 		bool (*fnStartCameraImport)(const CameraImportRequest&, std::string&){nullptr};
 		int (*fnPollCameraImport)(std::string&){nullptr};
-		// 场景中见过的 actor，顺序即宿主每帧的调用顺序。用于 GUI 的目标选择。
+		// Fresh active actors in the admitted owner scene; managed reads stay on Unity thread.
 		std::vector<void*> sceneActors;
+		SceneActorRegistry sceneActorRegistry;
+		bool (*fnBeforeTargetChange)(){nullptr};
 
 		BoneOverrideSet globalOverrides; // <localRoot>/GakuMotion/bone_overrides.json
 		BoneOverrideSet motionOverrides; // <曲目目录>/bone_overrides.json
@@ -283,6 +285,7 @@ namespace GakuMotion
 			std::string motionFile;
 			float playbackSpeed{-1.0f};
 			int facialEnableBaseline{-1};
+			int facialMikuMouthFit{-1};
 			float facialBaselineMultiplier{-1.0f};
 			std::string facialCharacterOverride;
 		} applied;
@@ -304,13 +307,13 @@ namespace GakuMotion
 			BeforeQuartzExperiment,
 			StageSettings, StagePreset, ToggleStageCandidate, ScanStageCandidates,
 			MountCustomStage, UnloadCustomStage, RestoreCameraSkybox,
-			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, RestoreDeleted, StageLoadReplacement
+			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, RestoreDeleted, StageLoadReplacement, SelectTarget
 		};
 
-		std::atomic<int> guiPhysicsBackend{1};
+		std::atomic<int> guiPhysicsBackend{2};
 		std::atomic_bool guiTextInputActive{false};
 		std::atomic<bool> guiBeforeQuartzExperiment{false};
-		std::atomic<bool> guiExperimentalWaistSupport{false};
+		std::atomic<bool> guiExperimentalWaistSupport{true};
 
 		struct GuiCommand
 		{
@@ -329,6 +332,7 @@ namespace GakuMotion
 			int candidateIndex{-1};
 			int64_t frame{0};
 			uint64_t loadedGeneration{0}, sceneSession{0}, libraryRevision{0};
+			uint64_t actorToken{0}, actorEpoch{0};
 		};
 
 		std::mutex guiCommandMutex;
@@ -509,6 +513,13 @@ namespace GakuMotion
 			for (const auto& command : commands) SetStageLoadReplacement(command.key);
 		}
 
+		bool HasPendingTargetSelection()
+		{
+			std::lock_guard<std::mutex> lock(guiCommandMutex);
+			return std::any_of(guiCommands.begin(), guiCommands.end(), [](const auto& command)
+				{ return command.action == GuiAction::SelectTarget; });
+		}
+
 		void ProcessPendingGuiCommands()
 		{
 			std::deque<GuiCommand> commands;
@@ -606,7 +617,7 @@ namespace GakuMotion
 				case GuiAction::Mute: player.SetMuted(cmd.flag);
 					break;
 				case GuiAction::Speed:
-					if (std::isfinite(cmd.value)) player.playbackSpeedMultiplier = std::clamp(cmd.value, 0.1f, 5.0f);
+					player.SetPlaybackSpeed(cmd.value);
 					break;
 				case GuiAction::Import: StartImport(cmd.import);
 					break;
@@ -650,7 +661,10 @@ namespace GakuMotion
 					config.beforeQuartzExperiment = cmd.flag && config.secondaryPhysicsBackend == 2;
 					ApplyDeclarativeConfig();
 					break;
-				case GuiAction::ClearTarget: SetTargetActor(nullptr);
+				case GuiAction::SelectTarget:
+					if (void* actor = sceneActorRegistry.Resolve(cmd.actorToken, cmd.actorEpoch)) SetTargetActor(actor);
+					break;
+				case GuiAction::ClearTarget: PickBoundActorAsTarget();
 					break;
 				case GuiAction::NextTarget: CycleTargetActor();
 					break;
@@ -857,6 +871,7 @@ namespace GakuMotion
 			stageManager.AbandonScene();
 			ResetSoleObservation();
 			sceneActors.clear();
+			sceneActorRegistry.Clear();
 			currentActor = nullptr;
 			currentActorBoundBones = currentActorTotalBones = 0;
 			NotifyMotionPlaying(false);
@@ -876,6 +891,7 @@ namespace GakuMotion
 			player.AbandonScene();
 			ResetSoleObservation();
 			sceneActors.clear();
+			sceneActorRegistry.Clear();
 			currentActor = nullptr;
 			currentActorBoundBones = currentActorTotalBones = 0;
 			NotifyMotionPlaying(false);
@@ -887,7 +903,8 @@ namespace GakuMotion
 		// =========================================================================
 		void OnLateUpdate(void* actor, void* animator = nullptr,
 		                  void* playableDirector = nullptr, float deltaTime = 0.0333f,
-		                  bool advanceClock = true)
+		                  bool advanceClock = true, float cameraDeltaTime = -1.0f,
+		                  uint64_t physicalFrame = 0)
 		{
 			currentActor = actor;
 
@@ -962,8 +979,11 @@ namespace GakuMotion
 			else if (actor == cameraActor)
 			{
 				camera.LoadTrack(player.currentMotionDir, player.clip);
+				player.cameraSourceDuration = camera.track.frames.empty() ? 0.0f :
+					static_cast<float>(camera.track.frames.size()) / camera.track.fps;
 				camera.Tick(player.state == PlaybackState::Playing || player.state == PlaybackState::Paused || player.state == PlaybackState::Preview,
-				            player.currentTime, deltaTime, actor);
+				            player.CameraSourceTime(), cameraDeltaTime >= 0.0f ? cameraDeltaTime : deltaTime,
+				            actor, physicalFrame);
 			}
 
 			// 4. 角色状态快照（供面板/日志）
@@ -1102,6 +1122,9 @@ namespace GakuMotion
 			const bool preview = player.state == PlaybackState::Stopped || player.state == PlaybackState::Preview;
 			player.AdoptLoadedMotion(directory, file, std::move(next));
 			camera.InstallTrack(directory, std::move(nextCamera));
+			player.cameraSourceDuration = camera.track.frames.empty() ? 0.0f :
+				static_cast<float>(camera.track.frames.size()) / camera.track.fps;
+			loadedMotionEntry.timing = player.timing;
 			player.Seek(time);
 			player.state = preview ? PlaybackState::Preview : PlaybackState::Paused;
 			++loadedMotionGeneration;
@@ -1481,6 +1504,7 @@ namespace GakuMotion
 			out << "{\n  \"camera\": {\n    \"enabled\": " << (s.enabled ? "true" : "false")
 				<< ",\n    \"mode\": " << static_cast<int>(s.mode)
 				<< ",\n    \"follow_behavior\": " << static_cast<int>(s.followBehavior)
+				<< ",\n    \"follow_target\": \"" << CameraFollowTargetName(s.followTarget) << '"'
 				<< ",\n    \"follow_actor\": " << (s.followActor ? "true" : "false")
 				<< ",\n    \"limit_to_scene\": " << (s.limitToScene ? "true" : "false") << ",\n    \"bounds_min\": ";
 			vector(s.boundsMin);
@@ -1494,6 +1518,8 @@ namespace GakuMotion
 			vector(s.vmdOffset);
 			out << ",\n    \"follow_factor\": ";
 			vector(s.followFactor);
+			out << ",\n    \"follow_rate\": ";
+			vector(s.followRate);
 			out << ",\n    \"follow_fov\": " << jsonlite::FormatNumber(s.followFov, 6)
 				<< ",\n    \"actor_shadow_experiment_mode\": " << s.actorShadowExperimentMode
 				<< ",\n    \"use_per_mode_transforms\": " << (s.usePerModeTransforms ? "true" : "false");
@@ -1949,6 +1975,8 @@ namespace GakuMotion
 			loadedSourceMissing = loadedSourceChanged = false;
 			++loadedMotionGeneration;
 			camera.LoadTrack(player.currentMotionDir, player.clip);
+			player.cameraSourceDuration = camera.track.frames.empty() ? 0.0f :
+				static_cast<float>(camera.track.frames.size()) / camera.track.fps;
 			LoadOverrides(false); // 曲目级覆盖随曲目切换
 
 			// 若本曲目目录自带辅助骨官方真值（aux_replay.json）则顺带挂载，供 mode=3 直接对照
@@ -2154,6 +2182,14 @@ namespace GakuMotion
 			guiExperimentalWaistSupport.store(player.controller.IsExperimentalWaistSupportEnabled());
 
 			// ---- Character facial default prior (adapter v2) ----
+			if (config.facialMikuMouthFit >= 0 && config.facialMikuMouthFit != applied.facialMikuMouthFit)
+			{
+				applied.facialMikuMouthFit = config.facialMikuMouthFit;
+				player.controller.facialMikuMouthFit = config.facialMikuMouthFit != 0;
+				for (auto& pair : player.controller.bindings)
+					pair.second.face.enableMikuMouthFit = player.controller.facialMikuMouthFit;
+				player.controller.currentBinding.face.enableMikuMouthFit = player.controller.facialMikuMouthFit;
+			}
 			if (config.facialEnableBaseline >= 0 && config.facialEnableBaseline != applied.facialEnableBaseline)
 			{
 				applied.facialEnableBaseline = config.facialEnableBaseline;
@@ -2175,24 +2211,20 @@ namespace GakuMotion
 				}
 				player.controller.currentBinding.face.baselineMultiplier = player.controller.facialBaselineMultiplier;
 			}
-			if (!config.facialCharacterOverride.empty() && config.facialCharacterOverride != applied.
-				facialCharacterOverride)
+			// Facial identity belongs to the bound actor, never an old manual override.
+			if (player.controller.facialCharacterOverride != "auto" || applied.facialCharacterOverride != "auto")
 			{
-				applied.facialCharacterOverride = config.facialCharacterOverride;
-				player.controller.facialCharacterOverride = config.facialCharacterOverride;
-				for (auto& pair : player.controller.bindings)
-				{
-					pair.second.face.characterOverride = player.controller.facialCharacterOverride;
-				}
-				player.controller.currentBinding.face.characterOverride = player.controller.facialCharacterOverride;
+				applied.facialCharacterOverride = "auto";
+				player.controller.facialCharacterOverride = "auto";
+				for (auto& pair : player.controller.bindings) pair.second.face.characterOverride = "auto";
+				player.controller.currentBinding.face.characterOverride = "auto";
 			}
 
-			// ---- 3b. 播放速度倍率（方案 C）----
-			// 仅影响本地墙钟推进；音频为主时钟时动作与音频同步，倍率无效。
+			// ---- 3b. Global transport rate (multiplied by each file's own speed). ----
 			if (config.playbackSpeedMultiplier > 0.0f && config.playbackSpeedMultiplier != applied.playbackSpeed)
 			{
 				applied.playbackSpeed = config.playbackSpeedMultiplier;
-				player.playbackSpeedMultiplier = config.playbackSpeedMultiplier;
+				player.SetPlaybackSpeed(config.playbackSpeedMultiplier);
 				LogInfo(detail::FormatMsg("[GakuMotion][Config] playback_speed_multiplier=%.3f",
 				                          player.playbackSpeedMultiplier));
 			}
@@ -2371,61 +2403,88 @@ namespace GakuMotion
 		}
 
 		// ---- Target actor --------------------------------------------------------
-		// 宿主每帧对场景里每个 actor 各调一次 OnLateUpdate（hski→jsna→hume→ttmr
-		// 轮番），所以没有目标选择时**全部角色**都会被驱动，探针日志也会混排。
-		// 这三个方法让 GUI 能指定只驱动一个角色。
-		//
-		// 2026-10-07：actor 列表原本只存在于插件文件的函数内 static 变量里，Core
-		// 看不到，GUI 无法显示。改为由 Core 持有，插件上报。
-		void NoteActor(void* a)
+		// 宿主对每个 actor 分别回调；当前只允许一个已确认的实际目标。
+		// 不向 GUI 暴露托管指针；发布实际名单和带生命周期的选择 token。
+		// Called only from a fresh, pinned Unity-thread actor search in the owner scene.
+		// Missing actors are abandoned without touching possibly destroyed objects.
+		bool PublishSceneActors(const std::vector<SceneActorObservation>& observations)
 		{
-			if (!a) return;
-			for (void* k : sceneActors) if (k == a) return;
-			sceneActors.push_back(a);
+			const auto* old = sceneActorRegistry.Find(player.controller.targetActor);
+			const uint64_t oldToken = old ? old->token : 0;
+			sceneActorRegistry.Publish(observations);
+			sceneActors.clear();
+			for (const auto& item : sceneActorRegistry.Entries()) sceneActors.push_back(item.actor);
+			const auto* selected = sceneActorRegistry.Find(player.controller.targetActor);
+			const bool lost = player.controller.targetActor && (!selected || selected->token != oldToken);
+			if (lost)
+			{
+				++injectionSession;
+				camera.Release(false);
+				player.AbandonScene();
+				currentActor = nullptr;
+				ResetSoleObservation();
+				NotifyMotionPlaying(false);
+			}
+			if (!lost && !player.controller.targetActor && !sceneActors.empty())
+			{
+				void* bound = player.controller.currentBinding.actor;
+				SetTargetActor(sceneActorRegistry.Find(bound) ? bound : sceneActors.front());
+			}
+			return lost;
 		}
 
-		unsigned KnownActorCount() const { return (unsigned)sceneActors.size(); }
-		bool IsTargetActor(void* a) const { return player.controller.IsTargetActor(a); }
+		// Kept for offline/legacy callers; production publishes fresh typed snapshots.
+		void NoteActor(void* a)
+		{
+			if (!a || sceneActorRegistry.Find(a)) return;
+			std::vector<SceneActorObservation> observations;
+			for (const auto& item : sceneActorRegistry.Entries()) observations.push_back(item);
+			observations.push_back({a, static_cast<int>(sceneActorRegistry.Entries().size() + 1), {}});
+			PublishSceneActors(observations);
+		}
+
+		unsigned KnownActorCount() const { return static_cast<unsigned>(sceneActorRegistry.Entries().size()); }
+		bool IsTargetActor(void* a) const { return a && player.controller.targetActor == a; }
 
 		void SetTargetActor(void* a)
 		{
-			if (player.controller.targetActor != a) ++injectionSession;
-			if (player.controller.targetActor != a) ResetSoleObservation();
+			if (!a || !sceneActorRegistry.Find(a) || player.controller.targetActor == a) return;
+			if (fnBeforeTargetChange && !fnBeforeTargetChange())
+			{
+				LogWarn("[GakuMotion][Target] selection rejected: secondary physics restore unconfirmed");
+				return;
+			}
+			// Restore only a still-live old target, then release its cached body/face state.
+			if (!player.controller.bindings.empty())
+			{
+				const auto restored = player.controller.RestoreForCapture();
+				if (!restored.bodyConfirmed || !restored.faceConfirmed || !restored.gazeConfirmed)
+				{
+					LogWarn("[GakuMotion][Target] selection rejected: old actor restore unconfirmed");
+					return;
+				}
+			}
+			player.controller.DiscardBindings();
+			camera.Release();
+			++injectionSession;
+			ResetSoleObservation();
 			player.controller.SetTargetActor(a);
-			LogInfo(detail::FormatMsg(
-				"[GakuMotion][Target] drive %s", a ? "ONE actor only" : "ALL actors"));
+			LogInfo("[GakuMotion][Target] selected one current scene actor");
 		}
 
 		void CycleTargetActor()
 		{
 			if (sceneActors.empty()) return;
-			// 当前目标在列表中的位置；nullptr 视为「全部」，切到第一个具体角色。
-			void* cur = player.controller.targetActor;
-			size_t idx = 0;
-			bool found = false;
-			for (size_t i = 0; i < sceneActors.size(); ++i)
-			{
-				if (sceneActors[i] == cur)
-				{
-					idx = i + 1;
-					found = true;
-					break;
-				}
-			}
-			void* next = sceneActors[idx % sceneActors.size()];
-			// 选满一圈后回到「全部」。
-			SetTargetActor(found && (idx % sceneActors.size()) == 0 ? nullptr : next);
+			const auto found = std::find(sceneActors.begin(), sceneActors.end(), player.controller.targetActor);
+			const size_t next = found == sceneActors.end() ? 0 : (std::distance(sceneActors.begin(), found) + 1) % sceneActors.size();
+			SetTargetActor(sceneActors[next]);
 		}
 
 		void PickBoundActorAsTarget()
 		{
-			void* a = player.controller.currentBinding.actor;
-			if (!a)
-			{
-				LogInfo("[GakuMotion][Target] no bound actor to pick");
-				return;
-			}
-			SetTargetActor(a);
+			void* bound = player.controller.currentBinding.actor;
+			if (sceneActorRegistry.Find(bound)) SetTargetActor(bound);
+			else if (!sceneActors.empty()) SetTargetActor(sceneActors.front());
 		}
 
 		// =========================================================================
@@ -2467,7 +2526,7 @@ namespace GakuMotion
 				m ? m->name.c_str() : "<none>",
 				PlaybackStateName(player.state),
 				player.currentTime,
-				player.clip.duration_seconds,
+				player.TimelineDuration(),
 				currentActorBoundBones,
 				currentActorTotalBones,
 				GazeModeName(static_cast<int>(lookAt.gazeMode.load())),
@@ -2683,15 +2742,27 @@ namespace GakuMotion
 			ctx.loadedMotionKey = loadedMotionKey;
 			ctx.loadedSourceMissing = loadedSourceMissing;
 			ctx.loadedSourceChanged = loadedSourceChanged;
+			ctx.actorRosterEpoch = sceneActorRegistry.Epoch();
+			for (const auto& item : sceneActorRegistry.Entries())
+			{
+				const std::string name = item.character.empty() ? "未识别角色" : FormatIdolDisplayName(item.character.c_str());
+				ctx.sceneActors.push_back({item.token, name + " · " + std::to_string(ctx.sceneActors.size() + 1),
+					item.actor == player.controller.targetActor});
+			}
 			auto actorLabel = [&](void* actor)
 			{
-				if (!actor) return std::string("未绑定角色");
-				const auto found = std::find(sceneActors.begin(), sceneActors.end(), actor);
-				return found == sceneActors.end() ? std::string("当前已绑定角色") :
-					"场景角色 " + std::to_string(std::distance(sceneActors.begin(), found) + 1);
+				for (size_t i = 0; i < sceneActorRegistry.Entries().size(); ++i)
+					if (sceneActorRegistry.Entries()[i].actor == actor) return ctx.sceneActors[i].label;
+				return std::string("尚未绑定角色");
 			};
 			ctx.boundActorLabel = actorLabel(player.controller.currentBinding.actor);
-			ctx.targetActorLabel = player.controller.targetActor ? actorLabel(player.controller.targetActor) : "全部场景角色";
+			ctx.targetActorLabel = actorLabel(player.controller.targetActor);
+			ctx.fnSelectTargetActor = [](void* self, uint64_t token, uint64_t epoch)
+			{
+				GuiCommand command{GuiAction::SelectTarget};
+				command.actorToken = token; command.actorEpoch = epoch;
+				static_cast<Core*>(self)->QueueGui(std::move(command));
+			};
 			ctx.statusLine = StatusSummary();
 			ctx.physicsBackend = guiPhysicsBackend.load();
 			ctx.beforeQuartzExperiment = guiBeforeQuartzExperiment.load();
@@ -2968,9 +3039,11 @@ namespace GakuMotion
 	}
 
 	inline void OnLateUpdate(void* actor, void* animator = nullptr, void* playableDirector = nullptr,
-	                         float deltaTime = 0.0333f, bool advanceClock = true)
+	                         float deltaTime = 0.0333f, bool advanceClock = true,
+	                         float cameraDeltaTime = -1.0f, uint64_t physicalFrame = 0)
 	{
-		Core::Instance().OnLateUpdate(actor, animator, playableDirector, deltaTime, advanceClock);
+		Core::Instance().OnLateUpdate(actor, animator, playableDirector, deltaTime, advanceClock,
+		                             cameraDeltaTime, physicalFrame);
 	}
 
 	inline void OnLookAtUpdate(void* lookAtController, void* cameraTransform)

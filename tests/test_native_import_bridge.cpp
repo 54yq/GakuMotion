@@ -113,7 +113,7 @@ int wmain(int argc,wchar_t** argv)
     const auto count=reinterpret_cast<std::int32_t(*)()>(GetProcAddress(rejected,"GkFakeAbi_CallCount"));
     CHECK(count && count()==1);
     CHECK(!bridge::Initialize(Utf8(old/L".")) && count()==1);
-    CHECK(bridge::Detail().find("ABI v2")!=std::string::npos);
+    CHECK(bridge::Detail().find("ABI v3")!=std::string::npos);
 
     GakuMotion::RuntimeConfig config;
     CHECK(config.importBackend=="csharp");
@@ -133,6 +133,8 @@ int wmain(int argc,wchar_t** argv)
     // A nonmatching adjacent geometry file must not reject an unrelated VMD.
     Write(unicode/L"target_leg_geometry.json","{\"source_vmd_sha256\":\"not-this-source\"}");
     request.vmd=Utf8(body); request.motionsRoot=Utf8(library); request.title="桥接曲目";
+    request.timing.motion={0.5f,2.0f}; request.timing.facial={1.5f,-1.0f};
+    request.timing.camera={0.0f,0.25f}; request.timing.audio={2.0f,-0.5f};
     const auto transactions=unicode/L"managed transactions";
     request.transactionRoot=Utf8(transactions);
     request.log=Utf8(unicode/L"导入.log"); request.clearAudio=true;
@@ -149,10 +151,18 @@ int wmain(int argc,wchar_t** argv)
     for (const auto& entry:fs::directory_iterator(library))
         if (entry.is_directory() && fs::exists(entry.path()/L"motion.gkclip")) track=entry.path();
     CHECK(!track.empty());
+    GakuMotion::jsonlite::Value newMetadata; std::string newError;
+    CHECK(GakuMotion::jsonlite::ParseText(Read(track/L"info.json"),newMetadata,newError));
+    const auto newTiming=GakuMotion::ReadPerformanceTiming(newMetadata);
+    CHECK(newTiming.motion.speed==0.5f && newTiming.motion.offsetSeconds==2.0f &&
+        newTiming.facial.speed==1.5f && newTiming.facial.offsetSeconds==-1.0f &&
+        newTiming.camera.speed==0.0f && newTiming.camera.offsetSeconds==0.25f &&
+        newTiming.audio.speed==2.0f && newTiming.audio.offsetSeconds==-0.5f);
     const std::string bodyBytes=Read(track/L"motion.gkclip");
     CHECK(!bodyBytes.empty());
     MotionImportRequest edit;
     edit.editDir=Utf8(track); edit.title="原生修改 标题"; edit.log=Utf8(unicode/L"编辑.log");
+    edit.timing.motion={3.0f,-0.125f}; edit.timing.audio={0.0f,4.0f};
     edit.transactionRoot=Utf8(transactions);
     CHECK(bridge::CanHandle(edit,message) && bridge::Begin(edit,message));
     CHECK(WaitBody(message,&progress)==1 && Read(track/L"motion.gkclip")==bodyBytes);
@@ -161,6 +171,11 @@ int wmain(int argc,wchar_t** argv)
     CHECK(GakuMotion::jsonlite::ParseText(Read(track/L"info.json"),metadata,error));
     const auto* title=metadata.Find("title");
     CHECK(title && title->IsString() && title->stringValue==edit.title);
+    const auto editedTiming=GakuMotion::ReadPerformanceTiming(metadata);
+    CHECK(editedTiming.motion.speed==3.0f && editedTiming.motion.offsetSeconds==-0.125f &&
+        editedTiming.audio.speed==0.0f && editedTiming.audio.offsetSeconds==4.0f);
+    edit.timing.motion.speed=-1.0f;
+    CHECK(!bridge::CanHandle(edit,message) && !bridge::Begin(edit,message) && !bridge::Busy());
 
     CHECK(bridge::BeginCamera(Utf8(camera),Utf8(track),60,0.083f,true,Utf8(unicode/L"镜头.log"),message));
     CHECK(bridge::CameraBusy() && !bridge::Begin(request,message));

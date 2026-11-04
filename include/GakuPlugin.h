@@ -145,6 +145,8 @@ typedef enum GakuUiTheme {
     GAKU_UI_THEME_DARK = 0,
     GAKU_UI_THEME_SAPPHIRE = 1,
     GAKU_UI_THEME_PAPER_AND_INK = 2,
+    GAKU_UI_THEME_APPLE_LIGHT = 3,
+    GAKU_UI_THEME_APPLE_DARK = 4,
 } GakuUiTheme;
 
 typedef struct GakuUiAppearanceV1 {
@@ -209,7 +211,8 @@ typedef struct GakuFileDialogService {
 typedef void (*GakuHotkeyFn)(void* userData);
 typedef struct GakuHotkeyBinding {
     uint32_t abiVersion; uint32_t structSize;
-    /* Stable owner-local id, e.g. "show-gui"; ini key is <pluginId>.<actionId>. */
+    /* Stable, case-sensitive owner-local id, e.g. "show-gui". The manager saves
+       exact identities; <pluginId>.<actionId> is a legacy INI alias only. */
     const char* actionId;
     /* Shown in the F1 manager and in conflict diagnostics. */
     const char* displayName;

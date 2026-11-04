@@ -203,6 +203,8 @@
        ====================================================================== -->
   <ItemGroup>
     <ClInclude Include="src\GakuMotion.hpp" />
+    <ClInclude Include="include\GakuFileDrop.h" />
+    <ClInclude Include="src\gui\GkGuiIcons.hpp" />
     <ClInclude Include="src\GkAuxChannelModel.hpp" />
     <ClInclude Include="src\GkBlendshapePlayer.hpp" />
     <ClInclude Include="src\GkBoneOverride.hpp" />
@@ -225,6 +227,8 @@
     <ClInclude Include="src\gui\GkGuiTabExperimentalSolePitch.hpp" />
     <ClInclude Include="src\gui\GkGuiTabConfig.hpp" />
     <ClInclude Include="src\gui\GuiOverlayCommon.hpp" />
+    <ClInclude Include="src\gui\GkGuiBranding.hpp" />
+    <ClInclude Include="src\gui\generated\GkGuiBrandingMesh.hpp" />
     <ClInclude Include="src\gui\GuiTransportBar.hpp" />
     <ClInclude Include="src\gui\GuiLibraryPage.hpp" />
     <ClInclude Include="src\gui\GuiMotionPage.hpp" />

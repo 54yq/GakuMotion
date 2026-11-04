@@ -27,6 +27,10 @@ internal sealed class MorphReport
     public string? ToothLut { get; set; }
     public float ToothPeak { get; set; }
     public int ToothActiveFrames { get; set; }
+    public bool MikuRawSourcePreserved { get; set; }
+    public bool MikuRawNativeAuthored { get; set; }
+    public int MikuRawInvalidFrames { get; set; }
+    public List<string> MikuRawUnsupportedNames { get; set; } = new();
     public List<string> BlendshapeNames { get; } = new();
 }
 
@@ -59,12 +63,14 @@ internal static class MorphTranslator
         };
 
         var channels = new Dictionary<string, float[]>(StringComparer.Ordinal);
+        var sourceSamples = new Dictionary<string, float[]>(StringComparer.Ordinal);
         int frames = Math.Max(0, totalFrames);
 
         foreach (KeyValuePair<string, IReadOnlyList<MorphKeyframe>> track in tracks)
         {
             string sourceName = track.Key;
             float[] sampled = MorphCurve.Sample(track.Value, frames);
+            if (track.Value.Count != 0) sourceSamples[sourceName] = sampled;
 
             if (!map.TryResolve(sourceName, out IReadOnlyList<MorphTarget> targets))
             {
@@ -160,6 +166,11 @@ internal static class MorphTranslator
             }
         }
 
+        report.MikuRawSourcePreserved = MikuRawSource.Append(channels, sourceSamples, map, frames,
+            out bool rawNative, out int rawInvalid, out List<string> rawUnsupported);
+        report.MikuRawNativeAuthored = rawNative;
+        report.MikuRawInvalidFrames = rawInvalid;
+        report.MikuRawUnsupportedNames = rawUnsupported;
         // --- Merge -----------------------------------------------------------
         // Several VMD aliases may feed one shape: sum first, clamp once.
         var namesList = new List<string>(channels.Keys);
@@ -223,6 +234,13 @@ internal static class MorphTranslator
         else
             writer.WriteNull("facial_adapter_version");
         writer.WriteString("runtime_contract", "mmd2.* channels require the v2 character adapter");
+        writer.WriteStartObject("miku_raw_source");
+        writer.WriteString("contract", MikuRawSource.Prefix+"*");
+        writer.WriteBoolean("preserved", report.MikuRawSourcePreserved);
+        writer.WriteBoolean("native_mouth_authored", report.MikuRawNativeAuthored);
+        writer.WriteNumber("serialization_clipped_invalid_frames", report.MikuRawInvalidFrames);
+        WriteStringArray(writer, "unsupported_source_names", report.MikuRawUnsupportedNames);
+        writer.WriteEndObject();
 
         if (report.ToothStatus != null)
         {

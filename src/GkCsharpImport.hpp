@@ -4,7 +4,7 @@
 // GkCsharpImport.hpp — 测试用 VMD 导入后端（Candidate B，NativeAOT）
 // =============================================================================
 // 运行时仅使用 C# NativeAOT；Python 工具仅供离线研究。
-// Body ABI v2；独立镜头 ABI v1。未支持的目标几何请求明确失败，
+// Body ABI v3；独立镜头 ABI v1。未支持的目标几何请求明确失败，
 // 不启动解释器，也不覆盖已有动作。单一工作线程使用 @PROGRESS 协议。
 // =============================================================================
 
@@ -246,9 +246,9 @@ namespace GakuMotion::csharp_import
 					reinterpret_cast<LPCWSTR>(module), &pinned);
 				auto run = reinterpret_cast<RunFn>(GetProcAddress(module, "GkVmdImport_Run"));
 				auto abi = reinterpret_cast<AbiFn>(GetProcAddress(module, "GkVmdImporter_AbiVersion"));
-				if (!run || !abi || abi() < 2)
+				if (!run || !abi || abi() < 3)
 				{
-					Detail() = "GakuMotion.VmdImporter.Native.dll 缺少 ABI v2 导出（旧 DLL 会丢运镜/表情请求）";
+					Detail() = "GakuMotion.VmdImporter.Native.dll 缺少 ABI v3 导出（旧 DLL 会丢播放速度/初始偏移量请求）";
 					RejectedModules().push_back({candidate, module, Detail()});
 					continue;
 				}
@@ -387,6 +387,11 @@ namespace GakuMotion::csharp_import
 	/// </summary>
 	inline bool CanHandle(const MotionImportRequest& request, std::string& reason)
 	{
+		if (!ValidPerformanceTiming(request.timing))
+		{
+			reason = "播放速度必须为不小于 0 的有限数值，初始偏移量必须为有限数值";
+			return false;
+		}
 		if (request.vmd.empty() && request.editDir.empty())
 		{
 			reason = "未指定 VMD 或待编辑曲目";
@@ -400,6 +405,11 @@ namespace GakuMotion::csharp_import
 	/// <summary>Starts the import on one worker thread; returns false if it could not start.</summary>
 	inline bool Begin(const MotionImportRequest& request, std::string& message)
 	{
+		if (!ValidPerformanceTiming(request.timing))
+		{
+			message = "播放速度必须为不小于 0 的有限数值，初始偏移量必须为有限数值";
+			return false;
+		}
 		std::lock_guard<std::mutex> lock(detail::Mutex());
 		auto& job = detail::Current();
 		if (job.active || detail::CameraCurrent().active)
@@ -441,6 +451,7 @@ namespace GakuMotion::csharp_import
 		detail::AppendJsonString(json, request.audio);
 		json += ",\"clear_audio\":";
 		json += request.clearAudio ? "true" : "false";
+		json += ",\"track_timing\":" + PerformanceTimingJson(request.timing);
 		json += ",\"camera_vmd\":";
 		detail::AppendJsonString(json, request.cameraVmd);
 		json += ",\"clear_camera\":";

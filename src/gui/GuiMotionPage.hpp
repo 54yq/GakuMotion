@@ -1,10 +1,11 @@
 #pragma once
 
 // =============================================================================
-// GuiMotionPage.hpp — 动作控制页面（驱动对象 / 表情适配 / 视线 / 初始位置 / 高级动作）
+// GuiMotionPage.hpp — 动作控制页面（场景驱动角色 / 初始位置 / 高级动作）
 // =============================================================================
 
 #include "GuiOverlayCommon.hpp"
+#include "GkGuiIcons.hpp"
 #include "../GkGuiOverlay.hpp"
 #include "../GkBoneOverride.hpp"
 #include "../GkIdolController.hpp"
@@ -24,112 +25,24 @@ namespace GakuMotion
 		IdolController& controller = player.controller;
 		controller.useRestRotations = true; // 静息姿态对齐自动保持启用
 
-		// =========================================================================
-		// 1. 实际驱动对象与表情适配角色分别设置。
-		// =========================================================================
-		ImGui::TextUnformatted("驱动对象");
-		ImGui::TextWrapped("目标: %s", ctx.targetActorLabel.empty() ? "未确认" : ctx.targetActorLabel.c_str());
-		ImGui::TextWrapped("当前绑定: %s", ctx.boundActorLabel.empty() ? "尚未绑定角色" : ctx.boundActorLabel.c_str());
-		ImGui::BeginDisabled(!controller.currentBinding.actor || !ctx.fnPickFocusedActor);
-		if (ImGui::Button("只驱动当前绑定角色")) ctx.fnPickFocusedActor(ctx.self);
-		ImGui::EndDisabled();
-		ImGui::BeginDisabled(ctx.knownActorCount == 0 || !ctx.fnNextTargetActor);
-		if (ImGui::Button("下一个场景角色")) ctx.fnNextTargetActor(ctx.self);
-		ImGui::EndDisabled();
-		if (ImGui::GetContentRegionAvail().x > 300.0f) ImGui::SameLine();
-		ImGui::BeginDisabled(!ctx.fnClearTargetActor);
-		if (ImGui::Button("驱动全部场景角色")) ctx.fnClearTargetActor(ctx.self);
-		ImGui::EndDisabled();
-		ImGui::TextWrapped("角色选择来自当前场景；“下一个”轮换一圈后回到全部角色。");
-
-		ImGui::Spacing();
-		ImGui::TextUnformatted("表情适配角色");
-		static const char* kFacialCodes[] = {
-			"auto", "hski", "ttmr", "fktn", "atbm", "kcna", "shro", "ssmk",
-			"kllj", "hume", "hmsz", "jsna", "hrnm", "amao", "nasr", "krnh"
-		};
-		const std::string facialCode = ctx.config ? ctx.config->facialCharacterOverride : "auto";
-		const std::string facialLabel = facialCode.empty() || facialCode == "auto"
-			? "自动识别" : FormatIdolDisplayName(facialCode.c_str());
-		ImGui::SetNextItemWidth((std::min)(300.0f, ImGui::GetContentRegionAvail().x));
-		ImGui::BeginDisabled(!ctx.config);
-		if (ImGui::BeginCombo("##facial_actor_combo", facialLabel.c_str()))
+		ImGui::TextUnformatted("驱动角色");
+		const std::string targetLabel = ctx.sceneActors.empty() ? "当前场景没有可驱动角色" :
+			(ctx.targetActorLabel.empty() ? "正在识别角色" : ctx.targetActorLabel);
+		ImGui::SetNextItemWidth((std::min)(360.0f, ImGui::GetContentRegionAvail().x));
+		ImGui::BeginDisabled(ctx.sceneActors.empty() || !ctx.fnSelectTargetActor);
+		if (ImGui::BeginCombo("##drive_actor_combo", targetLabel.c_str()))
 		{
-			for (const char* code : kFacialCodes)
+			for (const auto& actor : ctx.sceneActors)
 			{
-				const bool isSelected = facialCode == code || (facialCode.empty() && std::strcmp(code, "auto") == 0);
-				const std::string label = std::strcmp(code, "auto") == 0 ? "自动识别" : FormatIdolDisplayName(code);
-				if (ImGui::Selectable(label.c_str(), isSelected) && ctx.config)
-					ctx.config->facialCharacterOverride = code;
-				if (isSelected) ImGui::SetItemDefaultFocus();
+				const std::string label = actor.label + "##actor_" + std::to_string(actor.token);
+				if (ImGui::Selectable(label.c_str(), actor.selected) && ctx.fnSelectTargetActor)
+					ctx.fnSelectTargetActor(ctx.self, actor.token, ctx.actorRosterEpoch);
+				if (actor.selected) ImGui::SetItemDefaultFocus();
 			}
 			ImGui::EndCombo();
 		}
 		ImGui::EndDisabled();
-		ImGui::TextWrapped("仅覆盖表情适配身份，在本次运行中生效；驱动对象由上方单独选择。");
-
-		ImGui::Spacing();
-		ImGui::Separator();
-		ImGui::Spacing();
-
-		// =========================================================================
-		// 2. 视线 (Gaze)
-		// =========================================================================
-		ImGui::TextUnformatted("视线");
-
-		bool isVR = (ctx.lookAt && ctx.lookAt->IsVRifyLiveGazeActive());
-
-		if (isVR)
-		{
-			ImGui::BeginDisabled(true);
-			int dummyMode = 0;
-			ImGui::RadioButton("自动", &dummyMode, 0); ImGui::SameLine();
-			ImGui::RadioButton("使用动作原始视线", &dummyMode, 1); ImGui::SameLine();
-			ImGui::RadioButton("注视镜头", &dummyMode, 2);
-			ImGui::EndDisabled();
-			ImGui::TextColored(GuiTheme::WarningColor(), "视线由 GakuVRify 接管");
-		}
-		else
-		{
-			// 映射：
-			// 0 = 自动 (Auto, desktopLookAtEnabled=true)
-			// 1 = 使用动作原始视线 (ForceOff / Force VMD)
-			// 2 = 注视镜头 (DesktopOn)
-			int gazeChoice = 0;
-			if (ctx.lookAt)
-			{
-				const auto curMode = ctx.lookAt->gazeMode.load();
-				if (curMode == GazeMode::ForceOff) gazeChoice = 1;
-				else if (curMode == GazeMode::DesktopOn) gazeChoice = 2;
-				else gazeChoice = 0;
-			}
-
-			bool changed = false;
-			if (ImGui::RadioButton("自动", &gazeChoice, 0)) changed = true;
-			ImGui::SameLine(0.0f, 20.0f);
-			if (ImGui::RadioButton("使用动作原始视线", &gazeChoice, 1)) changed = true;
-			ImGui::SameLine(0.0f, 20.0f);
-			if (ImGui::RadioButton("注视镜头", &gazeChoice, 2)) changed = true;
-
-			if (changed && ctx.lookAt)
-			{
-				if (gazeChoice == 0)
-				{
-					ctx.lookAt->gazeMode.store(GazeMode::Auto);
-					ctx.lookAt->desktopLookAtEnabled.store(true);
-				}
-				else if (gazeChoice == 1)
-				{
-					ctx.lookAt->gazeMode.store(GazeMode::ForceOff);
-					ctx.lookAt->desktopLookAtEnabled.store(false);
-				}
-				else if (gazeChoice == 2)
-				{
-					ctx.lookAt->gazeMode.store(GazeMode::DesktopOn);
-					ctx.lookAt->desktopLookAtEnabled.store(true);
-				}
-			}
-		}
+		ImGui::TextWrapped("表情随驱动角色自动适配。");
 
 		ImGui::Spacing();
 		ImGui::Separator();
@@ -185,7 +98,7 @@ namespace GakuMotion
 		}
 
 		// 重置与保存按钮
-		if (ImGui::Button("重置位置偏移", ImVec2(120, 24)))
+		if (GuiIcons::Button("重置位置偏移", GuiIcons::Icon::Reset, ImVec2(120, 24)))
 		{
 			overlay.initialPositionEdit[0] = 0.0f;
 			overlay.initialPositionEdit[1] = 0.0f;
@@ -196,8 +109,8 @@ namespace GakuMotion
 			else
 				controller.SetInitialPositionOffset(Vector3(0.0f, 0.0f, 0.0f));
 		}
-		if (ImGui::GetContentRegionAvail().x > 290.0f) ImGui::SameLine();
-		if (ImGui::Button("保存初始位置为默认", ImVec2(150, 24)))
+		GuiIcons::SameLineIfRoom("保存初始位置为默认", ImVec2(150, 24));
+		if (GuiIcons::Button("保存初始位置为默认", GuiIcons::Icon::Save, ImVec2(150, 24)))
 		{
 			if (ctx.fnSaveInitialPosition) ctx.fnSaveInitialPosition(ctx.self);
 		}

@@ -26,11 +26,11 @@ internal static unsafe class NativeExports
     private static int _running;
 
     /// <summary>
-    /// Bumped to 2 when the request gained camera/morph fields. A v1 DLL would
-    /// silently drop a camera, so the plugin refuses to pair with it.
+    /// ABI v3 persists per-track playback speed and offset. Older modules would
+    /// silently drop those fields, so the plugin refuses to pair with them.
     /// </summary>
     [UnmanagedCallersOnly(EntryPoint = "GkVmdImporter_AbiVersion")]
-    public static int AbiVersion() => 2;
+    public static int AbiVersion() => 3;
 
     [UnmanagedCallersOnly(EntryPoint = "GkCameraImporter_AbiVersion")]
     public static int CameraAbiVersion() => 1;

@@ -14,6 +14,34 @@
 namespace GakuMotion
 {
 	enum class TransportBtnIcon { Prev, Play, Pause, Stop, Next };
+	inline constexpr const char* kTransportPlayModes[] = {"播放一次", "单曲循环", "列表循环", "随机播放"};
+	inline constexpr const char* kTransportCameraModes[] = {"镜头: 游戏", "镜头: VMD", "镜头: 跟随", "镜头: 注视", "镜头: 固定"};
+	inline constexpr float kTransportPlaybackSpeeds[] = {0.1f, 0.2f, 0.5f, 0.8f, 1.0f, 1.2f, 1.5f, 2.0f, 3.0f};
+	inline constexpr const char* kTransportPlaybackSpeedLabels[] = {
+		"倍速: 0.1x", "倍速: 0.2x", "倍速: 0.5x", "倍速: 0.8x", "倍速: 1.0x",
+		"倍速: 1.2x", "倍速: 1.5x", "倍速: 2.0x", "倍速: 3.0x"};
+
+	inline float TransportTextButtonWidth(const char* text, float minimum = 0.0f)
+	{
+		return (std::max)(minimum, ImGui::CalcTextSize(text).x + 2.0f * ImGui::GetStyle().FramePadding.x);
+	}
+
+	template<size_t Count>
+	inline float TransportComboWidth(const char* const (&labels)[Count])
+	{
+		float textWidth = 0.0f;
+		for (const char* label : labels) textWidth = (std::max)(textWidth, ImGui::CalcTextSize(label).x);
+		// BeginCombo reserves one frame-height-wide arrow button in addition to
+		// the preview's text padding. Measure every choice to avoid resize jitter.
+		return (std::max)(105.0f, textWidth + 2.0f * ImGui::GetStyle().FramePadding.x + ImGui::GetFrameHeight());
+	}
+
+	inline float TransportTimeInputWidth() { return TransportTextButtonWidth("00:00.000", 126.0f); }
+	inline float TransportFrameInputWidth() { return TransportTextButtonWidth("0000000", 92.0f); }
+	inline float TransportPrecisionGroupWidth(const char* label, float inputWidth)
+	{
+		return ImGui::CalcTextSize(label).x + inputWidth + TransportTextButtonWidth("定位") + 2.0f * ImGui::GetStyle().ItemSpacing.x;
+	}
 
 	inline float TransportBarHeight(float availableWidth, const GuiOverlay* overlay = nullptr)
 	{
@@ -38,9 +66,13 @@ namespace GakuMotion
 			return rows * (height + style.ItemSpacing.y);
 		};
 		return std::ceil(2.0f * (fontSize + style.ItemSpacing.y) + frameHeight + style.ItemSpacing.y +
-			flow({5.0f * 34.0f + 4.0f * style.ItemSpacing.x, 105.0f, 105.0f}, 18.0f,
+			flow({4.0f * (std::max)(34.0f, frameHeight) + 3.0f * style.ItemSpacing.x,
+				TransportComboWidth(kTransportPlayModes), TransportComboWidth(kTransportPlaybackSpeedLabels),
+				TransportComboWidth(kTransportCameraModes)}, 18.0f,
 				(std::max)(24.0f, frameHeight)) +
-			flow({136.0f + style.ItemSpacing.x, 230.0f, 210.0f}, 12.0f, frameHeight));
+			flow({2.0f * TransportTextButtonWidth("上一帧", 68.0f) + style.ItemSpacing.x,
+				TransportPrecisionGroupWidth("时间", TransportTimeInputWidth()),
+				TransportPrecisionGroupWidth("动作帧", TransportFrameInputWidth())}, 12.0f, frameHeight));
 	}
 
 	inline void TransportSameLineIfRoom(float width, float gap = 12.0f)
@@ -133,7 +165,7 @@ namespace GakuMotion
 				isPreview = (ctx.player->state == PlaybackState::Preview);
 				hasClip = ValidTransportTimeline(ctx.player->clip.total_frames, ctx.player->clip.fps);
 				currentTime = ctx.player->currentTime;
-				totalDuration = ctx.player->clip.duration_seconds;
+				totalDuration = ctx.player->TimelineDuration();
 
 				if (!ctx.player->loadedMotionFile.empty())
 				{
@@ -219,7 +251,7 @@ namespace GakuMotion
 			ImGui::EndDisabled();
 
 			// 第三行：控制按钮 + 播放模式 + 镜头快捷切换
-			const ImVec2 btnSize(34.0f, 24.0f);
+			const ImVec2 btnSize((std::max)(34.0f, ImGui::GetFrameHeight()), (std::max)(24.0f, ImGui::GetFrameHeight()));
 
 			// 上一曲 (|<)
 			ImGui::BeginDisabled(!ctx.motions || ctx.motions->empty());
@@ -273,23 +305,44 @@ namespace GakuMotion
 			if (ImGui::IsItemHovered()) ImGui::SetTooltip("下一曲");
 			ImGui::EndDisabled();
 
-			TransportSameLineIfRoom(105.0f, 18.0f);
+			const float playModeWidth = TransportComboWidth(kTransportPlayModes);
+			TransportSameLineIfRoom(playModeWidth, 18.0f);
 
 			// 播放模式切换 (0:播放一次, 1:单曲循环, 2:列表循环, 3:随机播放)
-			static const char* kPlayModes[] = {"播放一次", "单曲循环", "列表循环", "随机播放"};
 			int currentPlayMode = ctx.playlistMode;
 			if (currentPlayMode < 0 || currentPlayMode > 3) currentPlayMode = 1;
-			ImGui::SetNextItemWidth(105.0f);
-			if (ImGui::Combo("##play_mode", &currentPlayMode, kPlayModes, IM_ARRAYSIZE(kPlayModes)))
+			ImGui::SetNextItemWidth(playModeWidth);
+			if (ImGui::Combo("##play_mode", &currentPlayMode, kTransportPlayModes, IM_ARRAYSIZE(kTransportPlayModes)))
 			{
 				overlay.PlaylistAction(ctx, GuiPlaylistAction::SetMode, "", currentPlayMode);
 			}
 			if (ImGui::IsItemHovered()) ImGui::SetTooltip("播放列表循环模式");
 
-			TransportSameLineIfRoom(105.0f, 18.0f);
+			const float playbackSpeedWidth = TransportComboWidth(kTransportPlaybackSpeedLabels);
+			TransportSameLineIfRoom(playbackSpeedWidth, 18.0f);
+			const float playbackSpeed = ctx.player ? ctx.player->playbackSpeedMultiplier : 1.0f;
+			char playbackSpeedPreview[48]{};
+			std::snprintf(playbackSpeedPreview, sizeof(playbackSpeedPreview), "倍速: %.1fx", playbackSpeed);
+			ImGui::BeginDisabled(!ctx.fnSetSpeed);
+			ImGui::SetNextItemWidth(playbackSpeedWidth);
+			if (ImGui::BeginCombo("##playback_speed", playbackSpeedPreview))
+			{
+				for (int i = 0; i < IM_ARRAYSIZE(kTransportPlaybackSpeeds); ++i)
+				{
+					const bool selected = std::fabs(playbackSpeed - kTransportPlaybackSpeeds[i]) < 0.0001f;
+					if (ImGui::Selectable(kTransportPlaybackSpeedLabels[i], selected) && ctx.fnSetSpeed)
+						ctx.fnSetSpeed(ctx.self, kTransportPlaybackSpeeds[i]);
+					if (selected) ImGui::SetItemDefaultFocus();
+				}
+				ImGui::EndCombo();
+			}
+			ImGui::EndDisabled();
+			if (ImGui::IsItemHovered()) ImGui::SetTooltip("与各文件播放速度相乘；音频无法拉伸时自动静音。");
+
+			const float cameraModeWidth = TransportComboWidth(kTransportCameraModes);
+			TransportSameLineIfRoom(cameraModeWidth, 18.0f);
 
 			// 镜头模式快捷切换（仅切换模式，不暴露参数）
-			static const char* kCameraModes[] = {"镜头: 游戏", "镜头: VMD", "镜头: 跟随", "镜头: 注视", "镜头: 固定"};
 			int currentCamIndex = 0;
 			const auto camMode = ctx.cameraSnapshot.settings.mode;
 			if (!ctx.cameraSnapshot.settings.enabled)
@@ -308,8 +361,8 @@ namespace GakuMotion
 				currentCamIndex = camMode == CameraMode::Hold ? 4 : 1;
 			}
 
-			ImGui::SetNextItemWidth(105.0f);
-			if (ImGui::Combo("##camera_quick_mode", &currentCamIndex, kCameraModes, IM_ARRAYSIZE(kCameraModes)))
+			ImGui::SetNextItemWidth(cameraModeWidth);
+			if (ImGui::Combo("##camera_quick_mode", &currentCamIndex, kTransportCameraModes, IM_ARRAYSIZE(kTransportCameraModes)))
 			{
 				CameraSettings next = ctx.cameraSnapshot.settings;
 				next.enabled = currentCamIndex != 0;
@@ -349,19 +402,21 @@ namespace GakuMotion
 			ImGui::PushID(navigationId.c_str());
 			ImGui::BeginDisabled(!hasClip);
 			ImGui::BeginGroup();
-			if (ImGui::Button("上一帧", ImVec2(68.0f, 0.0f)) && ctx.fnStepFrame) ctx.fnStepFrame(ctx.self, -1);
+			const float stepWidth = (std::max)(TransportTextButtonWidth("上一帧", 68.0f), TransportTextButtonWidth("下一帧", 68.0f));
+			if (ImGui::Button("上一帧", ImVec2(stepWidth, 0.0f)) && ctx.fnStepFrame) ctx.fnStepFrame(ctx.self, -1);
 			if (ImGui::IsItemHovered()) ImGui::SetTooltip("暂停并检查前一个动作采样帧；不切换曲目");
 			ImGui::SameLine();
-			if (ImGui::Button("下一帧", ImVec2(68.0f, 0.0f)) && ctx.fnStepFrame) ctx.fnStepFrame(ctx.self, 1);
+			if (ImGui::Button("下一帧", ImVec2(stepWidth, 0.0f)) && ctx.fnStepFrame) ctx.fnStepFrame(ctx.self, 1);
 			if (ImGui::IsItemHovered()) ImGui::SetTooltip("暂停并检查后一个动作采样帧；不切换曲目");
 			ImGui::EndGroup();
 
-			TransportSameLineIfRoom(230.0f);
+			const float timeInputWidth = TransportTimeInputWidth();
+			TransportSameLineIfRoom(TransportPrecisionGroupWidth("时间", timeInputWidth));
 			ImGui::BeginGroup();
 			ImGui::TextUnformatted("时间");
 			ImGui::SameLine();
 			if (!navigation.editingTime) FormatTransportTime(currentTime, navigation.time, sizeof(navigation.time));
-			ImGui::SetNextItemWidth(126.0f);
+			ImGui::SetNextItemWidth(timeInputWidth);
 			const bool timeEnter = ImGui::InputText("##transport_time", navigation.time, sizeof(navigation.time), ImGuiInputTextFlags_EnterReturnsTrue);
 			if (ImGui::IsItemActivated()) navigation.editingTime = true;
 			if (ImGui::IsItemHovered()) ImGui::SetTooltip("秒数或 mm:ss.mmm；Enter 定位，Esc 取消。时间可位于两个采样帧之间。");
@@ -374,7 +429,7 @@ namespace GakuMotion
 				if (!ParseTransportTime(navigation.time, seconds))
 					navigation.error = "时间格式无效：请输入非负秒数或 mm:ss.mmm。";
 				else if (seconds > totalDuration)
-					navigation.error = "时间超出头部播放时长；可用动作帧输入检查末采样。";
+					navigation.error = "时间超出演出时长；可用动作帧输入检查末采样。";
 				else if (ctx.fnSeek)
 				{
 					ctx.fnSeek(ctx.self, seconds);
@@ -384,18 +439,19 @@ namespace GakuMotion
 			}
 			ImGui::EndGroup();
 
-			TransportSameLineIfRoom(210.0f);
+			const float frameInputWidth = TransportFrameInputWidth();
+			TransportSameLineIfRoom(TransportPrecisionGroupWidth("动作帧", frameInputWidth));
 			ImGui::BeginGroup();
 			ImGui::TextUnformatted("动作帧");
 			ImGui::SameLine();
 			const double framePosition = hasClip
 				? (ctx.player->navigationFrame >= 0 && currentTime == ctx.player->navigationFrameTime
 					? static_cast<double>(ctx.player->navigationFrame)
-					: TransportFramePosition(currentTime, ctx.player->clip.fps, ctx.player->clip.total_frames))
+					: TransportFramePosition(ctx.player->MotionSourceTime(), ctx.player->clip.fps, ctx.player->clip.total_frames))
 				: 0.0;
 			if (!navigation.editingFrame)
 				std::snprintf(navigation.frame, sizeof(navigation.frame), "%lld", static_cast<long long>(std::floor(framePosition)));
-			ImGui::SetNextItemWidth(92.0f);
+			ImGui::SetNextItemWidth(frameInputWidth);
 			const bool frameEnter = ImGui::InputText("##transport_frame", navigation.frame, sizeof(navigation.frame), ImGuiInputTextFlags_EnterReturnsTrue);
 			if (ImGui::IsItemActivated()) navigation.editingFrame = true;
 			if (ImGui::IsItemHovered()) ImGui::SetTooltip("按本动作的实际采样帧率换算，首帧为 0。Enter 定位并暂停，Esc 取消。");
@@ -428,11 +484,11 @@ namespace GakuMotion
 				else
 					ImGui::TextDisabled("当前位置：帧间 %.3f / %u · %.6g fps", framePosition,
 						ctx.player->clip.total_frames - 1, ctx.player->clip.fps);
-				if (TransportDurationMismatch(ctx.player->clip.total_frames, ctx.player->clip.fps, totalDuration))
+				if (TransportDurationMismatch(ctx.player->clip.total_frames, ctx.player->clip.fps, ctx.player->clip.duration_seconds))
 				{
 					ImGui::PushStyleColor(ImGuiCol_Text, GuiTheme::WarningColor());
-					ImGui::TextWrapped("时长与采样帧不一致：秒数范围 0–%.3f；末采样 %.3f 秒。播放仍使用头部时长。",
-						totalDuration, TransportLastFrameTime(ctx.player->clip.total_frames, ctx.player->clip.fps));
+					ImGui::TextWrapped("源动作头部时长与采样帧不一致：头部 %.3f 秒；末采样 %.3f 秒。",
+						ctx.player->clip.duration_seconds, TransportLastFrameTime(ctx.player->clip.total_frames, ctx.player->clip.fps));
 					ImGui::PopStyleColor();
 				}
 			}

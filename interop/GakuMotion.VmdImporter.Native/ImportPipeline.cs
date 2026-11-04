@@ -353,6 +353,7 @@ internal static class ImportPipeline
             }
             if (!string.IsNullOrWhiteSpace(request.Title)) info["title"] = request.Title.Trim();
             else if (info["title"] is null || info["title"]!.ToString().Length == 0) info["title"] = Path.GetFileName(target);
+            if (request.TrackTiming != null) info["track_timing"] = request.TrackTiming.ToJson();
             WriteEditInfo(stage, info);
 
             log.Progress(96, "PACK", "正在保存曲目修改...");
@@ -817,6 +818,10 @@ internal static class ImportPipeline
                     sourceMorph, File.Exists(target), sourceCamera, cameraRegistration);
             }
 
+            // Save inside the same directory transaction as all four sources.
+            JsonObject info = ReadEditInfo(Path.Combine(stage, "info.json"));
+            info["track_timing"] = (request.TrackTiming ?? new PerformanceTimingSettings()).ToJson();
+            WriteEditInfo(stage, info);
             PublishNewTrack(stage, commit);
             if (!string.IsNullOrEmpty(cameraNotice)) log.Line("Camera: " + cameraNotice);
             log.Line($"曲目已写入: {commit}");

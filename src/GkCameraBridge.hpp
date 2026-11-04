@@ -1399,6 +1399,16 @@ namespace CameraBridge
 			rotation = rotation.Normalized();
 			return GakuMotion::CameraFinite(origin) && GakuMotion::CameraFinite(hips);
 		};
+		c.fnFollowTarget = [](void* actor, GakuMotion::CameraFollowTarget target, GakuMotion::Vector3& position)
+		{
+			const int hid = GakuMotion::CameraFollowTargetBoneId(target);
+			if (hid < 0 || !IsAlive(actor)) return false;
+			void* bone = HelperGetBoneTransform(actor, hid);
+			if (!IsAlive(bone)) return false;
+			const auto p = g_getWorldPosNative(bone);
+			position = {p.x, p.y, p.z};
+			return GakuMotion::CameraFinite(position);
+		};
 		c.Publish();
 		return true;
 	}

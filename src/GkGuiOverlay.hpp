@@ -26,6 +26,7 @@
 #include "GkExperimentalSolePitch.hpp"
 #include "GkStageManager.hpp"
 #include "GkCamera.hpp"
+#include "GkSceneActors.hpp"
 #include "gui/GuiOverlayCommon.hpp"
 
 #include <string>
@@ -76,7 +77,7 @@ namespace GakuMotion
 		bool* masterOverridesEnabled{nullptr};
 		const int* selectedMotionIndex{nullptr};
 		std::string statusLine;
-		int physicsBackend{1}; // Published selection, not the render thread's config.
+		int physicsBackend{2}; // Published selection, not the render thread's config.
 		bool beforeQuartzExperiment{true};
 		void (*fnSetBeforeQuartzExperiment)(void*, bool){nullptr};
 		bool experimentalWaistSupport{true};
@@ -129,12 +130,15 @@ namespace GakuMotion
 		void (*fnRestoreCameraSkybox)(void*){nullptr};
 
 		// ---- 多角色场景 ----
-		// 宿主每帧对场景里每个 actor 各调一次 OnLateUpdate，所以没有目标选择时
-		// 全部角色都会被驱动。knownActorCount > 1 时 GUI 才显示选择器。
+		// Unity 主线程发布实际 active actor 名单；GUI 仅持有值和带 epoch 的 token。
+		// 普通动作页始终选择单个角色，空名单不表示驱动全部。
 		unsigned knownActorCount{0};
-		void (*fnClearTargetActor)(void* self){nullptr}; // nullptr = 驱动全部
-		void (*fnNextTargetActor)(void* self){nullptr}; // 在已知 actor 间轮换
-		void (*fnPickFocusedActor)(void* self){nullptr}; // 选当前绑定那个
+		std::vector<GuiSceneActor> sceneActors;
+		uint64_t actorRosterEpoch{0};
+		void (*fnSelectTargetActor)(void*, uint64_t token, uint64_t epoch){nullptr};
+		void (*fnClearTargetActor)(void* self){nullptr}; // Legacy developer callback: reselect bound/first actor
+		void (*fnNextTargetActor)(void* self){nullptr}; // Legacy developer callback: cycle current actors
+		void (*fnPickFocusedActor)(void* self){nullptr}; // Legacy developer callback: select bound actor
 
 		// ---- 写动作（回调到 Core） ----
 		void* self{nullptr};

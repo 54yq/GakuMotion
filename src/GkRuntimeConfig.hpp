@@ -1,6 +1,7 @@
 #pragma once
 
 #include "GkCamera.hpp"
+#include "GkTrackTiming.hpp"
 
 // =============================================================================
 // GkRuntimeConfig.hpp — 运行时控制文件热加载层（阶段一「无 GUI」控制入口）
@@ -112,6 +113,7 @@ namespace GakuMotion
 		std::string sourceVmd;
 		std::string sourceMorphVmd;
 		std::string sourceCameraVmd;
+		PerformanceTiming timing;
 		bool metadataLoaded{false}; // 是否成功读取 info.json
 		std::string motionFile; // 扫描实际命中的动作文件，UTF-8；GUI 不重复探测磁盘
 
@@ -329,6 +331,7 @@ namespace GakuMotion
 					m.sourceVmd = info.StringPath("source_vmd", "");
 					m.sourceMorphVmd = info.StringPath("source_morph_vmd", "");
 					m.sourceCameraVmd = info.StringPath("source_camera_vmd", "");
+					m.timing = ReadPerformanceTiming(info);
 					if (info.Find("has_camera"))
 					{
 						m.hasCamera = m.hasCamera || info.BoolPath("has_camera", false);
@@ -415,8 +418,8 @@ namespace GakuMotion
 		float pollInterval{0.5f}; // 兼容别名（外部可直接改）
 
 		// ---- 播放控制 ----
-		// 播放速度倍率（默认 1.0x）：仅对本地墙钟推进（无音频/音频不可用）生效，
-		// 音频为主时钟时动作与音频同步，倍率无效。解析时夹取到 [0.1, 5.0]。
+		// 全局播放倍速（默认 1.0x），与每个文件的速度相乘。
+		// 音频有效速度非 1 时静音并用本地时钟；配置兼容范围 [0.1, 5.0]。
 		float playbackSpeedMultiplier{1.0f};
 		CameraSettings camera;
 		bool cameraDeclared{false};
@@ -441,21 +444,22 @@ namespace GakuMotion
 		// Opt-in experiment: preserve the Animator graph for native hair/cloth jobs.
 		// Missing keeps the existing runtime setting; default remains legacy mute.
 		int preserveAnimatorForSecondaryPhysics{-1};
-		// Application-level fallback is the default. Native requires the optional
+		// Native is preferred by default. It requires the optional
 		// companion DLL and otherwise uses fallback; no private ABI lives here.
-		int secondaryPhysicsBackend{1}; // 0=off, 1=fallback, 2=native
+		int secondaryPhysicsBackend{2}; // 0=off, 1=fallback, 2=native
 		bool beforeQuartzExperiment{false}; // Explicit opt-in; omission returns to OFF.
 		bool sleeveMuscleDiagnostics{false}; // Bounded read-only native-reader samples.
 		int overridesEnabled{-1}; // 三态
 		int auxMode{-1}; // 三态：辅助骨驱动模式 0=normal 1=silence 2=identity 3=replay
-		int experimentalWaistSupport{-1}; // opt-in Waist_H geometry; missing preserves session state
+		int experimentalWaistSupport{1}; // default-on Waist_H geometry; missing preserves session state
 		std::string overrideGlobalFile; // 可选自定义全局覆盖文件
 		std::string overrideMotionFile; // 可选自定义曲目覆盖文件
 
 		// ---- 面部表情默认基线与动态让位 ----
 		int facialEnableBaseline{-1}; // 三态：-1 未设置(默认开启), 0 关, 1 开
+		int facialMikuMouthFit{-1}; // Missing preserves session; fresh controller/config default is on.
 		float facialBaselineMultiplier{-1.0f}; // 默认 1.0f (基线强度倍率)
-		std::string facialCharacterOverride; // "auto" 或 角色代号(如 "hski", "fktn", "ttmr" 等)
+		std::string facialCharacterOverride{"auto"}; // Legacy field: identity always comes from the bound actor.
 
 		// ---- 一次性命令（由 command.seq 去重） ----
 		bool cmdPlay{false};
@@ -521,10 +525,13 @@ namespace GakuMotion
 				"  \"autoplay\": false,\n"
 				"  \"camera\": {\n"
 				"    \"enabled\": true, \"mode\": 0, \"follow_behavior\": 1, \"follow_actor\": false,\n"
+				"    \"follow_target\": \"hips\", // Follow mode target: hips, chest or head\n"
 				"    \"limit_to_scene\": false,\n"
 				"    \"bounds_min\": [-5, 0.05, -5], \"bounds_max\": [5, 5, 5],\n"
 				"    \"follow_offset\": [0, 0.6, 3], \"target_offset\": [0, 0.4, 0], \"vmd_offset\": [0, 0, 0],\n"
-				"    \"follow_factor\": [1.0, 1.0, 1.0], \"follow_fov\": 45,\n"
+				"    \"follow_factor\": [1.0, 1.0, 1.0], // Captured camera-local displacement fractions\n"
+				"    \"follow_rate\": [0.1, 0.1, 0.1], // 0: hold, 0.1: smooth pursuit, 1: immediate\n"
+				"    \"follow_fov\": 45,\n"
 				"    // 可选分模式镜头位姿：\"transform_track\", \"transform_follow_move\", \"transform_look_at\": {\"pos\": [x,y,z], \"rot\": [rx,ry,rz]}\n"
 				"    \"use_per_mode_transforms\": false\n"
 				"  },\n"
@@ -541,17 +548,17 @@ namespace GakuMotion
 				"  // gkclip 眼骨：按角色实测眼区响应比缩放（#150 §8）；false = raw 1:1 对照\n"
 				"  \"eye_pose_relative_gain\": true,\n"
 				"  // Experimental: keep the native animation graph for hair/cloth; needs device acceptance.\n"
-				"  \"secondary_physics\": { \"backend\": \"fallback\", \"preserve_animator\": false, \"before_quartz_experiment\": false, \"sleeve_muscle_diagnostics\": false },\n"
-				"  \"experimental_waist_support\": { \"enabled\": false },\n"
+				"  \"secondary_physics\": { \"backend\": \"native\", \"preserve_animator\": false, \"before_quartz_experiment\": false, \"sleeve_muscle_diagnostics\": false },\n"
+				"  \"experimental_waist_support\": { \"enabled\": true },\n"
 				"\n"
 				"  // 面部默认表情基线与动态让位（Ducking）：\n"
 				"  //   enable_baseline: 无明确表情时使用角色官方默认；明确开口时让位（默认 true）\n"
 				"  //   baseline_multiplier: 默认表情强度倍率 [0.0, 2.0]（默认 1.0）\n"
-				"  //   character: 角色代号覆盖（\"auto\" 自动识别，或显式指定 \"hski\", \"fktn\", \"ttmr\" 等）\n"
+				"  //   角色身份由实际绑定对象自动识别，旧 character 覆盖字段不再生效。\n"
 				"  \"facial\": {\n"
 				"    \"enable_baseline\": true,\n"
 				"    \"baseline_multiplier\": 1.0,\n"
-				"    \"character\": \"auto\"\n"
+				"    \"miku_mouth_fit\": true\n"
 				"  },\n"
 				"\n"
 				"  // 辅助骨（_Roll_H / _H）驱动模式 —— 实机靶向对照实验\n"
@@ -706,10 +713,26 @@ namespace GakuMotion
 				if (!c->IsObject() || !vec("bounds_min", next.boundsMin) || !vec("bounds_max", next.boundsMax) ||
 					!vec("follow_offset", next.followOffset) || !vec("target_offset", next.targetOffset) ||
 					!vec("vmd_offset", next.vmdOffset) || !vec("vmd_initial_offset", next.vmdOffset) ||
-					!vec("follow_factor", next.followFactor))
+					!vec("follow_factor", next.followFactor) || !vec("follow_rate", next.followRate))
 				{
 					lastError = "camera vectors must contain three finite numbers";
 					return false;
+				}
+				if (const auto* target = c->Find("follow_target"))
+				{
+					if (!target->IsString())
+					{
+						lastError = "camera follow_target must be hips, chest or head";
+						return false;
+					}
+					if (target->stringValue == "hips") next.followTarget = CameraFollowTarget::Hips;
+					else if (target->stringValue == "chest") next.followTarget = CameraFollowTarget::Chest;
+					else if (target->stringValue == "head") next.followTarget = CameraFollowTarget::Head;
+					else
+					{
+						lastError = "camera follow_target must be hips, chest or head";
+						return false;
+					}
 				}
 
 				if (!next.usePerModeTransforms)
@@ -787,11 +810,14 @@ namespace GakuMotion
 					next.boundsMin.z > next.boundsMax.z || !CameraFinite(next.vmdOffset) || !CameraFinite(next.followFactor) ||
 					next.followFactor.x < 0 || next.followFactor.x > 1.0f ||
 					next.followFactor.y < 0 || next.followFactor.y > 1.0f ||
-					next.followFactor.z < 0 || next.followFactor.z > 1.0f || !std::isfinite(next.followFov) ||
+					next.followFactor.z < 0 || next.followFactor.z > 1.0f || !CameraFinite(next.followRate) ||
+					next.followRate.x < 0 || next.followRate.x > 1.0f ||
+					next.followRate.y < 0 || next.followRate.y > 1.0f ||
+					next.followRate.z < 0 || next.followRate.z > 1.0f || !std::isfinite(next.followFov) ||
 					next.followFov < 1 || next.followFov > 179 ||
 					!next.transformTrack.IsValid() || !next.transformFollowMove.IsValid() || !next.transformLookAt.IsValid())
 				{
-					lastError = "invalid camera mode, bounds, follow factor or FOV";
+					lastError = "invalid camera mode, bounds, follow factor, follow rate or FOV";
 					return false;
 				}
 				next.mode = static_cast<CameraMode>(mode);
@@ -868,6 +894,8 @@ namespace GakuMotion
 			// 面部表情默认基线与动态让位
 			if (const jsonlite::Value* facial = root.Find("facial"))
 			{
+				if (const jsonlite::Value* fitted = facial->Find("miku_mouth_fit"))
+					facialMikuMouthFit = fitted->AsBool(false) ? 1 : 0;
 				if (const jsonlite::Value* e = facial->Find("enable_baseline"))
 				{
 					facialEnableBaseline = e->AsBool(true) ? 1 : 0;
@@ -876,7 +904,8 @@ namespace GakuMotion
 				{
 					facialBaselineMultiplier = m->AsFloat(facialBaselineMultiplier);
 				}
-				facialCharacterOverride = facial->StringPath("character", facialCharacterOverride);
+				// Ignore legacy manual identity overrides, including those saved by older UIs.
+				facialCharacterOverride = "auto";
 			}
 
 			// 辅助骨驱动模式（实机靶向对照实验）

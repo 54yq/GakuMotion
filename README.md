@@ -1,4 +1,7 @@
-# GakuMotion
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/branding/gakumotion-wordmark-dark.svg">
+  <img alt="GakuMotion" src="assets/branding/gakumotion-wordmark-light.svg" width="480">
+</picture>
 
 在《学园偶像大师》PC DMM 版中回放 MMD 动作、表情、运镜与音频。
 
@@ -9,9 +12,9 @@ GakuMotion 通过 [GakuLoader](https://github.com/crested-ezios/GakuLoader) 加�
 ## 功能概览
 
 - **动作与表情**：导入 VMD 身体动作、表情和眼动，支持编辑已有曲目的资源。
-- **曲库与播放**：浏览、搜索和刷新曲库；加载静止预览或播放；按时间、采样帧定位及逐帧查看。
+- **曲库与播放**：浏览、搜索、刷新及多文件拖入；加载静止预览或播放；按时间、采样帧定位及逐帧查看，调整全局倍速与每文件速度、秒偏移。
 - **镜头与音频**：导入 VMD 运镜，选择固定、跟随或注视模式，配合 PCM WAV 同步播放。
-- **角色与场景**：调整角色初始位置、骨骼覆盖与表情适配，设置背景和舞台，选择次级物理后端。
+- **角色与场景**：从当前场景选择单个驱动角色，自动识别实际脸型；调整初始位置和骨骼覆盖，设置背景和舞台，选择次级物理后端。
 
 表情、眼动和服装物理的表现受角色、源动作与适配数据影响；实验功能在面板中单独标识。
 

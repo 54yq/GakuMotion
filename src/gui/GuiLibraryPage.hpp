@@ -5,6 +5,7 @@
 // =============================================================================
 
 #include "GuiOverlayCommon.hpp"
+#include "GkGuiIcons.hpp"
 namespace GakuMotion
 {
 	class GuiOverlay;
@@ -168,6 +169,7 @@ namespace GakuMotion
 		std::string editTargetKey;
 
 		char titleInput[256]{};
+		PerformanceTiming timing;
 		std::vector<std::string> motionCandidates;
 		std::vector<std::string> facialCandidates;
 		std::vector<std::string> cameraCandidates;
@@ -202,6 +204,7 @@ namespace GakuMotion
 			isOpen = false;
 			isEditMode = false;
 			editTargetKey.clear();
+			timing = {};
 			titleInput[0] = '\0';
 			motionCandidates.clear();
 			facialCandidates.clear();
@@ -358,6 +361,7 @@ namespace GakuMotion
 			isOpen = true;
 			isEditMode = true;
 			editTargetKey = entry.id;
+			timing = entry.timing;
 			std::snprintf(titleInput, sizeof(titleInput), "%s", entry.title.c_str());
 
 			// 动作槽位：保留当前动作
@@ -404,6 +408,63 @@ namespace GakuMotion
 
 	inline LibraryModalState g_libraryModal;
 
+	inline bool CanAcceptLibraryDrop(const GuiContext& ctx)
+	{
+		return !ctx.importBusy && !ctx.libraryRefreshing && !g_asyncFileDialog.IsBusy() &&
+			!g_libraryModal.isOpen && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
+	}
+
+	inline void OpenLibraryDrop(GuiOverlay& overlay, const std::vector<std::string>& files)
+	{
+		std::vector<std::string> accepted;
+		size_t ignored = 0;
+		for (const auto& file : files)
+		{
+			const std::filesystem::path path(Utf8ToWide(file));
+			std::error_code error;
+			std::string ext = WideToUtf8(path.extension().wstring());
+			for (auto& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+			if (!std::filesystem::is_regular_file(path, error) ||
+				(ext != ".vmd" && ext != ".gkcamera" && ext != ".wav" && ext != ".mp3" &&
+				 ext != ".ogg" && ext != ".flac" && ext != ".m4a")) { ++ignored; continue; }
+			if (std::find(accepted.begin(), accepted.end(), file) == accepted.end()) accepted.push_back(file);
+		}
+		if (accepted.empty())
+		{
+			overlay.libraryUiNotice = "未找到可添加的文件。请拖入 VMD、GKCamera 或 WAV 文件；不支持拖入文件夹。";
+			return;
+		}
+		g_libraryModal.SetupForNew(accepted);
+		overlay.libraryUiNotice = ignored ? "已忽略 " + std::to_string(ignored) + " 个不支持或无法读取的文件。" : "";
+	}
+
+	inline void ReceiveLibraryDrop(GuiOverlay& overlay, const GuiContext& ctx, ImVec2 minimum, ImVec2 maximum)
+	{
+		const auto& service = host::fileDrop;
+		if (!service.setTarget || !service.poll) return;
+		const bool ready = CanAcceptLibraryDrop(ctx) && minimum.x < maximum.x && minimum.y < maximum.y;
+		const GakuFileDropTarget target{GAKU_FILE_DROP_VERSION, sizeof(GakuFileDropTarget),
+			minimum.x, minimum.y, maximum.x, maximum.y};
+		if (service.setTarget(service.context, ready ? &target : nullptr) != GAKU_OK || !ready) return;
+		GakuFileDropResult result{};
+		if (service.poll(service.context, sizeof(result), &result, 0, nullptr) != GAKU_OK || !result.fileCount ||
+			result.fileCount > GAKU_FILE_DROP_MAX_FILES || result.requiredBytes > GAKU_FILE_DROP_MAX_BYTES || !result.requiredBytes) return;
+		std::vector<char> packed(result.requiredBytes);
+		if (service.poll(service.context, sizeof(result), &result, static_cast<uint32_t>(packed.size()), packed.data()) != GAKU_OK ||
+			result.requiredBytes > packed.size() || result.fileCount > GAKU_FILE_DROP_MAX_FILES) return;
+		std::vector<std::string> files;
+		size_t offset = 0;
+		for (uint32_t i = 0; i < result.fileCount; ++i)
+		{
+			const auto end = std::find(packed.begin() + offset, packed.begin() + result.requiredBytes, '\0');
+			if (end == packed.begin() + result.requiredBytes || end == packed.begin() + offset) return;
+			files.emplace_back(packed.data() + offset, static_cast<size_t>(end - (packed.begin() + offset)));
+			offset = static_cast<size_t>(end - packed.begin()) + 1;
+		}
+		if (offset == result.requiredBytes) OpenLibraryDrop(overlay, files);
+		if (g_libraryModal.isOpen) service.setTarget(service.context, nullptr);
+	}
+
 	inline void SyncLibraryEntriesFromMotions(GuiOverlay& overlay, const GuiContext& ctx)
 	{
 		if (!ctx.motions) return;
@@ -423,6 +484,7 @@ namespace GakuMotion
 			e.boneCount = m.boneCount;
 			e.hasAudio = m.hasAudio;
 			e.hasOverrides = m.hasOverrides;
+			e.timing = m.timing;
 
 			e.motionFile = !m.motionFile.empty() ? m.motionFile : (!m.dir.empty() ? m.dir : m.name) + "/motion.gkclip";
 
@@ -451,7 +513,14 @@ namespace GakuMotion
 
 		const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
 		ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-		ImGui::SetNextWindowSize(ImVec2(560, 360), ImGuiCond_Appearing);
+		const auto& style = ImGui::GetStyle();
+		const float typeWidth = (std::max)(100.0f, ImGui::CalcTextSize("动作 (.vmd)").x + 2.0f * style.CellPadding.x);
+		const float speedWidth = (std::max)(115.0f, ImGui::CalcTextSize("播放速度").x + 2.0f * style.CellPadding.x);
+		const float offsetWidth = (std::max)(155.0f, ImGui::CalcTextSize("初始偏移量（秒）").x + 2.0f * style.CellPadding.x);
+		const float tableWidth = (std::max)(850.0f, typeWidth + speedWidth + offsetWidth + 310.0f);
+		const float modalWidth = (std::min)((std::max)(980.0f, tableWidth + 2.0f * style.WindowPadding.x),
+			(std::max)(480.0f, ImGui::GetMainViewport()->WorkSize.x - 32.0f));
+		ImGui::SetNextWindowSize(ImVec2(modalWidth, 440), ImGuiCond_Appearing);
 
 		if (ImGui::BeginPopupModal(g_libraryModal.isEditMode ? "管理曲目##modal" : "添加到曲库##modal",
 		                           &g_libraryModal.isOpen, ImGuiWindowFlags_NoResize))
@@ -474,16 +543,20 @@ namespace GakuMotion
 
 			auto DrawCandidateRow = [&](const char* label, const char* comboId, int& selectedIdx,
 			                            const std::vector<std::string>& candidates,
-			                            int browseSlot, const wchar_t* filter, const char* browseBtnId)
+			                            int browseSlot, const wchar_t* filter, const char* browseBtnId,
+			                            TrackTiming& timing)
 			{
+				ImGui::TableNextRow();
+				ImGui::TableSetColumnIndex(0);
+				ImGui::AlignTextToFramePadding();
 				ImGui::TextUnformatted(label);
-				ImGui::SameLine(115.0f);
+				ImGui::TableSetColumnIndex(1);
 
 				std::string preview = (selectedIdx >= 0 && selectedIdx < static_cast<int>(candidates.size()))
 					? FormatCandidateLabel(candidates[selectedIdx])
 					: ImportSlot::kEmpty;
 
-				ImGui::SetNextItemWidth(330.0f);
+				ImGui::SetNextItemWidth(-1.0f);
 				if (ImGui::BeginCombo(comboId, preview.c_str()))
 				{
 					for (size_t i = 0; i < candidates.size(); ++i)
@@ -499,7 +572,7 @@ namespace GakuMotion
 					ImGui::EndCombo();
 				}
 
-				ImGui::SameLine();
+				ImGui::TableSetColumnIndex(2);
 				ImGui::BeginDisabled(g_asyncFileDialog.IsBusy());
 				if (ImGui::Button(browseBtnId, ImVec2(55, 0)))
 				{
@@ -507,6 +580,19 @@ namespace GakuMotion
 				}
 				ImGui::EndDisabled();
 				if (ImGui::IsItemHovered()) ImGui::SetTooltip("浏览并指定文件");
+
+				ImGui::PushID(comboId);
+				ImGui::TableSetColumnIndex(3);
+				ImGui::SetNextItemWidth(-1.0f);
+				if (ImGui::InputFloat("##track_speed", &timing.speed, 0.1f, 1.0f, "%.2f"))
+					timing.speed = std::isfinite(timing.speed) ? (std::max)(0.0f, timing.speed) : 1.0f;
+				if (ImGui::IsItemHovered()) ImGui::SetTooltip("最低为 0；0 停止该轨道的时间推进。与播放栏倍速相乘。");
+				ImGui::TableSetColumnIndex(4);
+				ImGui::SetNextItemWidth(-1.0f);
+				if (ImGui::InputFloat("##track_offset", &timing.offsetSeconds, 0.1f, 1.0f, "%.3f"))
+					if (!std::isfinite(timing.offsetSeconds)) timing.offsetSeconds = 0.0f;
+				if (ImGui::IsItemHovered()) ImGui::SetTooltip("正数后移，负数前移；单位为秒。");
+				ImGui::PopID();
 			};
 
 			ImGui::Spacing();
@@ -528,17 +614,27 @@ namespace GakuMotion
 			}
 
 			ImGui::Spacing();
-			DrawCandidateRow("动作 (.vmd)", "##sel_motion", g_libraryModal.motionSelection,
-			                 g_libraryModal.motionCandidates, 0, kMotionFilter, "浏览##b_mot");
-
-			DrawCandidateRow("表情 (.vmd)", "##sel_facial", g_libraryModal.facialSelection,
-			                 g_libraryModal.facialCandidates, 1, kFacialFilter, "浏览##b_fac");
-
-			DrawCandidateRow("镜头", "##sel_camera", g_libraryModal.cameraSelection,
-			                 g_libraryModal.cameraCandidates, 2, kCameraFilter, "浏览##b_cam");
-
-			DrawCandidateRow("音乐 (音频)", "##sel_audio", g_libraryModal.audioSelection,
-			                 g_libraryModal.audioCandidates, 3, kAudioFilter, "浏览##b_aud");
+			if (ImGui::BeginTable("##library_file_timing", 5, ImGuiTableFlags_ScrollX | ImGuiTableFlags_BordersInnerV,
+				ImVec2(0, 5.0f * (ImGui::GetFrameHeight() + 2.0f * style.CellPadding.y) + style.ScrollbarSize),
+				(std::max)(tableWidth, ImGui::GetContentRegionAvail().x)))
+			{
+				ImGui::TableSetupColumn("类型", ImGuiTableColumnFlags_WidthFixed, typeWidth);
+				ImGui::TableSetupColumn("文件", ImGuiTableColumnFlags_WidthStretch);
+				ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 60.0f);
+				ImGui::TableSetupColumn("播放速度", ImGuiTableColumnFlags_WidthFixed, speedWidth);
+				ImGui::TableSetupColumn("初始偏移量（秒）", ImGuiTableColumnFlags_WidthFixed, offsetWidth);
+				ImGui::TableHeadersRow();
+				DrawCandidateRow("动作 (.vmd)", "##sel_motion", g_libraryModal.motionSelection,
+					g_libraryModal.motionCandidates, 0, kMotionFilter, "浏览##b_mot", g_libraryModal.timing.motion);
+				DrawCandidateRow("表情 (.vmd)", "##sel_facial", g_libraryModal.facialSelection,
+					g_libraryModal.facialCandidates, 1, kFacialFilter, "浏览##b_fac", g_libraryModal.timing.facial);
+				DrawCandidateRow("镜头", "##sel_camera", g_libraryModal.cameraSelection,
+					g_libraryModal.cameraCandidates, 2, kCameraFilter, "浏览##b_cam", g_libraryModal.timing.camera);
+				DrawCandidateRow("音乐 (音频)", "##sel_audio", g_libraryModal.audioSelection,
+					g_libraryModal.audioCandidates, 3, kAudioFilter, "浏览##b_aud", g_libraryModal.timing.audio);
+				ImGui::EndTable();
+			}
+			ImGui::TextDisabled("速度与播放栏倍速相乘；偏移正数后移，负数前移。");
 
 			if (g_libraryModal.unsupportedAudio > 0)
 			{
@@ -696,6 +792,7 @@ namespace GakuMotion
 				MotionImportRequest req{};
 				req.title = g_libraryModal.titleInput[0] ? g_libraryModal.titleInput : "未命名演出";
 				req.fps = 0.0f;
+				req.timing = g_libraryModal.timing;
 
 				if (g_libraryModal.isEditMode)
 				{
@@ -901,20 +998,18 @@ namespace GakuMotion
 		}
 
 		// ---- 顶部操作栏：空间不足时换行，保持刷新与管理入口可见 ----
-		auto ContinueToolbar = [](float nextWidth) {
-			const float right = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
-			if (ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x + nextWidth <= right)
-				ImGui::SameLine();
+		auto ContinueToolbar = [](const char* nextLabel, float minimumWidth = 0.0f) {
+			GuiIcons::SameLineIfRoom(nextLabel, ImVec2(minimumWidth, 26));
 		};
 		ImGui::BeginDisabled(ctx.libraryRefreshing || ctx.importBusy || !ctx.fnRefreshMotions);
-		if (ImGui::Button(ctx.libraryRefreshing ? "正在刷新..." : "刷新曲库", ImVec2(100, 26)))
+		if (GuiIcons::Button(ctx.libraryRefreshing ? "正在刷新..." : "刷新曲库", GuiIcons::Icon::Refresh, ImVec2(100, 26)))
 		{
 			if (ctx.fnRefreshMotions && ctx.fnRefreshMotions(ctx.self)) overlay.libraryUiNotice.clear();
 		}
 		ImGui::EndDisabled();
 		if (ImGui::IsItemHovered()) ImGui::SetTooltip("重新扫描外部新增、删除和修改的曲目；不重新加载当前表演");
-		ContinueToolbar(140);
-		if (ImGui::Button("打开曲库文件夹", ImVec2(140, 26)))
+		ContinueToolbar("打开曲库文件夹", 140);
+		if (GuiIcons::Button("打开曲库文件夹", GuiIcons::Icon::Folder, ImVec2(140, 26)))
 		{
 			const auto folder = Utf8ToWide(overlay.motionsRoot);
 			const auto result = reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
@@ -922,9 +1017,9 @@ namespace GakuMotion
 		}
 		if (ctx.fnReloadMotion)
 		{
-			ContinueToolbar(160);
+			ContinueToolbar("重新加载当前曲目", 160);
 			ImGui::BeginDisabled(ctx.loadedMotionKey.empty() || ctx.loadedSourceMissing || ctx.importBusy || ctx.libraryRefreshing);
-			if (ImGui::Button("重新加载当前曲目", ImVec2(160, 26))) ctx.fnReloadMotion(ctx.self);
+			if (GuiIcons::Button("重新加载当前曲目", GuiIcons::Icon::Refresh, ImVec2(160, 26))) ctx.fnReloadMotion(ctx.self);
 			ImGui::EndDisabled();
 			if (ImGui::IsItemHovered()) ImGui::SetTooltip("载入当前曲目的磁盘更新；保留时间并暂停，点击继续后播放");
 		}
@@ -944,7 +1039,7 @@ namespace GakuMotion
 		ImGui::Spacing();
 
 		ImGui::BeginDisabled(g_asyncFileDialog.IsBusy() || ctx.importBusy);
-		if (ImGui::Button("+ 添加到曲库", ImVec2(100, 26)))
+		if (GuiIcons::Button("添加到曲库", GuiIcons::Icon::Add, ImVec2(100, 26)))
 		{
 			g_asyncFileDialog.Open(true, kAllImportFilter, -1);
 		}
@@ -952,13 +1047,13 @@ namespace GakuMotion
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("选择 .vmd 动作/表情/镜头或音频文件添加到曲库");
 
-		ContinueToolbar(85);
+		ContinueToolbar("管理选中", 85);
 
 		const bool hasSelection = (overlay.selectedLibraryIndex >= 0 &&
 		                           overlay.selectedLibraryIndex < static_cast<int>(overlay.libraryEntries.size()));
 
 		ImGui::BeginDisabled(!hasSelection || ctx.importBusy || ctx.libraryRefreshing);
-		if (ImGui::Button("管理选中", ImVec2(85, 26)))
+		if (GuiIcons::Button("管理选中", GuiIcons::Icon::Edit, ImVec2(85, 26)))
 		{
 			if (hasSelection)
 			{
@@ -967,25 +1062,25 @@ namespace GakuMotion
 		}
 		if (ImGui::IsItemHovered()) ImGui::SetTooltip("修改选中的曲目配置与文件映射");
 
-		ContinueToolbar(120);
-		if (ImGui::Button("从列表移除", ImVec2(120, 26)) && hasSelection)
+		ContinueToolbar("从列表移除", 120);
+		if (GuiIcons::Button("从列表移除", GuiIcons::Icon::Undo, ImVec2(120, 26)) && hasSelection)
 		{
 			const auto& entry = overlay.libraryEntries[overlay.selectedLibraryIndex];
 			overlay.PlaylistAction(ctx, GuiPlaylistAction::Remove, entry.id.c_str());
 		}
 		if (ImGui::IsItemHovered()) ImGui::SetTooltip("隐藏列表条目，保留全部本地文件；可用“恢复已移除曲目”找回");
-		ContinueToolbar(120);
+		ContinueToolbar("删除本地文件", 120);
 		ImGui::BeginDisabled(!ctx.fnPlaylistAction);
-		if (ImGui::Button("删除本地文件", ImVec2(120, 26)) && hasSelection)
+		if (GuiIcons::Button("删除本地文件", GuiIcons::Icon::Trash, ImVec2(120, 26)) && hasSelection)
 			overlay.RequestMotionDelete(ctx, overlay.libraryEntries[overlay.selectedLibraryIndex].id.c_str());
 		if (ImGui::IsItemHovered()) ImGui::SetTooltip("确认后将整个曲目目录移入可恢复区，文件不会永久删除");
 		ImGui::EndDisabled();
 		ImGui::EndDisabled();
-		ContinueToolbar(140);
+		ContinueToolbar("恢复已移除曲目", 140);
 		ImGui::BeginDisabled(ctx.importBusy || ctx.libraryRefreshing || !ctx.fnPlaylistAction);
-		if (ImGui::Button("恢复已移除曲目", ImVec2(140, 26))) overlay.PlaylistAction(ctx, GuiPlaylistAction::Restore);
-		ContinueToolbar(140);
-		if (ImGui::Button("恢复最近删除", ImVec2(140, 26))) overlay.PlaylistAction(ctx, GuiPlaylistAction::RestoreDeleted);
+		if (GuiIcons::Button("恢复已移除曲目", GuiIcons::Icon::Undo, ImVec2(140, 26))) overlay.PlaylistAction(ctx, GuiPlaylistAction::Restore);
+		ContinueToolbar("恢复最近删除", 140);
+		if (GuiIcons::Button("恢复最近删除", GuiIcons::Icon::Undo, ImVec2(140, 26))) overlay.PlaylistAction(ctx, GuiPlaylistAction::RestoreDeleted);
 		ImGui::EndDisabled();
 		overlay.DrawMotionDeleteConfirmation(ctx);
 
@@ -995,7 +1090,7 @@ namespace GakuMotion
 			ImGui::SetTooltip("输入关键字过滤曲库列表");
 		if (overlay.libraryFilter.IsActive())
 		{
-			ContinueToolbar(55);
+			ContinueToolbar("清空", 55);
 			if (ImGui::Button("清空")) overlay.libraryFilter.Clear();
 		}
 		if (hasSelection)
@@ -1003,9 +1098,9 @@ namespace GakuMotion
 			const auto& selected = overlay.libraryEntries[overlay.selectedLibraryIndex];
 			ImGui::TextWrapped("选中：%s", selected.title.c_str());
 			ImGui::BeginDisabled(ctx.importBusy || ctx.libraryRefreshing || !ctx.fnSelectMotion);
-			if (ImGui::Button("加载预览")) ctx.fnSelectMotion(ctx.self, overlay.selectedLibraryIndex, false);
-			ContinueToolbar(85);
-			if (ImGui::Button("播放选中")) ctx.fnSelectMotion(ctx.self, overlay.selectedLibraryIndex, true);
+			if (GuiIcons::Button("加载预览", GuiIcons::Icon::Preview)) ctx.fnSelectMotion(ctx.self, overlay.selectedLibraryIndex, false);
+			ContinueToolbar("播放选中", 85);
+			if (GuiIcons::Button("播放选中", GuiIcons::Icon::Play)) ctx.fnSelectMotion(ctx.self, overlay.selectedLibraryIndex, true);
 			ImGui::EndDisabled();
 		}
 
@@ -1028,10 +1123,12 @@ namespace GakuMotion
 				visibleIndices.push_back(static_cast<int>(i));
 		}
 		ImGui::TextDisabled("显示 %zu / %zu 个曲目", visibleIndices.size(), overlay.libraryEntries.size());
+		if (host::fileDrop.setTarget) ImGui::TextDisabled("将多个 VMD / GKCamera / WAV 文件拖入下方列表，添加到曲库");
 		if (overlay.libraryEntries.empty()) ImGui::TextWrapped("曲库为空。添加动作，或将动作文件夹放入曲库后点击“刷新曲库”。");
 		else if (visibleIndices.empty()) ImGui::TextWrapped("没有匹配的曲目，可清空搜索后查看全部曲目。");
 
 		const float tableHeight = ImGui::GetContentRegionAvail().y - 8.0f;
+		ImVec2 dropMinimum{}, dropMaximum{};
 		if (ImGui::BeginTable("##gkmotion_library_table", 4, tableFlags, ImVec2(0.0f, (std::max)(100.0f, tableHeight))))
 		{
 			ImGui::TableSetupColumn("状态", ImGuiTableColumnFlags_WidthFixed, 42.0f);
@@ -1137,7 +1234,16 @@ namespace GakuMotion
 			}
 			clipper.End();
 			ImGui::EndTable();
+			dropMinimum = ImGui::GetItemRectMin();
+			dropMaximum = ImGui::GetItemRectMax();
+			const ImVec2 clipMin = ImGui::GetWindowDrawList()->GetClipRectMin();
+			const ImVec2 clipMax = ImGui::GetWindowDrawList()->GetClipRectMax();
+			dropMinimum.x = (std::max)(dropMinimum.x, clipMin.x);
+			dropMinimum.y = (std::max)(dropMinimum.y, clipMin.y);
+			dropMaximum.x = (std::min)(dropMaximum.x, clipMax.x);
+			dropMaximum.y = (std::min)(dropMaximum.y, clipMax.y);
 		}
+		ReceiveLibraryDrop(overlay, ctx, dropMinimum, dropMaximum);
 
 		// 模态弹窗与导入动画渲染
 		DrawAddEditModal(overlay, ctx);

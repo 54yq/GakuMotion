@@ -8,24 +8,27 @@ namespace GakuMotion
 {
 	inline void GuiOverlay::DrawGazeTab(const GuiContext& ctx)
 	{
+		ImGui::TextUnformatted("实验：视线");
 		if (!ctx.lookAt)
 		{
 			ImGui::TextDisabled("视线管理器尚未就绪");
 			return;
 		}
 		LookAtManager& lookAt = *ctx.lookAt;
-
-		if (lookAt.IsVRifyLiveGazeActive())
-		{
-			ImGui::TextColored(GuiTheme::SuccessColor(),
-			                   "● VR 模式：由 VRify LiveGaze 统一接管视线");
-		}
+		const bool runtimeAvailable = lookAt.fnSetTarget && lookAt.fnSetWeights && lookAt.fnSetEnabled;
+		if (!runtimeAvailable)
+			ImGui::TextWrapped("当前构建尚未接入视线控制器，以下设置暂不生效；此功能尚未完成实机验收。");
 		else
+			ImGui::TextWrapped("视线控制器接口已连接，实际效果尚待实机验收。");
+
+		if (!lookAt.fnQueryVRifyGaze)
+			ImGui::TextDisabled("当前宿主未提供 VRify 视线状态查询。");
+		else if (lookAt.IsVRifyLiveGazeActive())
 		{
-			ImGui::TextColored(GuiTheme::InfoColor(),
-			                   "● 桌面模式：GakuMotion 独立对视");
+			ImGui::TextColored(GuiTheme::InfoColor(), "VRify LiveGaze 状态：已开启");
 		}
 		ImGui::Separator();
+		ImGui::BeginDisabled(!runtimeAvailable);
 
 		int mode = static_cast<int>(lookAt.gazeMode.load());
 		bool changed = false;
@@ -92,6 +95,7 @@ namespace GakuMotion
 			lookAt.bodyWeight.store(body);
 			if (ctx.config) ctx.config->bodyWeight = body;
 		}
+		ImGui::EndDisabled();
 	}
 } // namespace GakuMotion
 #endif

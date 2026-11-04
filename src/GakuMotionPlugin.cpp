@@ -476,6 +476,21 @@ namespace
 		return "";
 	}
 
+	std::string HelperGetFaceModelName(void* model)
+	{
+		// VLActorFaceModel is an existing Component. Use the same confirmed
+		// Unity Component/Object methods as actor naming, without new hooks.
+		if (!model || !g_getGameObjectNative || !g_getNameNative || !g_componentKlass ||
+			!g_faceRuntime.objectClass || !g_faceRuntime.parentClass) return "";
+		bool component = false;
+		void* klass = g_faceRuntime.objectClass(model);
+		for (int depth = 0; klass && depth < 64; ++depth, klass = g_faceRuntime.parentClass(klass))
+			if (klass == g_componentKlass) { component = true; break; }
+		if (!component) return "";
+		void* go = g_getGameObjectNative(model, nullptr);
+		return go ? Il2CppStringToUtf8(g_getNameNative(go)) : "";
+	}
+
 	void ProbeTransformHierarchy(void* rootTransform, const char* label, int depth = 0, int maxDepth = 3)
 	{
 		if (!rootTransform || depth > maxDepth) return;
@@ -1963,6 +1978,13 @@ void MotionRuntimeReady(void*)
 			HelperGetFacial, HelperReadBlink, HelperWriteBlink, HelperRefreshHighlight,
 			HelperBeginFaceBinding, HelperGetActorName
 		};
+		ctrl.faceApi.getModelName = HelperGetFaceModelName;
+		ctrl.faceApi.reportMikuMouthFit = [](const char* decision, const char* faceName)
+		{
+			if (g_hostContext.logInfo) g_hostContext.logInfo(
+				"[GakuMotion][MikuMouthFit] decision=%s actual_face=%s (prefab identity; asset bytes not runtime-verified)",
+				decision, faceName);
+		};
 		if (g_hostContext.logInfo)
 			g_hostContext.logInfo(
 				"[GakuMotion][Face] Named blendshapes use native percentage weights; blink metadata=%d highlight invoke=%d",
@@ -2011,6 +2033,19 @@ void MotionRuntimeReady(void*)
 	ctrl.fnGetChildCount = HelperGetChildCount;
 	ctrl.fnGetChild = HelperGetChild;
 	ctrl.fnGetTransformName = HelperGetTransformName;
+	GakuMotion::Core::Instance().fnBeforeTargetChange = []
+	{
+		auto& controller = GakuMotion::Core::Instance().player.controller;
+		const bool fallbackClean = g_fallbackPhysics.RestoreForCapture(controller);
+		const bool bridgeClean = g_burstBridge.ClearForCapture();
+		if (g_capturePhysicsUnconfirmed || !fallbackClean || !bridgeClean)
+		{
+			g_capturePhysicsUnconfirmed = true;
+			return false; // Preserve failed ownership snapshots for the capture gate.
+		}
+		ClearSecondaryPhysics();
+		return true;
+	};
 	ctrl.fnLogInfo = g_hostContext.logInfo;
 	ctrl.fnLogWarn = g_hostContext.logWarn;
 
@@ -2211,6 +2246,80 @@ static bool EnsureRuntimeReadyForActor(void* activeActor, void (*initialize)(voi
 	return g_runtimeReady.load(std::memory_order_acquire);
 }
 
+// Reuse the exact typed Unity finder already validated for the scene bridge.
+// Search only an admitted owner scene, at most four times per second unless a
+// scene boundary or a target-selection command requires a fresh admission check.
+// No callbacks, managed pointers or speculative metadata are exposed to ImGui.
+static bool RefreshSceneActors(GakuMotion::Core& core, bool force = false)
+{
+	static auto lastScan = std::chrono::steady_clock::time_point{};
+	const auto now = std::chrono::steady_clock::now();
+	if (!core.InjectionAllowed() || !g_sceneOwner.Valid() || g_currentSceneHandle != g_sceneOwner.sceneHandle)
+		return false;
+	if (!force && !core.HasPendingTargetSelection() && now - lastScan < std::chrono::milliseconds(250)) return true;
+	lastScan = now;
+	auto unavailable = [&]
+	{
+		// A failed fresh check must not admit a command through yesterday's token.
+		if (core.PublishSceneActors({}))
+		{
+			ClearSecondaryPhysics(true);
+			HelperClearActorAnimatorCache();
+			NativeAudio::Release(GakuMotion::bgm::ReleaseReason::SceneLost);
+		}
+		return false;
+	};
+	if (!StageLoader::findAll || !StageLoader::componentGo || !StageLoader::goScene || !StageLoader::instanceId ||
+		!StageLoader::arrayLength || !StageLoader::newHandle || !StageLoader::freeHandle ||
+		(!StageLoader::actorTypes[0] && !StageLoader::actorTypes[1])) return unavailable();
+	std::vector<GakuMotion::SceneActorObservation> observations;
+	for (void* actorType : StageLoader::actorTypes)
+	{
+		if (!actorType) continue;
+		bool includeInactive = false;
+		void* args[]{actorType, &includeInactive};
+		void* array = StageLoader::Invoke(StageLoader::findAll, nullptr, args);
+		if (!array) return unavailable();
+		StageLoader::Handle pin = StageLoader::newHandle(array, false);
+		if (!pin) return unavailable();
+		struct Release { StageLoader::Handle value; ~Release() { StageLoader::freeHandle(value); } } release{pin};
+		const uintptr_t count = StageLoader::arrayLength(array);
+		if (count > 4096) return unavailable();
+		void** items = reinterpret_cast<void**>(static_cast<char*>(array) + 32);
+		for (uintptr_t i = 0; i < count; ++i)
+		{
+			void* actor = items[i];
+			if (!actor || std::any_of(observations.begin(), observations.end(), [&](const auto& item) { return item.actor == actor; })) continue;
+			void* go = StageLoader::Invoke(StageLoader::componentGo, actor);
+			if (!go || StageLoader::SceneOfFreshGo(go) != g_sceneOwner.sceneHandle) continue;
+			const int id = StageLoader::ReadInt(StageLoader::instanceId, actor);
+			if (!id) continue;
+			// Prefer the loaded face identity, including a replacement's actual face.
+			void* face = HelperGetFaceModel(actor);
+			std::string character = GakuMotion::DetectIdolCharacterCode(face ? HelperGetFaceModelName(face) : "");
+			if (character.empty()) character = GakuMotion::DetectIdolCharacterCode(HelperGetActorName(actor));
+			observations.push_back({actor, id, std::move(character)});
+		}
+	}
+	const bool hadActors = !core.sceneActorRegistry.Entries().empty();
+	const auto oldEpoch = core.sceneActorRegistry.Epoch();
+	if (core.PublishSceneActors(observations))
+	{
+		ClearSecondaryPhysics(true);
+		HelperClearActorAnimatorCache();
+		NativeAudio::Release(GakuMotion::bgm::ReleaseReason::SceneLost);
+		core.PickBoundActorAsTarget(); // Old physics has been abandoned; bind only a fresh actor.
+	}
+	if (hadActors && oldEpoch != core.sceneActorRegistry.Epoch())
+	{
+		void* current = observations.empty() ? nullptr : observations.front().actor;
+		if (current) StageLoader::BindContext(g_sceneOwner.sceneHandle, current);
+		if (!core.stageManager.OnActorSetChanged(current))
+			ProtectedCaptureFault("stage restoration failed during actor replacement");
+	}
+	return true;
+}
+
 void MotionActorTick(void*, void* activeActor, float deltaTime)
 {
 	if (!EnsureRuntimeReadyForActor(activeActor, MotionRuntimeReady)) return;
@@ -2327,19 +2436,14 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 				sceneHandle, name.c_str(), g_motionSceneAllowed ? "allowed" : "blocked");
 	}
 
-	// 活跃角色实例变更检测（场景切换、重入或更换角色）
-	// -----------------------------------------------------------------------
-	// 修复：宿主在多角色场景下每帧对所有 actor 依次调用本函数（A→B→C→A→B→C…）。
-	// 原单变量 s_lastActiveActor 会把帧内的正常轮换误判为"角色切换"，导致每帧
-	// 触发多次 OnActorChanged（刷屏 + 反复清空 animator 缓存）。
-	//
-	// 新方案：保留上一帧和当前帧的角色集合；离场后再回来的主页角色也必须重新识别。
-	//   • 新加入角色可以结束旧播放会话，而不能继承旧骨骼/Animator 引用。
-	//   • 帧内同一 actor 再次到来属于正常多 actor 轮询，静默跳过。
-	//   • Unity 场景 handle 变更时立即丢弃旧绑定。
-	// -----------------------------------------------------------------------
+	// All actors share one physical playback clock. Target identity and roster
+	// lifetimes are managed by the fresh typed snapshot below, not callback order.
 	static auto s_lastPhysicalFrameTime = std::chrono::steady_clock::now();
 	static int s_lastUnityFrame = -1, s_fallbackFrame = 0;
+	// The camera target may be a later actor in this frame. Cache its unscaled
+	// wall-clock delta independently of the existing playback/physics delta.
+	static float s_cameraFrameDelta = 0.0333f;
+	static uint64_t s_cameraPhysicalFrame = 0;
 	auto now = std::chrono::steady_clock::now();
 	const float elapsedMs = std::chrono::duration<float, std::milli>(now - s_lastPhysicalFrameTime).count();
 	const int unityFrame = g_faceUnityFrame ? g_faceUnityFrame() : -1;
@@ -2351,55 +2455,17 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 		++s_fallbackFrame;
 		s_lastPhysicalFrameTime = now;
 		realDeltaTime = elapsedMs > 100.0f ? 0.0333f : elapsedMs / 1000.0f;
+		s_cameraFrameDelta = s_cameraPhysicalFrame == 0 ? 0.0333f :
+			(std::max)(0.0f, elapsedMs / 1000.0f);
+		// Zero is reserved by CameraController for callers without a frame ID.
+		if (++s_cameraPhysicalFrame == 0) ++s_cameraPhysicalFrame;
 	}
-	static GakuMotion::ActorFrameTracker actors;
-	if (sceneChanged) actors.Reset();
-	const bool actorArrived = actors.Note(unityFrame >= 0 ? unityFrame : s_fallbackFrame, activeActor);
-	if (isNewPhysicalFrame)
-	{
-		auto& listed = core.sceneActors;
-		listed.erase(std::remove_if(listed.begin(), listed.end(),
-		                            [&](void* actor) { return !actors.Contains(actor); }), listed.end());
-	}
-	if (actorArrived)
-	{
-		// Also invalidate scene candidates when no MMD bindings have ever existed.
-		StageLoader::BindContext(sceneHandle, activeActor);
-		if (!sceneChanged && !core.stageManager.OnActorSetChanged(activeActor))
-			ProtectedCaptureFault("stage restoration failed during actor replacement");
-		// A new costume/home actor can appear without changing the OutGame
-		// scene handle. An existing playback session must not transfer to it.
-		if (core.DiscardPreviousActorBindings())
-		{
-			ClearSecondaryPhysics();
-			HelperClearActorAnimatorCache();
-			if (g_hostContext.logInfo)
-				g_hostContext.logInfo(
-					"[GakuMotion][Scene] actor set changed; custom playback stopped and bindings discarded");
-		}
-		// 首次见到该 actor：真正的新角色（首帧载入或场景切换后新出现）
-		//
-		// 2026-10-07: this used to fire for EVERY actor in the scene, and
-		// OnActorChanged() calls bindings.clear(). With four characters the
-		// host cycles hski -> jsna -> hume -> ttmr every frame, so each one
-		// wiped the previous one's binding before it could be used: the pose
-		// was rebound 4x per frame, and PROBE blocks from different characters
-		// interleaved indistinguishably.
-		//
-		// Only the target actor may disturb the binding cache. A non-target
-		// actor is still tracked (so the GUI can list it) but is left alone.
-		if (g_hostContext.logInfo)
-		{
-			g_hostContext.logInfo("[GakuMotion] New actor detected: %p%s",
-			                      activeActor,
-			                      core.IsTargetActor(activeActor) ? "" : "  [not the target: left untouched]");
-		}
-		core.NoteActor(activeActor); // 让 GUI 能列出并选择目标
-		if (core.IsTargetActor(activeActor))
-		{
-			core.OnActorChanged(activeActor);
-		}
-	}
+	// Without Unity's frame counter, the first callbacks can precede the 2ms
+	// fallback boundary. They still share a nonzero camera deduplication ID.
+	if (s_cameraPhysicalFrame == 0) s_cameraPhysicalFrame = 1;
+	// Fresh typed snapshots remove disabled/destroyed actors even when no actor
+	// callback remains. Never retain an accumulating list of seen scene actors.
+	RefreshSceneActors(core, sceneChanged);
 	StageLoader::BindContext(sceneHandle, activeActor);
 	if (isNewPhysicalFrame) core.ProcessPendingGuiCommands();
 	void* anim = g_motionSceneAllowed && player.state != GakuMotion::PlaybackState::Stopped
@@ -2636,7 +2702,9 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	const auto bodyBegin = std::chrono::steady_clock::now();
 	const uint64_t poseSerialBefore = player.controller.footPoseWriteStamp.serial;
 	EyeGazeProbe::Before(activeActor);
-	GakuMotion::OnLateUpdate(activeActor, anim, nullptr, dtToPass, isNewPhysicalFrame);
+	if (player.controller.targetActor)
+		GakuMotion::OnLateUpdate(activeActor, anim, nullptr, dtToPass, isNewPhysicalFrame,
+		                        s_cameraFrameDelta, s_cameraPhysicalFrame);
 	EyeGazeProbe::After(activeActor);
 	NativeAudio::Sync();
 	if (isNewPhysicalFrame)
@@ -3009,6 +3077,9 @@ void MotionTick(void*, float)
 		ResolveDeferredManagedTypes();
 		StageLoader::ResolveDeferredTypeObjects();
 		RefreshProtectedContext();
+		auto& core = GakuMotion::Core::Instance();
+		std::lock_guard<std::recursive_mutex> lock(core.stateMutex);
+		RefreshSceneActors(core);
 	}
 }
 

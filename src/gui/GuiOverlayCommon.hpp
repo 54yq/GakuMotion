@@ -1,4 +1,6 @@
 #pragma once
+#include "../GkCharacterNames.hpp"
+#include "../GkTrackTiming.hpp"
 
 // =============================================================================
 // GuiOverlayCommon.hpp — GakuMotion UI 共享定义与辅助工具
@@ -64,53 +66,13 @@ namespace GakuMotion
 		bool hasCamera{false};
 		bool hasFacial{false};
 		bool hasOverrides{false};
+		PerformanceTiming timing;
 
 		bool HasMotion() const { return !motionFile.empty(); }
 		bool HasFacial() const { return !facialFile.empty() || hasFacial; }
 		bool HasCamera() const { return !cameraFile.empty() || hasCamera; }
 		bool HasAudio() const  { return !audioFile.empty() || hasAudio; }
 	};
-
-	// -----------------------------------------------------------------------------
-	// 偶像中文字符串查表
-	// -----------------------------------------------------------------------------
-	inline const char* LookupIdolChineseName(const char* code)
-	{
-		if (!code || !code[0]) return nullptr;
-		std::string s = code;
-		for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-
-		if (s == "hski") return "花海咲季";
-		if (s == "ttmr") return "月村手毬";
-		if (s == "krnh") return "有栖川凛花";
-		if (s == "fktn") return "藤田琴音";
-		if (s == "atbm") return "有村麻央";
-		if (s == "kcna") return "仓本千奈";
-		if (s == "shro") return "篠泽广";
-		if (s == "ssmk") return "紫云清夏";
-		if (s == "kllj") return "葛城莉莉娅";
-		if (s == "hume") return "花海佑芽";
-		if (s == "hmsz") return "姬崎莉波";
-		if (s == "jsna") return "十王星南";
-		if (s == "hrnm") return "秦谷美铃";
-		if (s == "amao") return "雨夜燕";
-		if (s == "nasr") return "根绪亚纱里";
-		return nullptr;
-	}
-
-	inline std::string FormatIdolDisplayName(const char* code)
-	{
-		if (!code || !code[0] || std::strcmp(code, "auto") == 0)
-			return "当前角色";
-		const char* cn = LookupIdolChineseName(code);
-		if (cn)
-		{
-			char buf[128];
-			std::snprintf(buf, sizeof(buf), "%s (%s)", cn, code);
-			return std::string(buf);
-		}
-		return std::string(code);
-	}
 
 	// -----------------------------------------------------------------------------
 	// 时间格式化 (mm:ss)

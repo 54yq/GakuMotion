@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>GakuMotion.EditTrackTests</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../GakuMotion.VmdImporter.Native/GakuMotion.VmdImporter.Native.csproj" />
+    <Compile Include="../TimebaseTests/Fixtures.cs" Link="Fixtures.cs" />
+  </ItemGroup>
+</Project>

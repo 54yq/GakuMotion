@@ -44,6 +44,8 @@ namespace GakuMotion
 			            (ctx.cameraFrames - 1) / ctx.cameraFps);
 		if (!ctx.cameraSnapshot.error.empty())
 			ImGui::TextColored(GuiTheme::ErrorColor(), "轨道错误: %s", ctx.cameraSnapshot.error.c_str());
+		if (!ctx.cameraSnapshot.followTargetError.empty())
+			ImGui::TextColored(GuiTheme::ErrorColor(), "跟随目标错误: %s", ctx.cameraSnapshot.followTargetError.c_str());
 		ImGui::Separator();
 		bool changed = ImGui::Checkbox("启用 MMD 镜头接管", &settings.enabled);
 		int mode = static_cast<int>(settings.mode);
@@ -61,6 +63,15 @@ namespace GakuMotion
 		changed |= ImGui::Checkbox("运镜 / 固定镜头随角色平移", &settings.followActor);
 		ImGui::EndDisabled();
 		changed |= ImGui::Checkbox("镜头限定在场景范围内", &settings.limitToScene);
+		if (settings.mode == CameraMode::Follow)
+		{
+			int target = static_cast<int>(settings.followTarget);
+			if (ImGui::Combo("跟随部位", &target, "髋部\0胸部\0头部\0"))
+			{
+				settings.followTarget = static_cast<CameraFollowTarget>(target);
+				changed = true;
+			}
+		}
 
 		ImGui::Spacing();
 		static const char* const shadowModes[] = {
@@ -110,10 +121,19 @@ namespace GakuMotion
 		float offset[] = {settings.followOffset.x, settings.followOffset.y, settings.followOffset.z};
 		float target[] = {settings.targetOffset.x, settings.targetOffset.y, settings.targetOffset.z};
 		changed |= ImGui::InputFloat3("跟随位置偏移（角色坐标）", offset);
-		changed |= ImGui::InputFloat3("注视目标偏移（角色坐标）", target);
+		changed |= ImGui::InputFloat3("注视目标偏移（相对所选部位，角色坐标）", target);
 		ImGui::EndDisabled();
-		ImGui::TextDisabled("按接管时的镜头本地 X/Y/Z 缩放髋部位移：0 不跟随，0.5 跟一半，1 完整跟随。");
-		const char* factorLabels[] = {"跟随幅度 X（镜头本地）", "跟随幅度 Y（镜头本地）", "跟随幅度 Z（镜头本地）"};
+		ImGui::TextUnformatted("追随速率 (Target Rate)");
+		ImGui::TextWrapped("0 停止追随，0.1 平滑追随，1 即时追随；按接管时镜头本地 X/Y/Z 追近当前目标。");
+		changed |= ImGui::SliderFloat3("追随速率 XYZ", &settings.followRate.x, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+		if (ImGui::Button("重置追随速率 (0.1)"))
+		{
+			settings.followRate = {0.1f, 0.1f, 0.1f};
+			changed = true;
+		}
+		ImGui::TextUnformatted("位移比例（旧版跟随幅度）");
+		ImGui::TextWrapped("按接管时的镜头本地 X/Y/Z 缩放最终髋部位移：0 不跟随，0.5 跟一半，1 完整跟随；不表示追赶速度。");
+		const char* factorLabels[] = {"位移比例 X（镜头本地）", "位移比例 Y（镜头本地）", "位移比例 Z（镜头本地）"};
 		float* factors[] = {&settings.followFactor.x, &settings.followFactor.y, &settings.followFactor.z};
 		for (int i = 0; i < 3; ++i)
 		{
@@ -132,7 +152,7 @@ namespace GakuMotion
 				changed = true;
 			}
 			ImGui::SameLine();
-			if (ImGui::Button("锁定 (0.0)"))
+			if (ImGui::Button("不跟随 (0.0)"))
 			{
 				*factors[i] = 0.0f;
 				changed = true;
@@ -152,6 +172,10 @@ namespace GakuMotion
 			settings.followFactor.x >= 0.0f && settings.followFactor.x <= 1.0f &&
 			settings.followFactor.y >= 0.0f && settings.followFactor.y <= 1.0f &&
 			settings.followFactor.z >= 0.0f && settings.followFactor.z <= 1.0f &&
+			CameraFinite(settings.followRate) &&
+			settings.followRate.x >= 0.0f && settings.followRate.x <= 1.0f &&
+			settings.followRate.y >= 0.0f && settings.followRate.y <= 1.0f &&
+			settings.followRate.z >= 0.0f && settings.followRate.z <= 1.0f &&
 			std::isfinite(settings.followFov) &&
 			settings.followFov >= 1.0f && settings.followFov <= 179.0f;
 		for (int i = 0; i < 3; ++i)

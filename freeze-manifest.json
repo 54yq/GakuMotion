@@ -3,7 +3,7 @@
   "status": "complete-source-snapshot",
   "source_snapshot": {
     "repository": "GakuMotion",
-    "revision": "102df32c515e49d78f086c9467ec591a93716442",
+    "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
     "selected_git_blobs": true,
     "whole_repository_copy": false,
     "preserved_previous_input_origins": true
@@ -42,15 +42,13 @@
     },
     {
       "path": "BUILD_NOTES.md",
-      "sha256": "029e7a1096cfd09f080dbd751d9fa0c5cc3c1c7aa4f5d4553cdc8328b57e3117",
-      "size": 4175,
+      "sha256": "39729217e320a6c9e7e1bae5d5bafdc3bb4e945be190bc293e9932baf7eaf5fa",
+      "size": 4847,
       "origin": {
-        "type": "staging product documentation adaptation",
-        "base_staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
-        "product_source_revision": "102df32c515e49d78f086c9467ec591a93716442",
-        "purpose": "Keep the user homepage and build integration; describe managed paths and preserved-data migration."
+        "type": "local staging product documentation or synthetic test",
+        "source_algorithm_modified": false
       },
-      "classification": "product_documentation_with_explicit_adaptations",
+      "classification": "new_local_staging_control_or_documentation",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -65,20 +63,32 @@
           },
           "classification": "restored_product_documentation_with_explicit_adaptations"
         }
+      ],
+      "history": [
+        {
+          "sha256": "029e7a1096cfd09f080dbd751d9fa0c5cc3c1c7aa4f5d4553cdc8328b57e3117",
+          "size": 4175,
+          "origin": {
+            "type": "staging product documentation adaptation",
+            "base_staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
+            "product_source_revision": "102df32c515e49d78f086c9467ec591a93716442",
+            "purpose": "Keep the user homepage and build integration; describe managed paths and preserved-data migration."
+          },
+          "classification": "product_documentation_with_explicit_adaptations"
+        }
       ]
     },
     {
       "path": "GakuMotion.vcxproj",
-      "sha256": "f3f136dd734b625b828db1aa1abab7d1db4a18ac76f8f961a733542e241bf4c1",
-      "size": 16103,
+      "sha256": "73e9f9d5fb94104057d1fdac2aa51d7897206620b286968d34e4d6d9405c1c0c",
+      "size": 16327,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "102df32c515e49d78f086c9467ec591a93716442",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
         "path": "GakuMotion.vcxproj",
-        "git_blob": "919de30c74567297725eb827ff68b741c24e2281",
-        "selection": "fixed product closure"
+        "selected_raw_git_blob": true
       },
-      "classification": "first_party_product_code_or_synthetic_support",
+      "classification": "selected_first_party_or_retained_license_source",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -90,6 +100,20 @@
             "path": "GakuMotion.vcxproj"
           },
           "classification": "selected_first_party_or_retained_license_source"
+        }
+      ],
+      "history": [
+        {
+          "sha256": "f3f136dd734b625b828db1aa1abab7d1db4a18ac76f8f961a733542e241bf4c1",
+          "size": 16103,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "102df32c515e49d78f086c9467ec591a93716442",
+            "path": "GakuMotion.vcxproj",
+            "git_blob": "919de30c74567297725eb827ff68b741c24e2281",
+            "selection": "fixed product closure"
+          },
+          "classification": "first_party_product_code_or_synthetic_support"
         }
       ]
     },
@@ -106,15 +130,13 @@
     },
     {
       "path": "README.md",
-      "sha256": "1ca1e0ab2850245750f6b2e2beebb8d48f1621ee1ad65605f1f2f3a0fc208ccb",
-      "size": 4025,
+      "sha256": "e3f5403b2214c03899c1657426833d0c339a8a38c90b27419cbf645dba6601cf",
+      "size": 4335,
       "origin": {
-        "type": "staging product documentation adaptation",
-        "base_staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
-        "product_source_revision": "102df32c515e49d78f086c9467ec591a93716442",
-        "purpose": "Keep the user homepage and build integration; describe managed paths and preserved-data migration."
+        "type": "local staging product documentation or synthetic test",
+        "source_algorithm_modified": false
       },
-      "classification": "product_documentation_with_explicit_adaptations",
+      "classification": "new_local_staging_control_or_documentation",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -130,19 +152,30 @@
           },
           "classification": "restored_product_documentation_with_explicit_adaptations"
         }
+      ],
+      "history": [
+        {
+          "sha256": "1ca1e0ab2850245750f6b2e2beebb8d48f1621ee1ad65605f1f2f3a0fc208ccb",
+          "size": 4025,
+          "origin": {
+            "type": "staging product documentation adaptation",
+            "base_staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
+            "product_source_revision": "102df32c515e49d78f086c9467ec591a93716442",
+            "purpose": "Keep the user homepage and build integration; describe managed paths and preserved-data migration."
+          },
+          "classification": "product_documentation_with_explicit_adaptations"
+        }
       ]
     },
     {
       "path": "SOURCE_REVIEW.md",
       "origin": {
-        "type": "staging product documentation adaptation",
-        "base_staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
-        "product_source_revision": "102df32c515e49d78f086c9467ec591a93716442",
-        "purpose": "Keep the user homepage and build integration; describe managed paths and preserved-data migration."
+        "type": "local staging product documentation or synthetic test",
+        "source_algorithm_modified": false
       },
-      "classification": "product_documentation_with_explicit_adaptations",
-      "sha256": "b9868b1eb0f6bd4b8dddcfc4adf78d6d675e1ea7e19430ce4650367c4a897008",
-      "size": 6266,
+      "classification": "new_local_staging_control_or_documentation",
+      "sha256": "11329f8104ebf379a39618b50e8a3caf076cfcce825b27d3dc548ec099023f31",
+      "size": 7881,
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -156,6 +189,19 @@
           },
           "classification": "new_local_staging_control_or_documentation"
         }
+      ],
+      "history": [
+        {
+          "sha256": "b9868b1eb0f6bd4b8dddcfc4adf78d6d675e1ea7e19430ce4650367c4a897008",
+          "size": 6266,
+          "origin": {
+            "type": "staging product documentation adaptation",
+            "base_staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
+            "product_source_revision": "102df32c515e49d78f086c9467ec591a93716442",
+            "purpose": "Keep the user homepage and build integration; describe managed paths and preserved-data migration."
+          },
+          "classification": "product_documentation_with_explicit_adaptations"
+        }
       ]
     },
     {
@@ -168,6 +214,54 @@
       "classification": "new_local_staging_control_or_documentation",
       "sha256": "38ad8cf04d28cd15cf28aa5660921a8ba092bf1bc32a639546f8843c641bd0b9",
       "size": 2353
+    },
+    {
+      "path": "assets/branding/gakumotion-icon-dark.svg",
+      "sha256": "102685063b90944846d9e41cc4ea474059f02bab025f5aafc7c982374633ab6e",
+      "size": 2333,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "assets/branding/gakumotion-icon-dark.svg",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
+      "path": "assets/branding/gakumotion-icon-light.svg",
+      "sha256": "4b727405e23e2e64e5f07578cf8ee93cb035c73691130b525950c5694d8ce08d",
+      "size": 2242,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "assets/branding/gakumotion-icon-light.svg",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
+      "path": "assets/branding/gakumotion-wordmark-dark.svg",
+      "sha256": "e74990449b273b9190af5b74e90d82e8d2a4d96f18dcc8b0c314bb7972684725",
+      "size": 8320,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "assets/branding/gakumotion-wordmark-dark.svg",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
+      "path": "assets/branding/gakumotion-wordmark-light.svg",
+      "sha256": "7134b39ca0d4c095cb1d10fb8c2abe1eb6fa59b484e2812755f60b8a8efe35a9",
+      "size": 8149,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "assets/branding/gakumotion-wordmark-light.svg",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
     },
     {
       "path": "build.ps1",
@@ -574,6 +668,30 @@
       "classification": "selected_first_party_or_retained_license_source"
     },
     {
+      "path": "data/miku_mouth_fit_profiles.json",
+      "sha256": "24976f600cb52350b1c86dfe8ee91f9bad3383fa7d5e43ec29939223787a2e43",
+      "size": 172407,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "data/miku_mouth_fit_profiles.json",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
+      "path": "data/miku_mouth_fit_v4_portable.json",
+      "sha256": "84833f0b7ff7b443620face49ee42762c7f86a2e4fc2d730918b7969ec7d7a1e",
+      "size": 183267,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "data/miku_mouth_fit_v4_portable.json",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
       "path": "deps/KineTexture/src/KineTexture/Channels.hpp",
       "sha256": "6fa3c2a3cfa136303425cdcca2ff19aa8dcd0080961d3df477c98ff0d77cf4a3",
       "size": 2046,
@@ -891,6 +1009,16 @@
       "classification": "first_party_product_code_or_synthetic_support"
     },
     {
+      "path": "docs/PLAYBACK_TIMING.md",
+      "sha256": "8290e8e48cc9cc7aef225cdb3900b8cccfbb885925bee6ac8394f9deffde0fba",
+      "size": 1144,
+      "origin": {
+        "type": "local staging product documentation or synthetic test",
+        "source_algorithm_modified": false
+      },
+      "classification": "new_local_staging_control_or_documentation"
+    },
+    {
       "path": "docs/README.md",
       "sha256": "083fb5c50810ce60351ed62ceb895a8a7e79c7444efb513179d5ee4e7deb0660",
       "size": 1551,
@@ -918,15 +1046,13 @@
     },
     {
       "path": "docs/TROUBLESHOOTING.md",
-      "sha256": "c36ac61ff805ff6d8f85ea82d2079c2ec7470fd42887bb3cd557b9c4aa2fc3e3",
-      "size": 7141,
+      "sha256": "cf239b572fc0e4254e578b234faa71cbcafb81a3d3b7e165b7cf202aea7cd95f",
+      "size": 7644,
       "origin": {
-        "type": "staging product documentation adaptation",
-        "base_staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
-        "product_source_revision": "102df32c515e49d78f086c9467ec591a93716442",
-        "purpose": "Keep the user homepage and build integration; describe managed paths and preserved-data migration."
+        "type": "local staging product documentation or synthetic test",
+        "source_algorithm_modified": false
       },
-      "classification": "product_documentation_with_explicit_adaptations",
+      "classification": "new_local_staging_control_or_documentation",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -940,19 +1066,30 @@
           },
           "classification": "restored_product_documentation_with_explicit_adaptations"
         }
+      ],
+      "history": [
+        {
+          "sha256": "c36ac61ff805ff6d8f85ea82d2079c2ec7470fd42887bb3cd557b9c4aa2fc3e3",
+          "size": 7141,
+          "origin": {
+            "type": "staging product documentation adaptation",
+            "base_staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
+            "product_source_revision": "102df32c515e49d78f086c9467ec591a93716442",
+            "purpose": "Keep the user homepage and build integration; describe managed paths and preserved-data migration."
+          },
+          "classification": "product_documentation_with_explicit_adaptations"
+        }
       ]
     },
     {
       "path": "docs/USAGE.md",
-      "sha256": "044810db105597a58ad8ace34c323733dd2b1fe3c8013b8d23064d199b74a9c6",
-      "size": 7048,
+      "sha256": "195b787749f9c6eee7488321268a8e89f3290e923e8b6aecbbcf3185dcaaa113",
+      "size": 8781,
       "origin": {
-        "type": "staging product documentation adaptation",
-        "base_staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
-        "product_source_revision": "102df32c515e49d78f086c9467ec591a93716442",
-        "purpose": "Keep the user homepage and build integration; describe managed paths and preserved-data migration."
+        "type": "local staging product documentation or synthetic test",
+        "source_algorithm_modified": false
       },
-      "classification": "product_documentation_with_explicit_adaptations",
+      "classification": "new_local_staging_control_or_documentation",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -966,6 +1103,19 @@
             "documentation_followup": "Move dated acceptance narration from product entry pages into existing historical version notes."
           },
           "classification": "restored_product_documentation_with_explicit_adaptations"
+        }
+      ],
+      "history": [
+        {
+          "sha256": "044810db105597a58ad8ace34c323733dd2b1fe3c8013b8d23064d199b74a9c6",
+          "size": 7048,
+          "origin": {
+            "type": "staging product documentation adaptation",
+            "base_staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
+            "product_source_revision": "102df32c515e49d78f086c9467ec591a93716442",
+            "purpose": "Keep the user homepage and build integration; describe managed paths and preserved-data migration."
+          },
+          "classification": "product_documentation_with_explicit_adaptations"
         }
       ]
     },
@@ -1065,6 +1215,18 @@
       "classification": "selected_first_party_code_for_private_review"
     },
     {
+      "path": "include/GakuFileDrop.h",
+      "sha256": "b8f703c34627ecee86d51fe1aa630053b2e224c441430ac6c93779642d6148fd",
+      "size": 1620,
+      "origin": {
+        "repository": "GakuLoader",
+        "revision": "ed5ad70819907c0a0f5acc25e804b0aea205fa57",
+        "canonical_line_endings": "LF",
+        "path": "include/GakuFileDrop.h"
+      },
+      "classification": "selected_shared_canonical_sdk"
+    },
+    {
       "path": "include/GakuLocalifyCameraWrite.h",
       "sha256": "35329f94627a65df2a28bf9937d12f323b9e91cc4088da49ccc54bcfad24434e",
       "size": 1645,
@@ -1125,14 +1287,27 @@
     },
     {
       "path": "include/GakuPlugin.h",
-      "sha256": "c02e006180e464a770bd31df52e89f5d539ceaaf4978f4e056734b5a5ca00abd",
-      "size": 13988,
+      "sha256": "12f4e4db22ff0505990b66cfeaf97b1cae54486c9eb415e7efc3adfd9984867e",
+      "size": 14132,
       "origin": {
-        "repository": "GakuMotion",
-        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+        "repository": "GakuLoader",
+        "revision": "ed5ad70819907c0a0f5acc25e804b0aea205fa57",
+        "canonical_line_endings": "LF",
         "path": "include/GakuPlugin.h"
       },
-      "classification": "selected_first_party_code_for_private_review"
+      "classification": "selected_shared_canonical_sdk",
+      "history": [
+        {
+          "sha256": "c02e006180e464a770bd31df52e89f5d539ceaaf4978f4e056734b5a5ca00abd",
+          "size": 13988,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+            "path": "include/GakuPlugin.h"
+          },
+          "classification": "selected_first_party_code_for_private_review"
+        }
+      ]
     },
     {
       "path": "include/GakuSafeBoneLookup.h",
@@ -1301,6 +1476,54 @@
       "classification": "third_party_licensed_source"
     },
     {
+      "path": "interop/CameraImportTests/GakuMotion.CameraImportTests.csproj",
+      "sha256": "c689dcc3140b585266ff6c36b370cd9ec0c67ce973cbcf18c462d5729e7bfa5d",
+      "size": 516,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "interop/CameraImportTests/GakuMotion.CameraImportTests.csproj",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
+      "path": "interop/CameraImportTests/Program.cs",
+      "sha256": "afd6c18924d87df461cd357c613e87bed22b86ed61c0b20f0b6bec31c1e7b80c",
+      "size": 16703,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "interop/CameraImportTests/Program.cs",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
+      "path": "interop/EditTrackTests/GakuMotion.EditTrackTests.csproj",
+      "sha256": "69a7328e12374bca680b023417e2f455e1b175e074212f7a08330e91e658a52b",
+      "size": 552,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "interop/EditTrackTests/GakuMotion.EditTrackTests.csproj",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
+      "path": "interop/EditTrackTests/Program.cs",
+      "sha256": "9f7ebd3cc7457ec37f979630502bf0c957b56540a11645bfc7fd8ce7cc2150c9",
+      "size": 25221,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "interop/EditTrackTests/Program.cs",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
       "path": "interop/GakuMotion.VmdImporter.Native/Camera/CameraBaker.cs",
       "sha256": "1d7aa50e535dc8bfa5bac5bbbc32dc0cbb4f79c16cdbba8ff02d37a58c0acf35",
       "size": 15400,
@@ -1367,6 +1590,18 @@
       "classification": "selected_first_party_or_retained_license_source"
     },
     {
+      "path": "interop/GakuMotion.VmdImporter.Native/Facial/MikuRawSource.cs",
+      "sha256": "c93e992789ad40e53e446715a1f5562ba99960a74d81d10f3094d98d2bb3e61d",
+      "size": 3413,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "interop/GakuMotion.VmdImporter.Native/Facial/MikuRawSource.cs",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
       "path": "interop/GakuMotion.VmdImporter.Native/Facial/MorphCurve.cs",
       "sha256": "34b4deed3155f865d7e7c35328c7f9100bb03f44d2723e3a8ac84a819f9adf7b",
       "size": 2405,
@@ -1379,14 +1614,27 @@
     },
     {
       "path": "interop/GakuMotion.VmdImporter.Native/Facial/MorphTranslator.cs",
-      "sha256": "ff31cb1b6248bc017e1a6388bc3835ebdf97eab538bbf78c52b8cb5d22a2aacf",
-      "size": 10357,
+      "sha256": "4764b084cc4228ac14249efb733ba2baf7d5b9e31f9953193e7bd38a64876511",
+      "size": 11586,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
-        "path": "interop/GakuMotion.VmdImporter.Native/Facial/MorphTranslator.cs"
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "interop/GakuMotion.VmdImporter.Native/Facial/MorphTranslator.cs",
+        "selected_raw_git_blob": true
       },
-      "classification": "selected_first_party_or_retained_license_source"
+      "classification": "selected_first_party_or_retained_license_source",
+      "history": [
+        {
+          "sha256": "ff31cb1b6248bc017e1a6388bc3835ebdf97eab538bbf78c52b8cb5d22a2aacf",
+          "size": 10357,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+            "path": "interop/GakuMotion.VmdImporter.Native/Facial/MorphTranslator.cs"
+          },
+          "classification": "selected_first_party_or_retained_license_source"
+        }
+      ]
     },
     {
       "path": "interop/GakuMotion.VmdImporter.Native/Facial/ToothAppearanceLut.cs",
@@ -1401,27 +1649,39 @@
     },
     {
       "path": "interop/GakuMotion.VmdImporter.Native/GakuMotion.VmdImporter.Native.csproj",
-      "sha256": "8e4190ee09addb460da0e1c57118881edf2d4eecb24abe5358b952f223d50f8f",
-      "size": 2642,
+      "sha256": "aa4bed863e7c32d72ea686977cb9bb65a5d58fa17fab4e0f0581c4d2a7dc325b",
+      "size": 2709,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
-        "path": "interop/GakuMotion.VmdImporter.Native/GakuMotion.VmdImporter.Native.csproj"
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "interop/GakuMotion.VmdImporter.Native/GakuMotion.VmdImporter.Native.csproj",
+        "selected_raw_git_blob": true
       },
-      "classification": "selected_first_party_or_retained_license_source"
+      "classification": "selected_first_party_or_retained_license_source",
+      "history": [
+        {
+          "sha256": "8e4190ee09addb460da0e1c57118881edf2d4eecb24abe5358b952f223d50f8f",
+          "size": 2642,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+            "path": "interop/GakuMotion.VmdImporter.Native/GakuMotion.VmdImporter.Native.csproj"
+          },
+          "classification": "selected_first_party_or_retained_license_source"
+        }
+      ]
     },
     {
       "path": "interop/GakuMotion.VmdImporter.Native/ImportPipeline.cs",
-      "sha256": "0d18071d41a55f261f8f9e607cb35af13e60d19a3e9bd58385c20f9a67cf0dca",
-      "size": 52489,
+      "sha256": "7898090c233900d0e47274f8c5a43660a59ab403da3282c48b4b1b8f492a49f2",
+      "size": 52886,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "102df32c515e49d78f086c9467ec591a93716442",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
         "path": "interop/GakuMotion.VmdImporter.Native/ImportPipeline.cs",
-        "git_blob": "021c1d7331cfd54b022b5a30fe6f1b9ac6cda8df",
-        "selection": "fixed product closure"
+        "selected_raw_git_blob": true
       },
-      "classification": "first_party_product_code_or_synthetic_support",
+      "classification": "selected_first_party_or_retained_license_source",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -1434,20 +1694,33 @@
           },
           "classification": "selected_first_party_or_retained_license_source"
         }
+      ],
+      "history": [
+        {
+          "sha256": "0d18071d41a55f261f8f9e607cb35af13e60d19a3e9bd58385c20f9a67cf0dca",
+          "size": 52489,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "102df32c515e49d78f086c9467ec591a93716442",
+            "path": "interop/GakuMotion.VmdImporter.Native/ImportPipeline.cs",
+            "git_blob": "021c1d7331cfd54b022b5a30fe6f1b9ac6cda8df",
+            "selection": "fixed product closure"
+          },
+          "classification": "first_party_product_code_or_synthetic_support"
+        }
       ]
     },
     {
       "path": "interop/GakuMotion.VmdImporter.Native/ImportRequest.cs",
-      "sha256": "dc115ba272809c2b6afef6327865f20ff98df83e45091cd74b28bdea9808552c",
-      "size": 3700,
+      "sha256": "039097d4c6827994f1d7672e5fd5cf25d72f7e822926b98a65a858bb29cbe42b",
+      "size": 3838,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "102df32c515e49d78f086c9467ec591a93716442",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
         "path": "interop/GakuMotion.VmdImporter.Native/ImportRequest.cs",
-        "git_blob": "cf24bde8f0dd58c85cbe9502ac6348fd6d547983",
-        "selection": "fixed product closure"
+        "selected_raw_git_blob": true
       },
-      "classification": "first_party_product_code_or_synthetic_support",
+      "classification": "selected_first_party_or_retained_license_source",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -1459,6 +1732,20 @@
             "path": "interop/GakuMotion.VmdImporter.Native/ImportRequest.cs"
           },
           "classification": "selected_first_party_or_retained_license_source"
+        }
+      ],
+      "history": [
+        {
+          "sha256": "dc115ba272809c2b6afef6327865f20ff98df83e45091cd74b28bdea9808552c",
+          "size": 3700,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "102df32c515e49d78f086c9467ec591a93716442",
+            "path": "interop/GakuMotion.VmdImporter.Native/ImportRequest.cs",
+            "git_blob": "cf24bde8f0dd58c85cbe9502ac6348fd6d547983",
+            "selection": "fixed product closure"
+          },
+          "classification": "first_party_product_code_or_synthetic_support"
         }
       ]
     },
@@ -1475,12 +1762,37 @@
     },
     {
       "path": "interop/GakuMotion.VmdImporter.Native/NativeExports.cs",
-      "sha256": "f7f3e98a4cb650fa5af64fc3ecdcf82e3fa40312cd961eafce69bc6a66331eac",
-      "size": 6843,
+      "sha256": "710263c598571f073ee233beea777bb42ab17b30027964d1b2368a4f8479f2c1",
+      "size": 6850,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
-        "path": "interop/GakuMotion.VmdImporter.Native/NativeExports.cs"
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "interop/GakuMotion.VmdImporter.Native/NativeExports.cs",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source",
+      "history": [
+        {
+          "sha256": "f7f3e98a4cb650fa5af64fc3ecdcf82e3fa40312cd961eafce69bc6a66331eac",
+          "size": 6843,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+            "path": "interop/GakuMotion.VmdImporter.Native/NativeExports.cs"
+          },
+          "classification": "selected_first_party_or_retained_license_source"
+        }
+      ]
+    },
+    {
+      "path": "interop/GakuMotion.VmdImporter.Native/PerformanceTimingSettings.cs",
+      "sha256": "a5068b86408a3d614542bb2401973209eaa34f59edb9cab0dd369a3767ecf417",
+      "size": 2390,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "interop/GakuMotion.VmdImporter.Native/PerformanceTimingSettings.cs",
+        "selected_raw_git_blob": true
       },
       "classification": "selected_first_party_or_retained_license_source"
     },
@@ -1496,17 +1808,64 @@
       "classification": "selected_first_party_or_retained_license_source"
     },
     {
-      "path": "src/GakuMotion.hpp",
-      "sha256": "0f7be6d21a56d8926057e8f43a72a4d2d3fc9f114cdef8e39f584f4e8ab1b39a",
-      "size": 116054,
+      "path": "interop/MikuRawSourceTests/GakuMotion.MikuRawSourceTests.csproj",
+      "sha256": "4f708f24a9d69b327b749a31d59aabd98a257051145ecb188c9c69828feb6ce2",
+      "size": 416,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "102df32c515e49d78f086c9467ec591a93716442",
-        "path": "src/GakuMotion.hpp",
-        "git_blob": "daf9f13d45625428d548768d59ba4884c5616446",
-        "selection": "fixed product closure"
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "interop/MikuRawSourceTests/GakuMotion.MikuRawSourceTests.csproj",
+        "selected_raw_git_blob": true
       },
-      "classification": "first_party_product_code_or_synthetic_support",
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
+      "path": "interop/MikuRawSourceTests/Program.cs",
+      "sha256": "e470adb84bc4b8b5e96e5407a6dcb113647c433b57b6fadbc2103075455308eb",
+      "size": 2057,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "interop/MikuRawSourceTests/Program.cs",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
+      "path": "interop/TimebaseTests/Fixtures.cs",
+      "sha256": "89dc93177b2fd6f6633d4b902db4dee2d852657436c546deb831e27389f8f6d5",
+      "size": 7615,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "interop/TimebaseTests/Fixtures.cs",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
+      "path": "preview/GkMockState.hpp",
+      "sha256": "589fa2257241f46d0b9fa24f568c4385725416da90d0228d2e76af819bba7296",
+      "size": 39324,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "preview/GkMockState.hpp",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
+      "path": "src/GakuMotion.hpp",
+      "sha256": "82717ec0209e250d303d8238f7c0635c48d7871c37f1b59a31da2f2ba223aadb",
+      "size": 119974,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "src/GakuMotion.hpp",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -1519,20 +1878,33 @@
           },
           "classification": "selected_first_party_code_for_private_review"
         }
+      ],
+      "history": [
+        {
+          "sha256": "0f7be6d21a56d8926057e8f43a72a4d2d3fc9f114cdef8e39f584f4e8ab1b39a",
+          "size": 116054,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "102df32c515e49d78f086c9467ec591a93716442",
+            "path": "src/GakuMotion.hpp",
+            "git_blob": "daf9f13d45625428d548768d59ba4884c5616446",
+            "selection": "fixed product closure"
+          },
+          "classification": "first_party_product_code_or_synthetic_support"
+        }
       ]
     },
     {
       "path": "src/GakuMotionPlugin.cpp",
-      "sha256": "d47c4a517986ae989a727b1ebd6ff233d8b5e853e03de68a12c18a6a04f2c551",
-      "size": 128173,
+      "sha256": "32f2dd21d4d6c732222617509dfe3c994e505b2c726ed6a6fd70b7d4ecbdb030",
+      "size": 131665,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "102df32c515e49d78f086c9467ec591a93716442",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
         "path": "src/GakuMotionPlugin.cpp",
-        "git_blob": "0cbf856fb043b716414a7a066afcd3f9dfde1cb2",
-        "selection": "fixed product closure"
+        "selected_raw_git_blob": true
       },
-      "classification": "first_party_product_code_or_synthetic_support",
+      "classification": "selected_first_party_or_retained_license_source",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -1544,6 +1916,20 @@
             "path": "src/GakuMotionPlugin.cpp"
           },
           "classification": "selected_first_party_code_for_private_review"
+        }
+      ],
+      "history": [
+        {
+          "sha256": "d47c4a517986ae989a727b1ebd6ff233d8b5e853e03de68a12c18a6a04f2c551",
+          "size": 128173,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "102df32c515e49d78f086c9467ec591a93716442",
+            "path": "src/GakuMotionPlugin.cpp",
+            "git_blob": "0cbf856fb043b716414a7a066afcd3f9dfde1cb2",
+            "selection": "fixed product closure"
+          },
+          "classification": "first_party_product_code_or_synthetic_support"
         }
       ]
     },
@@ -1571,14 +1957,27 @@
     },
     {
       "path": "src/GkAudioPlayback.hpp",
-      "sha256": "d0c1c63141b51e3ae4356a9cd854cf65ff0e681f2d287fa9f5689a72de8b85a1",
-      "size": 1050,
+      "sha256": "568dc3cf155e3de05141a4e6d897783906e7aff07723f214e9954ee72fce6396",
+      "size": 2917,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
-        "path": "src/GkAudioPlayback.hpp"
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "src/GkAudioPlayback.hpp",
+        "selected_raw_git_blob": true
       },
-      "classification": "selected_first_party_code_for_private_review"
+      "classification": "selected_first_party_or_retained_license_source",
+      "history": [
+        {
+          "sha256": "d0c1c63141b51e3ae4356a9cd854cf65ff0e681f2d287fa9f5689a72de8b85a1",
+          "size": 1050,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+            "path": "src/GkAudioPlayback.hpp"
+          },
+          "classification": "selected_first_party_code_for_private_review"
+        }
+      ]
     },
     {
       "path": "src/GkAuxChannelModel.hpp",
@@ -1606,14 +2005,27 @@
     },
     {
       "path": "src/GkBlendshapePlayer.hpp",
-      "sha256": "adbc0cf8c8628e4ae926a732fa2bfbcfc0226298c19e78e432c2d4c1b2fb0c67",
-      "size": 14947,
+      "sha256": "58fed6ead17cc747dc3911e81b45d14968f5337a0447e7aeebaf38ba7c403b6a",
+      "size": 17172,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
-        "path": "src/GkBlendshapePlayer.hpp"
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "src/GkBlendshapePlayer.hpp",
+        "selected_raw_git_blob": true
       },
-      "classification": "selected_first_party_code_for_private_review"
+      "classification": "selected_first_party_or_retained_license_source",
+      "history": [
+        {
+          "sha256": "adbc0cf8c8628e4ae926a732fa2bfbcfc0226298c19e78e432c2d4c1b2fb0c67",
+          "size": 14947,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+            "path": "src/GkBlendshapePlayer.hpp"
+          },
+          "classification": "selected_first_party_code_for_private_review"
+        }
+      ]
     },
     {
       "path": "src/GkBodyShadowBootstrap.hpp",
@@ -1691,25 +2103,51 @@
     },
     {
       "path": "src/GkCamera.hpp",
-      "sha256": "b41c3d5c3f96b4a446275bdbe1f7a6b70f0d2f09d3c00f1e0d0e1e4335464143",
-      "size": 20781,
+      "sha256": "87930f7c3187f5ae53e40ab2cf957337060d6976edfe51c3caacff131e552c3d",
+      "size": 23821,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
-        "path": "src/GkCamera.hpp"
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "src/GkCamera.hpp",
+        "selected_raw_git_blob": true
       },
-      "classification": "selected_first_party_code_for_private_review"
+      "classification": "selected_first_party_or_retained_license_source",
+      "history": [
+        {
+          "sha256": "b41c3d5c3f96b4a446275bdbe1f7a6b70f0d2f09d3c00f1e0d0e1e4335464143",
+          "size": 20781,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+            "path": "src/GkCamera.hpp"
+          },
+          "classification": "selected_first_party_code_for_private_review"
+        }
+      ]
     },
     {
       "path": "src/GkCameraBridge.hpp",
-      "sha256": "65e7e0ff38d4b1d78f0bf3beed93f673d1bfc5c721125cd153e4b1571af4a2e5",
-      "size": 57678,
+      "sha256": "756eebb7bb65823364f03be18f6c1dd06530e736f9dc5a816ba12b27bd817630",
+      "size": 58119,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
-        "path": "src/GkCameraBridge.hpp"
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "src/GkCameraBridge.hpp",
+        "selected_raw_git_blob": true
       },
-      "classification": "selected_first_party_code_for_private_review"
+      "classification": "selected_first_party_or_retained_license_source",
+      "history": [
+        {
+          "sha256": "65e7e0ff38d4b1d78f0bf3beed93f673d1bfc5c721125cd153e4b1571af4a2e5",
+          "size": 57678,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+            "path": "src/GkCameraBridge.hpp"
+          },
+          "classification": "selected_first_party_code_for_private_review"
+        }
+      ]
     },
     {
       "path": "src/GkCaptureGuard.hpp",
@@ -1734,17 +2172,28 @@
       "classification": "selected_first_party_code_for_private_review"
     },
     {
-      "path": "src/GkCsharpImport.hpp",
-      "sha256": "cbf02280544c57e3ad0ad9282f3982234a175898a5d258283c3dc970863134d8",
-      "size": 18655,
+      "path": "src/GkCharacterNames.hpp",
+      "sha256": "f3985a1fea146d2243a7451802580bb9c5c95edb9f0380e80bd37cc74518d0aa",
+      "size": 1838,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "102df32c515e49d78f086c9467ec591a93716442",
-        "path": "src/GkCsharpImport.hpp",
-        "git_blob": "8647dbe3d2b48315133dcd1ab1f2e993ff457108",
-        "selection": "fixed product closure"
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "src/GkCharacterNames.hpp",
+        "selected_raw_git_blob": true
       },
-      "classification": "first_party_product_code_or_synthetic_support",
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
+      "path": "src/GkCsharpImport.hpp",
+      "sha256": "2c7aa5e590b700df4c374371f5bd06aa9d0f89ba1964c3251491af3a4635c277",
+      "size": 19093,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "src/GkCsharpImport.hpp",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -1756,6 +2205,20 @@
             "path": "src/GkCsharpImport.hpp"
           },
           "classification": "selected_first_party_code_for_private_review"
+        }
+      ],
+      "history": [
+        {
+          "sha256": "cbf02280544c57e3ad0ad9282f3982234a175898a5d258283c3dc970863134d8",
+          "size": 18655,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "102df32c515e49d78f086c9467ec591a93716442",
+            "path": "src/GkCsharpImport.hpp",
+            "git_blob": "8647dbe3d2b48315133dcd1ab1f2e993ff457108",
+            "selection": "fixed product closure"
+          },
+          "classification": "first_party_product_code_or_synthetic_support"
         }
       ]
     },
@@ -1892,16 +2355,15 @@
     },
     {
       "path": "src/GkGmlClient.hpp",
-      "sha256": "ded003665518f3c2853166b03c8e7709c7dc090794821e20613bd042cb377536",
-      "size": 5530,
+      "sha256": "f8d91b9b050fe457e8e855adeae7bb7f248e3c24a9a27132df80f53848530999",
+      "size": 5721,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "102df32c515e49d78f086c9467ec591a93716442",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
         "path": "src/GkGmlClient.hpp",
-        "git_blob": "801326e70985887fad7a59d2ed8c367a35ae59b8",
-        "selection": "fixed product closure"
+        "selected_raw_git_blob": true
       },
-      "classification": "first_party_product_code_or_synthetic_support",
+      "classification": "selected_first_party_or_retained_license_source",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -1913,6 +2375,20 @@
             "path": "src/GkGmlClient.hpp"
           },
           "classification": "selected_first_party_code_for_private_review"
+        }
+      ],
+      "history": [
+        {
+          "sha256": "ded003665518f3c2853166b03c8e7709c7dc090794821e20613bd042cb377536",
+          "size": 5530,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "102df32c515e49d78f086c9467ec591a93716442",
+            "path": "src/GkGmlClient.hpp",
+            "git_blob": "801326e70985887fad7a59d2ed8c367a35ae59b8",
+            "selection": "fixed product closure"
+          },
+          "classification": "first_party_product_code_or_synthetic_support"
         }
       ]
     },
@@ -1981,16 +2457,15 @@
     },
     {
       "path": "src/GkGuiOverlay.hpp",
-      "sha256": "0b9501633a51b4cd399e84df8ceba8c10abf78857a33714d3538ad6b3b2cee64",
-      "size": 21491,
+      "sha256": "7730ed74e9ef887ed5f6759ef7220ac3cc1f50742e3faf8994ae0ca93ea55b3f",
+      "size": 21745,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "102df32c515e49d78f086c9467ec591a93716442",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
         "path": "src/GkGuiOverlay.hpp",
-        "git_blob": "279761ff4e59689b6a672731314a9e3333488745",
-        "selection": "fixed product closure"
+        "selected_raw_git_blob": true
       },
-      "classification": "first_party_product_code_or_synthetic_support",
+      "classification": "selected_first_party_or_retained_license_source",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -2002,6 +2477,20 @@
             "path": "src/GkGuiOverlay.hpp"
           },
           "classification": "selected_first_party_code_for_private_review"
+        }
+      ],
+      "history": [
+        {
+          "sha256": "0b9501633a51b4cd399e84df8ceba8c10abf78857a33714d3538ad6b3b2cee64",
+          "size": 21491,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "102df32c515e49d78f086c9467ec591a93716442",
+            "path": "src/GkGuiOverlay.hpp",
+            "git_blob": "279761ff4e59689b6a672731314a9e3333488745",
+            "selection": "fixed product closure"
+          },
+          "classification": "first_party_product_code_or_synthetic_support"
         }
       ]
     },
@@ -2018,14 +2507,27 @@
     },
     {
       "path": "src/GkIdolController.hpp",
-      "sha256": "05b0a6692f54e163867a3788b0dc4c424934e416a77b30c9cc1df4833a805b20",
-      "size": 147121,
+      "sha256": "041100f7cf9a10c1eea6b9d503fc2e1527431a21a4dcdf654efd8d8d86b557f9",
+      "size": 149096,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
-        "path": "src/GkIdolController.hpp"
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "src/GkIdolController.hpp",
+        "selected_raw_git_blob": true
       },
-      "classification": "selected_first_party_code_for_private_review"
+      "classification": "selected_first_party_or_retained_license_source",
+      "history": [
+        {
+          "sha256": "05b0a6692f54e163867a3788b0dc4c424934e416a77b30c9cc1df4833a805b20",
+          "size": 147121,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+            "path": "src/GkIdolController.hpp"
+          },
+          "classification": "selected_first_party_code_for_private_review"
+        }
+      ]
     },
     {
       "path": "src/GkImportToolsCheck.hpp",
@@ -2094,6 +2596,30 @@
       "classification": "selected_first_party_code_for_private_review"
     },
     {
+      "path": "src/GkMikuFacialFit.hpp",
+      "sha256": "f9688c8b7adf283d4c4b35013e456aa77b923fb78eb9b2599fdfb5655421c2d3",
+      "size": 8460,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "src/GkMikuFacialFit.hpp",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
+      "path": "src/GkMikuFacialFitModel.hpp",
+      "sha256": "1e23a1fce72e69564ef5006e22698bd8e6cd245a28f7a95fd6304de07b62f9c8",
+      "size": 50158,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "src/GkMikuFacialFitModel.hpp",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
       "path": "src/GkMotionData.hpp",
       "sha256": "591473eaa1c2350f47927c62c407eb79c68289edac325a4062a4dd529e35a485",
       "size": 18115,
@@ -2106,14 +2632,27 @@
     },
     {
       "path": "src/GkMotionPlayer.hpp",
-      "sha256": "cd6f9b7a89e1d215177da3ed9c8f84bd2163cbb3a3a73dd48f50bc61676aaf0b",
-      "size": 23109,
+      "sha256": "a29feea1ddb1ba8624060ee48bb4e7dcb0d51ce3f8c2670ea2c46db23f5d599a",
+      "size": 26161,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
-        "path": "src/GkMotionPlayer.hpp"
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "src/GkMotionPlayer.hpp",
+        "selected_raw_git_blob": true
       },
-      "classification": "selected_first_party_code_for_private_review"
+      "classification": "selected_first_party_or_retained_license_source",
+      "history": [
+        {
+          "sha256": "cd6f9b7a89e1d215177da3ed9c8f84bd2163cbb3a3a73dd48f50bc61676aaf0b",
+          "size": 23109,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+            "path": "src/GkMotionPlayer.hpp"
+          },
+          "classification": "selected_first_party_code_for_private_review"
+        }
+      ]
     },
     {
       "path": "src/GkNativeAudio.hpp",
@@ -2139,16 +2678,15 @@
     },
     {
       "path": "src/GkPlaylist.hpp",
-      "sha256": "08fd499f16723d024e30ee1aef1f318e5b65c749cac009cd9cf06471f8970503",
-      "size": 8991,
+      "sha256": "a63e5b5c613448adfeeee9833a4055b2e6877af836ed8ce73da89ef1fcd66147",
+      "size": 9019,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "102df32c515e49d78f086c9467ec591a93716442",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
         "path": "src/GkPlaylist.hpp",
-        "git_blob": "fb784b9ced434268d840aee50e96a4b6d147bcd4",
-        "selection": "fixed product closure"
+        "selected_raw_git_blob": true
       },
-      "classification": "first_party_product_code_or_synthetic_support",
+      "classification": "selected_first_party_or_retained_license_source",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -2160,6 +2698,20 @@
             "path": "src/GkPlaylist.hpp"
           },
           "classification": "selected_first_party_code_for_private_review"
+        }
+      ],
+      "history": [
+        {
+          "sha256": "08fd499f16723d024e30ee1aef1f318e5b65c749cac009cd9cf06471f8970503",
+          "size": 8991,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "102df32c515e49d78f086c9467ec591a93716442",
+            "path": "src/GkPlaylist.hpp",
+            "git_blob": "fb784b9ced434268d840aee50e96a4b6d147bcd4",
+            "selection": "fixed product closure"
+          },
+          "classification": "first_party_product_code_or_synthetic_support"
         }
       ]
     },
@@ -2187,16 +2739,15 @@
     },
     {
       "path": "src/GkRuntimeConfig.hpp",
-      "sha256": "d360e5e4d32d15c4be706f4fed4eab9423884b6434303111c60d7491efb3acf3",
-      "size": 44575,
+      "sha256": "b49d9161bf0b255ea144e22380ef81816da222e47c89f5b3197a62fccffeb092",
+      "size": 45962,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "102df32c515e49d78f086c9467ec591a93716442",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
         "path": "src/GkRuntimeConfig.hpp",
-        "git_blob": "ae2e15fdce9633e402add5c6e9b9eeba56ead66c",
-        "selection": "fixed product closure"
+        "selected_raw_git_blob": true
       },
-      "classification": "first_party_product_code_or_synthetic_support",
+      "classification": "selected_first_party_or_retained_license_source",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -2209,7 +2760,33 @@
           },
           "classification": "selected_first_party_code_for_private_review"
         }
+      ],
+      "history": [
+        {
+          "sha256": "d360e5e4d32d15c4be706f4fed4eab9423884b6434303111c60d7491efb3acf3",
+          "size": 44575,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "102df32c515e49d78f086c9467ec591a93716442",
+            "path": "src/GkRuntimeConfig.hpp",
+            "git_blob": "ae2e15fdce9633e402add5c6e9b9eeba56ead66c",
+            "selection": "fixed product closure"
+          },
+          "classification": "first_party_product_code_or_synthetic_support"
+        }
       ]
+    },
+    {
+      "path": "src/GkSceneActors.hpp",
+      "sha256": "86abf080f23c5b435d2bb4281cdc3dc60fae5c8691fd55cdbd5188fec427bad0",
+      "size": 2071,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "src/GkSceneActors.hpp",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
     },
     {
       "path": "src/GkSceneOwnerRuntime.hpp",
@@ -2369,6 +2946,18 @@
       "classification": "selected_first_party_code_for_private_review"
     },
     {
+      "path": "src/GkTrackTiming.hpp",
+      "sha256": "57d6c9b62548c4e1307241434cf5b2560c3b799fc253f44367847af2492bf3d8",
+      "size": 3313,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "src/GkTrackTiming.hpp",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
       "path": "src/GkTransportTime.hpp",
       "sha256": "ce0a81280a564f19e818235f5e7052da2d1ffda7a2ef50aa39f4b72f17f19d3a",
       "size": 5677,
@@ -2404,6 +2993,30 @@
       "classification": "first_party_product_code_or_synthetic_support"
     },
     {
+      "path": "src/gui/GkGuiBranding.hpp",
+      "sha256": "075635f3cf162bfa21140c6739b955353786377527c2a9be55097c938298415b",
+      "size": 3943,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "src/gui/GkGuiBranding.hpp",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
+      "path": "src/gui/GkGuiIcons.hpp",
+      "sha256": "749319c49ff2458d8f1a0efcf07c1ee5ea1b76534af9cc0ea7b6aee862f629e5",
+      "size": 6782,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "src/gui/GkGuiIcons.hpp",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
       "path": "src/gui/GkGuiStatusBar.hpp",
       "sha256": "7a9e96b00807d3ddaa3c811d270153ee97e6cc9b062b177bee2d64156c155fc6",
       "size": 329,
@@ -2427,25 +3040,51 @@
     },
     {
       "path": "src/gui/GkGuiTabCamera.hpp",
-      "sha256": "62a442935d6c6a740e18083a48e27be93aa8b89e1a55ba96258222acdc2a33e9",
-      "size": 11161,
+      "sha256": "59a806642c4ca041382cf40359b8fa43c7870d6cc06928b78d07afdb984d80dc",
+      "size": 12416,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
-        "path": "src/gui/GkGuiTabCamera.hpp"
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "src/gui/GkGuiTabCamera.hpp",
+        "selected_raw_git_blob": true
       },
-      "classification": "selected_first_party_code_for_private_review"
+      "classification": "selected_first_party_or_retained_license_source",
+      "history": [
+        {
+          "sha256": "62a442935d6c6a740e18083a48e27be93aa8b89e1a55ba96258222acdc2a33e9",
+          "size": 11161,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+            "path": "src/gui/GkGuiTabCamera.hpp"
+          },
+          "classification": "selected_first_party_code_for_private_review"
+        }
+      ]
     },
     {
       "path": "src/gui/GkGuiTabConfig.hpp",
-      "sha256": "701299050107c67687f34e98a31e483071e1a666cecef33f7bc0b566a3ba0bf8",
-      "size": 3487,
+      "sha256": "8473fd8ca73b98ecf41db2a918afb6cd51bb7b2dac72d7ada4bdb9e798013edb",
+      "size": 3493,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
-        "path": "src/gui/GkGuiTabConfig.hpp"
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "src/gui/GkGuiTabConfig.hpp",
+        "selected_raw_git_blob": true
       },
-      "classification": "selected_first_party_code_for_private_review"
+      "classification": "selected_first_party_or_retained_license_source",
+      "history": [
+        {
+          "sha256": "701299050107c67687f34e98a31e483071e1a666cecef33f7bc0b566a3ba0bf8",
+          "size": 3487,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+            "path": "src/gui/GkGuiTabConfig.hpp"
+          },
+          "classification": "selected_first_party_code_for_private_review"
+        }
+      ]
     },
     {
       "path": "src/gui/GkGuiTabExperimentalSolePitch.hpp",
@@ -2460,14 +3099,27 @@
     },
     {
       "path": "src/gui/GkGuiTabGaze.hpp",
-      "sha256": "9a176f3d7952e96eb9df9b1f2a3500328c2685da3ae98ad6e98851f27c6da93e",
-      "size": 3057,
+      "sha256": "490f0c4d5df6304da24bc0f07a7e3c4f903e9b4ce7dab280c34ce3fa87a474e0",
+      "size": 3464,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
-        "path": "src/gui/GkGuiTabGaze.hpp"
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "src/gui/GkGuiTabGaze.hpp",
+        "selected_raw_git_blob": true
       },
-      "classification": "selected_first_party_code_for_private_review"
+      "classification": "selected_first_party_or_retained_license_source",
+      "history": [
+        {
+          "sha256": "9a176f3d7952e96eb9df9b1f2a3500328c2685da3ae98ad6e98851f27c6da93e",
+          "size": 3057,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+            "path": "src/gui/GkGuiTabGaze.hpp"
+          },
+          "classification": "selected_first_party_code_for_private_review"
+        }
+      ]
     },
     {
       "path": "src/gui/GkGuiTabMotion.hpp",
@@ -2530,27 +3182,39 @@
     },
     {
       "path": "src/gui/GuiCameraPage.hpp",
-      "sha256": "ceedb572d2be1920597f9f6cde0c826152184e2f1a24ddf25303a4cc5e2e1f3c",
-      "size": 12173,
+      "sha256": "e4eb1fab577278e688c2ec2d8861983de7adf69ae9aa80dd200d71ee4ae715ed",
+      "size": 14488,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
-        "path": "src/gui/GuiCameraPage.hpp"
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "src/gui/GuiCameraPage.hpp",
+        "selected_raw_git_blob": true
       },
-      "classification": "selected_first_party_code_for_private_review"
+      "classification": "selected_first_party_or_retained_license_source",
+      "history": [
+        {
+          "sha256": "ceedb572d2be1920597f9f6cde0c826152184e2f1a24ddf25303a4cc5e2e1f3c",
+          "size": 12173,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+            "path": "src/gui/GuiCameraPage.hpp"
+          },
+          "classification": "selected_first_party_code_for_private_review"
+        }
+      ]
     },
     {
       "path": "src/gui/GuiDeveloperPage.hpp",
-      "sha256": "19c76e651194237688ad92731641b0e28ad269526ab91f15696a553392f416f7",
-      "size": 3560,
+      "sha256": "e2e8ead1d71303475c5e8783201d163ffef5c4792d532e3ba59f9565dce4e4f8",
+      "size": 4204,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "102df32c515e49d78f086c9467ec591a93716442",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
         "path": "src/gui/GuiDeveloperPage.hpp",
-        "git_blob": "131e88c5c5525295ebda01f554616914dbbc3ca8",
-        "selection": "fixed product closure"
+        "selected_raw_git_blob": true
       },
-      "classification": "first_party_product_code_or_synthetic_support",
+      "classification": "selected_first_party_or_retained_license_source",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -2563,62 +3227,153 @@
           },
           "classification": "selected_first_party_code_for_private_review"
         }
+      ],
+      "history": [
+        {
+          "sha256": "19c76e651194237688ad92731641b0e28ad269526ab91f15696a553392f416f7",
+          "size": 3560,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "102df32c515e49d78f086c9467ec591a93716442",
+            "path": "src/gui/GuiDeveloperPage.hpp",
+            "git_blob": "131e88c5c5525295ebda01f554616914dbbc3ca8",
+            "selection": "fixed product closure"
+          },
+          "classification": "first_party_product_code_or_synthetic_support"
+        }
       ]
     },
     {
       "path": "src/gui/GuiLibraryPage.hpp",
-      "sha256": "768735e2641383abad8d41083bbd8ebfcac3de175034685b4b684223c0e378f7",
-      "size": 39209,
+      "sha256": "f664849515fa2c7771c22bf3f5bc19a5c12ec96fd9374412f9722194412038ee",
+      "size": 45991,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
-        "path": "src/gui/GuiLibraryPage.hpp"
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "src/gui/GuiLibraryPage.hpp",
+        "selected_raw_git_blob": true
       },
-      "classification": "selected_first_party_code_for_private_review"
+      "classification": "selected_first_party_or_retained_license_source",
+      "history": [
+        {
+          "sha256": "768735e2641383abad8d41083bbd8ebfcac3de175034685b4b684223c0e378f7",
+          "size": 39209,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+            "path": "src/gui/GuiLibraryPage.hpp"
+          },
+          "classification": "selected_first_party_code_for_private_review"
+        }
+      ]
+    },
+    {
+      "path": "src/gui/GuiMotionExperiments.hpp",
+      "sha256": "56b8c1706cb45195112873ae860f19a2ed24d4eca1e586a9270743b92f2e4f44",
+      "size": 2744,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "src/gui/GuiMotionExperiments.hpp",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
     },
     {
       "path": "src/gui/GuiMotionPage.hpp",
-      "sha256": "0118a342af459e9a3b9cbe18633ec1b2c04c09e59316ab5a4904c04d680b1b12",
-      "size": 8823,
+      "sha256": "c1ca15d39978786b1b8dadfc2da4ec1bbaf3f4bcab7563cebb66da62f84c5306",
+      "size": 5379,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
-        "path": "src/gui/GuiMotionPage.hpp"
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "src/gui/GuiMotionPage.hpp",
+        "selected_raw_git_blob": true
       },
-      "classification": "selected_first_party_code_for_private_review"
+      "classification": "selected_first_party_or_retained_license_source",
+      "history": [
+        {
+          "sha256": "0118a342af459e9a3b9cbe18633ec1b2c04c09e59316ab5a4904c04d680b1b12",
+          "size": 8823,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+            "path": "src/gui/GuiMotionPage.hpp"
+          },
+          "classification": "selected_first_party_code_for_private_review"
+        }
+      ]
     },
     {
       "path": "src/gui/GuiOverlayCommon.hpp",
-      "sha256": "089bc2a3397b6b05f02a0b647b8ca03cf5e09b64b55874f016b250856fff47de",
-      "size": 25185,
+      "sha256": "820a801f05ccfffe8049185c5689ebbea7fb2ac003c15738aeb20fe416f15612",
+      "size": 23863,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
-        "path": "src/gui/GuiOverlayCommon.hpp"
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "src/gui/GuiOverlayCommon.hpp",
+        "selected_raw_git_blob": true
       },
-      "classification": "selected_first_party_code_for_private_review"
+      "classification": "selected_first_party_or_retained_license_source",
+      "history": [
+        {
+          "sha256": "089bc2a3397b6b05f02a0b647b8ca03cf5e09b64b55874f016b250856fff47de",
+          "size": 25185,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+            "path": "src/gui/GuiOverlayCommon.hpp"
+          },
+          "classification": "selected_first_party_code_for_private_review"
+        }
+      ]
     },
     {
       "path": "src/gui/GuiOverlayShell.hpp",
-      "sha256": "80087be05b476ea46e4e054bc2d281922c2dbba5b33ddb413bf8192385368b5a",
-      "size": 5674,
+      "sha256": "b1b66dbcd1769facf15fb566edf5f35bc7220c0459239a1e0d629ec6da7f6ddb",
+      "size": 5956,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
-        "path": "src/gui/GuiOverlayShell.hpp"
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "src/gui/GuiOverlayShell.hpp",
+        "selected_raw_git_blob": true
       },
-      "classification": "selected_first_party_code_for_private_review"
+      "classification": "selected_first_party_or_retained_license_source",
+      "history": [
+        {
+          "sha256": "80087be05b476ea46e4e054bc2d281922c2dbba5b33ddb413bf8192385368b5a",
+          "size": 5674,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+            "path": "src/gui/GuiOverlayShell.hpp"
+          },
+          "classification": "selected_first_party_code_for_private_review"
+        }
+      ]
     },
     {
       "path": "src/gui/GuiSettingsPage.hpp",
-      "sha256": "4ac535a6977da23a1cc6134f25bcf3a0c4481ee9c385da6821915e77d38a2907",
-      "size": 4161,
+      "sha256": "4d2595e6a6a0e6e545272c81eb508620a4b21dfb17b1c4d52e5ee16361684ebf",
+      "size": 4149,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
-        "path": "src/gui/GuiSettingsPage.hpp"
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "src/gui/GuiSettingsPage.hpp",
+        "selected_raw_git_blob": true
       },
-      "classification": "selected_first_party_code_for_private_review"
+      "classification": "selected_first_party_or_retained_license_source",
+      "history": [
+        {
+          "sha256": "4ac535a6977da23a1cc6134f25bcf3a0c4481ee9c385da6821915e77d38a2907",
+          "size": 4161,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+            "path": "src/gui/GuiSettingsPage.hpp"
+          },
+          "classification": "selected_first_party_code_for_private_review"
+        }
+      ]
     },
     {
       "path": "src/gui/GuiStageLoadReplacement.hpp",
@@ -2661,14 +3416,109 @@
     },
     {
       "path": "src/gui/GuiTransportBar.hpp",
-      "sha256": "2e900e4884f4ca4cbd93790c309ced4dc7717fcc03ce47c566d945210241c2d6",
-      "size": 19228,
+      "sha256": "5fac30f16bd4ecede1a69df7af5a08ae89c6fdb0c498e6a8edc711b3596d1a44",
+      "size": 22783,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
-        "path": "src/gui/GuiTransportBar.hpp"
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "src/gui/GuiTransportBar.hpp",
+        "selected_raw_git_blob": true
       },
-      "classification": "selected_first_party_code_for_private_review"
+      "classification": "selected_first_party_or_retained_license_source",
+      "history": [
+        {
+          "sha256": "2e900e4884f4ca4cbd93790c309ced4dc7717fcc03ce47c566d945210241c2d6",
+          "size": 19228,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+            "path": "src/gui/GuiTransportBar.hpp"
+          },
+          "classification": "selected_first_party_code_for_private_review"
+        }
+      ]
+    },
+    {
+      "path": "src/gui/generated/GkGuiBrandingMesh.hpp",
+      "sha256": "361d64898396df53da863fe47fe4257ecadd1bf9d6ed91c030177b4527719239",
+      "size": 73416,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "src/gui/generated/GkGuiBrandingMesh.hpp",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
+      "path": "tests/gui_syntax_check.cpp",
+      "sha256": "637e64ab51f4d85d61ea5c561f2c5d3db0549370f2dbbb9deb9f469f824bd986",
+      "size": 1700,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "tests/gui_syntax_check.cpp",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
+      "path": "tests/miku_fit_runner.cpp",
+      "sha256": "c75f14f314da6a42b9535034b02cf59d9660083cc4e74d55124c139e7fda5bbc",
+      "size": 4005,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "tests/miku_fit_runner.cpp",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
+      "path": "tests/native_import_bridge/CMakeLists.txt",
+      "sha256": "37d7c3d9701c1eba2ad2c0194bdc26b6e3ef6e80f7874aa0408889c66c1dd440",
+      "size": 1337,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "tests/native_import_bridge/CMakeLists.txt",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
+      "path": "tests/native_import_bridge/fake_importer.cpp",
+      "sha256": "79f2f6d1bb6b2c82294d09d5a3c718fe877268f608f3577d69aae309e6a94bfe",
+      "size": 888,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "tests/native_import_bridge/fake_importer.cpp",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
+      "path": "tests/run_gui_ux_tests.ps1",
+      "sha256": "9b583c9c326facedae7656fbeb0747d79bbb84a49cf44aa0ffddf85ed5a1bbd0",
+      "size": 2710,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "type": "synthetic-only test harness adaptation",
+        "source_algorithm_modified": false
+      },
+      "classification": "staging_synthetic_test_adaptation"
+    },
+    {
+      "path": "tests/run_import_e2e.py",
+      "sha256": "b31a53c63b209c3b13c14a35c6bc2a9ba6091f157b81246264b2663e6cd05d6c",
+      "size": 3651,
+      "origin": {
+        "type": "local staging product documentation or synthetic test",
+        "source_algorithm_modified": false
+      },
+      "classification": "new_local_staging_control_or_documentation"
     },
     {
       "path": "tests/run_layout_tests.ps1",
@@ -2684,6 +3534,18 @@
       "classification": "first_party_product_code_or_synthetic_support"
     },
     {
+      "path": "tests/run_release_tests.ps1",
+      "sha256": "38efd77d3c0501c279bdceaf14fdc9c99f72731e98a441473e2967d41dde7d4e",
+      "size": 7031,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "type": "synthetic-only test harness adaptation",
+        "source_algorithm_modified": false
+      },
+      "classification": "staging_synthetic_test_adaptation"
+    },
+    {
       "path": "tests/run_unicode_path_tests.ps1",
       "sha256": "fe0a85e20e1d7640abc496b41ba5e54054d90035a10b9f05c480c55e2b3a3bf5",
       "size": 2281,
@@ -2695,6 +3557,30 @@
         "selection": "fixed product closure"
       },
       "classification": "first_party_product_code_or_synthetic_support"
+    },
+    {
+      "path": "tests/test_camera.hpp",
+      "sha256": "c2ce964effed83bca3767ce0cef7d9b0e36a34c401fb5cee6250e9eea61718ed",
+      "size": 52875,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "tests/test_camera.hpp",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
+      "path": "tests/test_camera_core.hpp",
+      "sha256": "7f619a594eb6795b84c4919e1e396de09cb7c1b3cf81c2ba2b02924d6dda94bd",
+      "size": 10693,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "tests/test_camera_core.hpp",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
     },
     {
       "path": "tests/test_data_layout.cpp",
@@ -2710,6 +3596,42 @@
       "classification": "first_party_product_code_or_synthetic_support"
     },
     {
+      "path": "tests/test_face_ownership.hpp",
+      "sha256": "b515068870abe94069c37e92f4a9e6f36a133016870b692aca7f4b1a0a0d1980",
+      "size": 22178,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "tests/test_face_ownership.hpp",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
+      "path": "tests/test_facial_continuity.hpp",
+      "sha256": "e9b01b6cf700744cd395cde1b618649eac938fc9d0e0f33ec03039f44bd42a5a",
+      "size": 6884,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "tests/test_facial_continuity.hpp",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
+      "path": "tests/test_gui_ux.cpp",
+      "sha256": "77c67f7905a2bf30a07a0ce828401add3cca9926ecab0d489461c97ef68e9539",
+      "size": 50611,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "tests/test_gui_ux.cpp",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
       "path": "tests/test_layout_migration.ps1",
       "sha256": "baee790e0371628f8db63bf282aa47b385e504d8dcc686b75a5310bb758606ba",
       "size": 12969,
@@ -2723,17 +3645,78 @@
       "classification": "first_party_product_code_or_synthetic_support"
     },
     {
-      "path": "tests/test_native_import_bridge.cpp",
-      "sha256": "cea1b182d8939bd6cca44ebf3ff8880ff3c3b475978ad4514f26ccb687a276ac",
-      "size": 9498,
+      "path": "tests/test_miku_facial_fit.hpp",
+      "sha256": "ef2fbeb02726b7dbcddb24ae33daf88fa845ed88471d9e6efc70847467ad6f02",
+      "size": 8388,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "102df32c515e49d78f086c9467ec591a93716442",
-        "path": "tests/test_native_import_bridge.cpp",
-        "git_blob": "ad3e18943c93c45762778bd416efa15aad77174a",
-        "selection": "fixed product closure"
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "tests/test_miku_facial_fit.hpp",
+        "selected_raw_git_blob": true
       },
-      "classification": "first_party_product_code_or_synthetic_support"
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
+      "path": "tests/test_native_import_bridge.cpp",
+      "sha256": "4f63f7847a47bf5b56fd1bf09cda80dd66448fe6987ce76a55fd9825979ff4fa",
+      "size": 10650,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "tests/test_native_import_bridge.cpp",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source",
+      "history": [
+        {
+          "sha256": "cea1b182d8939bd6cca44ebf3ff8880ff3c3b475978ad4514f26ccb687a276ac",
+          "size": 9498,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "102df32c515e49d78f086c9467ec591a93716442",
+            "path": "tests/test_native_import_bridge.cpp",
+            "git_blob": "ad3e18943c93c45762778bd416efa15aad77174a",
+            "selection": "fixed product closure"
+          },
+          "classification": "first_party_product_code_or_synthetic_support"
+        }
+      ]
+    },
+    {
+      "path": "tests/test_playback_timing.hpp",
+      "sha256": "2051743db6e97ab6dbaeac3a27090c7a0bcd0711cce81700840e7f719a802367",
+      "size": 13698,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "tests/test_playback_timing.hpp",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
+      "path": "tests/test_refresh_core.cpp",
+      "sha256": "67599eaf243b241e85c8b48faa4770223cc76c6553eefe8c378611a7f66a0917",
+      "size": 114491,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "type": "synthetic-only test harness adaptation",
+        "source_algorithm_modified": false
+      },
+      "classification": "staging_synthetic_test_adaptation"
+    },
+    {
+      "path": "tests/test_scene_actor_selection.hpp",
+      "sha256": "b62c571a69a7a1f68c70ec1fe227c679de05edaa86dc10a1601e060dd6e37c79",
+      "size": 3736,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "tests/test_scene_actor_selection.hpp",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
     },
     {
       "path": "tests/test_stage_load_runtime.cpp",
@@ -2743,6 +3726,30 @@
         "repository": "GakuMotion",
         "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
         "path": "tests/test_stage_load_runtime.cpp"
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
+      "path": "tests/test_timing_gui.hpp",
+      "sha256": "662436ef9869b555b40e7711e78e3dd54fb829eeb2f9cb71cd72fcfcf793786b",
+      "size": 3630,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "tests/test_timing_gui.hpp",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
+      "path": "tests/test_track_timing.hpp",
+      "sha256": "499ac99a6da30a2696f9fc311d90aa887aeed214b00cefa10a5aeb29fbf1fe6b",
+      "size": 2483,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "tests/test_track_timing.hpp",
+        "selected_raw_git_blob": true
       },
       "classification": "selected_first_party_or_retained_license_source"
     },
@@ -2758,6 +3765,66 @@
         "selection": "fixed product closure"
       },
       "classification": "first_party_product_code_or_synthetic_support"
+    },
+    {
+      "path": "tests/test_waist_support.hpp",
+      "sha256": "ddee7cc1c2abac39c9a4c6fffb4a3bc97b2cc10ea51b24110c0874c7be2cab5a",
+      "size": 8888,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "tests/test_waist_support.hpp",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
+      "path": "tests/test_waist_support_core.hpp",
+      "sha256": "9e4104643bedec09dffdb0a462fd8d67ba021ad9db6a55de461eed049bc8ba64",
+      "size": 2482,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "tests/test_waist_support_core.hpp",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
+      "path": "tests/test_waist_support_integration.hpp",
+      "sha256": "0bdaa66e0dfc47572be5aa98ee4f03ef2ae5668d760cfa0f77383fe797c4889a",
+      "size": 20261,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "tests/test_waist_support_integration.hpp",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
+      "path": "tools/generate_branding_mesh.py",
+      "sha256": "b946a6195a05b160130c052cf26351fe16a9828df6212a78fa7b75de596d74b1",
+      "size": 21564,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "tools/generate_branding_mesh.py",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
+    },
+    {
+      "path": "tools/generate_miku_facial_fit.py",
+      "sha256": "b01cc96e0cc6c7951c7340b10ff052ce4747cc027e0088be4cb90bdc8611a141",
+      "size": 6087,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "path": "tools/generate_miku_facial_fit.py",
+        "selected_raw_git_blob": true
+      },
+      "classification": "selected_first_party_or_retained_license_source"
     },
     {
       "path": "tools/migrate-layout.ps1",
@@ -2858,7 +3925,7 @@
     "candidate_included_files": 31,
     "candidate_excluded_files": 0,
     "native_project_original_files": 15,
-    "native_project_included_files": 15,
+    "native_project_included_files": 17,
     "embedded_product_json_included": 4,
     "embedded_product_json_excluded": 0,
     "complete_product_build": true,
@@ -3338,5 +4405,47 @@
       "real user data"
     ],
     "validation_boundary": "One normal staging All build; previous fixed-source synthetic and game evidence remain separately attributed."
+  },
+  "product_experience_refresh": {
+    "date": "2026-11-04",
+    "base_staging_revision": "cc8c9083af89d72a26ab2af2f94c1884034066bb",
+    "fixed_product_revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+    "selected_commits": [
+      "75e9a6d5309d743090c49993196d670c2aed3a8e",
+      "2169236d2486175860cdb7fc57366ba27d261eef",
+      "b2cc6f34f21fe0efa2921b419b0cb5db5bc46ca1",
+      "e408a5038fece0dafe1885406485745245672c0a",
+      "9f953df76034caf761afd10d9ccd3aef1010a5e9",
+      "e626b354000e555d2b77514bacb946a8153db4c8",
+      "b225b29b6a123442becf3f3450b39828f09fa2c9",
+      "f9cb643a5e2fee51ed69d8b4269a02c5a9547d6a",
+      "388c789b6d4a4a45969c8f5c601a2eb992302161",
+      "9169ece1876261c937bd61b19bec19086a48f072",
+      "000a9327417bd2145ac91a123566f0676ba7fd99"
+    ],
+    "canonical_sdk": {
+      "include/GakuPlugin.h": {
+        "repository": "GakuLoader",
+        "revision": "ed5ad70819907c0a0f5acc25e804b0aea205fa57",
+        "sha256": "12f4e4db22ff0505990b66cfeaf97b1cae54486c9eb415e7efc3adfd9984867e",
+        "canonical_line_endings": "LF"
+      },
+      "include/GakuFileDrop.h": {
+        "repository": "GakuLoader",
+        "revision": "ed5ad70819907c0a0f5acc25e804b0aea205fa57",
+        "sha256": "b8f703c34627ecee86d51fe1aa630053b2e224c441430ac6c93779642d6148fd",
+        "canonical_line_endings": "LF"
+      }
+    },
+    "preserved_required_input_count": 11,
+    "new_miku_portable_input_sha256": "84833f0b7ff7b443620face49ee42762c7f86a2e4fc2d730918b7969ec7d7a1e",
+    "excluded": [
+      "SP and tooth research",
+      "recordings and original assets",
+      "Control API/Clock/Timeline/Director prototypes",
+      "uncommitted Sole UI text",
+      "enc_temp_folder"
+    ],
+    "game_deployment_or_acceptance_performed": false
   }
 }

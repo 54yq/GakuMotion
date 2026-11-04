@@ -27,6 +27,7 @@ internal sealed class ImportRequest
     public string LogPath { get; init; } = string.Empty;
     public string TimingJsonl { get; init; } = string.Empty;
     public string TransactionRoot { get; init; } = string.Empty;
+    public PerformanceTimingSettings? TrackTiming { get; init; }
 
     public static ImportRequest Parse(ReadOnlySpan<byte> utf8Json)
     {
@@ -81,7 +82,8 @@ internal sealed class ImportRequest
             ToothChannel = Optional("tooth_channel"),
             LogPath = Optional("log_path"),
             TimingJsonl = Optional("timing_jsonl"),
-            TransactionRoot = Optional("transaction_root")
+            TransactionRoot = Optional("transaction_root"),
+            TrackTiming = PerformanceTimingSettings.ParseOptional(root)
         };
     }
 }

@@ -20,8 +20,8 @@ namespace GakuMotion
 		// 与 RuntimeConfig / Core 使用相同的后端编号。
 		static const char* kPhysicsOptions[] = {
 			"关闭",
-			"内建物理（默认）",
-			"原生物理（实验性）"
+			"内建物理",
+			"原生物理（默认，实验性）"
 		};
 
 		int currentChoice = (std::clamp)(ctx.physicsBackend, 0, 2);
@@ -39,7 +39,7 @@ namespace GakuMotion
 			ImGui::PopStyleColor();
 		}
 		else if (ctx.physicsBackend == 1)
-			ImGui::TextWrapped("内建弹簧骨为默认与保底方案，不包含官方碰撞模型。");
+			ImGui::TextWrapped("内建弹簧骨为保底方案，不包含官方碰撞模型。");
 
 		ImGui::Spacing();
 		ImGui::Separator();
