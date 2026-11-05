@@ -284,6 +284,7 @@ namespace
 	};
 
 	#include "test_timing_gui.hpp"
+	#include "test_responsive_layout.hpp"
 
 	void TestCameraPursuitControls(const std::filesystem::path& root)
 	{
@@ -478,6 +479,7 @@ int main(int argc, char** argv)
 	io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
 	GImGui->TestEngineHookItems = true;
 	TestPlaybackAndTrackTimingGui(root);
+	TestResponsiveLibraryAndStageLayout(root);
 	TestCameraPursuitControls(root);
 	TestCameraFollowTargetControls(root);
 	TestUnifiedCameraModeControls(root);
@@ -752,38 +754,37 @@ int main(int argc, char** argv)
 		app.core.SavePlaylist();
 		const auto playlistBeforeCancel = read(app.core.playlistPath);
 		const auto clipBeforeCancel = read(app.fixture / "B" / "motion.gkclip");
-		app.Click("删除本地文件");
+		app.Click("删除选中");
 		ImRect confirmationButton;
-		Check(app.core.gui.pendingDeleteDirectory == (app.fixture / "B").string() && app.Find("移入可恢复区", confirmationButton),
+		Check(app.core.gui.pendingDeleteDirectory == (app.fixture / "B").string() && app.Find("永久删除", confirmationButton),
 			"actual delete confirmation displays the selected directory");
 		app.Click("取消删除");
 		Check(read(app.core.playlistPath) == playlistBeforeCancel && read(app.fixture / "B" / "motion.gkclip") == clipBeforeCancel &&
-			!std::filesystem::exists(app.fixture / LibraryTrash::DirectoryName), "actual cancel performs zero disk/list writes");
-		app.Click("删除本地文件");
+			!std::filesystem::exists(app.fixture / ".gakumotion-trash"), "actual cancel performs zero disk/list writes");
+		app.Click("删除选中");
 		app.Key(ImGuiKey_Escape);
 		Check(read(app.core.playlistPath) == playlistBeforeCancel && std::filesystem::exists(app.fixture / "B"),
 			"Escape cancels deletion without changing files");
-		app.Click("删除本地文件");
+		app.Click("删除选中");
 		++app.core.libraryRevision;
 		app.Frame();
-		app.Click("移入可恢复区");
+		app.Click("永久删除");
 		Check(std::filesystem::exists(app.fixture / "B") && FindPlaylistIndex(app.core.motions, "B") >= 0,
 			"library revision change disables stale confirmation");
 		app.Click("取消删除");
-		app.Click("从列表移除");
-		Check(FindPlaylistIndex(app.core.motions, "B") < 0 && read(app.fixture / "B" / "motion.gkclip") == clipBeforeCancel,
-			"actual remove button hides the entry while preserving file bytes");
-		app.Click("恢复已移除曲目");
-		Check(FindPlaylistIndex(app.core.motions, "B") >= 0, "actual restore-hidden button discovers the retained entry");
+		Check(!app.ItemWithLabel("从列表移除") && !app.ItemWithLabel("恢复已移除曲目") && !app.ItemWithLabel("恢复最近删除"),
+            "library has no list-removal or recovery controls");
 		app.Settle();
 		app.Click("##row", 1);
-		app.Click("删除本地文件");
-		app.Click("移入可恢复区");
+		app.Click("删除选中");
+		app.Click("永久删除");
 		Check(!std::filesystem::exists(app.fixture / "B") && FindPlaylistIndex(app.core.motions, "B") < 0,
-			"actual explicit confirmation reaches recoverable deletion");
-		app.Click("恢复最近删除");
-		Check(read(app.fixture / "B" / "motion.gkclip") == clipBeforeCancel && FindPlaylistIndex(app.core.motions, "B") >= 0,
-			"actual restore-deleted button returns the original directory byte for byte");
+			"actual explicit confirmation permanently deletes the selected track");
+		app.core.RefreshMotionLibrary();
+        app.Settle();
+        Check(!std::filesystem::exists(app.fixture / "B") && FindPlaylistIndex(app.core.motions, "B") < 0 &&
+            !std::filesystem::exists(app.fixture / ".gakumotion-trash"),
+            "refresh cannot resurrect permanently deleted files and creates no recovery area");
 	}
 	{
 		Harness app(root);
@@ -857,7 +858,7 @@ int main(int argc, char** argv)
 		Check(g_libraryModal.isOpen && g_libraryModal.isEditMode && g_libraryModal.editTargetKey == editKey && !drop.enabled && drop.consumed == 1,
 			"an edit modal rejects file drops without replacing its selected song");
 		app.Click("取消"); app.Settle();
-		app.Click("删除本地文件");
+		app.Click("删除选中");
 		drop.queued = {utf8(motion)}; app.Frame();
 		Check(!drop.enabled && !g_libraryModal.isOpen && drop.queued.empty() && drop.consumed == 1,
 			"another modal rejects file drops without opening an import modal");
@@ -885,7 +886,7 @@ int main(int argc, char** argv)
 			for (ImGuiWindow* window : GImGui->Windows)
 				if (window->Active && std::string_view(window->Name).find("/##gkmotion_main_content_") != std::string_view::npos)
 					for (ImGuiID id : order)
-						if (std::string_view(items[id].label) == "打开曲库文件夹" || items[id].label == "管理选中" || items[id].label == "恢复最近删除" || items[id].label == "播放选中")
+						if (std::string_view(items[id].label) == "打开曲库文件夹" || items[id].label == "管理选中" || items[id].label == "删除选中" || items[id].label == "播放选中")
 						{ ++buttons; fits = fits && items[id].rect.Max.x <= window->ContentRegionRect.Max.x + .5f; }
 			Check(fits && buttons >= 3, scale == 1.25f ? "icon library toolbar wraps Chinese labels within a 720px window at 125%" : "icon library toolbar wraps Chinese labels within a 720px window at 150%");
 		}
@@ -921,65 +922,49 @@ int main(int argc, char** argv)
 		io.FontDefault = originalFont;
 		io.FontGlobalScale = 1.0f;
 	}
-	{
-		MockGuiState preview;
-		Harness app(root);
-		app.previewState = &preview;
-		app.core.gui.selectedLibraryKey = preview.motions.front().name;
-		const auto key = preview.motions.front().name;
-		const auto original = preview.motions.front();
-		const auto revision = preview.libraryRevision;
-		app.Frame(); app.Frame();
-		app.Click("删除本地文件");
-		ImRect confirmationButton;
-		Check(app.core.gui.pendingDeleteDirectory == original.dir && app.Find("移入可恢复区", confirmationButton),
-			"standalone mock supplies the same confirmation key and target-directory contract");
-		app.Click("取消删除");
-		Check(preview.motions.size() == 3 && preview.deletedMotions.empty() && preview.libraryRevision == revision,
-			"standalone mock cancel preserves all memory state");
-		auto context = preview.BuildContext();
-		context.fnPlaylistAction(context.self, static_cast<int>(GuiPlaylistAction::DeleteFiles), key.c_str(), 0);
-		Check(preview.motions.size() == 3 && preview.deletedMotions.empty(), "standalone mock rejects a delete callback without confirmation value 1");
-		app.Click("删除本地文件");
-		++preview.libraryRevision; app.Frame();
-		app.Click("移入可恢复区");
-		Check(preview.motions.size() == 3 && preview.deletedMotions.empty(), "standalone mock revision invalidates an open confirmation");
-		app.Click("取消删除");
-		app.Click("删除本地文件");
-		app.Click("移入可恢复区");
-		Check(preview.motions.size() == 2 && preview.deletedMotions.size() == 1 && preview.selectedMotionIndex == -1 &&
-			preview.player.state == PlaybackState::Stopped && preview.player.loadedMotionFile.empty(),
-			"standalone mock confirm simulates deletion in memory and releases the loaded identity");
-		Check(preview.playlistNotice.find("未操作本地文件") != std::string::npos, "standalone mock explicitly labels file operations as memory-only");
-		app.Click("恢复最近删除");
-		Check(preview.motions.size() == 3 && preview.deletedMotions.empty() && preview.motions.back().dir == original.dir &&
-			preview.player.state == PlaybackState::Stopped, "standalone mock restore returns original metadata without autoplay");
-		app.Settle();
-		app.Click("##row", 2);
-		app.Click("加载预览");
-		Check(preview.selectedMotionIndex == 2 && preview.player.clip.total_frames == original.totalFrames &&
-			preview.player.state == PlaybackState::Preview, "standalone mock can load a recovered entry after deleting the previous clip");
-		app.Click("从列表移除");
-		Check(preview.motions.size() == 2 && preview.hiddenMotions.size() == 1 && preview.deletedMotions.empty(),
-			"standalone mock distinguishes hidden entries from simulated deletion");
-		app.Click("恢复已移除曲目");
-		Check(preview.motions.size() == 3 && preview.hiddenMotions.empty(), "standalone mock hidden-entry restore is connected");
-		context = preview.BuildContext();
-		preview.importBusy = true;
-		context.fnPlaylistAction(context.self, static_cast<int>(GuiPlaylistAction::DeleteFiles), key.c_str(), 1);
-		Check(preview.motions.size() == 3 && preview.deletedMotions.empty(), "standalone mock import state blocks competing deletion");
-		preview.importBusy = false;
-		context.fnPlaylistAction(context.self, static_cast<int>(GuiPlaylistAction::DeleteFiles), key.c_str(), 1);
-		auto replacement = original;
-		replacement.title = "New same-name entry";
-		preview.motions.push_back(replacement);
-		context.fnPlaylistAction(context.self, static_cast<int>(GuiPlaylistAction::RestoreDeleted), "", 0);
-		Check(preview.deletedMotions.size() == 1 && preview.motions.back().title == replacement.title &&
-			preview.playlistNotice.find("未覆盖") != std::string::npos, "standalone mock restoration rejects a same-name replacement");
-		preview.Reset();
-		Check(preview.motions.size() == 3 && preview.hiddenMotions.empty() && preview.deletedMotions.empty(),
-			"standalone mock reset clears both memory recovery stores");
-	}
+    {
+        MockGuiState preview;
+        Harness app(root);
+        app.previewState = &preview;
+        app.core.gui.selectedLibraryKey = preview.motions.front().name;
+        const auto key = preview.motions.front().name;
+        const auto original = preview.motions.front();
+        const auto revision = preview.libraryRevision;
+        app.Settle();
+        app.Click("删除选中");
+        ImRect confirmationButton;
+        Check(app.core.gui.pendingDeleteDirectory == original.dir && app.Find("永久删除", confirmationButton),
+            "standalone mock supplies the same confirmation key and target-directory contract");
+        app.Click("取消删除");
+        Check(preview.motions.size() == 3 && preview.libraryRevision == revision,
+            "standalone mock cancel preserves all memory state");
+        auto context = preview.BuildContext();
+        context.fnPlaylistAction(context.self, static_cast<int>(GuiPlaylistAction::DeleteFiles), key.c_str(), 0);
+        Check(preview.motions.size() == 3, "standalone mock rejects deletion without explicit confirmation");
+        app.Click("删除选中");
+        ++preview.libraryRevision; app.Frame();
+        app.Click("永久删除");
+        Check(preview.motions.size() == 3, "standalone mock revision invalidates an open confirmation");
+        app.Click("取消删除");
+        app.Click("删除选中");
+        app.Click("永久删除");
+        Check(preview.motions.size() == 2 && preview.selectedMotionIndex == -1 &&
+            preview.player.state == PlaybackState::Stopped && preview.player.loadedMotionFile.empty(),
+            "standalone mock confirm simulates deletion and releases the loaded identity");
+        Check(preview.playlistNotice.find("未操作本地文件") != std::string::npos,
+            "standalone mock explicitly labels file operations as memory-only");
+        Check(!app.ItemWithLabel("恢复最近删除") && !app.ItemWithLabel("恢复已移除曲目") && !app.ItemWithLabel("从列表移除"),
+            "standalone preview has no removal or recovery controls");
+        preview.Reset();
+        const auto secondKey = preview.motions.front().name;
+        context = preview.BuildContext();
+        preview.importBusy = true;
+        context.fnPlaylistAction(context.self, static_cast<int>(GuiPlaylistAction::DeleteFiles), secondKey.c_str(), 1);
+        Check(preview.motions.size() == 3, "standalone mock import blocks competing deletion");
+        preview.importBusy = false;
+        context.fnPlaylistAction(context.self, static_cast<int>(GuiPlaylistAction::DeleteFiles), secondKey.c_str(), 1);
+        Check(preview.motions.size() == 2, "standalone mock deletes after import is no longer busy");
+    }
 	ImGui::DestroyContext();
 	std::printf("GUI UX interaction checks: %d passed, %d failed\n", passed, failed);
 	return failed ? EXIT_FAILURE : EXIT_SUCCESS;

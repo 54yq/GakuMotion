@@ -2219,21 +2219,16 @@ static void TestSecondaryPhysicsConfig()
 }
 
 
+#include "test_library_safety.hpp"
+
 static void TestPlaylistLifecycle(const std::string& repoRoot)
 {
 	BeginTest("playlist_lifecycle");
 	namespace fs = std::filesystem;
 	const auto root = fs::path(repoRoot) / "build" / "tests" / ("gkmotion_playlist_regression_" +
 		std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-	fs::remove_all(root);
-	fs::path source = fs::path(repoRoot) / "Motions" / "Like JENNIE" / "motion.gkmotion";
-	if (!fs::exists(source)) source = fs::path(repoRoot) / "Motions" / "Fighting My Way" / "motion.gkmotion";
-	if (!fs::exists(source)) source = fs::path(repoRoot) / "test_motion" / "motion.gkmotion";
 	for (const char* name : {"song", "song_b", "song_c"})
-	{
-		fs::create_directories(root / "motions" / name);
-		fs::copy_file(source, root / "motions" / name / "motion.gkmotion");
-	}
+		LibraryDeleteFixture::WriteClip(root / "motions" / name / "motion.gkclip");
 	Core core;
 	core.Initialize(root.string());
 	core.SelectMotionByIndex(1, true);
@@ -2243,31 +2238,35 @@ static void TestPlaylistLifecycle(const std::string& repoRoot)
 	      "reordering preserves selected track and running clip");
 	core.QueueSelectMotion(2, false);
 	Check(core.currentMotionIndex == 0, "GUI queues selection without changing main-thread index");
-	core.QueueGui({Core::GuiAction::Remove, 0, false, "song"});
+	Core::GuiCommand deletion{Core::GuiAction::DeleteFiles, 0, true, "song"};
+	deletion.libraryRevision = core.libraryRevision;
+	core.QueueGui(std::move(deletion));
 	core.ProcessPendingGuiCommands();
 	Check(core.CurrentMotion() && core.CurrentMotion()->name == "song_c",
 	      "commands identify songs independently of row renumbering");
 	core.RefreshMotionLibrary();
 	Check(core.motions.size() == 2 && FindPlaylistIndex(core.motions, "song") < 0,
-	      "refresh does not resurrect removed song or confuse name prefixes");
-	Check(fs::exists(root / "motions" / "song" / "motion.gkmotion"), "playlist removal preserves motion files");
+	      "refresh does not resurrect deleted song or confuse name prefixes");
+	Check(!fs::exists(root / "motions" / "song"), "confirmed deletion removes motion directory permanently");
 	Core restarted;
 	restarted.Initialize(root.string());
 	Check(restarted.motions.size() == 2 && restarted.motions.front().name == "song_b",
-	      "restart restores playlist exclusions and ordering");
+	      "restart retains remaining playlist order");
 	const auto before = restarted.playlist.order;
 	WriteTextFile(root / "bad.json", R"({"version":1,"mode":3,"order":[4],"removed":[]})");
 	std::string error;
 	Check(!restarted.playlist.Load((root / "bad.json").string(), error) && restarted.playlist.order == before,
 	      "malformed saved list cannot partially mutate current list");
-	core.RemoveMotion("song_c");
+	core.DeleteMotionFiles("song_c", true);
 	Check(core.currentMotionIndex == -1 && core.player.clip.total_frames == 0 && core.player.state ==
 	      PlaybackState::Stopped,
-	      "removing current song stops sound, restores pose and clears clip");
-	core.RemoveMotion("song_b");
-	Check(core.motions.empty(), "last song can be removed");
-	Check(core.RestoreHiddenMotions(), "hidden entries can be restored");
-	Check(core.motions.size() == 3, "restoring hidden entries makes all untouched directories visible");
+	      "deleting current song stops sound, restores pose and clears clip");
+	core.DeleteMotionFiles("song_b", true);
+	Check(core.motions.empty(), "last song can be permanently deleted");
+	for (const char* name : {"song", "song_b", "song_c"})
+		LibraryDeleteFixture::WriteClip(root / "motions" / name / "motion.gkclip");
+	core.RefreshMotionLibrary();
+	Check(core.motions.size() == 3, "new external imports become visible on refresh");
 	core.playlist.mode = PlaylistMode::Shuffle;
 	std::unordered_set<int> seen;
 	int index = 0;
@@ -2554,6 +2553,8 @@ int main(int argc, char** argv)
  TestPlaybackTiming();
  TestTrackTimingMetadata();
  TestActorlessLibraryCommands(repoRoot);
+ TestPlaylistLifecycle(repoRoot);
+ TestLibrarySafety(repoRoot);
  TestHotkeyEdgeGate();
  TestScrubAndPreview();
  TestCameraController(repoRoot);

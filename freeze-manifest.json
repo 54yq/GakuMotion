@@ -130,13 +130,15 @@
     },
     {
       "path": "README.md",
-      "sha256": "a68b6884bb06d7eb34827528739b28cab7d21125649ca5b813fb376a2c208f5d",
-      "size": 7725,
+      "sha256": "cc83d2e676062882d33a827a109e34862479b0ff0957567de4d9cbcb99cfb1f7",
+      "size": 7737,
       "origin": {
-        "type": "local staging product documentation or synthetic test",
-        "source_algorithm_modified": false
+        "repository": "GakuMotion",
+        "revision": "4f8ec4f62107130dfdeeae61586ac861ae71d2e0",
+        "path": "README.md",
+        "adaptation": "Staging-specific documentation or synthetic test integration for the selected library deletion and layout changes."
       },
-      "classification": "new_local_staging_control_or_documentation",
+      "classification": "selected_product_change_with_explicit_staging_adaptation",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -151,6 +153,16 @@
             "complete_candidate_update": "Normal local build integration and current user/developer documentation; no algorithm or parameter change."
           },
           "classification": "restored_product_documentation_with_explicit_adaptations"
+        },
+        {
+          "staging_revision": "50bafca0b66cdff3a01b6585769f06367eeb1fe4",
+          "sha256": "a68b6884bb06d7eb34827528739b28cab7d21125649ca5b813fb376a2c208f5d",
+          "size": 7725,
+          "origin": {
+            "type": "local staging product documentation or synthetic test",
+            "source_algorithm_modified": false
+          },
+          "classification": "new_local_staging_control_or_documentation"
         }
       ],
       "history": [
@@ -218,14 +230,14 @@
     {
       "path": "SOURCE_REVIEW.md",
       "origin": {
-        "type": "staging product documentation for actorless library fix",
-        "product_source_revision": "0870da032cdb25d02f2d3c7803fce4afc618c743",
-        "base_staging_revision": "e41c502cbcb078a055f5c0ff7bf8ddcc2fe6fba5",
-        "adaptation": "Describe the selected file-job host-frame behavior, exact source scope, synthetic checks and absence of staging game acceptance."
+        "repository": "GakuMotion",
+        "revision": "4f8ec4f62107130dfdeeae61586ac861ae71d2e0",
+        "path": "SOURCE_REVIEW.md",
+        "adaptation": "Staging-specific documentation or synthetic test integration for the selected library deletion and layout changes."
       },
-      "classification": "product_documentation_with_explicit_adaptations",
-      "sha256": "40987b29689dbfd826793a5a28f1695285fd8c45ae04995a2c9326cc700e560c",
-      "size": 10117,
+      "classification": "selected_product_change_with_explicit_staging_adaptation",
+      "sha256": "fe7ed0e00faf33ddc5048c4cf65ed86eabee83fec44f4e20efe35e8f207ded3e",
+      "size": 10817,
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -238,6 +250,18 @@
             "complete_candidate_update": "Normal local build integration and current user/developer documentation; no algorithm or parameter change."
           },
           "classification": "new_local_staging_control_or_documentation"
+        },
+        {
+          "staging_revision": "50bafca0b66cdff3a01b6585769f06367eeb1fe4",
+          "sha256": "40987b29689dbfd826793a5a28f1695285fd8c45ae04995a2c9326cc700e560c",
+          "size": 10117,
+          "origin": {
+            "type": "staging product documentation for actorless library fix",
+            "product_source_revision": "0870da032cdb25d02f2d3c7803fce4afc618c743",
+            "base_staging_revision": "e41c502cbcb078a055f5c0ff7bf8ddcc2fe6fba5",
+            "adaptation": "Describe the selected file-job host-frame behavior, exact source scope, synthetic checks and absence of staging game acceptance."
+          },
+          "classification": "product_documentation_with_explicit_adaptations"
         }
       ],
       "history": [
@@ -1070,15 +1094,15 @@
     },
     {
       "path": "docs/INSTALLATION.md",
-      "sha256": "975dcdf8a8b8318b60b5cbc78a20392fd12d0db46df3d74b0d54437a26a7c8c8",
-      "size": 4728,
+      "sha256": "7cde3016cfcfdea659fe6a1a915cd797dcb001ea8739d71b26f576806085b9ff",
+      "size": 4737,
       "origin": {
-        "type": "staging product documentation adaptation",
-        "base_staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
-        "product_source_revision": "102df32c515e49d78f086c9467ec591a93716442",
-        "purpose": "Keep the user homepage and build integration; describe managed paths and preserved-data migration."
+        "repository": "GakuMotion",
+        "revision": "4f8ec4f62107130dfdeeae61586ac861ae71d2e0",
+        "path": "docs/INSTALLATION.md",
+        "adaptation": "Staging-specific documentation or synthetic test integration for the selected library deletion and layout changes."
       },
-      "classification": "product_documentation_with_explicit_adaptations",
+      "classification": "selected_product_change_with_explicit_staging_adaptation",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -1091,21 +1115,59 @@
             "adaptation": "Restore existing documentation; adapt current build interface, links and historical placement."
           },
           "classification": "restored_product_documentation_with_explicit_adaptations"
+        },
+        {
+          "staging_revision": "50bafca0b66cdff3a01b6585769f06367eeb1fe4",
+          "sha256": "975dcdf8a8b8318b60b5cbc78a20392fd12d0db46df3d74b0d54437a26a7c8c8",
+          "size": 4728,
+          "origin": {
+            "type": "staging product documentation adaptation",
+            "base_staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
+            "product_source_revision": "102df32c515e49d78f086c9467ec591a93716442",
+            "purpose": "Keep the user homepage and build integration; describe managed paths and preserved-data migration."
+          },
+          "classification": "product_documentation_with_explicit_adaptations"
         }
       ]
     },
     {
-      "path": "docs/MIGRATION_LAYOUT.md",
-      "sha256": "c052f63136fe7a8fc595ac1a73d72ce808f8a070145a1af357b8bdf04a0a314b",
-      "size": 5829,
+      "path": "docs/LIBRARY_DELETE_LAYOUT_20261105.md",
       "origin": {
         "repository": "GakuMotion",
-        "revision": "102df32c515e49d78f086c9467ec591a93716442",
-        "path": "docs/MIGRATION_LAYOUT.md",
-        "git_blob": "d68219e86344d2ebe1a42c2bcf6bfbe940aa954d",
-        "selection": "fixed product closure"
+        "revision": "4f8ec4f62107130dfdeeae61586ac861ae71d2e0",
+        "path": "docs/LIBRARY_DELETE_LAYOUT_20261105.md",
+        "adaptation": "Staging-specific documentation or synthetic test integration for the selected library deletion and layout changes."
       },
-      "classification": "first_party_product_code_or_synthetic_support"
+      "classification": "selected_product_change_with_explicit_staging_adaptation",
+      "sha256": "24c9b9e36fa6593b155a640d7cf86cabb1ac9c5b114043c2fc6ed346c28450ce",
+      "size": 2434
+    },
+    {
+      "path": "docs/MIGRATION_LAYOUT.md",
+      "sha256": "7ad66e271be7e92f486a23d11fafc427b4d7d349f964524e6186cbbc874f4463",
+      "size": 5910,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "4f8ec4f62107130dfdeeae61586ac861ae71d2e0",
+        "path": "docs/MIGRATION_LAYOUT.md",
+        "adaptation": "Staging-specific documentation or synthetic test integration for the selected library deletion and layout changes."
+      },
+      "classification": "selected_product_change_with_explicit_staging_adaptation",
+      "origin_history": [
+        {
+          "staging_revision": "50bafca0b66cdff3a01b6585769f06367eeb1fe4",
+          "sha256": "c052f63136fe7a8fc595ac1a73d72ce808f8a070145a1af357b8bdf04a0a314b",
+          "size": 5829,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "102df32c515e49d78f086c9467ec591a93716442",
+            "path": "docs/MIGRATION_LAYOUT.md",
+            "git_blob": "d68219e86344d2ebe1a42c2bcf6bfbe940aa954d",
+            "selection": "fixed product closure"
+          },
+          "classification": "first_party_product_code_or_synthetic_support"
+        }
+      ]
     },
     {
       "path": "docs/PLAYBACK_TIMING.md",
@@ -1145,13 +1207,15 @@
     },
     {
       "path": "docs/TROUBLESHOOTING.md",
-      "sha256": "cf239b572fc0e4254e578b234faa71cbcafb81a3d3b7e165b7cf202aea7cd95f",
-      "size": 7644,
+      "sha256": "66d31e43fed4173566d7fee8e2c5b8ca83bdba2e56a0b4e9cec3bca4cdef96d7",
+      "size": 7675,
       "origin": {
-        "type": "local staging product documentation or synthetic test",
-        "source_algorithm_modified": false
+        "repository": "GakuMotion",
+        "revision": "4f8ec4f62107130dfdeeae61586ac861ae71d2e0",
+        "path": "docs/TROUBLESHOOTING.md",
+        "adaptation": "Staging-specific documentation or synthetic test integration for the selected library deletion and layout changes."
       },
-      "classification": "new_local_staging_control_or_documentation",
+      "classification": "selected_product_change_with_explicit_staging_adaptation",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -1164,6 +1228,16 @@
             "adaptation": "Restore existing documentation; adapt current build interface, links and historical placement."
           },
           "classification": "restored_product_documentation_with_explicit_adaptations"
+        },
+        {
+          "staging_revision": "50bafca0b66cdff3a01b6585769f06367eeb1fe4",
+          "sha256": "cf239b572fc0e4254e578b234faa71cbcafb81a3d3b7e165b7cf202aea7cd95f",
+          "size": 7644,
+          "origin": {
+            "type": "local staging product documentation or synthetic test",
+            "source_algorithm_modified": false
+          },
+          "classification": "new_local_staging_control_or_documentation"
         }
       ],
       "history": [
@@ -1182,15 +1256,15 @@
     },
     {
       "path": "docs/USAGE.md",
-      "sha256": "21b67b2e6da7e046183bed9698c75ee06b3fd0ab07aa20943f3580c78ae4be59",
-      "size": 9020,
+      "sha256": "ed985ac29c4961b614e1c9b7a252a6ac76c82d70d261970cec41ab83b216f758",
+      "size": 9305,
       "origin": {
-        "type": "staging product documentation for actorless library fix",
-        "product_source_revision": "0870da032cdb25d02f2d3c7803fce4afc618c743",
-        "base_staging_revision": "e41c502cbcb078a055f5c0ff7bf8ddcc2fe6fba5",
-        "adaptation": "Describe the selected file-job host-frame behavior, exact source scope, synthetic checks and absence of staging game acceptance."
+        "repository": "GakuMotion",
+        "revision": "4f8ec4f62107130dfdeeae61586ac861ae71d2e0",
+        "path": "docs/USAGE.md",
+        "adaptation": "Staging-specific documentation or synthetic test integration for the selected library deletion and layout changes."
       },
-      "classification": "product_documentation_with_explicit_adaptations",
+      "classification": "selected_product_change_with_explicit_staging_adaptation",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -1204,6 +1278,18 @@
             "documentation_followup": "Move dated acceptance narration from product entry pages into existing historical version notes."
           },
           "classification": "restored_product_documentation_with_explicit_adaptations"
+        },
+        {
+          "staging_revision": "50bafca0b66cdff3a01b6585769f06367eeb1fe4",
+          "sha256": "21b67b2e6da7e046183bed9698c75ee06b3fd0ab07aa20943f3580c78ae4be59",
+          "size": 9020,
+          "origin": {
+            "type": "staging product documentation for actorless library fix",
+            "product_source_revision": "0870da032cdb25d02f2d3c7803fce4afc618c743",
+            "base_staging_revision": "e41c502cbcb078a055f5c0ff7bf8ddcc2fe6fba5",
+            "adaptation": "Describe the selected file-job host-frame behavior, exact source scope, synthetic checks and absence of staging game acceptance."
+          },
+          "classification": "product_documentation_with_explicit_adaptations"
         }
       ],
       "history": [
@@ -1969,30 +2055,41 @@
     },
     {
       "path": "preview/GkMockState.hpp",
-      "sha256": "589fa2257241f46d0b9fa24f568c4385725416da90d0228d2e76af819bba7296",
-      "size": 39324,
+      "sha256": "dfeaf663db254be19f4e0243af36dcd3aa46518eb2741977b63e7f862e1a7c60",
+      "size": 37317,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "revision": "4f8ec4f62107130dfdeeae61586ac861ae71d2e0",
         "path": "preview/GkMockState.hpp",
-        "selected_raw_git_blob": true
+        "adaptation": "Selected permanent deletion, legacy playlist compatibility, GUI height fixes and synthetic tests; retain staging-specific product scope."
       },
-      "classification": "selected_first_party_or_retained_license_source"
+      "classification": "selected_product_change_with_explicit_staging_adaptation",
+      "origin_history": [
+        {
+          "staging_revision": "50bafca0b66cdff3a01b6585769f06367eeb1fe4",
+          "sha256": "589fa2257241f46d0b9fa24f568c4385725416da90d0228d2e76af819bba7296",
+          "size": 39324,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+            "path": "preview/GkMockState.hpp",
+            "selected_raw_git_blob": true
+          },
+          "classification": "selected_first_party_or_retained_license_source"
+        }
+      ]
     },
     {
       "path": "src/GakuMotion.hpp",
-      "sha256": "21b74a8df90e97121671348ebb62ace9218421316cf9903a8eb878fe18b2cc08",
-      "size": 121122,
+      "sha256": "f70bfa6cf11f0bf22de895a84c65cb448a9a41b5375d410e4fba0ba40ede4318",
+      "size": 118127,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "0870da032cdb25d02f2d3c7803fce4afc618c743",
+        "revision": "4f8ec4f62107130dfdeeae61586ac861ae71d2e0",
         "path": "src/GakuMotion.hpp",
-        "git_blob": "7b7a3f909b67f1e7214e77675fd64b3e0f929553",
-        "selected_raw_git_blob": false,
-        "base_staging_revision": "e41c502cbcb078a055f5c0ff7bf8ddcc2fe6fba5",
-        "adaptation": "Core::ProcessPendingLibraryCommands only; existing staging GUI command consumer is unchanged."
+        "adaptation": "Selected permanent deletion, legacy playlist compatibility, GUI height fixes and synthetic tests; retain staging-specific product scope."
       },
-      "classification": "selected_actorless_library_fix_hunks",
+      "classification": "selected_product_change_with_explicit_staging_adaptation",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -2004,6 +2101,21 @@
             "path": "src/GakuMotion.hpp"
           },
           "classification": "selected_first_party_code_for_private_review"
+        },
+        {
+          "staging_revision": "50bafca0b66cdff3a01b6585769f06367eeb1fe4",
+          "sha256": "21b74a8df90e97121671348ebb62ace9218421316cf9903a8eb878fe18b2cc08",
+          "size": 121122,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "0870da032cdb25d02f2d3c7803fce4afc618c743",
+            "path": "src/GakuMotion.hpp",
+            "git_blob": "7b7a3f909b67f1e7214e77675fd64b3e0f929553",
+            "selected_raw_git_blob": false,
+            "base_staging_revision": "e41c502cbcb078a055f5c0ff7bf8ddcc2fe6fba5",
+            "adaptation": "Core::ProcessPendingLibraryCommands only; existing staging GUI command consumer is unchanged."
+          },
+          "classification": "selected_actorless_library_fix_hunks"
         }
       ],
       "history": [
@@ -2624,15 +2736,15 @@
     },
     {
       "path": "src/GkGuiOverlay.hpp",
-      "sha256": "7730ed74e9ef887ed5f6759ef7220ac3cc1f50742e3faf8994ae0ca93ea55b3f",
-      "size": 21745,
+      "sha256": "ef0f504771a75780ba927b383a5870e34cb7f28ebd1490ddcc325519f26e5e37",
+      "size": 21666,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "revision": "4f8ec4f62107130dfdeeae61586ac861ae71d2e0",
         "path": "src/GkGuiOverlay.hpp",
-        "selected_raw_git_blob": true
+        "adaptation": "Selected permanent deletion, legacy playlist compatibility, GUI height fixes and synthetic tests; retain staging-specific product scope."
       },
-      "classification": "selected_first_party_or_retained_license_source",
+      "classification": "selected_product_change_with_explicit_staging_adaptation",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -2644,6 +2756,18 @@
             "path": "src/GkGuiOverlay.hpp"
           },
           "classification": "selected_first_party_code_for_private_review"
+        },
+        {
+          "staging_revision": "50bafca0b66cdff3a01b6585769f06367eeb1fe4",
+          "sha256": "7730ed74e9ef887ed5f6759ef7220ac3cc1f50742e3faf8994ae0ca93ea55b3f",
+          "size": 21745,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+            "path": "src/GkGuiOverlay.hpp",
+            "selected_raw_git_blob": true
+          },
+          "classification": "selected_first_party_or_retained_license_source"
         }
       ],
       "history": [
@@ -2730,6 +2854,18 @@
       "classification": "selected_first_party_code_for_private_review"
     },
     {
+      "path": "src/GkLibraryDelete.hpp",
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "4f8ec4f62107130dfdeeae61586ac861ae71d2e0",
+        "path": "src/GkLibraryDelete.hpp",
+        "adaptation": "Selected permanent deletion, legacy playlist compatibility, GUI height fixes and synthetic tests; retain staging-specific product scope."
+      },
+      "classification": "selected_product_change_with_explicit_staging_adaptation",
+      "sha256": "3b93106d93ad3b16333a2bcc36ad1433d15a95227487ae53cc7ce637e96282cc",
+      "size": 4564
+    },
+    {
       "path": "src/GkLibraryState.hpp",
       "sha256": "3ba561ec4cd777e775eec21333aa51a18d975964a36bb7fc55504b0c16c531bb",
       "size": 1761,
@@ -2737,17 +2873,6 @@
         "repository": "GakuMotion",
         "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
         "path": "src/GkLibraryState.hpp"
-      },
-      "classification": "selected_first_party_code_for_private_review"
-    },
-    {
-      "path": "src/GkLibraryTrash.hpp",
-      "sha256": "e7d83d1775c6e97bfb9faeb8016485b576527e37316c21d1c2d48770f176432c",
-      "size": 6471,
-      "origin": {
-        "repository": "GakuMotion",
-        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
-        "path": "src/GkLibraryTrash.hpp"
       },
       "classification": "selected_first_party_code_for_private_review"
     },
@@ -2845,15 +2970,15 @@
     },
     {
       "path": "src/GkPlaylist.hpp",
-      "sha256": "a63e5b5c613448adfeeee9833a4055b2e6877af836ed8ce73da89ef1fcd66147",
-      "size": 9019,
+      "sha256": "7b60c8b00443f5a9f7b6f529eec1ab9f4dd13e52ed7955c9318d84c2bb00550a",
+      "size": 8650,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "revision": "4f8ec4f62107130dfdeeae61586ac861ae71d2e0",
         "path": "src/GkPlaylist.hpp",
-        "selected_raw_git_blob": true
+        "adaptation": "Selected permanent deletion, legacy playlist compatibility, GUI height fixes and synthetic tests; retain staging-specific product scope."
       },
-      "classification": "selected_first_party_or_retained_license_source",
+      "classification": "selected_product_change_with_explicit_staging_adaptation",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -2865,6 +2990,18 @@
             "path": "src/GkPlaylist.hpp"
           },
           "classification": "selected_first_party_code_for_private_review"
+        },
+        {
+          "staging_revision": "50bafca0b66cdff3a01b6585769f06367eeb1fe4",
+          "sha256": "a63e5b5c613448adfeeee9833a4055b2e6877af836ed8ce73da89ef1fcd66147",
+          "size": 9019,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+            "path": "src/GkPlaylist.hpp",
+            "selected_raw_git_blob": true
+          },
+          "classification": "selected_first_party_or_retained_license_source"
         }
       ],
       "history": [
@@ -2906,15 +3043,15 @@
     },
     {
       "path": "src/GkRuntimeConfig.hpp",
-      "sha256": "0a7a2516922f309ad7a0c7fd159d4f94c1ff775cdb5480577974895efc45c78c",
-      "size": 46163,
+      "sha256": "8c3e1dd65142fb212e59789b9494837351e2abe57565d5d97d0cd1b9f9d906a0",
+      "size": 46186,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "3a33452a09aa9eea8e97eb2e58ac2710ee1e4f5e",
+        "revision": "4f8ec4f62107130dfdeeae61586ac861ae71d2e0",
         "path": "src/GkRuntimeConfig.hpp",
-        "selected_raw_git_blob": true
+        "adaptation": "Selected permanent deletion, legacy playlist compatibility, GUI height fixes and synthetic tests; retain staging-specific product scope."
       },
-      "classification": "selected_first_party_camera_code_or_synthetic_test",
+      "classification": "selected_product_change_with_explicit_staging_adaptation",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -2926,6 +3063,18 @@
             "path": "src/GkRuntimeConfig.hpp"
           },
           "classification": "selected_first_party_code_for_private_review"
+        },
+        {
+          "staging_revision": "50bafca0b66cdff3a01b6585769f06367eeb1fe4",
+          "sha256": "0a7a2516922f309ad7a0c7fd159d4f94c1ff775cdb5480577974895efc45c78c",
+          "size": 46163,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "3a33452a09aa9eea8e97eb2e58ac2710ee1e4f5e",
+            "path": "src/GkRuntimeConfig.hpp",
+            "selected_raw_git_blob": true
+          },
+          "classification": "selected_first_party_camera_code_or_synthetic_test"
         }
       ],
       "history": [
@@ -3312,14 +3461,28 @@
     },
     {
       "path": "src/gui/GkGuiTabMotion.hpp",
-      "sha256": "ed74998429c0e52d226a09a12755de3fefb0fe6d7c5e28d8d4594e735b2afa3c",
-      "size": 10073,
+      "sha256": "ad6d7ff8b135b9147f5bf7a58aec0fd79003a54d7697a22c72fb059faee64f20",
+      "size": 9711,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
-        "path": "src/gui/GkGuiTabMotion.hpp"
+        "revision": "4f8ec4f62107130dfdeeae61586ac861ae71d2e0",
+        "path": "src/gui/GkGuiTabMotion.hpp",
+        "adaptation": "Selected permanent deletion, legacy playlist compatibility, GUI height fixes and synthetic tests; retain staging-specific product scope."
       },
-      "classification": "selected_first_party_code_for_private_review"
+      "classification": "selected_product_change_with_explicit_staging_adaptation",
+      "origin_history": [
+        {
+          "staging_revision": "50bafca0b66cdff3a01b6585769f06367eeb1fe4",
+          "sha256": "ed74998429c0e52d226a09a12755de3fefb0fe6d7c5e28d8d4594e735b2afa3c",
+          "size": 10073,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+            "path": "src/gui/GkGuiTabMotion.hpp"
+          },
+          "classification": "selected_first_party_code_for_private_review"
+        }
+      ]
     },
     {
       "path": "src/gui/GkGuiTabSole.hpp",
@@ -3457,15 +3620,15 @@
     },
     {
       "path": "src/gui/GuiLibraryPage.hpp",
-      "sha256": "f664849515fa2c7771c22bf3f5bc19a5c12ec96fd9374412f9722194412038ee",
-      "size": 45991,
+      "sha256": "28ab1982e4f0bb4657ed58c9c4d45cb7e4330fef97ba338f1443c0ad7610c756",
+      "size": 47172,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "revision": "4f8ec4f62107130dfdeeae61586ac861ae71d2e0",
         "path": "src/gui/GuiLibraryPage.hpp",
-        "selected_raw_git_blob": true
+        "adaptation": "Selected permanent deletion, legacy playlist compatibility, GUI height fixes and synthetic tests; retain staging-specific product scope."
       },
-      "classification": "selected_first_party_or_retained_license_source",
+      "classification": "selected_product_change_with_explicit_staging_adaptation",
       "history": [
         {
           "sha256": "768735e2641383abad8d41083bbd8ebfcac3de175034685b4b684223c0e378f7",
@@ -3476,6 +3639,20 @@
             "path": "src/gui/GuiLibraryPage.hpp"
           },
           "classification": "selected_first_party_code_for_private_review"
+        }
+      ],
+      "origin_history": [
+        {
+          "staging_revision": "50bafca0b66cdff3a01b6585769f06367eeb1fe4",
+          "sha256": "f664849515fa2c7771c22bf3f5bc19a5c12ec96fd9374412f9722194412038ee",
+          "size": 45991,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+            "path": "src/gui/GuiLibraryPage.hpp",
+            "selected_raw_git_blob": true
+          },
+          "classification": "selected_first_party_or_retained_license_source"
         }
       ]
     },
@@ -3541,15 +3718,15 @@
     },
     {
       "path": "src/gui/GuiOverlayShell.hpp",
-      "sha256": "b1b66dbcd1769facf15fb566edf5f35bc7220c0459239a1e0d629ec6da7f6ddb",
-      "size": 5956,
+      "sha256": "2c37f4955afb4c182803471570bb894d26bcb493df0bbb03eb56de8f762f7f1a",
+      "size": 6221,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "revision": "4f8ec4f62107130dfdeeae61586ac861ae71d2e0",
         "path": "src/gui/GuiOverlayShell.hpp",
-        "selected_raw_git_blob": true
+        "adaptation": "Selected permanent deletion, legacy playlist compatibility, GUI height fixes and synthetic tests; retain staging-specific product scope."
       },
-      "classification": "selected_first_party_or_retained_license_source",
+      "classification": "selected_product_change_with_explicit_staging_adaptation",
       "history": [
         {
           "sha256": "80087be05b476ea46e4e054bc2d281922c2dbba5b33ddb413bf8192385368b5a",
@@ -3560,6 +3737,20 @@
             "path": "src/gui/GuiOverlayShell.hpp"
           },
           "classification": "selected_first_party_code_for_private_review"
+        }
+      ],
+      "origin_history": [
+        {
+          "staging_revision": "50bafca0b66cdff3a01b6585769f06367eeb1fe4",
+          "sha256": "b1b66dbcd1769facf15fb566edf5f35bc7220c0459239a1e0d629ec6da7f6ddb",
+          "size": 5956,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+            "path": "src/gui/GuiOverlayShell.hpp",
+            "selected_raw_git_blob": true
+          },
+          "classification": "selected_first_party_or_retained_license_source"
         }
       ]
     },
@@ -3602,16 +3793,15 @@
     },
     {
       "path": "src/gui/GuiStagePage.hpp",
-      "sha256": "fe68e363481d41959dcef75c53b1cefe2aa91fb5527d8a039bef99a3e049ecd0",
-      "size": 9294,
+      "sha256": "bee96265f6a5eb443bca4f330a24882ca6c1d04a9e9328eee2c3b0c43b7d647a",
+      "size": 9426,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "102df32c515e49d78f086c9467ec591a93716442",
+        "revision": "4f8ec4f62107130dfdeeae61586ac861ae71d2e0",
         "path": "src/gui/GuiStagePage.hpp",
-        "git_blob": "7e4ac07da2de693a1fb75d0a04e95b2091d45192",
-        "selection": "fixed product closure"
+        "adaptation": "Selected permanent deletion, legacy playlist compatibility, GUI height fixes and synthetic tests; retain staging-specific product scope."
       },
-      "classification": "first_party_product_code_or_synthetic_support",
+      "classification": "selected_product_change_with_explicit_staging_adaptation",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -3623,6 +3813,19 @@
             "path": "src/gui/GuiStagePage.hpp"
           },
           "classification": "selected_first_party_code_for_private_review"
+        },
+        {
+          "staging_revision": "50bafca0b66cdff3a01b6585769f06367eeb1fe4",
+          "sha256": "fe68e363481d41959dcef75c53b1cefe2aa91fb5527d8a039bef99a3e049ecd0",
+          "size": 9294,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "102df32c515e49d78f086c9467ec591a93716442",
+            "path": "src/gui/GuiStagePage.hpp",
+            "git_blob": "7e4ac07da2de693a1fb75d0a04e95b2091d45192",
+            "selection": "fixed product closure"
+          },
+          "classification": "first_party_product_code_or_synthetic_support"
         }
       ]
     },
@@ -3835,16 +4038,30 @@
     },
     {
       "path": "tests/test_data_layout.cpp",
-      "sha256": "2d2b6c15ad67847e4e954087dfe6260965344898d90b2ae86166df827bb18784",
-      "size": 7663,
+      "sha256": "c73ae1dcfd844680ae724c923cd3e965683f063d6ee330c7a12a17af7959d6ad",
+      "size": 7550,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "102df32c515e49d78f086c9467ec591a93716442",
+        "revision": "4f8ec4f62107130dfdeeae61586ac861ae71d2e0",
         "path": "tests/test_data_layout.cpp",
-        "git_blob": "cac2a6b3e23a56485099250ff492d0873c1cf4c7",
-        "selection": "fixed product closure"
+        "adaptation": "Selected permanent deletion, legacy playlist compatibility, GUI height fixes and synthetic tests; retain staging-specific product scope."
       },
-      "classification": "first_party_product_code_or_synthetic_support"
+      "classification": "selected_product_change_with_explicit_staging_adaptation",
+      "origin_history": [
+        {
+          "staging_revision": "50bafca0b66cdff3a01b6585769f06367eeb1fe4",
+          "sha256": "2d2b6c15ad67847e4e954087dfe6260965344898d90b2ae86166df827bb18784",
+          "size": 7663,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "102df32c515e49d78f086c9467ec591a93716442",
+            "path": "tests/test_data_layout.cpp",
+            "git_blob": "cac2a6b3e23a56485099250ff492d0873c1cf4c7",
+            "selection": "fixed product closure"
+          },
+          "classification": "first_party_product_code_or_synthetic_support"
+        }
+      ]
     },
     {
       "path": "tests/test_face_ownership.hpp",
@@ -3872,15 +4089,15 @@
     },
     {
       "path": "tests/test_gui_ux.cpp",
-      "sha256": "1143d5f409cf43f669db91f26ed140de1cb3329e18f41c34480326625f12c0f2",
-      "size": 53239,
+      "sha256": "32cdbb713f55134fed8d4af36feb7c405c2aaca19971be9109c125cd459c9666",
+      "size": 52007,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "3a33452a09aa9eea8e97eb2e58ac2710ee1e4f5e",
+        "revision": "4f8ec4f62107130dfdeeae61586ac861ae71d2e0",
         "path": "tests/test_gui_ux.cpp",
-        "selected_raw_git_blob": true
+        "adaptation": "Selected permanent deletion, legacy playlist compatibility, GUI height fixes and synthetic tests; retain staging-specific product scope."
       },
-      "classification": "selected_first_party_camera_code_or_synthetic_test",
+      "classification": "selected_product_change_with_explicit_staging_adaptation",
       "history": [
         {
           "sha256": "77c67f7905a2bf30a07a0ce828401add3cca9926ecab0d489461c97ef68e9539",
@@ -3892,6 +4109,20 @@
             "selected_raw_git_blob": true
           },
           "classification": "selected_first_party_or_retained_license_source"
+        }
+      ],
+      "origin_history": [
+        {
+          "staging_revision": "50bafca0b66cdff3a01b6585769f06367eeb1fe4",
+          "sha256": "1143d5f409cf43f669db91f26ed140de1cb3329e18f41c34480326625f12c0f2",
+          "size": 53239,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "3a33452a09aa9eea8e97eb2e58ac2710ee1e4f5e",
+            "path": "tests/test_gui_ux.cpp",
+            "selected_raw_git_blob": true
+          },
+          "classification": "selected_first_party_camera_code_or_synthetic_test"
         }
       ]
     },
@@ -3907,6 +4138,18 @@
         "selection": "fixed product closure"
       },
       "classification": "first_party_product_code_or_synthetic_support"
+    },
+    {
+      "path": "tests/test_library_safety.hpp",
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "4f8ec4f62107130dfdeeae61586ac861ae71d2e0",
+        "path": "tests/test_library_safety.hpp",
+        "adaptation": "Selected permanent deletion, legacy playlist compatibility, GUI height fixes and synthetic tests; retain staging-specific product scope."
+      },
+      "classification": "selected_product_change_with_explicit_staging_adaptation",
+      "sha256": "1b17b8001dc50268949f2c237335433b37364d5441b223305b79276c876c494c",
+      "size": 6994
     },
     {
       "path": "tests/test_miku_facial_fit.hpp",
@@ -3960,18 +4203,15 @@
     },
     {
       "path": "tests/test_refresh_core.cpp",
-      "sha256": "6246fa8bcd7ef5b2b61f45787ae3c1161963c74497620dd248806002e91ffbf1",
-      "size": 114570,
+      "sha256": "2a6048bb48339607cbc49495c4af1d59cb40db077caa2015ee578f3c59b6e026",
+      "size": 114510,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "0870da032cdb25d02f2d3c7803fce4afc618c743",
-        "path": "tests/test_core.cpp",
-        "git_blob": "9f8f5ffa3dc285d3b0e40cadc46aa83251d9850b",
-        "selected_raw_git_blob": false,
-        "base_staging_revision": "e41c502cbcb078a055f5c0ff7bf8ddcc2fe6fba5",
-        "adaptation": "Only the include and invocation selecting the new actorless library test; adapted into staging synthetic test_refresh_core.cpp."
+        "revision": "4f8ec4f62107130dfdeeae61586ac861ae71d2e0",
+        "path": "tests/test_refresh_core.cpp",
+        "adaptation": "Staging-specific documentation or synthetic test integration for the selected library deletion and layout changes."
       },
-      "classification": "staging_synthetic_test_adaptation",
+      "classification": "selected_product_change_with_explicit_staging_adaptation",
       "history": [
         {
           "sha256": "67599eaf243b241e85c8b48faa4770223cc76c6553eefe8c378611a7f66a0917",
@@ -3985,7 +4225,36 @@
           "classification": "staging_synthetic_test_adaptation",
           "staging_revision": "e41c502cbcb078a055f5c0ff7bf8ddcc2fe6fba5"
         }
+      ],
+      "origin_history": [
+        {
+          "staging_revision": "50bafca0b66cdff3a01b6585769f06367eeb1fe4",
+          "sha256": "6246fa8bcd7ef5b2b61f45787ae3c1161963c74497620dd248806002e91ffbf1",
+          "size": 114570,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "0870da032cdb25d02f2d3c7803fce4afc618c743",
+            "path": "tests/test_core.cpp",
+            "git_blob": "9f8f5ffa3dc285d3b0e40cadc46aa83251d9850b",
+            "selected_raw_git_blob": false,
+            "base_staging_revision": "e41c502cbcb078a055f5c0ff7bf8ddcc2fe6fba5",
+            "adaptation": "Only the include and invocation selecting the new actorless library test; adapted into staging synthetic test_refresh_core.cpp."
+          },
+          "classification": "staging_synthetic_test_adaptation"
+        }
       ]
+    },
+    {
+      "path": "tests/test_responsive_layout.hpp",
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "4f8ec4f62107130dfdeeae61586ac861ae71d2e0",
+        "path": "tests/test_responsive_layout.hpp",
+        "adaptation": "Selected permanent deletion, legacy playlist compatibility, GUI height fixes and synthetic tests; retain staging-specific product scope."
+      },
+      "classification": "selected_product_change_with_explicit_staging_adaptation",
+      "sha256": "403eed4af07da79dc4fa1517c12965d8b9c29a4f6ee78740c3522e73b43ba9f1",
+      "size": 4900
     },
     {
       "path": "tests/test_scene_actor_selection.hpp",
@@ -4824,5 +5093,91 @@
       "game_deployed_or_controlled": false,
       "remote_updated": false
     }
+  },
+  "retired_payload_history": [
+    {
+      "date": "2026-11-05",
+      "staging_revision": "50bafca0b66cdff3a01b6585769f06367eeb1fe4",
+      "reason": "Recoverable deletion removed; replaced by src/GkLibraryDelete.hpp",
+      "payload": {
+        "path": "src/GkLibraryTrash.hpp",
+        "sha256": "e7d83d1775c6e97bfb9faeb8016485b576527e37316c21d1c2d48770f176432c",
+        "size": 6471,
+        "origin": {
+          "repository": "GakuMotion",
+          "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+          "path": "src/GkLibraryTrash.hpp"
+        },
+        "classification": "selected_first_party_code_for_private_review"
+      }
+    }
+  ],
+  "library_delete_layout_refresh": {
+    "date": "2026-11-05",
+    "source_revision": "4f8ec4f62107130dfdeeae61586ac861ae71d2e0",
+    "base_staging_revision": "50bafca0b66cdff3a01b6585769f06367eeb1fe4",
+    "previous_manifest_sha256": "5259168a9d762661405f28d3c48f8a947752320ae355d6b5e98ad9a9e4bbb18b",
+    "scope": "Selected permanent deletion and GUI layout fixes in both repositories; no whole-source synchronization.",
+    "changed_payload_files": [
+      "README.md",
+      "SOURCE_REVIEW.md",
+      "docs/INSTALLATION.md",
+      "docs/LIBRARY_DELETE_LAYOUT_20261105.md",
+      "docs/MIGRATION_LAYOUT.md",
+      "docs/TROUBLESHOOTING.md",
+      "docs/USAGE.md",
+      "preview/GkMockState.hpp",
+      "src/GakuMotion.hpp",
+      "src/GkGuiOverlay.hpp",
+      "src/GkLibraryDelete.hpp",
+      "src/GkLibraryTrash.hpp",
+      "src/GkPlaylist.hpp",
+      "src/GkRuntimeConfig.hpp",
+      "src/gui/GkGuiTabMotion.hpp",
+      "src/gui/GuiLibraryPage.hpp",
+      "src/gui/GuiOverlayShell.hpp",
+      "src/gui/GuiStagePage.hpp",
+      "tests/test_data_layout.cpp",
+      "tests/test_gui_ux.cpp",
+      "tests/test_library_safety.hpp",
+      "tests/test_refresh_core.cpp",
+      "tests/test_responsive_layout.hpp"
+    ],
+    "retired_payload_files": [
+      "src/GkLibraryTrash.hpp"
+    ],
+    "validation": {
+      "runtime_msvc_release_imgui": "passed",
+      "synthetic_core": {
+        "passed": 895,
+        "failed": 0
+      },
+      "stage_load_contract": {
+        "passed": 80,
+        "failed": 0
+      },
+      "imgui_syntax": "passed",
+      "unicode_layout": {
+        "passed": 23,
+        "failed": 0
+      },
+      "imgui_interactions": {
+        "passed": 155,
+        "failed": 0
+      },
+      "symbolic_link_fixture": "skipped: Windows privilege unavailable",
+      "staging_game_deployed": false,
+      "game_acceptance_added": false,
+      "remote_updated": false
+    },
+    "excluded": [
+      "Control/Clock/Timeline/Director",
+      "Studio lighting/video",
+      "eye-motion research",
+      "DevAgents",
+      "existing sole edits",
+      "parallel BBP camera work",
+      "real user motion data"
+    ]
   }
 }

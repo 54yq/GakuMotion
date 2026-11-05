@@ -19,7 +19,7 @@
 namespace GakuMotion
 {
 	enum class PlaylistMode { Once, SingleLoop, ListLoop, Shuffle };
-	enum class GuiPlaylistAction { Remove, Move, Restore, SaveList, LoadList, SetMode, DeleteFiles, RestoreDeleted };
+	enum class GuiPlaylistAction { Move = 1, SaveList = 3, LoadList = 4, SetMode = 5, DeleteFiles = 6 };
 
 	struct MotionImportRequest
 	{
@@ -61,22 +61,17 @@ namespace GakuMotion
 	}
 
 	// Entries are identified by directory name, never by a transient row index.
-	// Removal hides a directory key; local file deletion is a separate recoverable action.
+	// Every local track remains visible until its directory is permanently deleted.
 	class PlaylistSettings
 	{
 	public:
 		PlaylistMode mode{PlaylistMode::SingleLoop};
 		std::vector<std::string> order;
-		std::vector<std::string> removed;
 		std::vector<std::string> shuffleRemaining;
 		std::mt19937 random{std::random_device{}()};
 
 		void Apply(std::vector<MotionEntry>& entries)
 		{
-			entries.erase(std::remove_if(entries.begin(), entries.end(), [&](const MotionEntry& e)
-			{
-				return std::find(removed.begin(), removed.end(), e.name) != removed.end();
-			}), entries.end());
 			auto rank = [&](const std::string& key)
 			{
 				auto it = std::find(order.begin(), order.end(), key);
@@ -136,7 +131,6 @@ namespace GakuMotion
 				out << ']';
 			};
 			array("order", order);
-			array("removed", removed);
 			out << "\n}\n";
 			const auto bytes = out.str();
 			static std::atomic<uint64_t> sequence{0};
@@ -204,15 +198,14 @@ namespace GakuMotion
 			jsonlite::Value root;
 			if (!jsonlite::ParseFile(path, root, error)) return false;
 			const auto* o = root.Find("order");
-			const auto* r = root.Find("removed");
 			const int m = root.IntPath("mode", -1);
 			if (!root.IsObject() || root.IntPath("version", 0) != 1 || m < 0 || m > 3 ||
-				!o || !o->IsArray() || !r || !r->IsArray())
+				!o || !o->IsArray())
 			{
-				error = "Invalid GakuMotion playlist (version/mode/order/removed)";
+				error = "Invalid GakuMotion playlist (version/mode/order)";
 				return false;
 			}
-			std::vector<std::string> nextOrder, nextRemoved;
+			std::vector<std::string> nextOrder;
 			auto read = [&](const jsonlite::Value& array, std::vector<std::string>& out)
 			{
 				for (const auto& v : array.arrayItems)
@@ -222,14 +215,14 @@ namespace GakuMotion
 				}
 				return true;
 			};
-			if (!read(*o, nextOrder) || !read(*r, nextRemoved))
+			if (!read(*o, nextOrder))
 			{
 				error = "Invalid song key";
 				return false;
 			}
 			mode = static_cast<PlaylistMode>(m);
 			order = std::move(nextOrder);
-			removed = std::move(nextRemoved);
+			// Ignore the retired "removed" field in legacy playlists.
 			shuffleRemaining.clear();
 			return true;
 		}

@@ -51,10 +51,6 @@ namespace GakuMotion
 		ImGui::SameLine();
 		ImGui::TextDisabled("(共 %zu 个曲目)", library.size());
 		if (ImGui::Button("导入外部 VMD")) importOpen = !importOpen;
-		ImGui::SameLine();
-		if (ImGui::Button("恢复已移除曲目")) PlaylistAction(ctx, GuiPlaylistAction::Restore);
-		ImGui::SameLine();
-		if (ImGui::Button("恢复最近删除")) PlaylistAction(ctx, GuiPlaylistAction::RestoreDeleted);
 		if (importOpen) DrawImport(ctx);
 		if (!ctx.playlistNotice.empty()) ImGui::TextWrapped("%s", ctx.playlistNotice.c_str());
 		if (ctx.importBusy) ImGui::TextDisabled("正在后台导入…");
@@ -96,12 +92,10 @@ namespace GakuMotion
 		ImGui::SameLine();
 		if (ImGui::Button("下移")) PlaylistAction(ctx, 1, key, 1);
 		ImGui::SameLine();
-		if (ImGui::Button("从列表移除")) PlaylistAction(ctx, GuiPlaylistAction::Remove, key);
-		ImGui::SameLine();
-		if (ImGui::Button("删除本地文件")) RequestMotionDelete(ctx, key);
+		if (ImGui::Button("删除选中")) RequestMotionDelete(ctx, key);
 		ImGui::EndDisabled();
 		DrawMotionDeleteConfirmation(ctx);
-		ImGui::TextDisabled("列表移除保留文件；本地文件删除需确认，可从恢复区找回。顺序自动保存。");
+		ImGui::TextDisabled("删除选中需确认，确认后永久删除曲目目录，无法撤销。顺序自动保存。");
 		int mode = ctx.playlistMode;
 		if (ImGui::Combo("播放模式", &mode, "播放一次\0单曲循环\0列表循环\0随机轮播\0"))
 			PlaylistAction(ctx, 5, "", mode);

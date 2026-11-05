@@ -248,7 +248,8 @@ namespace GakuMotion
 					ImGui::Spacing();
 					ImGui::TextDisabled("已探测场景节点 (%zu 个):", ctx.stageCandidates.size());
 
-					ImGui::BeginChild("##custom_node_tree", ImVec2(0, 240.0f), true);
+					const float treeHeight = (std::max)(1.0f, std::floor(ImGui::GetContentRegionAvail().y - ImGui::GetStyle().ItemSpacing.y));
+					ImGui::BeginChild("##custom_node_tree", ImVec2(0, treeHeight), true);
 					for (size_t i = 0; i < ctx.stageCandidates.size(); ++i)
 					{
 						if (ctx.stageCandidates[i].parentIndex < 0 ||

@@ -263,7 +263,7 @@ namespace GakuMotion
 		{
 			if (ec) break;
 			const auto& entry = *iterator;
-			if (entry.path().filename() == ".gakumotion-trash") continue; // Reserved recoverable-delete storage.
+			if (entry.path().filename() == ".gakumotion-trash") continue; // Reserved legacy recovery storage; never scanned as a track.
 			const bool isDirectory = entry.is_directory(ec);
 			if (ec) { warn(MotionPathToUtf8(entry.path()) + ": " + ec.message()); ec.clear(); continue; }
 			if (!isDirectory) continue;

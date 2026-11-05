@@ -511,7 +511,7 @@ namespace GakuMotion
 
 		ImGui::OpenPopup(g_libraryModal.isEditMode ? "管理曲目##modal" : "添加到曲库##modal");
 
-		const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+		const ImVec2 center = ImGui::GetMainViewport()->GetWorkCenter();
 		ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
 		const auto& style = ImGui::GetStyle();
 		const float typeWidth = (std::max)(100.0f, ImGui::CalcTextSize("动作 (.vmd)").x + 2.0f * style.CellPadding.x);
@@ -519,11 +519,27 @@ namespace GakuMotion
 		const float offsetWidth = (std::max)(155.0f, ImGui::CalcTextSize("初始偏移量（秒）").x + 2.0f * style.CellPadding.x);
 		const float tableWidth = (std::max)(850.0f, typeWidth + speedWidth + offsetWidth + 310.0f);
 		const float modalWidth = (std::min)((std::max)(980.0f, tableWidth + 2.0f * style.WindowPadding.x),
-			(std::max)(480.0f, ImGui::GetMainViewport()->WorkSize.x - 32.0f));
-		ImGui::SetNextWindowSize(ImVec2(modalWidth, 440), ImGuiCond_Appearing);
+			(std::max)(1.0f, ImGui::GetMainViewport()->WorkSize.x - 32.0f));
+		const float frameHeight = ImGui::GetFrameHeight();
+		const float buttonHeight = (std::max)(26.0f, frameHeight);
+		const bool tableNeedsScroll = tableWidth > modalWidth - 2.0f * style.WindowPadding.x;
+		const float tableHeight = ImGui::GetTextLineHeight() + 2.0f * style.CellPadding.y +
+			4.0f * (frameHeight + 2.0f * style.CellPadding.y) + (tableNeedsScroll ? style.ScrollbarSize : 0.0f);
+		static float measuredBodyHeight = 0.0f, measuredBodyWidth = 0.0f, measuredFontSize = 0.0f;
+		const bool measuredLayoutMatches = std::fabs(measuredBodyWidth - modalWidth) < 0.5f &&
+			std::fabs(measuredFontSize - ImGui::GetFontSize()) < 0.01f;
+		const float estimatedBodyHeight = tableHeight + (std::max)(24.0f, frameHeight) + frameHeight +
+			4.0f * ImGui::GetTextLineHeight() + 10.0f * style.ItemSpacing.y;
+		const float bodyTargetHeight = measuredLayoutMatches && measuredBodyHeight > 0.0f
+			? measuredBodyHeight : estimatedBodyHeight;
+		const float footerHeight = buttonHeight + 1.0f + 2.0f * style.ItemSpacing.y;
+		const float modalHeight = (std::min)(bodyTargetHeight + footerHeight + frameHeight + 2.0f * style.WindowPadding.y,
+			(std::max)(1.0f, ImGui::GetMainViewport()->WorkSize.y - 32.0f));
+		ImGui::SetNextWindowSize(ImVec2(modalWidth, modalHeight));
 
 		if (ImGui::BeginPopupModal(g_libraryModal.isEditMode ? "管理曲目##modal" : "添加到曲库##modal",
-		                           &g_libraryModal.isOpen, ImGuiWindowFlags_NoResize))
+		                           &g_libraryModal.isOpen, ImGuiWindowFlags_NoResize |
+				ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse))
 		{
 			auto FormatCandidateLabel = [&](const std::string& path) -> std::string
 			{
@@ -595,11 +611,15 @@ namespace GakuMotion
 				ImGui::PopID();
 			};
 
+			// Keep the action row visible when the viewport is shorter than the form.
+			const float bodyHeight = (std::max)(1.0f, ImGui::GetContentRegionAvail().y - footerHeight);
+			ImGui::BeginChild("##library_modal_body", ImVec2(0, bodyHeight));
 			ImGui::Spacing();
 
 			// 顶部文件追加工具栏
 			ImGui::BeginDisabled(g_asyncFileDialog.IsBusy());
-			if (ImGui::Button("+ 追加文件...", ImVec2(105, 24)))
+			if (ImGui::Button("+ 追加文件...", ImVec2((std::max)(105.0f,
+				ImGui::CalcTextSize("+ 追加文件...").x + 2.0f * style.FramePadding.x), (std::max)(24.0f, frameHeight))))
 			{
 				g_asyncFileDialog.Open(true, kAllImportFilter, -1);
 			}
@@ -615,7 +635,7 @@ namespace GakuMotion
 
 			ImGui::Spacing();
 			if (ImGui::BeginTable("##library_file_timing", 5, ImGuiTableFlags_ScrollX | ImGuiTableFlags_BordersInnerV,
-				ImVec2(0, 5.0f * (ImGui::GetFrameHeight() + 2.0f * style.CellPadding.y) + style.ScrollbarSize),
+				ImVec2(0, tableHeight),
 				(std::max)(tableWidth, ImGui::GetContentRegionAvail().x)))
 			{
 				ImGui::TableSetupColumn("类型", ImGuiTableColumnFlags_WidthFixed, typeWidth);
@@ -645,8 +665,8 @@ namespace GakuMotion
 
 			ImGui::Spacing();
 			ImGui::TextUnformatted("演出曲目名称");
-			ImGui::SameLine(115.0f);
-			ImGui::SetNextItemWidth(330.0f);
+			ImGui::SameLine((std::max)(115.0f, ImGui::CalcTextSize("演出曲目名称").x + style.ItemSpacing.x));
+			ImGui::SetNextItemWidth((std::min)(330.0f, (std::max)(1.0f, ImGui::GetContentRegionAvail().x)));
 			ImGui::InputText("##title_input", g_libraryModal.titleInput, sizeof(g_libraryModal.titleInput));
 
 			// 智能校验与防呆逻辑
@@ -766,28 +786,35 @@ namespace GakuMotion
 			ImGui::Spacing();
 			if (!validationError.empty())
 			{
-				ImGui::TextColored(GuiTheme::WarningColor(), "%s", validationError.c_str());
+				ImGui::PushStyleColor(ImGuiCol_Text, GuiTheme::WarningColor());
+				ImGui::TextWrapped("%s", validationError.c_str());
+				ImGui::PopStyleColor();
 			}
 			else
 			{
 				ImGui::TextUnformatted("");
 			}
 
+			measuredBodyHeight = std::ceil(ImGui::GetCursorPosY());
+			measuredBodyWidth = modalWidth;
+			measuredFontSize = ImGui::GetFontSize();
+			ImGui::EndChild();
 			ImGui::Separator();
-			ImGui::Spacing();
 
 			// 底部按钮 [取消] [添加 / 保存修改]
-			if (ImGui::Button("取消", ImVec2(90, 26)))
+			const float actionWidth = (std::max)(90.0f, ImGui::CalcTextSize("保存修改").x + 2.0f * style.FramePadding.x);
+			if (ImGui::Button("取消", ImVec2(actionWidth, buttonHeight)))
 			{
 				g_libraryModal.isOpen = false;
 				ImGui::CloseCurrentPopup();
 			}
 
-			ImGui::SameLine(ImGui::GetWindowWidth() - 110.0f);
+			ImGui::SameLine((std::max)(actionWidth + style.ItemSpacing.x,
+				ImGui::GetWindowWidth() - style.WindowPadding.x - actionWidth));
 
 			const char* confirmBtnText = g_libraryModal.isEditMode ? "保存修改" : "添加";
 			ImGui::BeginDisabled(!canConfirm);
-			if (ImGui::Button(confirmBtnText, ImVec2(90, 26)))
+			if (ImGui::Button(confirmBtnText, ImVec2(actionWidth, buttonHeight)))
 			{
 				MotionImportRequest req{};
 				req.title = g_libraryModal.titleInput[0] ? g_libraryModal.titleInput : "未命名演出";
@@ -1062,25 +1089,12 @@ namespace GakuMotion
 		}
 		if (ImGui::IsItemHovered()) ImGui::SetTooltip("修改选中的曲目配置与文件映射");
 
-		ContinueToolbar("从列表移除", 120);
-		if (GuiIcons::Button("从列表移除", GuiIcons::Icon::Undo, ImVec2(120, 26)) && hasSelection)
-		{
-			const auto& entry = overlay.libraryEntries[overlay.selectedLibraryIndex];
-			overlay.PlaylistAction(ctx, GuiPlaylistAction::Remove, entry.id.c_str());
-		}
-		if (ImGui::IsItemHovered()) ImGui::SetTooltip("隐藏列表条目，保留全部本地文件；可用“恢复已移除曲目”找回");
-		ContinueToolbar("删除本地文件", 120);
+		ContinueToolbar("删除选中", 120);
 		ImGui::BeginDisabled(!ctx.fnPlaylistAction);
-		if (GuiIcons::Button("删除本地文件", GuiIcons::Icon::Trash, ImVec2(120, 26)) && hasSelection)
+		if (GuiIcons::Button("删除选中", GuiIcons::Icon::Trash, ImVec2(120, 26)) && hasSelection)
 			overlay.RequestMotionDelete(ctx, overlay.libraryEntries[overlay.selectedLibraryIndex].id.c_str());
-		if (ImGui::IsItemHovered()) ImGui::SetTooltip("确认后将整个曲目目录移入可恢复区，文件不会永久删除");
+		if (ImGui::IsItemHovered()) ImGui::SetTooltip("确认后永久删除选中曲目的目录及其中全部文件，无法撤销");
 		ImGui::EndDisabled();
-		ImGui::EndDisabled();
-		ContinueToolbar("恢复已移除曲目", 140);
-		ImGui::BeginDisabled(ctx.importBusy || ctx.libraryRefreshing || !ctx.fnPlaylistAction);
-		if (GuiIcons::Button("恢复已移除曲目", GuiIcons::Icon::Undo, ImVec2(140, 26))) overlay.PlaylistAction(ctx, GuiPlaylistAction::Restore);
-		ContinueToolbar("恢复最近删除", 140);
-		if (GuiIcons::Button("恢复最近删除", GuiIcons::Icon::Undo, ImVec2(140, 26))) overlay.PlaylistAction(ctx, GuiPlaylistAction::RestoreDeleted);
 		ImGui::EndDisabled();
 		overlay.DrawMotionDeleteConfirmation(ctx);
 

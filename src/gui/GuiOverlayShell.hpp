@@ -84,13 +84,17 @@ namespace GakuMotion
 
 	inline void DrawShell(GuiOverlay& overlay, const GuiContext& ctx)
 	{
-		const float transportHeight = TransportBarHeight(ImGui::GetContentRegionAvail().x, &overlay) + 8.0f;
+		const auto& style = ImGui::GetStyle();
+		// EndChild and Separator each advance by ItemSpacing.y. Reserve their
+		// actual spacing so scaled host styles cannot push the transport outside.
+		const float transportHeight = TransportBarHeight(ImGui::GetContentRegionAvail().x, &overlay) +
+			2.0f * style.ItemSpacing.y + 1.0f;
 		const float availHeight = ImGui::GetContentRegionAvail().y;
-		const float contentAreaHeight = (std::max)(120.0f, availHeight - transportHeight);
+		const float contentAreaHeight = (std::max)(1.0f, std::floor(availHeight - transportHeight));
 
 		// ---- 上半部：左侧 Sidebar + 中间 Content ----
 		const float sidebarWidth = (std::max)(115.0f, ImGui::GetFontSize() * 6.4f);
-		const float mainContentWidth = ImGui::GetContentRegionAvail().x - sidebarWidth - 10.0f;
+		const float mainContentWidth = (std::max)(1.0f, ImGui::GetContentRegionAvail().x - sidebarWidth - style.ItemSpacing.x);
 
 		// 1. 左侧 Sidebar
 		ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 4.0f);

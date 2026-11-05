@@ -9,7 +9,7 @@
 #include "GkGuiOverlay.hpp"
 #include "GkPlaylist.hpp"
 #include "GkLibraryState.hpp"
-#include "GkLibraryTrash.hpp"
+#include "GkLibraryDelete.hpp"
 #include "GkInjectionPolicy.hpp"
 #include "GkCaptureSafety.hpp"
 #include "GkStageLoadSettings.hpp"
@@ -299,7 +299,7 @@ namespace GakuMotion
 		enum class GuiAction
 		{
 			Select, Cycle, Play, Pause, Resume, Stop, Seek,
-			ScrubBegin, ScrubUpdate, ScrubEnd, Refresh, Remove, Move, Restore,
+			ScrubBegin, ScrubUpdate, ScrubEnd, Refresh, Move,
 			SaveList, LoadList, Mode, Mute, Speed, Import, ClearTarget, NextTarget, PickTarget,
 			InitialPosition, SaveInitialPosition, PhysicsBackend,
 			CameraSettings, SaveCameraSettings, CameraImport, ReloadCamera,
@@ -307,7 +307,7 @@ namespace GakuMotion
 			BeforeQuartzExperiment,
 			StageSettings, StagePreset, ToggleStageCandidate, ScanStageCandidates,
 			MountCustomStage, UnloadCustomStage, RestoreCameraSkybox,
-			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, RestoreDeleted, StageLoadReplacement, SelectTarget
+			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, StageLoadReplacement, SelectTarget
 		};
 
 		std::atomic<int> guiPhysicsBackend{2};
@@ -614,17 +614,11 @@ namespace GakuMotion
 					break;
 				case GuiAction::Refresh: BeginLibraryRefresh();
 					break;
-				case GuiAction::Remove: RemoveMotion(cmd.key);
-					break;
 				case GuiAction::DeleteFiles:
 					if (cmd.libraryRevision == libraryRevision) DeleteMotionFiles(cmd.key, cmd.flag);
 					else playlistNotice = "曲库已变化，请重新选择并确认删除";
 					break;
-				case GuiAction::RestoreDeleted: RestoreDeletedMotion();
-					break;
 				case GuiAction::Move: MoveMotion(cmd.key, static_cast<int>(cmd.value));
-					break;
-				case GuiAction::Restore: RestoreHiddenMotions();
 					break;
 				case GuiAction::SaveList: SavePlaylist(cmd.key);
 					break;
@@ -1191,45 +1185,8 @@ namespace GakuMotion
 			return ok;
 		}
 
-		bool RemoveMotion(const std::string& key)
-		{
-			if (importBusy || cameraImportBusy) { playlistNotice = "正在导入，完成后可移除曲目"; return false; }
-			const int index = FindPlaylistIndex(motions, key);
-			if (index < 0) return false;
-			auto next = playlist;
-			if (std::find(next.removed.begin(), next.removed.end(), key) == next.removed.end()) next.removed.push_back(key);
-			auto entries = motions;
-			entries.erase(entries.begin() + index);
-			next.Remember(entries);
-			std::string error;
-			if (!next.Save(playlistPath, error)) { playlistNotice = "移除失败，未更改曲目状态或文件: " + error; return false; }
-			const auto current = CurrentMotion() ? CurrentMotion()->name : "";
-			if (current == key) ClearCurrentMotion();
-			playlist = std::move(next);
-			motions = std::move(entries);
-			libraryVersions.erase(key);
-			currentMotionIndex = current == key ? -1 : FindPlaylistIndex(motions, current);
-			++libraryRevision; ++libraryMutationGeneration;
-			playlistNotice = "已从列表移除，所有本地文件保留；可用“恢复已移除曲目”找回: " + key;
-			return true;
-		}
-
-		bool RestoreHiddenMotions()
-		{
-			if (importBusy || cameraImportBusy) { playlistNotice = "正在导入，完成后可恢复曲目"; return false; }
-			auto next = playlist;
-			next.removed.clear();
-			std::string error;
-			if (!next.Save(playlistPath, error)) { playlistNotice = "恢复失败: " + error; return false; }
-			playlist = std::move(next);
-			const bool refreshed = RefreshMotionLibrary();
-			playlistNotice = refreshed ? "已恢复仍在本地的已移除曲目" : "列表排除已清除；曲库暂不可访问，请稍后刷新";
-			return refreshed;
-		}
-
 		bool DeleteMotionFiles(const std::string& key, bool confirmed = false)
 		{
-			// No file or playlist mutation is allowed before explicit confirmation.
 			if (!confirmed) return false;
 			if (importBusy || cameraImportBusy) { playlistNotice = "正在导入，完成后可删除曲目"; return false; }
 			const int index = FindPlaylistIndex(motions, key);
@@ -1238,60 +1195,41 @@ namespace GakuMotion
 			const auto source = MotionPathFromUtf8(motions[index].dir);
 			if (source.filename() != MotionPathFromUtf8(key).filename() || MotionPathFromUtf8(key).has_parent_path())
 			{ playlistNotice = "删除失败：曲目路径与标识不一致"; return false; }
-			std::filesystem::path checkedRoot, checkedSource, stored;
+			std::filesystem::path checkedRoot, checkedSource;
 			std::string error;
-			if (!LibraryTrash::ResolveRoot(root, checkedRoot, error) || !LibraryTrash::ResolveChild(checkedRoot, source, checkedSource, error))
+			if (!LibraryDelete::ResolveRoot(root, checkedRoot, error) || !LibraryDelete::ResolveChild(checkedRoot, source, checkedSource, error))
 			{ playlistNotice = "删除失败，原文件保留: " + error; return false; }
+			// Verify persistence before irreversible work. A later external write or
+			// lock can still fail; that must never be reported as a file rollback.
+			if (!playlist.Save(playlistPath, error))
+			{ playlistNotice = "删除失败，原文件保留；列表无法保存: " + error; return false; }
 			const auto current = CurrentMotion() ? CurrentMotion()->name : "";
-			// Release MCI file handles before the same-volume rename. A failed rename
-			// leaves the stopped clip available but never removes its list entry.
-			if (current == key) { player.Stop(); camera.Release(); NotifyMotionPlaying(false); }
-			if (!LibraryTrash::Move(root, source, stored, error))
-			{ playlistNotice = "删除失败，原文件保留: " + error; return false; }
-			auto next = playlist;
-			next.removed.erase(std::remove(next.removed.begin(), next.removed.end(), key), next.removed.end());
-			auto entries = motions;
-			entries.erase(entries.begin() + index);
-			next.Remember(entries);
-			if (!next.Save(playlistPath, error))
+			const bool deletingLoaded = loadedMotionKey == key ||
+				(!player.currentMotionDir.empty() && DataLayout::SamePath(player.currentMotionDir, motions[index].dir));
+			if (deletingLoaded) { player.Stop(); camera.Release(); NotifyMotionPlaying(false); }
+			bool changed = false;
+			if (!LibraryDelete::PermanentlyDelete(root, source, changed, error))
 			{
-				std::filesystem::path restored;
-				std::string rollback;
-				if (LibraryTrash::Restore(root, stored, restored, rollback))
-					playlistNotice = "删除失败，原目录已恢复、列表保留: " + error;
-				else
-					playlistNotice = "列表保存失败；文件保留在恢复目录 " + MotionPathToUtf8(stored) + "；恢复提示: " + rollback;
+				if (changed)
+				{
+					if (deletingLoaded) ClearCurrentMotion();
+					++libraryMutationGeneration;
+					const bool refreshed = RefreshMotionLibrary();
+					playlistNotice = std::string("删除未完成，部分文件可能已永久删除；") +
+						(refreshed ? "已刷新曲库: " : "曲库刷新失败，请稍后刷新: ") + error;
+				}
+				else playlistNotice = "删除失败，原文件保留: " + error;
 				return false;
 			}
-			if (current == key) ClearCurrentMotion();
-			playlist = std::move(next);
-			motions = std::move(entries);
+			if (deletingLoaded) ClearCurrentMotion();
+			motions.erase(motions.begin() + index);
+			playlist.Remember(motions);
 			libraryVersions.erase(key);
-			currentMotionIndex = current == key ? -1 : FindPlaylistIndex(motions, current);
+			currentMotionIndex = deletingLoaded ? -1 : FindPlaylistIndex(motions, current);
 			++libraryRevision; ++libraryMutationGeneration;
-			playlistNotice = "本地目录已移入可恢复区；可用“恢复最近删除”找回: " + MotionPathToUtf8(stored);
-			return true;
-		}
-
-		bool RestoreDeletedMotion()
-		{
-			if (importBusy || cameraImportBusy) { playlistNotice = "正在导入，完成后可恢复曲目"; return false; }
-			std::filesystem::path stored, restored;
-			std::string error;
-			const auto root = MotionPathFromUtf8(motionsRoot);
-			if (!LibraryTrash::Latest(root, stored, error) || !LibraryTrash::Restore(root, stored, restored, error))
-			{ playlistNotice = "恢复失败: " + error; return false; }
-			if (!RefreshMotionLibrary())
-			{
-				playlistNotice = "目录已恢复，但曲库刷新失败；请稍后刷新: " + MotionPathToUtf8(restored) + "；" + libraryNotice;
-				return false;
-			}
-			if (!SavePlaylist())
-			{
-				playlistNotice = "目录已恢复，但列表保存失败: " + MotionPathToUtf8(restored) + "；" + playlistNotice;
-				return false;
-			}
-			playlistNotice = "已恢复目录（未覆盖任何同名文件）: " + MotionPathToUtf8(restored);
+			if (!playlist.Save(playlistPath, error))
+				playlistNotice = "曲目目录已永久删除；列表保存失败，请稍后保存: " + error;
+			else playlistNotice = "已永久删除曲目目录: " + MotionPathToUtf8(checkedSource);
 			return true;
 		}
 
@@ -2849,14 +2787,11 @@ namespace GakuMotion
 				GuiAction command;
 				switch (static_cast<GuiPlaylistAction>(action))
 				{
-				case GuiPlaylistAction::Remove: command = GuiAction::Remove; break;
 				case GuiPlaylistAction::Move: command = GuiAction::Move; break;
-				case GuiPlaylistAction::Restore: command = GuiAction::Restore; break;
 				case GuiPlaylistAction::SaveList: command = GuiAction::SaveList; break;
 				case GuiPlaylistAction::LoadList: command = GuiAction::LoadList; break;
 				case GuiPlaylistAction::SetMode: command = GuiAction::Mode; break;
 				case GuiPlaylistAction::DeleteFiles: command = GuiAction::DeleteFiles; break;
-				case GuiPlaylistAction::RestoreDeleted: command = GuiAction::RestoreDeleted; break;
 				default: return;
 				}
 				std::string path = key ? key : "";

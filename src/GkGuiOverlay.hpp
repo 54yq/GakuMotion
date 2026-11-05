@@ -418,24 +418,24 @@ namespace GakuMotion
 			pendingDeleteKey = key;
 			pendingDeleteDirectory = (*ctx.motions)[index].dir;
 			pendingDeleteRevision = ctx.libraryRevision;
-			ImGui::OpenPopup("删除本地文件确认");
+			ImGui::OpenPopup("删除选中确认");
 		}
 
 		void DrawMotionDeleteConfirmation(const GuiContext& ctx)
 		{
 			bool open = true;
 			ImGui::SetNextWindowSize(ImVec2(540, 0), ImGuiCond_Appearing);
-			if (ImGui::BeginPopupModal("删除本地文件确认", &open, ImGuiWindowFlags_AlwaysAutoResize))
+			if (ImGui::BeginPopupModal("删除选中确认", &open, ImGuiWindowFlags_AlwaysAutoResize))
 			{
 				ImGui::TextWrapped("删除曲目：%s", pendingDeleteKey.c_str());
-				ImGui::TextWrapped("将移动整个目录及其中全部文件：%s", pendingDeleteDirectory.c_str());
-				ImGui::TextWrapped("文件会保留在曲库的 .gakumotion-trash 恢复区，可用“恢复最近删除”找回。不会永久删除文件，也不会释放磁盘空间。");
+				ImGui::TextWrapped("将永久删除整个曲目目录及其中全部文件：%s", pendingDeleteDirectory.c_str());
+				ImGui::TextWrapped("此操作无法撤销，文件不会进入回收站。确定删除选中曲目？");
 				const int index = ctx.motions ? FindPlaylistIndex(*ctx.motions, pendingDeleteKey) : -1;
 				const bool changed = pendingDeleteRevision != ctx.libraryRevision || index < 0 ||
 					(*ctx.motions)[index].dir != pendingDeleteDirectory;
 				if (changed) ImGui::TextWrapped("曲库已变化，请取消后重新选择曲目。");
 				ImGui::BeginDisabled(changed || ctx.importBusy || ctx.libraryRefreshing);
-				if (ImGui::Button("移入可恢复区"))
+				if (ImGui::Button("永久删除"))
 				{
 					PlaylistAction(ctx, GuiPlaylistAction::DeleteFiles, pendingDeleteKey.c_str(), 1);
 					pendingDeleteKey.clear();

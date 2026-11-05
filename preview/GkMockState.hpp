@@ -20,7 +20,6 @@ namespace GakuMotion
 	public:
 		MotionPlayer player;
 		std::vector<MotionEntry> motions;
-		std::vector<MotionEntry> hiddenMotions, deletedMotions; // Memory-only preview recovery stores.
 		int selectedMotionIndex{0};
 		uint64_t loadedMotionGeneration{1}, libraryRevision{1};
 		std::string libraryNotice{"曲库已是最新"};
@@ -74,7 +73,6 @@ namespace GakuMotion
 		{
 			// 1. 曲目列表
 			motions.clear();
-			hiddenMotions.clear(); deletedMotions.clear();
 			++libraryRevision; ++loadedMotionGeneration;
 			{
 				MotionEntry m;
@@ -654,19 +652,16 @@ namespace GakuMotion
 				auto* s = static_cast<MockGuiState*>(self);
 				std::string keyStr = key ? key : "";
 				const auto operation = static_cast<GuiPlaylistAction>(action);
-				if ((operation == GuiPlaylistAction::Remove || operation == GuiPlaylistAction::DeleteFiles ||
-					operation == GuiPlaylistAction::Restore || operation == GuiPlaylistAction::RestoreDeleted) && s->importBusy)
-				{ s->playlistNotice = "离线预览：模拟导入中，暂不能移除、删除或恢复；未操作本地文件"; return; }
-				if (operation == GuiPlaylistAction::Remove || operation == GuiPlaylistAction::DeleteFiles)
+				if (operation == GuiPlaylistAction::DeleteFiles && s->importBusy)
+				{ s->playlistNotice = "离线预览：模拟导入中，暂不能删除；未操作本地文件"; return; }
+				if (operation == GuiPlaylistAction::DeleteFiles)
 				{
-					if (operation == GuiPlaylistAction::DeleteFiles && value != 1)
+					if (value != 1)
 					{ s->playlistNotice = "离线预览：尚未确认删除，状态未变；未操作本地文件"; return; }
 					const int index = FindPlaylistIndex(s->motions, keyStr);
 					if (index < 0) return;
 					const auto loaded = s->selectedMotionIndex >= 0 && s->selectedMotionIndex < static_cast<int>(s->motions.size())
 						? s->motions[s->selectedMotionIndex].name : "";
-					auto& destination = operation == GuiPlaylistAction::DeleteFiles ? s->deletedMotions : s->hiddenMotions;
-					destination.push_back(s->motions[index]);
 					s->motions.erase(s->motions.begin() + index);
 					s->selectedMotionIndex = loaded == keyStr ? -1 : FindPlaylistIndex(s->motions, loaded);
 					if (loaded == keyStr)
@@ -680,34 +675,7 @@ namespace GakuMotion
 						++s->loadedMotionGeneration;
 					}
 					++s->libraryRevision;
-					s->playlistNotice = operation == GuiPlaylistAction::DeleteFiles
-						? "离线预览：已模拟删除，可用“恢复最近删除”找回；未操作本地文件: " + keyStr
-						: "离线预览：已模拟从列表移除，可恢复；未操作本地文件: " + keyStr;
-				}
-				else if (operation == GuiPlaylistAction::Restore)
-				{
-					for (auto it = s->hiddenMotions.begin(); it != s->hiddenMotions.end();)
-					{
-						if (FindPlaylistIndex(s->motions, it->name) >= 0) { ++it; continue; }
-						s->motions.push_back(*it);
-						it = s->hiddenMotions.erase(it);
-					}
-					++s->libraryRevision;
-					s->playlistNotice = s->hiddenMotions.empty()
-						? "离线预览：已恢复模拟移除的曲目；未操作本地文件"
-						: "离线预览：部分同名条目未恢复，未覆盖现有曲目；未操作本地文件";
-				}
-				else if (operation == GuiPlaylistAction::RestoreDeleted)
-				{
-					if (s->deletedMotions.empty())
-					{ s->playlistNotice = "离线预览：没有可恢复的模拟删除；未操作本地文件"; return; }
-					const auto& entry = s->deletedMotions.back();
-					if (FindPlaylistIndex(s->motions, entry.name) >= 0 || FindPlaylistIndex(s->hiddenMotions, entry.name) >= 0)
-					{ s->playlistNotice = "离线预览：恢复失败，已有同名曲目，未覆盖；未操作本地文件"; return; }
-					s->motions.push_back(entry);
-					s->deletedMotions.pop_back();
-					++s->libraryRevision;
-					s->playlistNotice = "离线预览：已恢复最近模拟删除的曲目；未操作本地文件";
+					s->playlistNotice = "离线预览：已模拟永久删除；未操作本地文件: " + keyStr;
 				}
 				else if (action == 1) // Move
 				{

@@ -41,7 +41,7 @@ GakuMotion 是运行在 [GakuLoader](https://github.com/crested-ezios/GakuLoader
 
 可以直接解压候选发布包中的完整安装包，也可以按 [构建指南](BUILD_NOTES.md) 自行编译。升级时覆盖这两个 DLL 即可，不会影响已有曲库素材或个人配置。若需要整理早期版本的文件分布，可参考 [数据布局与迁移指南](docs/MIGRATION_LAYOUT.md)。
 
-完成迁移后，配置位于 `gakumas-local/Configs/gakumotion/`，曲库位于 `gakumas-local/UserData/gakumotion/motions/`，播放列表和活动回执位于 `gakumas-local/PluginData/gakumotion/`，导入日志位于 `gakumas-local/Logs/gakumotion/`。有效活动回执才会切换布局；仅覆盖 DLL 不会搬动用户文件。导入 VMD 请使用面板，备份时保留完整曲目目录及 `.gakumotion-trash` 恢复区。
+完成迁移后，配置位于 `gakumas-local/Configs/gakumotion/`，曲库位于 `gakumas-local/UserData/gakumotion/motions/`，播放列表和活动回执位于 `gakumas-local/PluginData/gakumotion/`，导入日志位于 `gakumas-local/Logs/gakumotion/`。有效活动回执才会切换布局；仅覆盖 DLL 不会搬动用户文件。导入 VMD 请使用面板，备份时保留完整曲目目录及旧版遗留的 `.gakumotion-trash` 目录。
 
 ## 使用方法与快捷键
 

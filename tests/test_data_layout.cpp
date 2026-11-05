@@ -78,9 +78,12 @@ int wmain(int argc, wchar_t** argv) {
     MotionImportRequest request; request.vmd = "synthetic.vmd";
     core.StartImport(request);
     Check(capturedImport.log == offered.logs + "/import.log" && capturedImport.transactionRoot == offered.temp + "/transactions", "import uses Logs and managed transaction scratch");
-    Check(core.DeleteMotionFiles("NEW", true), "managed full track can move to recovery");
-    Check(fs::exists(MotionPathFromUtf8(offered.Motions() + "/.gakumotion-trash")) && core.RestoreDeletedMotion(), "managed recovery area restores full track");
-    Check(Read(MotionPathFromUtf8(offered.Motions() + "/NEW/custom/private-note.bin")) == "synthetic custom bytes", "unknown custom data survives recoverable deletion");
+	MotionClip loaded;
+	Check(loaded.LoadFromFile(offered.Motions() + "/NEW/motion.gkclip") && loaded.total_frames == 61, "synthetic smoke track loads through production loader");
+	Check(core.DeleteMotionFiles("NEW", true), "managed track can be permanently deleted");
+	Check(!fs::exists(MotionPathFromUtf8(offered.Motions() + "/NEW")) &&
+		!fs::exists(MotionPathFromUtf8(offered.Motions() + "/.gakumotion-trash")),
+		"managed delete removes full track tree without creating recovery storage");
     Check(Read(root / "GakuMotion/control.json") == "{\"selected_motion\":\"OLD\"}" && fs::exists(root / "motions/OLD/motion.gkclip"), "old originals remain unchanged");
     Check(!SelectDataLayout(utf8, nullptr, selected, error), "old host cannot fall back once managed receipt exists");
     Write(receipt, Receipt(offered, "pending"));
@@ -93,8 +96,6 @@ int wmain(int argc, wchar_t** argv) {
     Write(receipt, "{broken");
     Check(!SelectDataLayout(utf8, &offered, selected, error), "corrupt receipt refuses activation without fallback");
     Write(receipt, Receipt(offered));
-    MotionClip loaded;
-    Check(loaded.LoadFromFile(offered.Motions() + "/NEW/motion.gkclip") && loaded.total_frames == 61, "synthetic smoke track loads through production loader");
     std::cout << "layout tests: " << passed << " passed, " << failed << " failed\n";
     std::cout << "synthetic evidence: " << MotionPathToUtf8(root) << '\n';
     return failed ? 1 : 0;

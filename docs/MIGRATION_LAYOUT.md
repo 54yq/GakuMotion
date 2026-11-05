@@ -15,7 +15,7 @@ gakumas-local/
     stage.json
   UserData/gakumotion/motions/
     <完整曲目目录，包括未知 custom 文件>
-    .gakumotion-trash/
+    .gakumotion-trash/  # 旧版遗留目录（如存在）
   PluginData/gakumotion/
     playlist.json
     layout-v1.json
@@ -30,7 +30,7 @@ gakumas-local/
     <由新版导入器管理的同卷事务>
 ```
 
-迁移完整旧 `motions` 树，包含隐藏恢复区、空目录和未知用户文件。不会只挑选已知扩展名。全局配置及已有 `.bak` 副本进入 Configs；播放顺序、隐藏曲目、播放模式所在的 `playlist.json` 进入 PluginData。诊断请求 `*.request.json` 保留在原位置，不复制到新位置重放；程序 DLL 和旧工具目录不属于用户数据迁移范围。
+迁移完整旧 `motions` 树，包含旧版遗留的 `.gakumotion-trash`、空目录和未知用户文件。不会只挑选已知扩展名。全局配置及已有 `.bak` 副本进入 Configs；播放顺序与播放模式所在的 `playlist.json` 进入 PluginData，旧版隐藏曲目记录不再生效。诊断请求 `*.request.json` 保留在原位置，不复制到新位置重放；程序 DLL 和旧工具目录不属于用户数据迁移范围。
 
 ## 执行入口
 
