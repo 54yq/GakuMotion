@@ -2523,6 +2523,7 @@ static void TestInjectionRuntimeBoundary()
 
 #include "test_playback_timing.hpp"
 #include "test_track_timing.hpp"
+#include "test_actorless_library.hpp"
 
 int main(int argc, char** argv)
 {
@@ -2552,6 +2553,7 @@ int main(int argc, char** argv)
  TestPlaybackSpeedAndClock();
  TestPlaybackTiming();
  TestTrackTimingMetadata();
+ TestActorlessLibraryCommands(repoRoot);
  TestHotkeyEdgeGate();
  TestScrubAndPreview();
  TestCameraController(repoRoot);

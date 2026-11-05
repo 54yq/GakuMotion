@@ -218,16 +218,14 @@
     {
       "path": "SOURCE_REVIEW.md",
       "origin": {
-        "repository": "GakuMotion",
-        "revision": "3a33452a09aa9eea8e97eb2e58ac2710ee1e4f5e",
-        "path": "SOURCE_REVIEW.md",
-        "selected_raw_git_blob": false,
-        "adaptation": "Camera-only changes on the existing staging implementation/documentation; excludes Control API, Clock, Timeline and workspace changes.",
-        "base_staging_revision": "8fe8af16536ee70312d52118d66ad518723d0877"
+        "type": "staging product documentation for actorless library fix",
+        "product_source_revision": "0870da032cdb25d02f2d3c7803fce4afc618c743",
+        "base_staging_revision": "e41c502cbcb078a055f5c0ff7bf8ddcc2fe6fba5",
+        "adaptation": "Describe the selected file-job host-frame behavior, exact source scope, synthetic checks and absence of staging game acceptance."
       },
-      "classification": "camera_product_documentation_with_explicit_adaptations",
-      "sha256": "1f2ce9fb68f83c5b1b683c91deec9d9e6ce55c186c218a6a3e5409ced657a953",
-      "size": 8944,
+      "classification": "product_documentation_with_explicit_adaptations",
+      "sha256": "40987b29689dbfd826793a5a28f1695285fd8c45ae04995a2c9326cc700e560c",
+      "size": 10117,
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -262,6 +260,20 @@
           "classification": "new_local_staging_control_or_documentation",
           "sha256": "11329f8104ebf379a39618b50e8a3caf076cfcce825b27d3dc548ec099023f31",
           "size": 7881
+        },
+        {
+          "sha256": "1f2ce9fb68f83c5b1b683c91deec9d9e6ce55c186c218a6a3e5409ced657a953",
+          "size": 8944,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "3a33452a09aa9eea8e97eb2e58ac2710ee1e4f5e",
+            "path": "SOURCE_REVIEW.md",
+            "selected_raw_git_blob": false,
+            "adaptation": "Camera-only changes on the existing staging implementation/documentation; excludes Control API, Clock, Timeline and workspace changes.",
+            "base_staging_revision": "8fe8af16536ee70312d52118d66ad518723d0877"
+          },
+          "classification": "camera_product_documentation_with_explicit_adaptations",
+          "staging_revision": "e41c502cbcb078a055f5c0ff7bf8ddcc2fe6fba5"
         }
       ]
     },
@@ -1005,6 +1017,18 @@
       "classification": "third_party_licensed_source_snapshot"
     },
     {
+      "path": "docs/ACTORLESS_IMPORT_FIX_20261105.md",
+      "sha256": "6ddb270e9650bce84a8db301558411c03476796bf6f096af9fc6d412fe063754",
+      "size": 2262,
+      "origin": {
+        "type": "staging product documentation for actorless library fix",
+        "product_source_revision": "0870da032cdb25d02f2d3c7803fce4afc618c743",
+        "base_staging_revision": "e41c502cbcb078a055f5c0ff7bf8ddcc2fe6fba5",
+        "adaptation": "Describe the selected file-job host-frame behavior, exact source scope, synthetic checks and absence of staging game acceptance."
+      },
+      "classification": "product_documentation_with_explicit_adaptations"
+    },
+    {
       "path": "docs/ARCHITECTURE.md",
       "sha256": "d78bd8f4348ad49e6ae93074ea5b80b6f545229c4c74192635b1d2970fdae2d9",
       "size": 5931,
@@ -1158,17 +1182,15 @@
     },
     {
       "path": "docs/USAGE.md",
-      "sha256": "1297e70873501406d2aac4da8e846a8ef28dcca4c3c425806883160b79b18c07",
-      "size": 8799,
+      "sha256": "21b67b2e6da7e046183bed9698c75ee06b3fd0ab07aa20943f3580c78ae4be59",
+      "size": 9020,
       "origin": {
-        "repository": "GakuMotion",
-        "revision": "3a33452a09aa9eea8e97eb2e58ac2710ee1e4f5e",
-        "path": "docs/USAGE.md",
-        "selected_raw_git_blob": false,
-        "adaptation": "Camera-only changes on the existing staging implementation/documentation; excludes Control API, Clock, Timeline and workspace changes.",
-        "base_staging_revision": "8fe8af16536ee70312d52118d66ad518723d0877"
+        "type": "staging product documentation for actorless library fix",
+        "product_source_revision": "0870da032cdb25d02f2d3c7803fce4afc618c743",
+        "base_staging_revision": "e41c502cbcb078a055f5c0ff7bf8ddcc2fe6fba5",
+        "adaptation": "Describe the selected file-job host-frame behavior, exact source scope, synthetic checks and absence of staging game acceptance."
       },
-      "classification": "camera_product_documentation_with_explicit_adaptations",
+      "classification": "product_documentation_with_explicit_adaptations",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -1204,6 +1226,20 @@
             "source_algorithm_modified": false
           },
           "classification": "new_local_staging_control_or_documentation"
+        },
+        {
+          "sha256": "1297e70873501406d2aac4da8e846a8ef28dcca4c3c425806883160b79b18c07",
+          "size": 8799,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "3a33452a09aa9eea8e97eb2e58ac2710ee1e4f5e",
+            "path": "docs/USAGE.md",
+            "selected_raw_git_blob": false,
+            "adaptation": "Camera-only changes on the existing staging implementation/documentation; excludes Control API, Clock, Timeline and workspace changes.",
+            "base_staging_revision": "8fe8af16536ee70312d52118d66ad518723d0877"
+          },
+          "classification": "camera_product_documentation_with_explicit_adaptations",
+          "staging_revision": "e41c502cbcb078a055f5c0ff7bf8ddcc2fe6fba5"
         }
       ]
     },
@@ -1945,17 +1981,18 @@
     },
     {
       "path": "src/GakuMotion.hpp",
-      "sha256": "79bd032670eec05754bb5c0bd7713070eeb90a6b760f217e9c8962aa1da34acc",
-      "size": 120075,
+      "sha256": "21b74a8df90e97121671348ebb62ace9218421316cf9903a8eb878fe18b2cc08",
+      "size": 121122,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "3a33452a09aa9eea8e97eb2e58ac2710ee1e4f5e",
+        "revision": "0870da032cdb25d02f2d3c7803fce4afc618c743",
         "path": "src/GakuMotion.hpp",
+        "git_blob": "7b7a3f909b67f1e7214e77675fd64b3e0f929553",
         "selected_raw_git_blob": false,
-        "adaptation": "Camera-only changes on the existing staging implementation/documentation; excludes Control API, Clock, Timeline and workspace changes.",
-        "base_staging_revision": "8fe8af16536ee70312d52118d66ad518723d0877"
+        "base_staging_revision": "e41c502cbcb078a055f5c0ff7bf8ddcc2fe6fba5",
+        "adaptation": "Core::ProcessPendingLibraryCommands only; existing staging GUI command consumer is unchanged."
       },
-      "classification": "selected_first_party_camera_code_or_synthetic_test",
+      "classification": "selected_actorless_library_fix_hunks",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -1992,20 +2029,37 @@
             "selected_raw_git_blob": true
           },
           "classification": "selected_first_party_or_retained_license_source"
+        },
+        {
+          "sha256": "79bd032670eec05754bb5c0bd7713070eeb90a6b760f217e9c8962aa1da34acc",
+          "size": 120075,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "3a33452a09aa9eea8e97eb2e58ac2710ee1e4f5e",
+            "path": "src/GakuMotion.hpp",
+            "selected_raw_git_blob": false,
+            "adaptation": "Camera-only changes on the existing staging implementation/documentation; excludes Control API, Clock, Timeline and workspace changes.",
+            "base_staging_revision": "8fe8af16536ee70312d52118d66ad518723d0877"
+          },
+          "classification": "selected_first_party_camera_code_or_synthetic_test",
+          "staging_revision": "e41c502cbcb078a055f5c0ff7bf8ddcc2fe6fba5"
         }
       ]
     },
     {
       "path": "src/GakuMotionPlugin.cpp",
-      "sha256": "32f2dd21d4d6c732222617509dfe3c994e505b2c726ed6a6fd70b7d4ecbdb030",
-      "size": 131665,
+      "sha256": "cd03e359907125fae83cc22b946f046e7c726a065d5864c6055aaa2ac832a921",
+      "size": 131781,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+        "revision": "0870da032cdb25d02f2d3c7803fce4afc618c743",
         "path": "src/GakuMotionPlugin.cpp",
-        "selected_raw_git_blob": true
+        "git_blob": "67c4d2151fe36a65e6545884f7a1e7ac1a07353f",
+        "selected_raw_git_blob": false,
+        "base_staging_revision": "e41c502cbcb078a055f5c0ff7bf8ddcc2fe6fba5",
+        "adaptation": "MotionTick comment and ProcessPendingLibraryCommands call only; preserve staging lifecycle and actor dispatch."
       },
-      "classification": "selected_first_party_or_retained_license_source",
+      "classification": "selected_actorless_library_fix_hunks",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -2031,6 +2085,18 @@
             "selection": "fixed product closure"
           },
           "classification": "first_party_product_code_or_synthetic_support"
+        },
+        {
+          "sha256": "32f2dd21d4d6c732222617509dfe3c994e505b2c726ed6a6fd70b7d4ecbdb030",
+          "size": 131665,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+            "path": "src/GakuMotionPlugin.cpp",
+            "selected_raw_git_blob": true
+          },
+          "classification": "selected_first_party_or_retained_license_source",
+          "staging_revision": "e41c502cbcb078a055f5c0ff7bf8ddcc2fe6fba5"
         }
       ]
     },
@@ -3716,6 +3782,21 @@
       "classification": "first_party_product_code_or_synthetic_support"
     },
     {
+      "path": "tests/test_actorless_library.hpp",
+      "sha256": "86a6ddb30db3ff6c7fa56324b4f85bfd1d4b1ae979a2b769b55e7c7482d68683",
+      "size": 8233,
+      "origin": {
+        "repository": "GakuMotion",
+        "revision": "0870da032cdb25d02f2d3c7803fce4afc618c743",
+        "path": "tests/test_actorless_library.hpp",
+        "git_blob": "02c7720afb41cc6423d7a50c36a28dee5db550f0",
+        "selected_raw_git_blob": false,
+        "base_staging_revision": "e41c502cbcb078a055f5c0ff7bf8ddcc2fe6fba5",
+        "adaptation": "Replace LibraryRefreshFixture::WriteClip with a local two-frame synthetic clip writer; preserve all ten source regression checks."
+      },
+      "classification": "staging_synthetic_test_adaptation"
+    },
+    {
       "path": "tests/test_camera.hpp",
       "sha256": "c2ce964effed83bca3767ce0cef7d9b0e36a34c401fb5cee6250e9eea61718ed",
       "size": 52875,
@@ -3879,15 +3960,32 @@
     },
     {
       "path": "tests/test_refresh_core.cpp",
-      "sha256": "67599eaf243b241e85c8b48faa4770223cc76c6553eefe8c378611a7f66a0917",
-      "size": 114491,
+      "sha256": "6246fa8bcd7ef5b2b61f45787ae3c1161963c74497620dd248806002e91ffbf1",
+      "size": 114570,
       "origin": {
         "repository": "GakuMotion",
-        "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
-        "type": "synthetic-only test harness adaptation",
-        "source_algorithm_modified": false
+        "revision": "0870da032cdb25d02f2d3c7803fce4afc618c743",
+        "path": "tests/test_core.cpp",
+        "git_blob": "9f8f5ffa3dc285d3b0e40cadc46aa83251d9850b",
+        "selected_raw_git_blob": false,
+        "base_staging_revision": "e41c502cbcb078a055f5c0ff7bf8ddcc2fe6fba5",
+        "adaptation": "Only the include and invocation selecting the new actorless library test; adapted into staging synthetic test_refresh_core.cpp."
       },
-      "classification": "staging_synthetic_test_adaptation"
+      "classification": "staging_synthetic_test_adaptation",
+      "history": [
+        {
+          "sha256": "67599eaf243b241e85c8b48faa4770223cc76c6553eefe8c378611a7f66a0917",
+          "size": 114491,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
+            "type": "synthetic-only test harness adaptation",
+            "source_algorithm_modified": false
+          },
+          "classification": "staging_synthetic_test_adaptation",
+          "staging_revision": "e41c502cbcb078a055f5c0ff7bf8ddcc2fe6fba5"
+        }
+      ]
     },
     {
       "path": "tests/test_scene_actor_selection.hpp",
@@ -4120,7 +4218,8 @@
     "Original production algorithms and restored parameter bytes are unchanged; build integration and product documentation were updated.",
     "No real user materials, original model/texture files, motion/audio files, recordings or training inputs are included.",
     "The snapshot manifest is an optional maintenance record, not a product build prerequisite.",
-    "2026-11-02: Fixed product paths revision 102df32 selected; user-data migration is copy/hash verified and explicitly activated, and the eleven restored inputs remain unchanged."
+    "2026-11-02: Fixed product paths revision 102df32 selected; user-data migration is copy/hash verified and explicitly activated, and the eleven restored inputs remain unchanged.",
+    "2026-11-05: Selected actorless library job progression from fixed 0870da0 hunks; production queue ordering is preserved, and tests use only synthetic data. No importer, dependency, parameter or unrelated source update."
   ],
   "documentation_repair": {
     "baseline_staging_commit": "e4a9864d01e9773053fa3eaf7ed9bd93d2847e5c",
@@ -4675,5 +4774,55 @@
     "changed_payload_files": [
       "README.md"
     ]
+  },
+  "actorless_import_refresh": {
+    "date": "2026-11-05",
+    "source_revision": "0870da032cdb25d02f2d3c7803fce4afc618c743",
+    "base_staging_revision": "e41c502cbcb078a055f5c0ff7bf8ddcc2fe6fba5",
+    "previous_manifest_sha256": "c2180e1e08e839f929c404d95a4e7f82c3555a0d312ef6289dda82642e6760dc",
+    "selected_production_hunks": [
+      "src/GakuMotion.hpp::Core::ProcessPendingLibraryCommands",
+      "src/GakuMotionPlugin.cpp::MotionTick host-frame call and comment"
+    ],
+    "synthetic_test_source": "tests/test_actorless_library.hpp",
+    "staging_test_entry": "tests/test_refresh_core.cpp",
+    "staging_test_adaptation": "Self-contained two-frame synthetic clip writer replaces a dependency on the research repository test helper. All ten actorless job checks are retained.",
+    "changed_payload_files": [
+      "src/GakuMotion.hpp",
+      "src/GakuMotionPlugin.cpp",
+      "tests/test_actorless_library.hpp",
+      "tests/test_refresh_core.cpp",
+      "SOURCE_REVIEW.md",
+      "docs/USAGE.md",
+      "docs/ACTORLESS_IMPORT_FIX_20261105.md"
+    ],
+    "excluded": [
+      "Control API",
+      "Studio lighting or video",
+      "eye-motion research",
+      "source workspace sole wording",
+      "DevAgents",
+      "real user assets",
+      "unrelated working changes"
+    ],
+    "validation": {
+      "runtime_msvc_release_imgui": "passed",
+      "synthetic_core": {
+        "passed": 861,
+        "failed": 0
+      },
+      "stage_load_contract": {
+        "passed": 80,
+        "failed": 0
+      },
+      "imgui_interactions": {
+        "passed": 149,
+        "failed": 0
+      },
+      "imgui_syntax": "passed",
+      "nativeaot_rebuilt": false,
+      "game_deployed_or_controlled": false,
+      "remote_updated": false
+    }
   }
 }

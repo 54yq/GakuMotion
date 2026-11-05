@@ -520,6 +520,34 @@ namespace GakuMotion
 				{ return command.action == GuiAction::SelectTarget; });
 		}
 
+		// File work must keep progressing on host frames even when Photography
+		// has not created a dancer yet. Do not pass an earlier transport/scene
+		// command: e.g. a queued Stop must still precede a camera import.
+		void ProcessPendingLibraryCommands()
+		{
+			std::lock_guard<std::recursive_mutex> lock(stateMutex);
+			std::deque<GuiCommand> commands;
+			{
+				std::lock_guard<std::mutex> queueLock(guiCommandMutex);
+				while (!guiCommands.empty())
+				{
+					const auto action = guiCommands.front().action;
+					if (action != GuiAction::Import && action != GuiAction::CameraImport && action != GuiAction::Refresh) break;
+					commands.push_back(std::move(guiCommands.front()));
+					guiCommands.pop_front();
+				}
+			}
+			for (const auto& command : commands)
+			{
+				if (command.action == GuiAction::Import) StartImport(command.import);
+				else if (command.action == GuiAction::CameraImport) StartCameraImport(command.cameraImport);
+				else BeginLibraryRefresh();
+			}
+			PollImport();
+			PollCameraImport();
+			PollLibraryRefresh();
+		}
+
 		void ProcessPendingGuiCommands()
 		{
 			std::deque<GuiCommand> commands;

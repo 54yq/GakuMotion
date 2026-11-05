@@ -90,3 +90,11 @@ KineTexture 的源头、许可证与头文件一致性已核对。Dear ImGui 的
 此次应与 VRify 的空共享目标修复一同进入候选，避免只改界面却保留导致接口未就绪的启动故障。用户已确认开发版这次镜头效果恢复；该确认不扩展为全部 VR、角色、场景或配置矩阵验收。staging 本轮只做离线构建和合成测试，未部署游戏。
 
 未引入 Control API、Clock、Timeline、Director、DevAgents、真实输入或工作区其他改动。README 的既有未提交文案保留；冻结清单仍记录其提交版本，不能用当前工作树全文哈希冒充任务源码。具体范围与回执见 [镜头候选说明](docs/CAMERA_MODE_RECOVERY_20261104.md)。
+
+## 2026-11-05 无角色时的曲库导入推进
+
+从研发仓固定 `0870da032cdb25d02f2d3c7803fce4afc618c743` 只选择 `Core::ProcessPendingLibraryCommands`、`MotionTick` 的对应调用与合成测试闭包。文件导入、镜头导入和曲库刷新由宿主帧启动及轮询，摄影准备阶段不再依赖角色回调。处理仅取队首连续的三类文件命令；先前的播放、停止、选曲或场景控制保持原顺序及角色回调时机。
+
+生产方法直接采用该提交的对应代码段，未以研发仓全文覆盖 staging。测试接入 staging 的 `test_refresh_core.cpp`，并在新测试头中加入两帧合成动作写入器，替代研发测试对另一夹具头的引用；不访问用户动作或其他真实素材。原生导入 ABI、算法参数、依赖及公开构建入口不变。没有引入 Control API、Studio、眼动研究或原工作区鞋底文案。
+
+来源、适配和 staging 离线检查见 [导入修复说明](docs/ACTORLESS_IMPORT_FIX_20261105.md)；逐文件当前字节与历史身份继续由 `freeze-manifest.json` 记录。本轮不部署游戏，不新增 staging 进程加载或视觉验收声明。

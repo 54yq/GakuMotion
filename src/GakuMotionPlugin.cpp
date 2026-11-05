@@ -3065,12 +3065,14 @@ GakuStatus MotionActivate(const GakuHostApi* host, void** pluginState)
 // MotionActorTick.
 void MotionTick(void*, float)
 {
-	// Persist only the future Photography background selection outside actor
-	// callbacks. General playback and scene commands retain their actor timing.
+	// Preferences and file jobs do not need a dancer. The import UI is already
+	// usable in Photography preparation, before any actor callback can arrive.
+	// Playback and scene commands retain their actor timing and queue order.
 	{
 		auto& core = GakuMotion::Core::Instance();
 		std::lock_guard<std::recursive_mutex> lock(core.stateMutex);
 		core.ProcessPendingStageLoadCommands();
+		core.ProcessPendingLibraryCommands();
 	}
 	if (g_runtimeReady.load(std::memory_order_acquire))
 	{
