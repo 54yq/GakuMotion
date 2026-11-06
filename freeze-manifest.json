@@ -1859,8 +1859,8 @@
     },
     {
       "path": "interop/GakuMotion.VmdImporter.Native/GakuMotion.VmdImporter.Native.csproj",
-      "sha256": "aa4bed863e7c32d72ea686977cb9bb65a5d58fa17fab4e0f0581c4d2a7dc325b",
-      "size": 2709,
+      "sha256": "bd7b9c423dd23db8114de87ef9214d41b8d2105e3765264d12337e6e290785b6",
+      "size": 2738,
       "origin": {
         "repository": "GakuMotion",
         "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
@@ -1879,7 +1879,14 @@
           },
           "classification": "selected_first_party_or_retained_license_source"
         }
-      ]
+      ],
+      "release_version_refresh_20261106": {
+        "previous": {
+          "sha256": "aa4bed863e7c32d72ea686977cb9bb65a5d58fa17fab4e0f0581c4d2a7dc325b",
+          "size": 2709
+        },
+        "version": "0.1.0"
+      }
     },
     {
       "path": "interop/GakuMotion.VmdImporter.Native/ImportPipeline.cs",
@@ -2160,7 +2167,7 @@
     },
     {
       "path": "src/GakuMotionPlugin.cpp",
-      "sha256": "cd03e359907125fae83cc22b946f046e7c726a065d5864c6055aaa2ac832a921",
+      "sha256": "b69069a6293d4019778e5ce9af9f76bb03da0873671762a2b73721a87b64d2d7",
       "size": 131781,
       "origin": {
         "repository": "GakuMotion",
@@ -2210,7 +2217,14 @@
           "classification": "selected_first_party_or_retained_license_source",
           "staging_revision": "e41c502cbcb078a055f5c0ff7bf8ddcc2fe6fba5"
         }
-      ]
+      ],
+      "release_version_refresh_20261106": {
+        "version": "0.1.0",
+        "previous": {
+          "sha256": "cd03e359907125fae83cc22b946f046e7c726a065d5864c6055aaa2ac832a921",
+          "size": 131781
+        }
+      }
     },
     {
       "path": "src/GakuVrifyCameraBegin.h",
@@ -5179,5 +5193,9 @@
       "parallel BBP camera work",
       "real user motion data"
     ]
+  },
+  "release_version_refresh_20261106": {
+    "previous_manifest_sha256": "f91166ebe998c04d976d1f5dfbca83b667fc1a35a0d10019ef6d58e1eaed9b75",
+    "scope": "Plugin descriptor and NativeAOT importer product version 0.1.0; no ABI version change."
   }
 }
