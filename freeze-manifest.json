@@ -20,6 +20,26 @@
       "size": 84
     },
     {
+      "path": ".github/ISSUE_TEMPLATE/bug_report.md",
+      "sha256": "d43c99b2133b5133d2cb05b33cd2485d3e105ce6011615f1e7fe04fb93431b65",
+      "size": 1640,
+      "origin": {
+        "type": "cloud document polish",
+        "remote_commit": "83d1608c2f7cf76791dd8e6c9c4c80a77be57471"
+      },
+      "classification": "cloud_documentation_only"
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/feature_request.md",
+      "sha256": "da7da2c316ad878ee5d780ceb2dad502be2fb9a2f1c375f67299cce3c6bc81e0",
+      "size": 1534,
+      "origin": {
+        "type": "cloud document polish",
+        "remote_commit": "83d1608c2f7cf76791dd8e6c9c4c80a77be57471"
+      },
+      "classification": "cloud_documentation_only"
+    },
+    {
       "path": ".gitignore",
       "origin": {
         "type": "new staging-only documentation/build control",
@@ -42,13 +62,13 @@
     },
     {
       "path": "BUILD_NOTES.md",
-      "sha256": "39729217e320a6c9e7e1bae5d5bafdc3bb4e945be190bc293e9932baf7eaf5fa",
-      "size": 4847,
+      "sha256": "1997f67362ee143a220ccce139791457ba2b5ab52fef6840195d4998ff2705c4",
+      "size": 3669,
       "origin": {
-        "type": "local staging product documentation or synthetic test",
-        "source_algorithm_modified": false
+        "type": "cloud document polish",
+        "remote_commit": "83d1608c2f7cf76791dd8e6c9c4c80a77be57471"
       },
-      "classification": "new_local_staging_control_or_documentation",
+      "classification": "cloud_documentation_only",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -75,8 +95,22 @@
             "purpose": "Keep the user homepage and build integration; describe managed paths and preserved-data migration."
           },
           "classification": "product_documentation_with_explicit_adaptations"
+        },
+        {
+          "sha256": "39729217e320a6c9e7e1bae5d5bafdc3bb4e945be190bc293e9932baf7eaf5fa",
+          "size": 4847,
+          "origin": {
+            "type": "local staging product documentation or synthetic test",
+            "source_algorithm_modified": false
+          },
+          "classification": "new_local_staging_control_or_documentation"
         }
-      ]
+      ],
+      "documentation_sync_20261107": {
+        "previous_sha256": "643e4fd91b4a18893e98f42a62838c82cffaf7545f81f2c4f22eca47e36cb7c6",
+        "previous_size": 4992,
+        "scope": "Public documentation synchronized to the single-actor release baseline."
+      }
     },
     {
       "path": "GakuMotion.vcxproj",
@@ -130,15 +164,13 @@
     },
     {
       "path": "README.md",
-      "sha256": "cc83d2e676062882d33a827a109e34862479b0ff0957567de4d9cbcb99cfb1f7",
-      "size": 7737,
+      "sha256": "2947b7e7fa3292d8080447ce64b50919cfe2fae7df5c57fff85a692ed6007c6c",
+      "size": 8994,
       "origin": {
-        "repository": "GakuMotion",
-        "revision": "4f8ec4f62107130dfdeeae61586ac861ae71d2e0",
-        "path": "README.md",
-        "adaptation": "Staging-specific documentation or synthetic test integration for the selected library deletion and layout changes."
+        "type": "cloud document polish",
+        "remote_commit": "83d1608c2f7cf76791dd8e6c9c4c80a77be57471"
       },
-      "classification": "selected_product_change_with_explicit_staging_adaptation",
+      "classification": "cloud_documentation_only",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -225,6 +257,16 @@
       "documentation_repair": {
         "review": "Reviewed technical facts and conditions against current staged code; humanizer-zh expression pass.",
         "runtime_changed": false
+      },
+      "path_layout_docs_20261106": {
+        "previous_sha256": "cc83d2e676062882d33a827a109e34862479b0ff0957567de4d9cbcb99cfb1f7",
+        "previous_size": 7737,
+        "scope": "Document independent GakuLoader fresh-install paths; old root retained as historical compatibility."
+      },
+      "documentation_sync_20261107": {
+        "previous_sha256": "619ea322504f4bd2be1e1fe74242e85cda1b90b41c91fd8f9ea96519cf994af3",
+        "previous_size": 7877,
+        "scope": "Public documentation synchronized to the single-actor release baseline."
       }
     },
     {
@@ -363,13 +405,25 @@
     {
       "path": "build.ps1",
       "origin": {
-        "type": "new staging-only documentation/build control",
-        "source_algorithm_modified": false,
-        "complete_candidate_update": "Normal local build integration and current user/developer documentation; no algorithm or parameter change."
+        "type": "staging build and documentation security update",
+        "base_staging_revision": "7d9f65a1ce198a1ec4e5e9d456830336f5cc7a35",
+        "purpose": "Select patched .NET 8.0.427 feature band and support a private SDK executable; product algorithm unchanged."
       },
       "classification": "new_local_staging_control_or_documentation",
-      "sha256": "9b8a273de869da0214f84e9086d5a48cd1cbc175b2c16df51f4878409d763488",
-      "size": 6517
+      "sha256": "fef0c0740634fa69710897a06bfe86c3936cefdb82863a7c7ee576e42b8c8adb",
+      "size": 6566,
+      "history": [
+        {
+          "sha256": "9b8a273de869da0214f84e9086d5a48cd1cbc175b2c16df51f4878409d763488",
+          "size": 6517,
+          "origin": {
+            "type": "new staging-only documentation/build control",
+            "source_algorithm_modified": false,
+            "complete_candidate_update": "Normal local build integration and current user/developer documentation; no algorithm or parameter change."
+          },
+          "classification": "new_local_staging_control_or_documentation"
+        }
+      ]
     },
     {
       "path": "candidate/csharp/Directory.Build.props",
@@ -395,14 +449,26 @@
     },
     {
       "path": "candidate/csharp/global.json",
-      "sha256": "3f6e0011c2a5060f58e714d4c199c86184c228a44a24113cf84db3d2e0c2d325",
-      "size": 80,
+      "sha256": "d2b7fc96b08712b6d52e27fd4271d3561f38801aa0845edb2c997b99b29f60c5",
+      "size": 108,
       "origin": {
-        "repository": "GakuMotion",
-        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
-        "path": "candidate/csharp/global.json"
+        "type": "staging build and documentation security update",
+        "base_staging_revision": "7d9f65a1ce198a1ec4e5e9d456830336f5cc7a35",
+        "purpose": "Select patched .NET 8.0.427 feature band and support a private SDK executable; product algorithm unchanged."
       },
-      "classification": "selected_first_party_or_retained_license_source"
+      "classification": "selected_first_party_or_retained_license_source",
+      "history": [
+        {
+          "sha256": "3f6e0011c2a5060f58e714d4c199c86184c228a44a24113cf84db3d2e0c2d325",
+          "size": 80,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+            "path": "candidate/csharp/global.json"
+          },
+          "classification": "selected_first_party_or_retained_license_source"
+        }
+      ]
     },
     {
       "path": "candidate/csharp/src/GakuMotion.VmdImporter/Core/DoubleRotation.cs",
@@ -1054,15 +1120,13 @@
     },
     {
       "path": "docs/ARCHITECTURE.md",
-      "sha256": "d78bd8f4348ad49e6ae93074ea5b80b6f545229c4c74192635b1d2970fdae2d9",
-      "size": 5931,
+      "sha256": "966f15a8eedf9c97441c20a0dc62f56fecae14790393dfc15d63d8374f861180",
+      "size": 5174,
       "origin": {
-        "type": "staging product documentation adaptation",
-        "base_staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
-        "product_source_revision": "102df32c515e49d78f086c9467ec591a93716442",
-        "purpose": "Keep the user homepage and build integration; describe managed paths and preserved-data migration."
+        "type": "cloud document polish",
+        "remote_commit": "83d1608c2f7cf76791dd8e6c9c4c80a77be57471"
       },
-      "classification": "product_documentation_with_explicit_adaptations",
+      "classification": "cloud_documentation_only",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -1076,7 +1140,12 @@
           },
           "classification": "restored_product_documentation_with_explicit_adaptations"
         }
-      ]
+      ],
+      "documentation_sync_20261107": {
+        "previous_sha256": "d78bd8f4348ad49e6ae93074ea5b80b6f545229c4c74192635b1d2970fdae2d9",
+        "previous_size": 5931,
+        "scope": "Public documentation synchronized to the single-actor release baseline."
+      }
     },
     {
       "path": "docs/CAMERA_MODE_RECOVERY_20261104.md",
@@ -1094,15 +1163,13 @@
     },
     {
       "path": "docs/INSTALLATION.md",
-      "sha256": "7cde3016cfcfdea659fe6a1a915cd797dcb001ea8739d71b26f576806085b9ff",
-      "size": 4737,
+      "sha256": "7fe2f4fdc98a9155b64290c6963b420dd494e418f0f341a40415530f70a5f3c6",
+      "size": 1521,
       "origin": {
-        "repository": "GakuMotion",
-        "revision": "4f8ec4f62107130dfdeeae61586ac861ae71d2e0",
-        "path": "docs/INSTALLATION.md",
-        "adaptation": "Staging-specific documentation or synthetic test integration for the selected library deletion and layout changes."
+        "type": "cloud document polish",
+        "remote_commit": "83d1608c2f7cf76791dd8e6c9c4c80a77be57471"
       },
-      "classification": "selected_product_change_with_explicit_staging_adaptation",
+      "classification": "cloud_documentation_only",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -1128,7 +1195,18 @@
           },
           "classification": "product_documentation_with_explicit_adaptations"
         }
-      ]
+      ],
+      "acceptance_repair_20261106": "Fresh independent host layout, first-run empty library, companion placement or absolute MCI timing repair; see local tests."
+    },
+    {
+      "path": "docs/KNOWN_ISSUES.md",
+      "sha256": "e50ca47970b50b8c93a6de0020e2779b0e81b86a04ce1c828487facf74b41605",
+      "size": 3305,
+      "origin": {
+        "type": "cloud document polish",
+        "remote_commit": "83d1608c2f7cf76791dd8e6c9c4c80a77be57471"
+      },
+      "classification": "cloud_documentation_only"
     },
     {
       "path": "docs/LIBRARY_DELETE_LAYOUT_20261105.md",
@@ -1143,33 +1221,6 @@
       "size": 2434
     },
     {
-      "path": "docs/MIGRATION_LAYOUT.md",
-      "sha256": "7ad66e271be7e92f486a23d11fafc427b4d7d349f964524e6186cbbc874f4463",
-      "size": 5910,
-      "origin": {
-        "repository": "GakuMotion",
-        "revision": "4f8ec4f62107130dfdeeae61586ac861ae71d2e0",
-        "path": "docs/MIGRATION_LAYOUT.md",
-        "adaptation": "Staging-specific documentation or synthetic test integration for the selected library deletion and layout changes."
-      },
-      "classification": "selected_product_change_with_explicit_staging_adaptation",
-      "origin_history": [
-        {
-          "staging_revision": "50bafca0b66cdff3a01b6585769f06367eeb1fe4",
-          "sha256": "c052f63136fe7a8fc595ac1a73d72ce808f8a070145a1af357b8bdf04a0a314b",
-          "size": 5829,
-          "origin": {
-            "repository": "GakuMotion",
-            "revision": "102df32c515e49d78f086c9467ec591a93716442",
-            "path": "docs/MIGRATION_LAYOUT.md",
-            "git_blob": "d68219e86344d2ebe1a42c2bcf6bfbe940aa954d",
-            "selection": "fixed product closure"
-          },
-          "classification": "first_party_product_code_or_synthetic_support"
-        }
-      ]
-    },
-    {
       "path": "docs/PLAYBACK_TIMING.md",
       "sha256": "8290e8e48cc9cc7aef225cdb3900b8cccfbb885925bee6ac8394f9deffde0fba",
       "size": 1144,
@@ -1181,15 +1232,13 @@
     },
     {
       "path": "docs/README.md",
-      "sha256": "083fb5c50810ce60351ed62ceb895a8a7e79c7444efb513179d5ee4e7deb0660",
-      "size": 1551,
+      "sha256": "7677c1522dcaff59472435dc5b0f0dcc51ff4427d0d1eae5a6b2df230bb38cd2",
+      "size": 1129,
       "origin": {
-        "type": "staging product documentation adaptation",
-        "base_staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
-        "product_source_revision": "102df32c515e49d78f086c9467ec591a93716442",
-        "purpose": "Keep the user homepage and build integration; describe managed paths and preserved-data migration."
+        "type": "cloud document polish",
+        "remote_commit": "83d1608c2f7cf76791dd8e6c9c4c80a77be57471"
       },
-      "classification": "product_documentation_with_explicit_adaptations",
+      "classification": "cloud_documentation_only",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -1203,19 +1252,22 @@
           },
           "classification": "restored_product_documentation_with_explicit_adaptations"
         }
-      ]
+      ],
+      "documentation_sync_20261107": {
+        "previous_sha256": "083fb5c50810ce60351ed62ceb895a8a7e79c7444efb513179d5ee4e7deb0660",
+        "previous_size": 1551,
+        "scope": "Public documentation synchronized to the single-actor release baseline."
+      }
     },
     {
       "path": "docs/TROUBLESHOOTING.md",
-      "sha256": "66d31e43fed4173566d7fee8e2c5b8ca83bdba2e56a0b4e9cec3bca4cdef96d7",
-      "size": 7675,
+      "sha256": "91064bec32820ddec1be1c40d3c49b6de4ccb664db9b6c8ae438cd8cbc3e5abf",
+      "size": 7095,
       "origin": {
-        "repository": "GakuMotion",
-        "revision": "4f8ec4f62107130dfdeeae61586ac861ae71d2e0",
-        "path": "docs/TROUBLESHOOTING.md",
-        "adaptation": "Staging-specific documentation or synthetic test integration for the selected library deletion and layout changes."
+        "type": "cloud document polish",
+        "remote_commit": "83d1608c2f7cf76791dd8e6c9c4c80a77be57471"
       },
-      "classification": "selected_product_change_with_explicit_staging_adaptation",
+      "classification": "cloud_documentation_only",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -1252,19 +1304,22 @@
           },
           "classification": "product_documentation_with_explicit_adaptations"
         }
-      ]
+      ],
+      "path_layout_docs_20261106": {
+        "previous_sha256": "66d31e43fed4173566d7fee8e2c5b8ca83bdba2e56a0b4e9cec3bca4cdef96d7",
+        "previous_size": 7675,
+        "scope": "Document independent GakuLoader fresh-install paths; old root retained as historical compatibility."
+      }
     },
     {
       "path": "docs/USAGE.md",
-      "sha256": "ed985ac29c4961b614e1c9b7a252a6ac76c82d70d261970cec41ab83b216f758",
-      "size": 9305,
+      "sha256": "95968fcd6c6e7fb0fec1cccd50eaf7a8b4c857264f411803065337c8807a00df",
+      "size": 6162,
       "origin": {
-        "repository": "GakuMotion",
-        "revision": "4f8ec4f62107130dfdeeae61586ac861ae71d2e0",
-        "path": "docs/USAGE.md",
-        "adaptation": "Staging-specific documentation or synthetic test integration for the selected library deletion and layout changes."
+        "type": "cloud document polish",
+        "remote_commit": "83d1608c2f7cf76791dd8e6c9c4c80a77be57471"
       },
-      "classification": "selected_product_change_with_explicit_staging_adaptation",
+      "classification": "cloud_documentation_only",
       "origin_history": [
         {
           "staging_revision": "eebbb2b37ae30b3d033ed7fc4a3992a620840003",
@@ -1327,19 +1382,27 @@
           "classification": "camera_product_documentation_with_explicit_adaptations",
           "staging_revision": "e41c502cbcb078a055f5c0ff7bf8ddcc2fe6fba5"
         }
-      ]
+      ],
+      "path_layout_docs_20261106": {
+        "previous_sha256": "ed985ac29c4961b614e1c9b7a252a6ac76c82d70d261970cec41ab83b216f758",
+        "previous_size": 9305,
+        "scope": "Document independent GakuLoader fresh-install paths; old root retained as historical compatibility."
+      },
+      "documentation_sync_20261107": {
+        "previous_sha256": "f19de42d376da3b24d127ac315c3aede3bb306734084afec03fb982b4b407f44",
+        "previous_size": 9361,
+        "scope": "Public documentation synchronized to the single-actor release baseline."
+      }
     },
     {
       "path": "docs/formats/ACTION_FORMATS.md",
-      "sha256": "0c416ef32a79bcda87ec6c0f3ebd8ab46d986ea248b7a745a4a8c980c6046fa9",
-      "size": 5666,
+      "sha256": "1d0506f7c18ca5c70781979079d3d8b3461531f76000da0bcab70e52d4e0fc87",
+      "size": 5616,
       "origin": {
-        "repository": "GakuMotion",
-        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
-        "path": "docs/formats/ACTION_FORMATS.md",
-        "adaptation": "Restore existing documentation; adapt current build interface, links and historical placement."
+        "type": "cloud document polish",
+        "remote_commit": "83d1608c2f7cf76791dd8e6c9c4c80a77be57471"
       },
-      "classification": "restored_product_documentation_with_explicit_adaptations"
+      "classification": "cloud_documentation_only"
     },
     {
       "path": "docs/formats/NATIVE_FACIAL_TAIL.md",
@@ -1392,15 +1455,27 @@
     },
     {
       "path": "global.json",
-      "sha256": "9cca173f294b09373ebe03a4657934139be112d1d86564744cb937fa82b8d738",
-      "size": 110,
+      "sha256": "d2b7fc96b08712b6d52e27fd4271d3561f38801aa0845edb2c997b99b29f60c5",
+      "size": 108,
       "origin": {
-        "repository": "GakuMotion",
-        "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
-        "path": "candidate/csharp/global.json",
-        "adaptation": "Apply the existing stable SDK version at the product root; explicitly disallow prerelease selection."
+        "type": "staging build and documentation security update",
+        "base_staging_revision": "7d9f65a1ce198a1ec4e5e9d456830336f5cc7a35",
+        "purpose": "Select patched .NET 8.0.427 feature band and support a private SDK executable; product algorithm unchanged."
       },
-      "classification": "build_configuration_or_optional_maintenance_tool"
+      "classification": "build_configuration_or_optional_maintenance_tool",
+      "history": [
+        {
+          "sha256": "9cca173f294b09373ebe03a4657934139be112d1d86564744cb937fa82b8d738",
+          "size": 110,
+          "origin": {
+            "repository": "GakuMotion",
+            "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
+            "path": "candidate/csharp/global.json",
+            "adaptation": "Apply the existing stable SDK version at the product root; explicitly disallow prerelease selection."
+          },
+          "classification": "build_configuration_or_optional_maintenance_tool"
+        }
+      ]
     },
     {
       "path": "include/GakuBurstBridge.h",
@@ -2088,8 +2163,8 @@
     },
     {
       "path": "src/GakuMotion.hpp",
-      "sha256": "f70bfa6cf11f0bf22de895a84c65cb448a9a41b5375d410e4fba0ba40ede4318",
-      "size": 118127,
+      "sha256": "1040820456f118fd6a9c3ebd288244011568292e0f4cade2bafc6737b8bd57c1",
+      "size": 118533,
       "origin": {
         "repository": "GakuMotion",
         "revision": "4f8ec4f62107130dfdeeae61586ac861ae71d2e0",
@@ -2163,12 +2238,13 @@
           "classification": "selected_first_party_camera_code_or_synthetic_test",
           "staging_revision": "e41c502cbcb078a055f5c0ff7bf8ddcc2fe6fba5"
         }
-      ]
+      ],
+      "acceptance_repair_20261106": "Fresh independent host layout, first-run empty library, companion placement or absolute MCI timing repair; see local tests."
     },
     {
       "path": "src/GakuMotionPlugin.cpp",
-      "sha256": "b69069a6293d4019778e5ce9af9f76bb03da0873671762a2b73721a87b64d2d7",
-      "size": 131781,
+      "sha256": "375990c04ea35964714482aaca6d15ebe5043707f86afc539bbf8645f665d5e2",
+      "size": 131823,
       "origin": {
         "repository": "GakuMotion",
         "revision": "0870da032cdb25d02f2d3c7803fce4afc618c743",
@@ -2224,7 +2300,8 @@
           "sha256": "cd03e359907125fae83cc22b946f046e7c726a065d5864c6055aaa2ac832a921",
           "size": 131781
         }
-      }
+      },
+      "acceptance_repair_20261106": "Fresh independent host layout, first-run empty library, companion placement or absolute MCI timing repair; see local tests."
     },
     {
       "path": "src/GakuVrifyCameraBegin.h",
@@ -2385,14 +2462,15 @@
     },
     {
       "path": "src/GkBurstBridgeClient.hpp",
-      "sha256": "14d88fc927688dd9b692cdfbe006a7ae5415dcc871669d899f86f94671aca94c",
-      "size": 10251,
+      "sha256": "08e14e08b2554e27ccbdb8308acaad92509f7afda69e74a63507d4a01634a863",
+      "size": 10248,
       "origin": {
         "repository": "GakuMotion",
         "revision": "2b28931e8b50b780668baec5e3982927667c3e08",
         "path": "src/GkBurstBridgeClient.hpp"
       },
-      "classification": "selected_first_party_code_for_private_review"
+      "classification": "selected_first_party_code_for_private_review",
+      "acceptance_repair_20261106": "Fresh independent host layout, first-run empty library, companion placement or absolute MCI timing repair; see local tests."
     },
     {
       "path": "src/GkCamera.hpp",
@@ -2517,8 +2595,8 @@
     },
     {
       "path": "src/GkDataLayout.hpp",
-      "sha256": "b5b942da722a1acaa14e973d495fa1fd1c7b0fdc9a17ddb3bda515f8f85eb94f",
-      "size": 4992,
+      "sha256": "99156fba069a8d69f1de76cfd5a3056ba96890266e8134c47e2b87368960f50f",
+      "size": 6170,
       "origin": {
         "repository": "GakuMotion",
         "revision": "102df32c515e49d78f086c9467ec591a93716442",
@@ -2526,7 +2604,8 @@
         "git_blob": "f908fac1a0ba3efccad210b0c7d64c98f67b8d83",
         "selection": "fixed product closure"
       },
-      "classification": "first_party_product_code_or_synthetic_support"
+      "classification": "first_party_product_code_or_synthetic_support",
+      "acceptance_repair_20261106": "Fresh independent host layout, first-run empty library, companion placement or absolute MCI timing repair; see local tests."
     },
     {
       "path": "src/GkExactMethod.hpp",
@@ -2938,8 +3017,8 @@
     },
     {
       "path": "src/GkMotionPlayer.hpp",
-      "sha256": "a29feea1ddb1ba8624060ee48bb4e7dcb0d51ce3f8c2670ea2c46db23f5d599a",
-      "size": 26161,
+      "sha256": "3812c5baa917f8fff5c4cb542ead3c2add951fbd78b2cc58640ad7f3fb6a3494",
+      "size": 27242,
       "origin": {
         "repository": "GakuMotion",
         "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
@@ -2958,7 +3037,8 @@
           },
           "classification": "selected_first_party_code_for_private_review"
         }
-      ]
+      ],
+      "acceptance_repair_20261106": "Fresh independent host layout, first-run empty library, companion placement or absolute MCI timing repair; see local tests."
     },
     {
       "path": "src/GkNativeAudio.hpp",
@@ -4052,8 +4132,8 @@
     },
     {
       "path": "tests/test_data_layout.cpp",
-      "sha256": "c73ae1dcfd844680ae724c923cd3e965683f063d6ee330c7a12a17af7959d6ad",
-      "size": 7550,
+      "sha256": "de1d60236501ab0ca99787bedd9806c66d71624a2773854a3b5703bc1eec1221",
+      "size": 8825,
       "origin": {
         "repository": "GakuMotion",
         "revision": "4f8ec4f62107130dfdeeae61586ac861ae71d2e0",
@@ -4075,7 +4155,8 @@
           },
           "classification": "first_party_product_code_or_synthetic_support"
         }
-      ]
+      ],
+      "acceptance_repair_20261106": "Fresh independent host layout, first-run empty library, companion placement or absolute MCI timing repair; see local tests."
     },
     {
       "path": "tests/test_face_ownership.hpp",
@@ -4205,15 +4286,16 @@
     },
     {
       "path": "tests/test_playback_timing.hpp",
-      "sha256": "2051743db6e97ab6dbaeac3a27090c7a0bcd0711cce81700840e7f719a802367",
-      "size": 13698,
+      "sha256": "746448aa9d317bef00f5e503171fa4fb58881fe73cda7726883c75b3745743aa",
+      "size": 15554,
       "origin": {
         "repository": "GakuMotion",
         "revision": "000a9327417bd2145ac91a123566f0676ba7fd99",
         "path": "tests/test_playback_timing.hpp",
         "selected_raw_git_blob": true
       },
-      "classification": "selected_first_party_or_retained_license_source"
+      "classification": "selected_first_party_or_retained_license_source",
+      "acceptance_repair_20261106": "Fresh independent host layout, first-run empty library, companion placement or absolute MCI timing repair; see local tests."
     },
     {
       "path": "tests/test_refresh_core.cpp",
@@ -5197,5 +5279,65 @@
   "release_version_refresh_20261106": {
     "previous_manifest_sha256": "f91166ebe998c04d976d1f5dfbca83b667fc1a35a0d10019ef6d58e1eaed9b75",
     "scope": "Plugin descriptor and NativeAOT importer product version 0.1.0; no ABI version change."
+  },
+  "sdk_security_refresh_20261106": {
+    "previous_manifest_sha256": "deadbaa16a3588a7be49d390c2ec3159649343765075b43e586cead853882a9b",
+    "base_staging_revision": "7d9f65a1ce198a1ec4e5e9d456830336f5cc7a35",
+    "advisory": "GHSA-p3jp-9v83-76w9",
+    "changed_payload_files": [
+      "global.json",
+      "candidate/csharp/global.json",
+      "build.ps1",
+      "BUILD_NOTES.md"
+    ],
+    "scope": "SDK selection and build tooling only; no importer algorithm, asset, ABI or plugin version change."
+  },
+  "acceptance_repair_20261106": {
+    "layout": "GakuLoader categorized roots by default; library in PluginData/gakumotion/motions",
+    "companion": "plugins/GakuBurstBridge.dll; native companion ABI retained",
+    "audio": "absolute MCI source position; other backend behavior retained",
+    "validation": "29 layout cases; 902 core checks; 80 stage-load checks; runtime build; game acceptance pending"
+  },
+  "path_layout_docs_20261106": {
+    "previous_manifest_sha256": "e15b6f9bb937c3f6ccb62df17cc00b254030698c4d180c446d6c22d50fd8d6bd",
+    "changed_files": [
+      "README.md",
+      "docs/USAGE.md",
+      "docs/TROUBLESHOOTING.md"
+    ],
+    "scope": "Documentation only; no runtime changes."
+  },
+  "documentation_sync_20261107": {
+    "previous_manifest_sha256": "b18567fc7b15e7a4e2b02093dc3bcfd8fa15984c84c466d4581aafcb5766287e",
+    "changed_files": [
+      "BUILD_NOTES.md",
+      "README.md",
+      "docs/ARCHITECTURE.md",
+      "docs/README.md",
+      "docs/USAGE.md"
+    ],
+    "scope": "Public documentation only; corresponding development files synchronized separately."
+  },
+  "cloud_document_polish_20261108": {
+    "date": "2026-11-08",
+    "remote_commit": "83d1608c2f7cf76791dd8e6c9c4c80a77be57471",
+    "changed": [
+      ".github/ISSUE_TEMPLATE/bug_report.md",
+      ".github/ISSUE_TEMPLATE/feature_request.md",
+      "BUILD_NOTES.md",
+      "README.md",
+      "docs/ARCHITECTURE.md",
+      "docs/INSTALLATION.md",
+      "docs/KNOWN_ISSUES.md",
+      "docs/README.md",
+      "docs/TROUBLESHOOTING.md",
+      "docs/USAGE.md",
+      "docs/formats/ACTION_FORMATS.md"
+    ],
+    "deleted": [
+      "docs/MIGRATION_LAYOUT.md"
+    ],
+    "runtime_changed": false,
+    "note": "User-reviewed cloud documentation imported identically into the staging tree."
   }
 }

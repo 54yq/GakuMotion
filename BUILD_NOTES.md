@@ -1,96 +1,45 @@
 # 构建与验证
 
-GakuMotion 的完整运行包包含 C++ 插件 `GakuMotion.dll` 和 C# NativeAOT 导入器 `GakuMotion.VmdImporter.Native.dll`。两个文件应来自同一源码版本并配套提供。普通使用不需要开发工具，见[安装指南](docs/INSTALLATION.md)。
-
-项目结构见[架构](docs/ARCHITECTURE.md)。构建入口是根目录 `build.ps1`；默认输出到已被 Git 忽略的 `build/`，也可指定仓库外目录。脚本不会部署到游戏。
+GakuMotion 由 C++ 插件 `GakuMotion.dll` 和 C# NativeAOT 导入器 `GakuMotion.VmdImporter.Native.dll` 组成。日常使用预编译文件不需要开发工具；安装位置见[安装指南](docs/INSTALLATION.md)。本文基于 v0.1.0 发布线，可能存在过时之处，具体功能实现以实际代码为准。
 
 ## 环境与依赖
 
-| 项目 | 要求 |
-| --- | --- |
-| 系统 | Windows x64、PowerShell 5.1 或以上；以下示例使用 `pwsh` |
-| C++ | Visual Studio 桌面 C++ 工作负载、MSVC x64、Windows SDK |
-| 导入器 | .NET 8 SDK；根 `global.json` 固定从稳定 8.0.405 feature band 选择，不使用预览 SDK |
-| 界面与动作核心 | 所需 Dear ImGui、MinHook 和 KineTexture 源文件已包含，无需初始化子模块 |
-
-运行游戏插件和界面导入不需要 Python、.NET SDK 或 .NET 运行时。NativeAOT 发布需要 .NET SDK 能恢复相应包，以及 MSVC 和 Windows SDK；第一次恢复可能访问正常配置的 NuGet 源。
+- Windows x64、PowerShell，以及安装了桌面 C++ 工作负载和 Windows SDK 的 Visual Studio 2022 或更新版本。
+- NativeAOT 导入器构建需要 .NET 8 SDK、MSVC 和 Windows SDK；首次恢复依赖可能需要访问配置的 NuGet 源。运行预编译导入器不需要安装 .NET 运行时。
+- 构建前确认仓库所需的 Dear ImGui、MinHook、KineTexture 与 Candidate B 来源文件均已就位。开发仓库的子模块需要按其仓库配置准备；发布源码快照包含构建所需的选择文件。
+- 发布仓库根目录的 `global.json` 选择稳定的 .NET 8.0.427 feature band，允许该 band 中的更新补丁；开发仓库应按自身工具链选择兼容的 SDK。
 
 ## 构建
 
-从仓库根目录执行：
+在所使用的 GakuMotion 仓库根目录执行相应命令。两套仓库的 `build.ps1` 参数与输出位置不同，请使用对应行：
 
-```powershell
-pwsh -NoProfile -File build.ps1 -Target All
-```
+| 仓库 | 命令 | 输出 |
+| --- | --- | --- |
+| 发布源码 | `pwsh -NoProfile -File build.ps1 -Target All` | `build/native/GakuMotion.dll` 与 `build/nativeaot/GakuMotion.VmdImporter.Native.dll` |
+| 开发源码：运行时 | `powershell -NoProfile -File build.ps1 -Configuration Release` | `build/GakuMotion.dll` |
+| 开发源码：导入器 | `powershell -NoProfile -File interop/publish-native.ps1 -OutputDir build/test-vmd-csharp` | `build/test-vmd-csharp/GakuMotion.VmdImporter.Native.dll` |
 
-成功后得到：
+发布源码还支持 `-Target Runtime`、`-Target NativeAOT`、`-Target Preflight` 和 `-Target Contracts`；`-OutputRoot` 可指定输出目录，`-DotNet` 可指定 SDK 可执行文件。开发源码的运行时脚本提供 `-Configuration`、`-NoImGui`、`-Preview`、`-DiagnosticCapture` 和依赖目录选项，不支持发布脚本的 `-Target` 参数。两个脚本不会自动安装运行时插件。
 
-```text
-build/native/GakuMotion.dll
-build/nativeaot/GakuMotion.VmdImporter.Native.dll
-```
+将匹配的两个 DLL 放入 `GakuLoader/plugins/`，并正常退出、重新启动游戏才能加载新版。
 
-分别构建或选择输出位置：
+## 离线验证
 
-```powershell
-pwsh -NoProfile -File build.ps1 -Target Runtime -OutputRoot ../GakuMotion-build
-pwsh -NoProfile -File build.ps1 -Target NativeAOT -OutputRoot ../GakuMotion-build
-```
+| 仓库 | 命令 | 检查范围 |
+| --- | --- | --- |
+| 发布源码 | `pwsh -NoProfile -File tests/run_release_tests.ps1` | 合成核心、舞台加载边界与界面语法 |
+| 开发源码 | `powershell -NoProfile -File tests/run_tests.ps1` | 开发仓库的离线核心、相关边界与界面语法 |
+| 发布源码 | `pwsh -NoProfile -File tools/verify-source.ps1` | 维护者核对发布源码清单 |
 
-`-Target Preflight` 只检查真实源文件依赖、MSVC 和 Windows SDK，不编译。`-WindowsSdkRoot` 可指定 SDK 根目录。NativeAOT 发布会切换到仓库根目录选择 SDK，因此从其他工作目录使用 `-File` 调用时也采用根 `global.json`。
+两套仓库均提供 `tests/run_layout_tests.ps1`、`tests/test_layout_migration.ps1` 和 `tests/run_unicode_path_tests.ps1`，用于各自源码范围的合成路径与迁移检查。发布源码的 `pwsh -NoProfile -File build.ps1 -Target Contracts` 运行舞台加载的合成契约检查。
 
-## 合成契约检查
+## 常见问题
 
-```powershell
-pwsh -NoProfile -File build.ps1 -Target Contracts
-```
-
-该目标编译并运行合成的舞台加载边界测试，不读取游戏、模型、动作或录制。它不代替完整插件构建、真实导入链检查或游戏效果验证。
-
-## 分类路径的合成检查
-
-以下检查只生成小型临时安装树，不读取真实游戏素材：
-
-```powershell
-pwsh -NoProfile -File tests/run_layout_tests.ps1
-pwsh -NoProfile -File tests/test_layout_migration.ps1
-pwsh -NoProfile -File tests/run_unicode_path_tests.ps1
-```
-
-默认布局检查不加载游戏或实际导入器；Unicode 检查仅打开、查询和关闭自有静音 WAV，不播放声音。可选实际 NativeAOT 桥接检查还需要调用方明确提供实际 DLL 目录和旧 ABI 负向夹具目录。上述扩展检查不属于普通 `-Target All` 构建的前置门禁。
-
-## 可选的源码快照校验
-
-维护者准备固定源码快照时可执行：
-
-```powershell
-pwsh -NoProfile -File tools/verify-source.ps1
-```
-
-该工具比对 `freeze-manifest.json` 中的文件大小和 SHA256。普通构建不调用它、不读取审核状态；开发者修改源码后可以直接编译。准备新的固定快照时，再更新清单中的文件身份。
-
-## 插件接入与问题排查
-
-宿主生命周期、主线程调度及独立插件示例见 [GakuLoader 插件指南](https://github.com/crested-ezios/GakuLoader/blob/main/docs/PLUGIN_DEVELOPMENT.md)，Motion 的 ABI 见 [GakuPlugin.h](include/GakuPlugin.h)。产品导入使用 NativeAOT，不回退到 Python。
-
-| 症状 | 检查方式 |
+| 现象 | 检查 |
 | --- | --- |
-| 找不到 Visual Studio / MSVC | 安装桌面 C++ 工作负载和 x64 工具 |
-| 找不到 Windows SDK | 核对 SDK 安装位置，必要时指定 `-WindowsSdkRoot` |
-| 缺少源文件 | 重新取得完整源码；查看具体报错路径，不用空文件替代 |
-| .NET SDK 不匹配 | 按根 `global.json` 安装稳定 .NET 8 SDK，检查 `dotnet --version` |
-| NuGet 恢复失败 | 检查恢复日志和已配置包源，不把恢复失败当作 C# 编译错误 |
-| DLL 加载或导入失败 | 按[故障排查](docs/TROUBLESHOOTING.md)核对配套 DLL、ABI 和日志 |
+| 找不到 Visual Studio、MSVC 或 SDK | 检查桌面 C++ 工作负载、x64 工具链与 Windows SDK |
+| 找不到依赖源码 | 按所使用仓库的文件及子模块配置补全，不以空文件替代 |
+| .NET SDK 不匹配或 NuGet 恢复失败 | 核对 SDK 版本、发布仓库的 `global.json` 与恢复日志 |
+| 导入器加载或 ABI 失败 | 检查 DLL 是否来自同一配套构建，重新启动游戏并查看[故障排查](docs/TROUBLESHOOTING.md) |
 
-构建成功、文件部署、进程加载与游戏效果分别记录。更换安装 DLL 后需正常退出并重新启动游戏。
-
-## 交互功能的合成回归
-
-```powershell
-powershell -NoProfile -File tests/run_release_tests.ps1
-powershell -NoProfile -File tests/run_gui_ux_tests.ps1
-dotnet run --project interop/MikuRawSourceTests/GakuMotion.MikuRawSourceTests.csproj -c Release
-dotnet run --project interop/EditTrackTests/GakuMotion.EditTrackTests.csproj -c Release
-```
-
-这些测试使用自有内存对象与合成输入，不读取真实曲目或启动游戏。原生导入桥接测试位于 `tests/native_import_bridge/`，可对构建出的 NativeAOT DLL 检查 ABI 3、Unicode 导入、时序编辑、事务与失败保留。Runtime 与 NativeAOT 应从同一次源码提交成对构建。
+架构与格式分别见[架构说明](docs/ARCHITECTURE.md)和[动作与镜头格式](docs/formats/ACTION_FORMATS.md)。

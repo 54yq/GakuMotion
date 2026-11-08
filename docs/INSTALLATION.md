@@ -1,74 +1,46 @@
 # 安装与更新
 
-GakuMotion 面向《学园偶像大师》PC DMM 版，在 Windows x64 上由 GakuLoader 加载。当前界面标记为 Developer Preview；使用范围见[使用指南](USAGE.md)。
+GakuMotion 在 Windows x64 的 PC DMM 版中由 GakuLoader 加载。
 
-## 准备文件
-
-需要 [GakuLoader](https://github.com/crested-ezios/GakuLoader) 和同一构建配套的两个文件：
-
-- `GakuMotion.dll`：游戏内回放与控制面板。
-- `GakuMotion.VmdImporter.Native.dll`：VMD 身体、表情、眼动和运镜导入。
-
-配套导入器是 NativeAOT 动态库。游戏运行和面板导入无需安装 Python、.NET 运行时或 .NET SDK。自行编译时需要的工具链见[构建说明](../BUILD_NOTES.md)。
-
-维护者提供的配套包应附带组件版本与逐文件 SHA256 清单。先核对整个配套包，避免分别取用不同日期的 DLL。普通用户无需构建工具；源码目录中的 `build/` 文件也不自动构成已验证的发行包。
-
-[GakuBurstBridge](https://github.com/crested-ezios/GakuBurstBridge) 仅供实验性原生物理使用。选择安装时，将 `GakuBurstBridge.dll` 放在 `gakumas-local/GakuMotion/`，不要放进 `plugins/`。不安装 Bridge 仍可使用基础动作、导入和内建物理；原生物理不可用时回退至内建方案。
-
-## 安装
-
-1. 正常退出游戏。
-2. 按 GakuLoader 的说明安装加载器，使 `version.dll` 位于游戏根目录。
-3. 将两个 GakuMotion DLL 放进 `gakumas-local/plugins/`。
-4. 启动游戏，进入偶像摄影，按 `Ctrl+M` 唤出 GakuMotion 面板。
-5. 在“曲库”添加 VMD，或放入已有动作文件夹后点击“刷新曲库”。
-
-未执行布局迁移时，目录如下。新版支持 GakuLoader 的可选 paths v1 服务：停止游戏、独立备份并完成[一次性复制迁移](MIGRATION_LAYOUT.md)后，配置使用 `Configs/gakumotion`，完整曲库使用 `UserData/gakumotion/motions`，播放列表使用 `PluginData/gakumotion`，导入日志使用 `Logs/gakumotion`。有效活动回执才会切换，覆盖 DLL 不会暗自搬素材；活动回执损坏或与安装不符时明确报错。
-
-旧布局的 `GakuMotion/` 保存配置与导入日志，首次运行会生成基础配置。可选 Bridge 的程序位置仍按下图保留，不随用户数据移动。
+## 安装布局
 
 ```text
 <游戏根目录>/
-├── version.dll                         GakuLoader
-└── gakumas-local/
-    ├── gakuloader.log                   宿主与插件日志
-    ├── plugins/
-    │   ├── GakuMotion.dll
-    │   └── GakuMotion.VmdImporter.Native.dll
-    ├── GakuMotion/                      配置与导入日志
-    │   └── GakuBurstBridge.dll          可选，实验性原生物理伴生库
-    └── motions/
-        └── MyDance/
-            ├── motion.gkclip           身体动作，可含表情和眼动
-            ├── camera.gkcamera         运镜，可选
-            ├── song.wav                PCM WAV 音频，可选
-            └── info.json               曲名等元数据，可选
+  gakumas.exe
+  version.dll
+  GakuLoader/
+    plugins/
+      GakuMotion.dll
+      GakuMotion.VmdImporter.Native.dll
+      GakuBurstBridge.dll               # 可选伴生库
+    Configs/gakumotion/
+      control.json
+      bone_overrides.json
+      initial_position.json
+      camera.json
+      sole_measurement.json
+      stage.json
+    PluginData/gakumotion/
+      motions/<曲目目录>/
+      playlist.json
+    Logs/gakumotion/
+    Temp/gakumotion/transactions/
+    tools/
 ```
 
-曲库也识别已有的 `motion.gkmotion` 和 `motion.gk_world_dump`。一个曲目对应 `motions/` 下的一个直接子目录。导入时请保留生成的附属文件；迁移动作库时复制整个曲目目录。
+配置按需生成；空曲库会在首次初始化时创建，不需要先添加曲目才能刷新。曲目目录可包含身体 `motion.gkclip`、表情、运镜、音频、元数据和用户附属文件；移动或备份时保留整个曲目目录。用户动作文件归 `PluginData/gakumotion/motions/`。
 
-## 更新
+两个 Motion DLL 应来自同一配套包。
 
-1. 正常退出游戏，备份现有的两个 DLL。
-2. 用同一构建的新版本同时替换两个 DLL。
-3. 保留全部配置和用户数据。未迁移时保留 `GakuMotion/`、`motions/`；已迁移时保留分类目录、活动回执、完整曲库及旧版遗留目录。重新启动游戏。
+## 首次使用
 
-DLL 不支持通过覆盖文件在已运行的游戏中换版；文件已替换与进程已加载新版是两件事。若需要回退，退出游戏后恢复配套的两个旧 DLL。
+1. 正常退出游戏后将配套包解压到游戏根目录。
+2. 启动游戏，进入偶像摄影，按 `Ctrl+M` 打开 Motion 面板。
+3. 添加或拖入 VMD，可同时附加表情、镜头和 PCM WAV。
+4. 选择曲目加载预览或播放；`F9` 暂停/继续，`F10` 停止并释放接管。
 
-## 配置与卸载
+## 更新与恢复
 
-普通使用优先通过面板调整。未迁移时配置位于 `gakumas-local/GakuMotion/`；已迁移时除 `playlist.json` 位于 `PluginData/gakumotion` 外，下表配置位于 `Configs/gakumotion`：
+更新前退出游戏，备份当前程序、配置和完整曲库，再同时替换配套 DLL。
 
-| 文件 | 用途 |
-| --- | --- |
-| `control.json` | 运行时声明式配置与一次性控制命令，支持热读取 |
-| `playlist.json` | 曲库顺序与播放模式 |
-| `initial_position.json` | 保存的默认位置偏移 |
-| `camera.json` | 保存的镜头参数 |
-| `bone_overrides.json` | 全局骨骼微调 |
-| `sole_measurement.json` | 开发者鞋底测量配置 |
-| `stage.json` | 下一次进入摄影时使用的背景选择 |
-
-停止使用 GakuMotion 时，退出游戏后移走两个 GakuMotion DLL 即可；动作和配置可以保留。GakuLoader 的卸载方式以其自身说明为准。
-
-下一步：[导入并播放第一支动作](USAGE.md) · [排查安装与导入问题](TROUBLESHOOTING.md) · [文档索引](README.md)
+[使用指南](USAGE.md) · [排错指南](TROUBLESHOOTING.md)

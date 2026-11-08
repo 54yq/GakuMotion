@@ -1,6 +1,6 @@
 # 动作与镜头格式
 
-本文描述当前 GakuMotion 读写器使用的磁盘契约。实现入口是 [`GkMotionData.hpp`](../../src/GkMotionData.hpp)、[`GkClipEncoder.cs`](../../candidate/csharp/src/GakuMotion.VmdImporter/Output/GkClipEncoder.cs) 和 [`GkCamera.hpp`](../../src/GkCamera.hpp)。本文以当前读写器为准；早期格式草案未随本源码仓附带。
+本文描述当前 GakuMotion 读写器使用的磁盘契约。实现入口是 [`GkMotionData.hpp`](../../src/GkMotionData.hpp)、[`GkClipEncoder.cs`](../../candidate/csharp/src/GakuMotion.VmdImporter/Output/GkClipEncoder.cs) 和 [`GkCamera.hpp`](../../src/GkCamera.hpp)。本文基于v0.1.0版本的读写器，可能存在过时之处，具体功能实现以代码为准。
 
 ## 格式与用途
 
@@ -57,7 +57,7 @@ for each frame:
 
 v5 眼动增量需通过目标角色眼睛的中性坐标系转换；辅助骨、角色适配和显式覆盖是独立运行时处理。
 
-局部格式能够被不同角色读取，但格式本身不能证明动作与目标几何无关。显式目标腿几何烘焙可能产生依赖指定骨段长度的姿态，应结合 sidecar 判读，也不能据此认定鞋底接触通过。
+局部格式能够被不同角色读取，但格式本身不能证明动作与目标几何无关。显式目标腿几何烘焙可能产生依赖于指定骨段长度的姿态，应结合 sidecar 判读。
 
 ## 动作尾部
 
@@ -73,7 +73,7 @@ for each channel:
 f32 weights[total_frames][channel_count]
 ```
 
-通道为 `VLActorFaceModel` 命名槽，不是网格索引；权重必须有限且在 `[0,1]`。名称非空且唯一，通道数不超过 1024。无表情也要写 `channel_count=0`。尾部之外的额外数据会被运行时拒绝。字节保留式替换说明见 [原生表情尾部](NATIVE_FACIAL_TAIL.md)。
+通道为 `VLActorFaceModel` 命名槽，不是网格索引；权重必须有限且在 `[0,1]`。名称非空且唯一，通道数不超过 1024。无表情也要写 `channel_count=0`。尾部之外的额外数据会在运行时被拒绝。字节保留式替换说明见 [原生表情尾部](NATIVE_FACIAL_TAIL.md)。
 
 ## 独立镜头轨道
 
@@ -95,6 +95,6 @@ flags bit 0 为正交投影，bit 1 表示该采样与前一采样之间切镜�
 
 ## 校验与证据范围
 
-动作读取器接受 `.gkclip` v1–v5；其他动作格式接受 v1–v4。它检查头部、骨表、拓扑、有限值、单位四元数、相机及表情尾部，并应用默认 256 MiB 分配预算。文件合法不等于已部署、已加载或视觉正确。
+动作读取器接受 `.gkclip` v1–v5；其他动作格式接受 v1–v4。它检查头部、骨表、拓扑、有限值、单位四元数、相机及表情尾部，并应用默认 256 MiB 分配预算。
 
-维护时同时核对编码器、读取器和测试。格式顺序及防护由核心测试覆盖，执行入口见 [构建与验证](../../BUILD_NOTES.md)。历史测试数字和单曲视觉结论不构成文件格式的通用保证。
+维护时同时核对编码器、读取器和测试。格式顺序及防护由核心测试覆盖，执行入口见 [构建与验证](../../BUILD_NOTES.md)。

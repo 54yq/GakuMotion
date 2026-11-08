@@ -1,15 +1,35 @@
+<div align="center">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/branding/gakumotion-wordmark-dark.svg">
   <img alt="GakuMotion" src="assets/branding/gakumotion-wordmark-light.svg" width="480">
 </picture>
+<p>A Native Performance Extension for Gakumas</p>
+</div>
 
-在《学园偶像大师》（PC DMM 版）中回放 MMD 动作、表情、运镜与音频的模组插件。
+
+GakuMotion 是运行在 GakuLoader 插件宿主之上的游戏原生演出扩展。
+
+它利用《学园偶像大师》原生角色、服装、材质、动画与渲染环境，为玩家提供外部动作回放、面部表现、摄像机运镜及舞台控制能力。
 
 [安装指南](docs/INSTALLATION.md) · [使用指南](docs/USAGE.md) · [常见问题排查](docs/TROUBLESHOOTING.md) · [源码构建](BUILD_NOTES.md) · [全部文档索引](docs/README.md)
 
-## 这是什么
+## 支持范围
 
-GakuMotion 是运行在 [GakuLoader](https://github.com/crested-ezios/GakuLoader) 插件宿主之上的动作播放模组。它允许玩家在《学园偶像大师》的偶像摄影棚及更衣室中，让角色回放 MMD 动作（VMD 格式）、面部表情、眼动与摄像机运镜，并同步播放 16-bit PCM WAV 音频。模组不修改游戏的原版可执行程序或 AssetBundle 资源文件。VMD 文件的解析由配套的原生 NativeAOT 导入器完成，日常使用时无需安装 Python 或 .NET 运行环境。
+当前支持：
+
+| 内容 | 说明 |
+| --- | --- |
+| **Motion** | MMD/VMD 舞蹈动作导入与回放 |
+| **Facial** | 面部表情、眼动及相关表现 |
+| **Camera** | VMD 原生运镜与角色跟随运镜 |
+| **Audio** | 同步播放 16-bit PCM WAV 音频 |
+| **Stage** | 部分场景，以及自定义舞台环境与场景表现 |
+
+GakuMotion 目前处于 Developer Preview 阶段。
+
+长期目标是提供可编排的原生演出能力，让独立创作工具能够通过受控接口调用游戏内的角色、动作、镜头与场景。
+
+**让偶像以游戏原本的方式，呈现更多可能。**
 
 ## 准备工作与依赖
 
@@ -20,28 +40,30 @@ GakuMotion 是运行在 [GakuLoader](https://github.com/crested-ezios/GakuLoader
 
 ### 文件放置路径
 
-退出游戏后，将相关文件放置在游戏根目录下对应的文件夹中。未执行数据布局迁移时，目录如下：
+退出游戏后，将相关文件放置在游戏根目录下对应的文件夹中：
 
 ```text
 <游戏根目录>/
 ├── gakumas.exe
-├── version.dll                              # GakuLoader 宿主
-└── gakumas-local/
-    ├── gakuloader.log                       # 运行日志
-    ├── GakuMotion/                          # 配置与导入日志
-    ├── motions/                             # 曲库，每支曲目使用独立子目录
-    │   └── MyDance/
-    │       ├── motion.gkclip                 # 导入后的身体动作
-    │       ├── camera.gkcamera               # 运镜，可选
-    │       └── song.wav                      # PCM WAV 音频，可选
-    └── plugins/                             # 插件目录
-        ├── GakuMotion.dll                   # 动作播放插件核心
-        └── GakuMotion.VmdImporter.Native.dll # VMD 原生导入器
+├── version.dll                                  # GakuLoader 宿主
+└── GakuLoader/
+    ├── plugins/
+    │   ├── GakuMotion.dll                       # 动作播放插件
+    │   ├── GakuMotion.VmdImporter.Native.dll     # VMD 原生导入器
+    │   └── GakuBurstBridge.dll                  # 可选物理伴生库
+    ├── Configs/gakumotion/                      # Motion 配置
+    ├── Logs/
+    │   ├── gakuloader.log                       # 宿主日志
+    │   └── gakumotion/                          # 导入和诊断日志
+    └── PluginData/gakumotion/
+        ├── playlist.json                        # 播放列表
+        └── motions/MyDance/                     # 每支曲目使用独立子目录
+            ├── motion.gkclip                    # 导入后的身体动作
+            ├── camera.gkcamera                  # 运镜，可选
+            └── song.wav                         # PCM WAV 音频，可选
 ```
 
-可以直接解压候选发布包中的完整安装包，也可以按 [构建指南](BUILD_NOTES.md) 自行编译。升级时覆盖这两个 DLL 即可，不会影响已有曲库素材或个人配置。若需要整理早期版本的文件分布，可参考 [数据布局与迁移指南](docs/MIGRATION_LAYOUT.md)。
-
-完成迁移后，配置位于 `gakumas-local/Configs/gakumotion/`，曲库位于 `gakumas-local/UserData/gakumotion/motions/`，播放列表和活动回执位于 `gakumas-local/PluginData/gakumotion/`，导入日志位于 `gakumas-local/Logs/gakumotion/`。有效活动回执才会切换布局；仅覆盖 DLL 不会搬动用户文件。导入 VMD 请使用面板，备份时保留完整曲目目录及旧版遗留的 `.gakumotion-trash` 目录。
+可以直接解压候选发布包中的完整安装包，也可以按 [构建指南](BUILD_NOTES.md) 自行编译。升级时覆盖这两个 DLL 即可，不会影响已有曲库素材或个人配置。
 
 ## 使用方法与快捷键
 
@@ -66,38 +88,41 @@ GakuMotion 是运行在 [GakuLoader](https://github.com/crested-ezios/GakuLoader
 
 ## 常见问题与排查
 
+GakuMotion 当前仍在积极开发中。已知问题目录请参考 [已知问题](docs/KNOWN_ISSUES.md)。
+
 1. **按 Ctrl+M 无法打开面板**：
    - GakuMotion 仅在偶像摄影及指定更衣室页面开放。游戏主界面、Live 演出、养成培育和未适配页面默认不开放接管，按键不会响应。
-   - 检查 `gakumas-local/gakuloader.log`，确认 `GakuMotion.dll` 是否已成功被加载。
+   - 检查 `GakuLoader/Logs/gakuloader.log`，确认 `GakuMotion.dll` 是否已成功被加载。
 2. **接管期间官方拍照按钮无法点击**：
    - 在 GakuMotion 接管角色骨骼期间，为了避免相机和姿态产生冲突，模组会自动屏蔽游戏官方的手动拍照入口。停止播放（按 **F10**）或收起接管后即可恢复。详情见 [页面准入与拍照边界](docs/USAGE.md#打开面板)。
 3. **VR 模式下镜头控制不生效**：
-   - 与 [GakuVRify](https://github.com/crested-ezios/gakumas-VRify) 同时使用时，Motion 运镜仍有已知兼容问题，不能假定镜头会自动让位。遇到镜头冲突时，先选择“游戏”释放 Motion 镜头接管，并在反馈中注明 VR 状态。镜头选择修订与验证范围见 [恢复候选记录](docs/CAMERA_MODE_RECOVERY_20261104.md)，VR 限制见 [兼容性说明](docs/USAGE.md#已知兼容性)。
+   - 与 [GakuVRify](https://github.com/crested-ezios/gakumas-VRify) 同时使用时，Motion 运镜仍有已知兼容问题，不能假定镜头会自动让位。遇到镜头冲突时，先选择“游戏”释放 Motion 镜头接管，并在反馈中注明 VR 状态。VR 限制见 [兼容性说明](docs/USAGE.md#已知兼容性)。
 4. **播放倍速不为 1.0 时没有声音**：
    - 当前音频后端不支持拉伸。音乐的有效速度是“全局播放倍速 × 音乐文件速度”，乘积不为 1.0 时静音，恢复为 1.0 后从当前位置起播。例如，全局 0.5 倍、音乐文件 2 倍时仍可有声播放；只把全局倍速调回 1.0，不一定能恢复音乐。详见 [播放时序](docs/PLAYBACK_TIMING.md)。
 5. **更多排错指南**：
-   - 若遇到动作导入报错或模型变形，请参考 [常见问题与排查](docs/TROUBLESHOOTING.md)。
+   - 若遇到动作导入报错或模型变形，请参考 [常见问题与排查](docs/TROUBLESHOOTING.md)。GakuMotion 会优先处理播放角色为`花海咲季`的相关问题。
 
 ## 源码构建
 
 源码构建需要 Windows x64 系统，并安装 Visual Studio 2022（或更高版本，包含 MSVC C++20 工具集）以及 .NET 8 SDK。
 
-建议使用 PowerShell 7，在 `GakuMotion` 根目录下运行构建脚本：
+发布源码和开发源码的构建入口、参数及产物目录不同。请按所在仓库使用 [构建指南](BUILD_NOTES.md) 中对应的命令。编译完成后，将配套的两个 DLL 放入游戏的 `GakuLoader/plugins/`，并重启游戏。
 
-```powershell
-# 完整编译 C++ 插件与 NativeAOT 导入器
-pwsh -NoProfile -File build.ps1 -Target All
-```
-
-编译输出目录：
-- `build/native/GakuMotion.dll`
-- `build/nativeaot/GakuMotion.VmdImporter.Native.dll`
-
-编译完成后，将生成的两个 DLL 复制到游戏的 `gakumas-local/plugins/` 目录中即可。更多编译选项（如仅构建 Native 或仅构建 NativeAOT）请参阅 [构建指南](BUILD_NOTES.md)。
-
-### 相关项目与依赖
+## 相关项目
+### 依赖项目
 - [GakuLoader](https://github.com/crested-ezios/GakuLoader)：提供插件宿主、按键分发与控制窗口支持。
 - [KineTexture](https://github.com/crested-ezios/KineTexture)：提供底层正向运动学、数学计算与动作采样能力。
 - [GakuBurstBridge](https://github.com/crested-ezios/GakuBurstBridge)：可选的原生物理伴生库，用于让官方 Burst 物理读取动作输入。
-- 架构分工与数据读写契约详见 [架构设计](docs/ARCHITECTURE.md) 与 [动作文件格式](docs/formats/ACTION_FORMATS.md)。
 - 模组源码遵循 [MIT 许可证](LICENSE)，第三方组件遵循各自许可证，详见 [第三方通知](THIRD_PARTY_NOTICES.md)。
+### 参考项目与致谢
+GakuMotion 的开发过程中参考了 MMD 动作生态、游戏 Mod 工具及相关研究成果。感谢以下为动作语义验证、兼容性研究和技术设计提供的帮助。
+ - [Chinosk - Gakumas Localify](https://git.chinosk6.cn/chinosk/gkms-localify-dmm) — 原生插件兼容生态。
+ - [KagaminTheMirror - Gakumas VRify](https://github.com/KagaminTheMirror/gakumas-VRify) — VR 兼容生态。
+ - [三目YYB - YYB Hatsune Miku_Default](https://www.bilibili.com/video/BV1Bg411D7Me/) — GakuMotion VMD Source Evaluator 研究中的重要 MMD/PMX 参考模型。
+ - [樋口優 - MikuMikuDance](https://www.nicovideo.jp/watch/sm2420025) — VMD 的原始执行环境。
+ - [Mogg - MikuMikuMoving](https://sites.google.com/site/mikumikumovingeng/) — 另一个独立的 MMD 动作执行环境，作为动作表现验证。
+ - [powroupi / 后续维护者 - blender_mmd_tools](https://github.com/powroupi/blender_mmd_tools) — MMD 数据与行为研究参考。
+ - [Countd360 - MMD Director](https://www.patreon.com/posts/mmd-director-pv-55604378) — HS2/AI/KK/KKS CharaStudio的 VMD 播放与编排工具先例。
+ - [ifui小灰灰 / ArinLee](https://arin3000.github.io/) — 学马仕动画与原生表现相关研究。
+ - [nijinekoyo - Gakuen-idolmaster-ab-decrypt](https://github.com/nijinekoyo/Gakuen-idolmaster-ab-decrypt) — 提供了版本研究思路。
+ - [Akisaira](https://github.com/Akisaira) — 援助了早期兼容性研究的智能体调用额度。
