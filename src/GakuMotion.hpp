@@ -799,6 +799,11 @@ namespace GakuMotion
 			localRoot = rootPath;
 			dataLayout = selectedLayout ? *selectedLayout : DataLayout::Legacy(rootPath);
 			motionsRoot = dataLayout.Motions();
+            // A fresh empty library is a valid first-run state. Create it
+            // before the initial scan; permission and I/O errors remain visible.
+            std::error_code libraryError;
+            std::filesystem::create_directories(MotionPathFromUtf8(motionsRoot), libraryError);
+            if (libraryError) LogWarn("[GakuMotion][Paths] Cannot create library: " + libraryError.message());
 			configRoot = dataLayout.configs;
 			logsRoot = dataLayout.logs;
 			diagnosticsRoot = dataLayout.managed ? logsRoot + "/diagnostics" : configRoot;

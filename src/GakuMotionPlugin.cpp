@@ -1610,7 +1610,7 @@ bool InitializeMotion()
 {
 	std::lock_guard<std::mutex> lifecycleLock(g_lifecycleMutex);
 	if (g_pluginInitialized) return true;
-	g_burstBridge.Configure(g_hostContext.localRoot, [](void*, int32_t level, const char* message)
+	g_burstBridge.Configure(g_hostContext.pluginsRoot, [](void*, int32_t level, const char* message)
 	{
 		auto log = level > 0 ? g_hostContext.logWarn : g_hostContext.logInfo;
 		if (log) log("[GakuMotion][BurstBridge] %s", message);
@@ -1687,6 +1687,7 @@ bool InitializeMotion()
 	player.fnPauseAudio = HelperAudioPause;
 	player.fnStopAudio = HelperAudioStop;
 	player.fnGetAudioTime = HelperAudioGetTime;
+	player.audioPositionIsAbsolute = true;
 	player.fnResumeAudio = HelperAudioResumeAt;
 	player.fnSeekAudio = HelperAudioSeek;
 	player.fnSeekPausedAudio = HelperAudioSeekPaused;

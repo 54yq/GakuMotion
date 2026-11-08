@@ -229,6 +229,52 @@ static void TestPlaybackTiming()
 			"native audio clock is inverted through its own speed and offset into shared timeline time");
 	}
 
+	BeginTest("absolute audio clock catches up after first-frame stalls");
+	{
+		MotionPlayer player;
+		Prepare(player);
+		Reset();
+		player.audioPositionIsAbsolute = true;
+		player.fnGetAudioTime = []() { return position; };
+		player.Play();
+		// The audio device runs during half a second before the first actor tick;
+		// the frame clock only supplies 16ms when processing resumes.
+		position = 0.516f;
+		player.AdvanceClock(0.016f);
+		Check(TimingNear(player.currentTime, 0.516f) && TimingNear(player.audioSeekOffset, 0.0f),
+			"first actor tick follows elapsed audio rather than calibrating the stall into a permanent lag");
+		position = 0.550f;
+		player.AdvanceClock(0.034f);
+		Check(TimingNear(player.currentTime, 0.550f), "subsequent playback remains on absolute audio time");
+		player.Pause();
+		player.Resume();
+		position = 0.650f;
+		player.AdvanceClock(0.1f);
+		Check(TimingNear(player.currentTime, 0.650f), "pause and resume retain absolute alignment");
+		player.Seek(10.0f);
+		position = 10.2f;
+		player.AdvanceClock(0.016f);
+		Check(TimingNear(player.currentTime, 10.2f), "seek does not convert post-seek stalls into clock offsets");
+		position = 10.1f;
+		player.AdvanceClock(0.016f);
+		Check(TimingNear(player.currentTime, 10.2f), "backward audio jitter does not rewind motion");
+		position = -1.0f;
+		player.AdvanceClock(0.1f);
+		Check(TimingNear(player.currentTime, 10.3f), "unavailable audio position falls back to the local clock");
+	}
+	{
+		MotionPlayer player;
+		Prepare(player); Reset();
+		player.timing.audio = {0.5f, -1.0f};
+		player.playbackSpeedMultiplier = 2.0f;
+		player.audioPositionIsAbsolute = true;
+		player.fnGetAudioTime = []() { return position; };
+		player.Play();
+		position = 1.0f;
+		player.AdvanceClock(0.016f);
+		Check(TimingNear(player.currentTime, 1.0f), "absolute source position honors track speed and offset");
+	}
+
 	BeginTest("source frame navigation honors motion timing");
 	{
 		MotionPlayer player;

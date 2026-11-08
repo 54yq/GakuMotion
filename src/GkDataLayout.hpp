@@ -9,12 +9,13 @@ namespace GakuMotion {
 struct DataLayout {
     std::string localRoot, configs, userData, pluginData, logs, temp;
     bool managed{false};
+    bool libraryInPluginData{false};
 
     static DataLayout Legacy(const std::string& root) {
         return {root, root + "/GakuMotion", root, root + "/GakuMotion",
                 root + "/GakuMotion", "", false};
     }
-    std::string Motions() const { return userData + "/motions"; }
+    std::string Motions() const { return (libraryInPluginData ? pluginData : userData) + "/motions"; }
     std::string Playlist() const { return pluginData + "/playlist.json"; }
 
     static bool SamePath(const std::string& left, const std::string& right) {
@@ -64,7 +65,27 @@ inline bool SelectDataLayout(const std::string& localRoot, const DataLayout* off
     std::error_code ec;
     const auto status = std::filesystem::symlink_status(receipt, ec);
     if (ec == std::errc::no_such_file_or_directory || (!ec && !std::filesystem::exists(status))) {
-        selected = DataLayout::Legacy(localRoot);
+        // The independent host root is a new install contract, not an old
+        // Localify tree awaiting migration. Never mix it with legacy files.
+        auto rootPath = MotionPathFromUtf8(localRoot).lexically_normal();
+        if (rootPath.filename().empty()) rootPath = rootPath.parent_path();
+        if (DataLayout::SamePath(MotionPathToUtf8(rootPath.filename()), "GakuLoader")) {
+            if (!offered || !rootPath.is_absolute()) {
+                error = "Independent GakuLoader root requires the paths service";
+                return false;
+            }
+            for (const auto* path : {&offered->configs, &offered->userData,
+                    &offered->pluginData, &offered->logs, &offered->temp}) {
+                if (!MotionPathFromUtf8(*path).is_absolute()) {
+                    error = "Independent GakuLoader category is not absolute";
+                    return false;
+                }
+            }
+            selected = *offered;
+            selected.localRoot = localRoot;
+            selected.managed = true;
+            selected.libraryInPluginData = true;
+        } else selected = DataLayout::Legacy(localRoot);
         return true;
     }
     auto fail = [&](const std::string& reason) {

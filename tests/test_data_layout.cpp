@@ -96,6 +96,23 @@ int wmain(int argc, wchar_t** argv) {
     Write(receipt, "{broken");
     Check(!SelectDataLayout(utf8, &offered, selected, error), "corrupt receipt refuses activation without fallback");
     Write(receipt, Receipt(offered));
+    const auto freshRoot = root / "GakuLoader";
+    const auto fresh = MotionPathToUtf8(freshRoot);
+    DataLayout freshOffered{fresh, fresh + "/Configs/gakumotion", fresh + "/UserData/gakumotion",
+        fresh + "/PluginData/gakumotion", fresh + "/Logs/gakumotion", fresh + "/Temp/gakumotion", true};
+    Check(SelectDataLayout(fresh, &freshOffered, selected, error) && selected.managed,
+        "independent host defaults to categorized paths without migration receipt");
+    Check(selected.Motions() == fresh + "/PluginData/gakumotion/motions",
+        "independent library belongs to PluginData");
+    Core freshCore; freshCore.Initialize(fresh, &selected);
+    Check(fs::is_directory(MotionPathFromUtf8(selected.Motions())) && freshCore.motions.empty() &&
+        freshCore.RefreshMotionLibrary(), "first-run empty library is created and refresh succeeds");
+    Check(fs::exists(MotionPathFromUtf8(selected.configs + "/control.json")),
+        "first-run configuration uses Configs");
+    Check(!fs::exists(freshRoot / "motions") && !fs::exists(freshRoot / "GakuMotion"),
+        "fresh host does not create Localify-era Motion paths");
+    Check(!SelectDataLayout(fresh, nullptr, selected, error),
+        "independent host refuses missing categorized path service");
     std::cout << "layout tests: " << passed << " passed, " << failed << " failed\n";
     std::cout << "synthetic evidence: " << MotionPathToUtf8(root) << '\n';
     return failed ? 1 : 0;

@@ -163,6 +163,9 @@ namespace GakuMotion
 		// Optional audio synchronization callback
 		using GetAudioTimeFn = float (*)();
 		GetAudioTimeFn fnGetAudioTime{nullptr};
+		// The native MCI backend reports an absolute source-file position.
+		// Other backends retain the legacy settle calibration unless opted in.
+		bool audioPositionIsAbsolute{false};
 
 		using PlayAudioFn = void (*)(const std::string& path);
 		using PauseAudioFn = void (*)();
@@ -618,6 +621,33 @@ namespace GakuMotion
 				currentTime = advanced;
 				UpdateAudioTiming();
 				lastClockSource = "local(no-audio)";
+				return;
+			}
+
+			// MCI position is the absolute file time. Calibrating against the local
+			// frame clock after startup folds any first-frame stall into a permanent
+			// offset. Follow the actual source position instead, including on seeks.
+			if (audioPositionIsAbsolute)
+			{
+				const float rawAudioTime = fnGetAudioTime();
+				if (std::isfinite(rawAudioTime) && rawAudioTime >= 0.0f)
+				{
+					const float audioTime = rawAudioTime / timing.audio.speed + timing.audio.offsetSeconds;
+					if (audioTime >= currentTime - kAudioBackwardToleranceSeconds)
+					{
+						currentTime = audioTime;
+						lastClockSource = "audio";
+					}
+					else lastClockSource = "audio(backward-held)";
+					audioSeekOffset = 0.0f;
+					audioSyncSettleFrames = 0;
+					lastSyncCorrectionSeconds = 0.0f;
+				}
+				else
+				{
+					currentTime = advanced;
+					lastClockSource = "local(audio-query-fail)";
+				}
 				return;
 			}
 

@@ -6,7 +6,8 @@ param(
     [ValidateSet('Preflight', 'Contracts', 'Runtime', 'NativeAOT', 'All')]
     [string]$Target = 'All',
     [string]$OutputRoot = '',
-    [string]$WindowsSdkRoot = ''
+    [string]$WindowsSdkRoot = '',
+    [string]$DotNet = 'dotnet'
 )
 $ErrorActionPreference = 'Stop'
 $repo = $PSScriptRoot
@@ -26,8 +27,8 @@ $inputs = if ($Target -eq 'Runtime') { $runtimeInputs } elseif ($Target -eq 'Nat
 foreach ($inputPath in $inputs) {
     if (-not (Test-Path -LiteralPath (Join-Path $repo $inputPath) -PathType Leaf)) { throw ('Missing build input: ' + $inputPath) }
 }
-if ($Target -in @('NativeAOT', 'All', 'Preflight') -and -not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
-    throw 'Install the .NET 8 SDK to build the NativeAOT importer.'
+if ($Target -in @('NativeAOT', 'All', 'Preflight') -and -not (Get-Command $DotNet -ErrorAction SilentlyContinue)) {
+    throw 'Install the .NET 8 SDK, or pass -DotNet to a private SDK installation.'
 }
 
 New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
@@ -73,7 +74,7 @@ if ($Target -eq 'NativeAOT' -or $Target -eq 'All') {
     $libCreator = Join-Path $msvc.FullName 'bin\Hostx64\x64\lib.exe'
     Push-Location -LiteralPath $repo
     try {
-        & dotnet publish (Join-Path $repo 'interop\GakuMotion.VmdImporter.Native\GakuMotion.VmdImporter.Native.csproj') `
+        & $DotNet publish (Join-Path $repo 'interop\GakuMotion.VmdImporter.Native\GakuMotion.VmdImporter.Native.csproj') `
             -c Release -r win-x64 -o $aotOutput "-p:ArtifactsPath=$aotObjects" -p:IlcUseEnvironmentalTools=true `
             "-p:CppLinker=$linker" "-p:CppLibCreator=$libCreator"
         if ($LASTEXITCODE -ne 0) { throw ('NativeAOT build failed: ' + $LASTEXITCODE) }

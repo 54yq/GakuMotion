@@ -138,9 +138,9 @@ namespace GakuMotion
 			return false;
 		}
 
-		void Configure(const wchar_t* localRoot, GbbLogFn log, void* context)
+		void Configure(const wchar_t* pluginsRoot, GbbLogFn log, void* context)
 		{
-			if (localRoot && *localRoot) path_ = std::wstring(localRoot) + L"/GakuMotion/GakuBurstBridge.dll";
+			if (pluginsRoot && *pluginsRoot) path_ = std::wstring(pluginsRoot) + L"/GakuBurstBridge.dll";
 			config_ = {};
 			config_.size = sizeof(config_);
 			config_.version = GBB_API_VERSION;
