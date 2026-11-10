@@ -2415,6 +2415,23 @@ static void TestInitialPosition()
 	WriteTextFile(core.configRoot + "/facial_weights.json", R"({"version":1,"overall":1,"brow":1,"eye":1,"mouth":3})");
 	Check(!restarted.LoadFacialWeights() && Near(restarted.player.controller.facialWeights.mouth, 0.5f),
 	      "invalid facial settings leave current weights intact");
+	static float appliedVolume = -1.0f;
+	core.player.fnSetAudioVolume = [](float value) { appliedVolume = value; return true; };
+	core.QueueGui({Core::GuiAction::MusicVolume, 0.35f});
+	core.QueueGui({Core::GuiAction::SaveMusicVolume});
+	core.ProcessPendingGuiCommands();
+	Check(Near(core.player.musicVolume, 0.35f) && Near(appliedVolume, 0.35f),
+	      "queued music volume reaches the separate audio callback");
+	Check(restarted.LoadMusicVolume() && Near(restarted.player.musicVolume, 0.35f),
+	      "music volume persists across restart");
+	WriteTextFile(core.configRoot + "/music_volume.json", R"({"version":1,"volume":2})");
+	Check(!restarted.LoadMusicVolume() && Near(restarted.player.musicVolume, 0.35f),
+	      "invalid persisted volume leaves the current setting intact");
+	Check(!core.player.SetMusicVolume(std::numeric_limits<float>::quiet_NaN()) && Near(appliedVolume, 0.35f),
+	      "nonfinite volume is rejected without calling the backend");
+	Check(core.player.SetMusicVolume(-1.0f) && Near(appliedVolume, 0.0f) &&
+	      core.player.SetMusicVolume(2.0f) && Near(appliedVolume, 1.0f),
+	      "music volume is bounded between silence and full volume");
 	fs::remove_all(root);
 }
 

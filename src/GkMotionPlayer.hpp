@@ -76,6 +76,15 @@ namespace GakuMotion
 		bool loop{true};
 		bool finished{false}; // Consumed by Core for automatic playlist advancement.
 		bool muted{false};
+		float musicVolume{1.0f};
+		bool (*fnSetAudioVolume)(float){nullptr};
+		int (*fnAudioVolumeSupport)(){nullptr}; // 0=not open, 1=available, -1=unavailable
+		bool SetMusicVolume(float value)
+		{
+			if (!std::isfinite(value)) return false;
+			musicVolume = std::clamp(value, 0.0f, 1.0f);
+			return !fnSetAudioVolume || fnSetAudioVolume(musicVolume);
+		}
 		bool audioStarted{false};
 		std::string currentMotionDir;
 
