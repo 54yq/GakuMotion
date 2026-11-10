@@ -2406,6 +2406,15 @@ static void TestInitialPosition()
 	core.ProcessPendingGuiCommands();
 	Check(restarted.LoadInitialPosition() && near(restarted.player.controller.initialPositionOffset, {0, 0, 0}),
 	      "saved three-axis reset persists across restart");
+	core.player.controller.facialWeights = {0.8f, 0.9f, 0.7f, 0.5f};
+	core.QueueGui({Core::GuiAction::SaveFacialWeights});
+	core.ProcessPendingGuiCommands();
+	Check(restarted.LoadFacialWeights() && Near(restarted.player.controller.facialWeights.overall, 0.8f) &&
+	      Near(restarted.player.controller.facialWeights.mouth, 0.5f),
+	      "facial weight settings persist and reload");
+	WriteTextFile(core.configRoot + "/facial_weights.json", R"({"version":1,"overall":1,"brow":1,"eye":1,"mouth":3})");
+	Check(!restarted.LoadFacialWeights() && Near(restarted.player.controller.facialWeights.mouth, 0.5f),
+	      "invalid facial settings leave current weights intact");
 	fs::remove_all(root);
 }
 

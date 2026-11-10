@@ -93,6 +93,7 @@ namespace GakuMotion
 		bool savedUseBlink{false}, savedAutoDisabled{false};
 		bool enableBaseline{true};
 		float baselineMultiplier{1.0f};
+		FacialWeights facialWeights;
 		std::string characterOverride;
 		std::string boundCharacterOverride;
 		std::string detectedCharacter;
@@ -166,11 +167,13 @@ namespace GakuMotion
 			}
 			const bool keepEnableBaseline = enableBaseline;
 			const float keepMultiplier = baselineMultiplier;
+			const auto keepFacialWeights = facialWeights;
 			const std::string keepOverride = characterOverride;
 			const bool keepMikuFit = enableMikuMouthFit;
 			*this = BlendshapeBinding{};
 			enableBaseline = keepEnableBaseline;
 			baselineMultiplier = keepMultiplier;
+			facialWeights = keepFacialWeights;
 			characterOverride = keepOverride;
 			enableMikuMouthFit = keepMikuFit;
 		}
@@ -382,7 +385,7 @@ namespace GakuMotion
 			for (size_t i = 0; i < ownedIndices.size(); ++i)
 			{
 				const int slot = ownedClipSlots[i];
-				const float target = NativeWeight(adapted[i]);
+				const float target = NativeWeight(facialWeights.Apply(ownedNames[i], adapted[i]));
 				size_t diagnosticSlot = slot >= 0 ? static_cast<size_t>(slot) : diagnosticChannels.size();
 				if (observe && slot < 0 && diagnosticChannels.size() < GAKU_FACE_DIAGNOSTICS_CAPACITY)
 				{
