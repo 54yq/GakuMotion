@@ -75,6 +75,15 @@ static void TestFaceFamilyOwnership()
 	binding.Apply(actor, clip, 0, api);
 	Check(Near(a.weights[3], 10) && Near(a.weights[4], 9),
 	      "family ownership follows actual matched curves rather than claiming all facial controls");
+	binding.facialWeights.brow = 0.5f;
+	binding.Apply(actor, clip, 0, api);
+	Check(Near(a.weights[3], 5) && Near(a.weights[0], 40) && Near(a.weights[4], 9),
+	      "brow control scales brow without modifying mouth or unowned eyes");
+	binding.facialWeights.eye = 0.5f;
+	Check(Near(binding.facialWeights.Apply("b_eye.eye_001", 0.8f), 0.4f) &&
+	      Near(binding.facialWeights.Apply("b_iris.iris_001", 0.8f), 0.8f),
+	      "eye control scales eye morphs but leaves iris channels untouched");
+	binding.facialWeights = FacialWeights{};
 	live = &b;
 	binding.Apply(actor, clip, 0, api);
 	Check(Near(a.weights[1], 0) && Near(b.weights[0], 0) && Near(b.weights[1], 40),
