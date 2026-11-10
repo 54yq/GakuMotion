@@ -580,7 +580,7 @@ int main(int argc, char** argv)
 		Check(!app.ItemWithLabel("只驱动当前绑定角色") && !app.ItemWithLabel("下一个场景角色") &&
 			!app.ItemWithLabel("驱动全部场景角色") && !app.ItemWithLabel("##facial_actor_combo") &&
 			!app.ItemWithLabel("实验：四角色 Miku 嘴形拟合") && ordinaryText.find("表情适配角色") == std::string::npos &&
-			ordinaryText.find("视线") == std::string::npos && ordinaryText.find("表情随驱动角色自动适配") != std::string::npos,
+			ordinaryText.find("实验：视线") == std::string::npos && ordinaryText.find("表情随驱动角色自动适配") != std::string::npos,
 			"ordinary Motion page exposes one actor selector and automatic facial adaptation without experimental controls");
 
 		app.core.gui.activePage = GuiPage::Developer;
@@ -619,6 +619,27 @@ int main(int argc, char** argv)
 	{
 		Harness app(root);
 		app.Frame(); app.Frame();
+		app.core.configRoot = (app.fixture / "config").string();
+		app.Settle();
+		ImRect volumeRect;
+		if (app.Find("音乐音量", volumeRect))
+		{
+			auto& input = ImGui::GetIO();
+			input.AddMousePosEvent(volumeRect.Min.x + 35.0f, volumeRect.GetCenter().y); app.Frame();
+			input.AddMouseButtonEvent(0, true); app.Frame();
+			input.AddMouseButtonEvent(0, false); app.Frame(); app.Frame();
+			Check(app.core.player.musicVolume < 0.5f &&
+				std::filesystem::exists(app.fixture / "config" / "music_volume.json"),
+				"actual music volume slider changes the player and saves on release");
+			Core restored; restored.configRoot = app.core.configRoot;
+			Check(restored.LoadMusicVolume() && std::fabs(restored.player.musicVolume - app.core.player.musicVolume) < .001f,
+				"actual slider value is restored by a fresh player");
+		}
+		app.contextPatch = [](GuiContext& context) { context.musicVolumeSupport = -1; };
+		app.Settle();
+		Check(app.Text().find("当前音乐后端不支持独立音量") != std::string::npos,
+			"unavailable audio volume control is disclosed in the player");
+		app.contextPatch = {};
 		app.Click("##row", 1);
 		Check(app.core.gui.selectedLibraryKey == "B", "actual library single click browses B");
 		Check(app.core.currentMotionIndex == 0 && app.core.loadedMotionKey == "A" &&

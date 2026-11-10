@@ -112,6 +112,10 @@ namespace GakuMotion
 		int (*fnPollPickFile)(std::string&, std::string&){nullptr};
 		void (*fnSetMuted)(void*, bool){nullptr};
 		void (*fnSetSpeed)(void*, float){nullptr};
+		void (*fnSetMusicVolume)(void*, float){nullptr};
+		void (*fnSaveMusicVolume)(void*){nullptr};
+		int musicVolumeSupport{0};
+		std::string musicVolumeNotice;
 		void (*fnSetInitialPosition)(void*, const Vector3&){nullptr};
 		void (*fnSaveInitialPosition)(void*){nullptr};
 
