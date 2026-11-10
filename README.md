@@ -110,7 +110,7 @@ GakuMotion 当前仍在积极开发中。已知问题目录请参考 [已知问�
 
 ## 相关项目
 ### 依赖项目
-- [GakuLoader](https://github.com/crested-ezios/GakuLoader)：提供插件宿主、按键分发与控制窗口支持。
+- [GakuLoader](https://github.com/Gaku-Mod-Tools/GakuLoader)：提供插件宿主、按键分发与控制窗口支持。
 - [KineTexture](https://github.com/crested-ezios/KineTexture)：提供底层正向运动学、数学计算与动作采样能力。
 - [GakuBurstBridge](https://github.com/crested-ezios/GakuBurstBridge)：可选的原生物理伴生库，用于让官方 Burst 物理读取动作输入。
 - 模组源码遵循 [MIT 许可证](LICENSE)，第三方组件遵循各自许可证，详见 [第三方通知](THIRD_PARTY_NOTICES.md)。
