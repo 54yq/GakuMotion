@@ -91,6 +91,8 @@ namespace GakuMotion
 		bool libraryRefreshing{false}, loadedSourceMissing{false}, loadedSourceChanged{false};
 		std::string boundActorLabel, targetActorLabel;
 		std::string initialPositionNotice;
+		std::string facialWeightsNotice;
+		void (*fnSaveFacialWeights)(void*){nullptr};
 		SoleMeasurementSettings soleSettings;
 		SoleMeasurementSnapshot soleSnapshot;
 		sole_pitch::Settings experimentalSolePitchSettings;

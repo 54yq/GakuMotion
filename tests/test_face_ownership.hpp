@@ -43,6 +43,16 @@ static void TestFaceFamilyOwnership()
 	Check(binding.diagnosticChannels.size() == 3 && binding.diagnosticChannels[1].target == 0 &&
 	      Near(binding.diagnosticChannels[1].before, 65) && Near(binding.diagnosticChannels[1].after, 0),
 	      "observer reports zeroed default channels with actual before and after values");
+	binding.facialWeights.overall = 0.5f;
+	binding.facialWeights.mouth = 0.5f;
+	binding.Apply(actor, clip, 0, api);
+	Check(Near(a.weights[0], 10) && Near(a.weights[3], 12) && Near(a.weights[4], 9),
+	      "overall and mouth controls multiply only the owned mouth output");
+	binding.facialWeights.overall = 2.0f;
+	binding.facialWeights.mouth = 2.0f;
+	binding.Apply(actor, clip, 0, api);
+	Check(Near(a.weights[0], 100), "amplified facial weights clamp to 100 percent");
+	binding.facialWeights = FacialWeights{};
 	a.weights[1] = 97;
 	a.weights[2] = 35; // A looping pose / talk updates every frame.
 	binding.Apply(actor, clip, 1.f / 60, api);
