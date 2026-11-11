@@ -735,7 +735,16 @@ namespace GakuMotion
 					if (!src) return;
 					float r[4]{0.0f, 0.0f, 0.0f, 1.0f};
 					fnGetLocalRotation(src, r);
-					srcLocal[hid] = Quaternion(r[0], r[1], r[2], r[3]);
+					// q and -q are the same orientation. The fitted model's atan2
+					// and rotation-vector paths otherwise produce different auxiliary
+					// poses for them. Use the shortest-rotation hemisphere only for
+					// model input; never change the source bone's actual rotation.
+					// At exactly 180 degrees, choose the first nonzero vector component.
+					const bool flip = r[3] < 0.0f || (r[3] == 0.0f &&
+						(r[0] < 0.0f || (r[0] == 0.0f &&
+						(r[1] < 0.0f || (r[1] == 0.0f && r[2] < 0.0f)))));
+					const float sign = flip ? -1.0f : 1.0f;
+					srcLocal[hid] = Quaternion(sign * r[0], sign * r[1], sign * r[2], sign * r[3]);
 					srcValid[hid] = true;
 				}
 

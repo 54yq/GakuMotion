@@ -480,6 +480,57 @@ static void TestOverrideInjection()
 	ctrl.armOffsetRoll = 0.0f;
 }
 
+static void TestAuxQuaternionSignInvariance()
+{
+	BeginTest("auxiliary model uses rotation, not quaternion sign");
+	static Quaternion rotations[32];
+	IdolController ctrl;
+	ctrl.fnGetLocalRotation = [](void* t, float* out)
+	{
+		const auto q = rotations[reinterpret_cast<uintptr_t>(t)];
+		out[0] = q.x; out[1] = q.y; out[2] = q.z; out[3] = q.w;
+	};
+	ctrl.fnSetLocalRotation = [](void* t, float x, float y, float z, float w)
+	{
+		rotations[reinterpret_cast<uintptr_t>(t)] = {x, y, z, w};
+	};
+	auto handle = [](int id) { return reinterpret_cast<void*>(static_cast<uintptr_t>(id)); };
+	IdolBoneBinding binding;
+	binding.leftArmAux.upperArm = handle(1); binding.leftArmAux.foreArm = handle(2); binding.leftArmAux.hand = handle(3);
+	binding.rightArmAux.upperArm = handle(4); binding.rightArmAux.foreArm = handle(5); binding.rightArmAux.hand = handle(6);
+	binding.leftArmAux.upperArmRollH = handle(10); binding.leftArmAux.upperArmH = handle(11);
+	binding.leftArmAux.foreArmRollH = handle(12); binding.leftArmAux.foreArmH = handle(13); binding.leftArmAux.handH = handle(14);
+	binding.rightArmAux.upperArmRollH = handle(15); binding.rightArmAux.upperArmH = handle(16);
+	binding.rightArmAux.foreArmRollH = handle(17); binding.rightArmAux.foreArmH = handle(18); binding.rightArmAux.handH = handle(19);
+	rotations[1] = Quaternion::FromEulerDegreesXYZ(30, 20, 10);
+	rotations[2] = Quaternion::FromEulerDegreesXYZ(-20, 40, 15);
+	rotations[3] = Quaternion::FromEulerDegreesXYZ(35, 0, 0);
+	rotations[4] = Quaternion::FromEulerDegreesXYZ(-25, 35, 5);
+	rotations[5] = Quaternion::FromEulerDegreesXYZ(15, -45, 20);
+	rotations[6] = Quaternion::FromEulerDegreesXYZ(-35, 0, 0);
+	ctrl.ApplyAuxModelToBinding(binding);
+	Quaternion expected[10];
+	for (int i = 0; i < 10; ++i) expected[i] = rotations[10 + i];
+	Check(QuatNear(rotations[14], Quaternion::FromEulerDegreesXYZ(23.1f, 0, 0)) &&
+	      QuatNear(rotations[19], Quaternion::FromEulerDegreesXYZ(-23.1f, 0, 0)),
+	      "positive-hemisphere wrist input retains the calibrated half-angle model");
+	for (int i = 1; i <= 6; ++i)
+	{
+		const auto q = rotations[i]; rotations[i] = {-q.x, -q.y, -q.z, -q.w};
+	}
+	ctrl.ApplyAuxModelToBinding(binding);
+	for (int i = 0; i < 10; ++i)
+		Check(QuatNear(expected[i], rotations[10 + i]), "equivalent q and -q give the same auxiliary pose for channel " + std::to_string(i));
+	// At the exact 180-degree boundary, w cannot choose a hemisphere; the
+	// vector components must provide a deterministic tie break.
+	rotations[3] = {0.8f, 0.6f, 0, 0};
+	ctrl.ApplyAuxModelToBinding(binding);
+	const auto halfTurn = rotations[14];
+	rotations[3] = {-0.8f, -0.6f, 0, 0};
+	ctrl.ApplyAuxModelToBinding(binding);
+	Check(QuatNear(halfTurn, rotations[14]), "exact half turns are also invariant to quaternion sign");
+}
+
 static void TestQuartzAuxiliaryBones()
 {
 	BeginTest("quartz_auxiliary_bones");
@@ -2574,6 +2625,7 @@ int main(int argc, char** argv)
  TestOrderedPlaybackCommands();
  TestInitialPosition();
  TestOverrideInjection();
+ TestAuxQuaternionSignInvariance();
  TestPlayerSeekSync();
  TestPlaybackSpeedAndClock();
  TestPlaybackTiming();
