@@ -438,12 +438,28 @@ namespace
 	void TestUnifiedCameraModeControls(const std::filesystem::path& root)
 	{
 		Harness app(root);
+		app.core.configRoot = (app.fixture / "config").string();
 		app.core.gui.activePage = GuiPage::Camera;
 		app.core.camera.settings.enabled = true;
 		app.core.camera.settings.mode = CameraMode::Track;
 		app.core.camera.settings.transformTrack.position = {0.2f, 0.3f, 0.4f};
 		app.core.camera.Publish();
 		app.Settle();
+		ImRect rangeRect;
+		if (app.Find("VMD 运镜范围", rangeRect))
+		{
+			auto& io = ImGui::GetIO();
+			io.AddMousePosEvent(rangeRect.Min.x + 90.0f, rangeRect.GetCenter().y); app.Frame();
+			io.AddMouseButtonEvent(0, true); app.Frame();
+			io.AddMouseButtonEvent(0, false); app.Settle();
+			Check(app.core.camera.settings.vmdRangeScale < .95f && app.core.camera.settings.vmdRangeScale >= .3f,
+				"VMD camera range slider updates the actual camera settings");
+			app.Click("保存镜头设置"); app.Settle();
+			Core restored;
+			restored.configRoot = app.core.configRoot;
+			Check(restored.LoadCameraSettings() && std::fabs(restored.camera.settings.vmdRangeScale - app.core.camera.settings.vmdRangeScale) < 1e-5f,
+				"VMD camera range slider persists through the camera settings save button");
+		}
 		Check(!app.ItemWithLabel("启用 GakuMotion 镜头接管") && !app.ItemWithLabel("启用 MMD 镜头接管"),
 			"camera page has no separate takeover checkbox");
 		app.Click("##camera_mode");

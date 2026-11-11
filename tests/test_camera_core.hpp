@@ -17,6 +17,7 @@ static void TestCameraCoreWorkflow(const std::string& repoRoot)
 	settings.followRate = {0.0f, 0.1f, 1.0f};
 	settings.followTarget = CameraFollowTarget::Head;
 	settings.followFov = 51;
+	settings.vmdRangeScale = 0.75f;
 	core.QueueCameraSettings(settings);
 	core.QueueGui({Core::GuiAction::SaveCameraSettings});
 	Check(core.camera.settings.mode == CameraMode::Track,
@@ -32,6 +33,8 @@ static void TestCameraCoreWorkflow(const std::string& repoRoot)
 	      "independent pursuit rates and displacement fractions survive camera.json round-trip");
 	Check(reopened.camera.settings.followTarget == CameraFollowTarget::Head,
 	      "selected camera follow body part survives camera.json round-trip");
+	Check(reopened.camera.settings.vmdRangeScale == 0.75f,
+	      "VMD range scale survives camera.json round-trip");
 	settings.boundsMin.x = 4;
 	core.QueueCameraSettings(settings);
 	core.ProcessPendingGuiCommands();
@@ -140,6 +143,16 @@ static void TestCameraCoreWorkflow(const std::string& repoRoot)
 	      rateConfig.camera.followRate.x == 0.1f && rateConfig.camera.followRate.y == 0.1f &&
 	      rateConfig.camera.followRate.z == 0.1f,
 	      "legacy displacement fractions retain their meaning and missing rates use smooth defaults");
+	Check(rateConfig.camera.vmdRangeScale == 1.0f, "legacy camera config defaults to original VMD range");
+	const auto originalCamera = rateConfig.camera;
+	for (const char* invalidScale : {R"({"camera":{"vmd_range_scale":0.2}})",
+		R"({"camera":{"vmd_range_scale":1.1}})", R"({"camera":{"vmd_range_scale":"0.8"}})",
+		R"({"camera":{"vmd_range_scale":1e100}})"})
+	{
+		WriteTextFile(rateConfig.path, invalidScale);
+		Check(!rateConfig.Reload() && rateConfig.camera == originalCamera,
+		      "invalid VMD range scales cannot replace camera settings");
+	}
 	WriteTextFile(rateConfig.path, R"({"camera":{"follow_rate":[0,0.2,1]}})");
 	Check(rateConfig.Reload() && rateConfig.camera.followRate.x == 0.0f &&
 	      rateConfig.camera.followRate.y == 0.2f && rateConfig.camera.followRate.z == 1.0f &&
