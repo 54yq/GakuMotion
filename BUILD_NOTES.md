@@ -1,6 +1,6 @@
 # 构建与验证
 
-GakuMotion 由 C++ 插件 `GakuMotion.dll` 和 C# NativeAOT 导入器 `GakuMotion.VmdImporter.Native.dll` 组成。日常使用预编译文件不需要开发工具；安装位置见[安装指南](docs/INSTALLATION.md)。本文基于 v0.1.0 发布线，可能存在过时之处，具体功能实现以实际代码为准。
+GakuMotion 由 C++ 插件 `GakuMotion.dll` 和 C# NativeAOT 导入器 `GakuMotion.VmdImporter.Native.dll` 组成。日常使用预编译文件不需要开发工具；安装位置见[安装指南](docs/INSTALLATION.md)。本文基于 v0.1.1 发布线，可能存在过时之处，具体功能实现以实际代码为准。
 
 ## 环境与依赖
 
