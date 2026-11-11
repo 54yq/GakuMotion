@@ -531,7 +531,7 @@ namespace GakuMotion
 				"    \"follow_offset\": [0, 0.6, 3], \"target_offset\": [0, 0.4, 0], \"vmd_offset\": [0, 0, 0],\n"
 				"    \"follow_factor\": [1.0, 1.0, 1.0], // Captured camera-local displacement fractions\n"
 				"    \"follow_rate\": [0.1, 0.1, 0.1], // 0: hold, 0.1: smooth pursuit, 1: immediate\n"
-				"    \"follow_fov\": 45,\n"
+				"    \"follow_fov\": 45, \"vmd_range_scale\": 1.0,\n"
 				"    // 可选分模式镜头位姿：\"transform_track\", \"transform_follow_move\", \"transform_look_at\": {\"pos\": [x,y,z], \"rot\": [rx,ry,rz]}\n"
 				"    \"use_per_mode_transforms\": false\n"
 				"  },\n"
@@ -801,6 +801,11 @@ namespace GakuMotion
 				next.followActor = c->BoolPath("follow_actor", next.followActor);
 				next.limitToScene = c->BoolPath("limit_to_scene", next.limitToScene);
 				next.followFov = c->FloatPath("follow_fov", next.followFov);
+				if (const auto* scale = c->Find("vmd_range_scale"))
+				{
+					if (!scale->IsNumber()) { lastError = "camera vmd_range_scale must be a number"; return false; }
+					next.vmdRangeScale = scale->AsFloat(0);
+				}
 				next.srpFinalOverwriteFallback = c->BoolPath("srp_final_overwrite_fallback", next.srpFinalOverwriteFallback);
 				next.actorShadowExperimentMode = c->IntPath("actor_shadow_experiment_mode", next.actorShadowExperimentMode);
 				if (next.actorShadowExperimentMode < 0 || next.actorShadowExperimentMode > 2) next.actorShadowExperimentMode = 0;
@@ -814,10 +819,11 @@ namespace GakuMotion
 					next.followRate.x < 0 || next.followRate.x > 1.0f ||
 					next.followRate.y < 0 || next.followRate.y > 1.0f ||
 					next.followRate.z < 0 || next.followRate.z > 1.0f || !std::isfinite(next.followFov) ||
-					next.followFov < 1 || next.followFov > 179 ||
+					next.followFov < 1 || next.followFov > 179 || !std::isfinite(next.vmdRangeScale) ||
+					next.vmdRangeScale < 0.3f || next.vmdRangeScale > 1.0f ||
 					!next.transformTrack.IsValid() || !next.transformFollowMove.IsValid() || !next.transformLookAt.IsValid())
 				{
-					lastError = "invalid camera mode, bounds, follow factor, follow rate or FOV";
+					lastError = "invalid camera mode, bounds, follow factor, follow rate, FOV or VMD range scale";
 					return false;
 				}
 				// Hold is retired from user camera selection. Preserve its numeric

@@ -208,6 +208,7 @@ namespace GakuMotion
 		Vector3 boundsMin{-5, 0.05f, -5}, boundsMax{5, 5, 5}; // world-space AABB, opt-in
 		Vector3 followOffset{0, 0.6f, 3}, targetOffset{0, 0.4f, 0}; // captured hips camera offset / selected part aim offset
 		Vector3 vmdOffset{0, 0, 0}; // initial offset in actor coordinate frame (e.g. height adjustment for shorter idols)
+		float vmdRangeScale{1.0f}; // scale the VMD camera path around an actor-local chest-height anchor
 		Vector3 followFactor{1.0f, 1.0f, 1.0f}; // captured camera-local X/Y/Z displacement fractions
 		Vector3 followRate{0.1f, 0.1f, 0.1f}; // per-axis response at 60 Hz: 0 freezes, 1 tracks immediately
 		float followFov{45};
@@ -250,7 +251,7 @@ namespace GakuMotion
 				CameraFinite(boundsMin) && CameraFinite(boundsMax) &&
 				boundsMin.x <= boundsMax.x && boundsMin.y <= boundsMax.y && boundsMin.z <= boundsMax.z &&
 				CameraFinite(followOffset) && CameraFinite(targetOffset) &&
-				CameraFinite(vmdOffset) &&
+				CameraFinite(vmdOffset) && std::isfinite(vmdRangeScale) && vmdRangeScale >= 0.3f && vmdRangeScale <= 1.0f &&
 				CameraFinite(followFactor) &&
 				followFactor.x >= 0.0f && followFactor.x <= 1.0f &&
 				followFactor.y >= 0.0f && followFactor.y <= 1.0f &&
@@ -273,7 +274,7 @@ namespace GakuMotion
 				followActor == b.followActor &&
 				limitToScene == b.limitToScene && same(boundsMin, b.boundsMin) && same(boundsMax, b.boundsMax) &&
 				same(followOffset, b.followOffset) && same(targetOffset, b.targetOffset) &&
-				same(vmdOffset, b.vmdOffset) &&
+				same(vmdOffset, b.vmdOffset) && vmdRangeScale == b.vmdRangeScale &&
 				same(followFactor, b.followFactor) && same(followRate, b.followRate) && followFov == b.followFov &&
 				srpFinalOverwriteFallback == b.srpFinalOverwriteFallback &&
 				actorShadowExperimentMode == b.actorShadowExperimentMode &&
@@ -518,6 +519,16 @@ namespace GakuMotion
 				// in that mode to avoid applying placement twice.
 				const CameraModeTransform tf = settings.EffectiveTrackTransform();
 				const Quaternion qRot = Quaternion::FromEulerDegreesXYZ(tf.rotation.x, tf.rotation.y, tf.rotation.z);
+				if (settings.vmdRangeScale != 1.0f)
+				{
+					// A fixed actor-local anchor avoids scaling the track towards the floor.
+					// Preserve orientation and scale the implied focus distance with the pose.
+					const Vector3 pivot{0.0f, 1.0f, 0.0f};
+					const Vector3 delta = frame.position - pivot;
+					frame.position = pivot + Vector3{delta.x * settings.vmdRangeScale,
+						delta.y * settings.vmdRangeScale, delta.z * settings.vmdRangeScale};
+					frame.orthographicSize *= settings.vmdRangeScale;
+				}
 				frame.position = (settings.followActor ? origin : actorOrigin) + originRotation.Rotate(frame.position + tf.position);
 				frame.rotation = (originRotation * frame.rotation * qRot).Normalized();
 			}
