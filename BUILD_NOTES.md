@@ -1,6 +1,6 @@
 # 构建与验证
 
-GakuMotion 由 C++ 插件 `GakuMotion.dll` 和 C# NativeAOT 导入器 `GakuMotion.VmdImporter.Native.dll` 组成。日常使用预编译文件不需要开发工具；安装位置见[安装指南](docs/INSTALLATION.md)。本文基于 v0.1.0 发布线，可能存在过时之处，具体功能实现以实际代码为准。
+GakuMotion 由 C++ 插件 `GakuMotion.dll` 和 C# NativeAOT 导入器 `GakuMotion.VmdImporter.Native.dll` 组成。日常使用预编译文件不需要开发工具；安装位置见[安装指南](docs/INSTALLATION.md)。本文基于 v0.1.1 发布线，可能存在过时之处，具体功能实现以实际代码为准。
 
 ## 环境与依赖
 
@@ -29,7 +29,6 @@ GakuMotion 由 C++ 插件 `GakuMotion.dll` 和 C# NativeAOT 导入器 `GakuMotio
 | --- | --- | --- |
 | 发布源码 | `pwsh -NoProfile -File tests/run_release_tests.ps1` | 合成核心、舞台加载边界与界面语法 |
 | 开发源码 | `powershell -NoProfile -File tests/run_tests.ps1` | 开发仓库的离线核心、相关边界与界面语法 |
-| 发布源码 | `pwsh -NoProfile -File tools/verify-source.ps1` | 维护者核对发布源码清单 |
 
 两套仓库均提供 `tests/run_layout_tests.ps1`、`tests/test_layout_migration.ps1` 和 `tests/run_unicode_path_tests.ps1`，用于各自源码范围的合成路径与迁移检查。发布源码的 `pwsh -NoProfile -File build.ps1 -Target Contracts` 运行舞台加载的合成契约检查。
 
