@@ -49,6 +49,8 @@ static void TestRinhaFacialFit()
         }
     };
     static FakeProvider fake;
+    // Flip to simulate the provider plugin registering after this one activated.
+    static bool providerUp = false;
 
     // The published krnh mouth shape order is part of the table, not a guess:
     // the provider names them and the consumer must host every one of them.
@@ -92,7 +94,9 @@ static void TestRinhaFacialFit()
         }
         return GAKU_OK;
     };
+    static const RinhaFacialFitService published = facial_fit::service;
     facial_fit::available = true;
+    facial_fit::generation = 1;
 
     Check(facial_fit::Find("mdl_chr_krnh-base-0000_face") == &fake.face &&
         facial_fit::Find("mdl_chr_krnh-base-0000_face(Clone)") == &fake.face,
@@ -275,6 +279,37 @@ static void TestRinhaFacialFit()
     Check(std::all_of(state.weights.begin(), state.weights.end(), [](float value) { return value == 17.0f; }),
         "restoring returns the authored face to its captured weights");
 
+    // ---- provider registering after this plugin activated --------------------
+    // GakuLoader activates plugins in sorted filename order and
+    // "GakuMotion.dll" sorts before "RinhaReplacement.dll", so a single
+    // activation-time lookup would never see the provider on a real install.
     facial_fit::available = false;
     facial_fit::service = {};
+    facial_fit::generation = 0;
+    facial_fit::host = {};
+    facial_fit::host.queryService = [](void*, const char* name, uint32_t version, uint32_t size, void* table) -> GakuStatus {
+        if (!providerUp || !name || std::string(name) != RINHA_FACIAL_FIT_SERVICE) return GAKU_E_UNAVAILABLE;
+        if (version != GAKU_SERVICE_VERSION) return GAKU_E_VERSION;
+        if (size < sizeof(RinhaFacialFitService)) return GAKU_E_SIZE;
+        *static_cast<RinhaFacialFitService*>(table) = published;
+        return GAKU_OK;
+    };
+    facial_fit::nextAttempt = {};
+    Check(facial_fit::Find(faceName) == nullptr && !facial_fit::available &&
+        facial_fit::generation == 0,
+        "a provider that has not registered yet keeps the compiled path in charge");
+    providerUp = true;
+    facial_fit::nextAttempt = {}; // skip the retry interval, as a later frame would
+    Check(facial_fit::Find(faceName) == &fake.face && facial_fit::available &&
+        facial_fit::generation == 1,
+        "the lookup is retried once the provider registers, and forces a rebind");
+    facial_fit::available = false;
+    facial_fit::nextAttempt = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    Check(facial_fit::Find(faceName) == nullptr && facial_fit::generation == 1,
+        "the retry is throttled instead of running a registry lookup every frame");
+
+    facial_fit::available = false;
+    facial_fit::service = {};
+    facial_fit::host = {};
+    facial_fit::nextAttempt = {};
 }

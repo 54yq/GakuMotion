@@ -99,6 +99,9 @@ namespace GakuMotion
 		bool enableMikuMouthFit{false}, boundMikuMouthFit{false};
 		bool enableMikuEyeFit{false}, boundMikuEyeFit{false};
 		bool facialFitAllowUnverified{false}, boundFacialFitAllowUnverified{false};
+		// The provider registers after this plugin activates on a real install,
+		// so a binding made before that must notice the later appearance.
+		unsigned boundFacialFitGeneration{0};
 		std::string boundFaceName;
 		MikuFitDecision mikuFitDecision{MikuFitDecision::Disabled};
 		MikuFitDecision mikuEyeDecision{MikuFitDecision::Disabled};
@@ -244,7 +247,8 @@ namespace GakuMotion
 			void* current = api.getModel(actor);
 			if (current != model || names != clip.blendshape_names || boundCharacterOverride != characterOverride ||
 				boundMikuMouthFit != enableMikuMouthFit || boundMikuEyeFit != enableMikuEyeFit ||
-				boundFacialFitAllowUnverified != facialFitAllowUnverified)
+				boundFacialFitAllowUnverified != facialFitAllowUnverified ||
+				boundFacialFitGeneration != facial_fit::generation)
 			{
 				// Preserve this observer frame across the binding reset. Stop() still
 				// clears it, so an old write cannot masquerade as active playback.
@@ -273,6 +277,7 @@ namespace GakuMotion
 				boundMikuMouthFit = enableMikuMouthFit;
 				boundMikuEyeFit = enableMikuEyeFit;
 				boundFacialFitAllowUnverified = facialFitAllowUnverified;
+				boundFacialFitGeneration = facial_fit::generation;
 				boundFaceName = api.getModelName ? api.getModelName(model) : "";
 				indices.assign(names.size(), -1);
 				std::vector<std::string> modelNames;
@@ -358,6 +363,9 @@ namespace GakuMotion
 
 		void Apply(void* actor, const MotionClip& clip, float time, const FaceApi& api)
 		{
+			// No-op once the provider is known; otherwise a throttled re-query
+			// that rebinds through the generation check in Prepare().
+			facial_fit::Ensure();
 			mikuFitDecision = !enableMikuMouthFit ? MikuFitDecision::Disabled
 				: HasMikuRawSource(clip.blendshape_names) ? MikuFitDecision::UnknownFace : MikuFitDecision::MissingRawSource;
 			mikuEyeDecision = !enableMikuEyeFit ? MikuFitDecision::Disabled
