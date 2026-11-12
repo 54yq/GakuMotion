@@ -205,6 +205,26 @@ static void TestCameraController(const std::string& repoRoot)
 		      "VMD path captures the same XYZ placement anchor as the actor");
 		Check(anchored.settings.vmdRangeScale == 1.0f && actual.orthographicSize == local.orthographicSize,
 		      "default VMD range leaves the original camera path and focus size unchanged");
+		const Vector3 beforeYawPosition = actual.position;
+		const Quaternion beforeYawRotation = actual.rotation;
+		const Quaternion yaw90 = Quaternion::FromEulerDegreesXYZ(0, 90, 0);
+		anchored.Tick(true, 0, .016f, actor, 0, 90);
+		Check(std::fabs(actual.position.x - beforeYawPosition.x) < 1e-5f && QuatNear(actual.rotation, beforeYawRotation),
+		      "disabled facing sync leaves the original track unchanged");
+		anchored.settings.followPlacementYaw = true;
+		anchored.Tick(true, 0, .016f, actor, 0, 90);
+		const Vector3 yawExpected = placementAnchor + yaw90.Rotate(beforeYawPosition - placementAnchor);
+		Check(std::fabs(actual.position.x-yawExpected.x) < 1e-5f && std::fabs(actual.position.z-yawExpected.z) < 1e-5f &&
+		      QuatNear(actual.rotation, yaw90 * beforeYawRotation),
+		      "facing sync rotates VMD position and orientation around the placed actor");
+		anchored.Tick(true, 0, .016f, actor, 0, -90);
+		const auto negativeExpected = placementAnchor + Quaternion::FromEulerDegreesXYZ(0, -90, 0).Rotate(beforeYawPosition-placementAnchor);
+		Check(std::fabs(actual.position.x-negativeExpected.x) < 1e-5f && std::fabs(actual.position.z-negativeExpected.z) < 1e-5f,
+		      "camera responds to changed placement yaw without accumulating the previous angle");
+		anchored.settings.followPlacementYaw = false;
+		anchored.Tick(true, 0, .016f, actor, 0, 90);
+		Check(std::fabs(actual.position.x-beforeYawPosition.x) < 1e-5f && QuatNear(actual.rotation, beforeYawRotation),
+		      "disabling facing sync restores the original composition");
 		anchored.settings.vmdRangeScale = 0.5f;
 		anchored.Tick(true, 0, .016f, actor);
 		Check(std::fabs(actual.position.x - 10.4f) < 1e-5f &&
@@ -237,6 +257,22 @@ static void TestCameraController(const std::string& repoRoot)
 		Check(std::fabs(actual.position.x - 13.4f) < 1e-5f,
 		      "hips following includes actual animated root displacement");
 		anchored.Release();
+		// Both follow modes rotate their anchor offsets while preserving the target.
+		for (auto behavior : {FollowBehavior::FollowMove, FollowBehavior::LookAt})
+		{
+			anchored.settings = CameraSettings{};
+			anchored.settings.mode = CameraMode::Follow;
+			anchored.settings.followBehavior = behavior;
+			anchored.Tick(true, 0, .016f, actor);
+			const Vector3 base = actual.position;
+			const Quaternion rotation = actual.rotation;
+			anchored.settings.followPlacementYaw = true;
+			anchored.Tick(true, 0, .016f, actor, 0, 90);
+			const Vector3 expected = anchored.followOrigin + yaw90.Rotate(base - anchored.followOrigin);
+			Check(std::fabs(actual.position.x-expected.x) < 1e-4f && std::fabs(actual.position.z-expected.z) < 1e-4f &&
+			      QuatNear(actual.rotation, yaw90 * rotation), "follow camera rotates with placement yaw around its target");
+			anchored.Release();
+		}
 	}
 
 	BeginTest("camera follow response / time / physical frame / lifecycle");

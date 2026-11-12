@@ -448,6 +448,8 @@ namespace
 		app.core.camera.settings.transformTrack.position = {0.2f, 0.3f, 0.4f};
 		app.core.camera.Publish();
 		app.Settle();
+		app.Click("镜头随主角色朝向"); app.Settle();
+		Check(app.core.camera.settings.followPlacementYaw, "camera-facing checkbox reaches the camera runtime");
 		ImRect rangeRect;
 		if (app.Find("VMD 运镜范围", rangeRect))
 		{
@@ -462,6 +464,7 @@ namespace
 			restored.configRoot = app.core.configRoot;
 			Check(restored.LoadCameraSettings() && std::fabs(restored.camera.settings.vmdRangeScale - app.core.camera.settings.vmdRangeScale) < 1e-5f,
 				"VMD camera range slider persists through the camera settings save button");
+			Check(restored.camera.settings.followPlacementYaw, "camera-facing checkbox is saved by the existing save button");
 		}
 		Check(!app.ItemWithLabel("启用 GakuMotion 镜头接管") && !app.ItemWithLabel("启用 MMD 镜头接管"),
 			"camera page has no separate takeover checkbox");

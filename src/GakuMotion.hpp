@@ -1217,7 +1217,7 @@ namespace GakuMotion
 					static_cast<float>(camera.track.frames.size()) / camera.track.fps;
 				camera.Tick(player.state == PlaybackState::Playing || player.state == PlaybackState::Paused || player.state == PlaybackState::Preview,
 				            player.CameraSourceTime(), cameraDeltaTime >= 0.0f ? cameraDeltaTime : deltaTime,
-				            actor, physicalFrame);
+				            actor, physicalFrame, player.controller.initialYawDegrees);
 			}
 
 			// 4. 角色状态快照（供面板/日志）
@@ -1763,6 +1763,7 @@ namespace GakuMotion
 				<< ",\n    \"follow_behavior\": " << static_cast<int>(s.followBehavior)
 				<< ",\n    \"follow_target\": \"" << CameraFollowTargetName(s.followTarget) << '"'
 				<< ",\n    \"follow_actor\": " << (s.followActor ? "true" : "false")
+				<< ",\n    \"follow_placement_yaw\": " << (s.followPlacementYaw ? "true" : "false")
 				<< ",\n    \"limit_to_scene\": " << (s.limitToScene ? "true" : "false") << ",\n    \"bounds_min\": ";
 			vector(s.boundsMin);
 			out << ",\n    \"bounds_max\": ";
