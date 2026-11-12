@@ -177,6 +177,10 @@ namespace GakuMotion
 		std::array<GuiEnsembleFollower, 2> ensembleFollowers{};
 		std::string ensembleNotice;
 		void (*fnAlignEnsemble)(void*){nullptr};
+		std::vector<std::string> ensemblePresetNames;
+		std::string ensemblePresetNotice;
+		void (*fnSaveEnsemblePreset)(void*, const char*){nullptr};
+		void (*fnApplyEnsemblePreset)(void*, const char*){nullptr};
 		void (*fnSetEnsembleFollower)(void*, int, uint64_t, uint64_t, const char*, float, uint64_t){nullptr};
 		void (*fnClearEnsembleFollower)(void*, int, uint64_t){nullptr};
 		void (*fnSetEnsemblePosition)(void*, int, uint64_t, uint64_t, uint64_t, const Vector3&){nullptr};
@@ -308,6 +312,7 @@ namespace GakuMotion
 		uint64_t initialPlacementActorToken{0};
 		uint64_t armCalibrationToken{0};
 		uint64_t armCalibrationEpoch{0};
+		char ensemblePresetName[128] = "默认队形";
 		uint64_t ensembleDraftEpoch{0};
 		std::array<uint64_t, 2> ensembleDraftActor{};
 		std::array<std::string, 2> ensembleDraftMotion{};

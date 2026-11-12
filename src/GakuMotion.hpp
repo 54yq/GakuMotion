@@ -75,6 +75,12 @@ namespace GakuMotion
 		EnsembleRuntime ensemble;
 		bool ensembleRestoreUnconfirmed{false};
 		std::string ensembleNotice;
+		struct EnsemblePresetRole { bool enabled{false}; Vector3 world{}; float heading{0}; };
+		struct EnsemblePreset { std::string name; std::array<EnsemblePresetRole, 3> roles{}; };
+		std::vector<EnsemblePreset> ensemblePresets;
+		std::string ensemblePresetNotice;
+		std::string ensemblePresetPath;
+
 		bool (*fnReadFormationOrigin)(const std::string&, Vector3&){nullptr};
 		void RememberCurrentPlacement()
 		{
@@ -378,7 +384,7 @@ namespace GakuMotion
 			StageSettings, StagePreset, ToggleStageCandidate, ScanStageCandidates,
 			MountCustomStage, UnloadCustomStage, RestoreCameraSkybox,
 			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, StageLoadReplacement, SelectTarget,
-			SetEnsembleFollower, ClearEnsembleFollower, EnsemblePosition, EnsembleYaw, FollowerArm, SceneArm, AlignEnsemble
+			SetEnsembleFollower, ClearEnsembleFollower, EnsemblePosition, EnsembleYaw, FollowerArm, SceneArm, AlignEnsemble, SaveEnsemblePreset, ApplyEnsemblePreset
 		};
 
 		std::atomic<int> guiPhysicsBackend{2};
@@ -429,9 +435,10 @@ namespace GakuMotion
 			else guiCommands.push_back(std::move(cmd));
 		}
 
-		void QueueAlignEnsemble()
+		void QueueEnsemblePresetCommand(GuiAction action, const char* name = nullptr)
 		{
-			GuiCommand cmd{GuiAction::AlignEnsemble};
+			GuiCommand cmd{action};
+			cmd.key = name ? name : "";
 			cmd.actorEpoch = sceneActorRegistry.Epoch();
 			if (const auto* actor = sceneActorRegistry.Find(player.controller.targetActor)) cmd.actorToken = actor->token;
 			cmd.sceneSession = injectionSession;
@@ -442,6 +449,8 @@ namespace GakuMotion
 			}
 			QueueGui(std::move(cmd));
 		}
+
+		void QueueAlignEnsemble() { QueueEnsemblePresetCommand(GuiAction::AlignEnsemble); }
 
 		void QueueSelectMotion(int index, bool autoplay)
 		{
@@ -882,6 +891,12 @@ namespace GakuMotion
 				case GuiAction::AlignEnsemble:
 					AlignEnsembleFormation(cmd);
 					break;
+				case GuiAction::SaveEnsemblePreset:
+					SaveEnsemblePreset(cmd);
+					break;
+				case GuiAction::ApplyEnsemblePreset:
+					ApplyEnsemblePreset(cmd);
+					break;
 				case GuiAction::FollowerArm:
 					if (!ensembleRestoreUnconfirmed && cmd.candidateIndex >= 0 && cmd.candidateIndex < 2)
 						ensemble.SetArmCalibration(static_cast<size_t>(cmd.candidateIndex), cmd.actorToken, cmd.actorEpoch,
@@ -1027,6 +1042,8 @@ namespace GakuMotion
 			LoadStageLoadSettings();
 			playlistPath = dataLayout.Playlist();
 			initialPositionPath = configRoot + "/initial_position.json";
+			ensemblePresetPath = configRoot + "/ensemble_position_presets.json";
+			LoadEnsemblePresetFile();
 			LoadInitialPosition();
 			LoadFacialWeights();
 			LoadMusicVolume();
@@ -2826,23 +2843,9 @@ namespace GakuMotion
 		// 不向 GUI 暴露托管指针；发布实际名单和带生命周期的选择 token。
 		// Called only from a fresh, pinned Unity-thread actor search in the owner scene.
 		// Missing actors are abandoned without touching possibly destroyed objects.
-		// One-shot alignment, committed only after all source and live actor data validate.
-		void AlignEnsembleFormation(const GuiCommand& cmd)
+		struct ActorStart { Vector3 world; Quaternion rotation; float heading; };
+		static bool ReadActorStart(MotionPlayer& p, ActorStart& out)
 		{
-			if (ensembleRestoreUnconfirmed || cmd.sceneSession != injectionSession ||
-			    !cmd.actorToken || sceneActorRegistry.Resolve(cmd.actorToken, cmd.actorEpoch) != player.controller.targetActor)
-			{ ensembleNotice = "对齐失败：主角色或场景已变化"; return; }
-			if (!fnReadFormationOrigin || !player.clip.IsLocalDeltaStream())
-			{ ensembleNotice = "对齐失败：需要新版导入器和 gkclip 动作"; return; }
-			for (size_t i = 0; i < ensemble.Followers().size(); ++i)
-			{
-				const auto& follower = ensemble.Followers()[i];
-				if (cmd.formationTokens[i] != follower.actorToken || cmd.formationGenerations[i] != follower.bindingGeneration)
-				{ ensembleNotice = "对齐失败：角色绑定已变化，请重试"; return; }
-			}
-			struct ActorStart { Vector3 world; Quaternion rotation; float heading; };
-			auto readStart = [](MotionPlayer& p, ActorStart& out) -> bool
-			{
 				auto& c = p.controller;
 				const auto it = c.bindings.find(c.targetActor);
 				if (!c.targetActor || it == c.bindings.end() || !it->second.bindPoseCaptured ||
@@ -2863,10 +2866,184 @@ namespace GakuMotion
 					(c.rootHeightCalibrationEnabled ? b.calibratedRootHeight : 0.0f), b.restRootPos.z + r.z};
 				out.world = Vector3{pos[0],pos[1],pos[2]} + out.rotation.Rotate(local) + c.initialPositionOffset;
 				return std::isfinite(out.world.x) && std::isfinite(out.world.y) && std::isfinite(out.world.z);
-			};
+		}
+
+		bool LoadEnsemblePresetFile()
+		{
+			std::error_code ec;
+			if (ensemblePresetPath.empty()) ensemblePresetPath = configRoot + "/ensemble_position_presets.json";
+			const auto file = MotionPathFromUtf8(ensemblePresetPath);
+			if (!std::filesystem::exists(file, ec))
+			{
+				if (ec) { ensemblePresetNotice = "站位预设读取失败"; return false; }
+				ensemblePresets.clear(); return true;
+			}
+			if (std::filesystem::file_size(file, ec) > 1024 * 1024 || ec)
+			{ ensemblePresetNotice = "站位预设文件无效，未覆盖"; return false; }
+			jsonlite::Value root; std::string error;
+			if (!jsonlite::ParseFile(ensemblePresetPath, root, error) || root.IntPath("version", 0) != 1)
+			{ ensemblePresetNotice = "站位预设文件无效，未覆盖"; return false; }
+			const auto* entries = root.Find("presets");
+			if (!entries || !entries->IsArray() || entries->Size() > 32)
+			{ ensemblePresetNotice = "站位预设文件无效，未覆盖"; return false; }
+			std::vector<EnsemblePreset> parsed;
+			for (size_t i = 0; i < entries->Size(); ++i)
+			{
+				const auto* entry = entries->At(i);
+				const auto* name = entry ? entry->Find("name") : nullptr;
+				const auto* roles = entry ? entry->Find("roles") : nullptr;
+				if (!name || !name->IsString() || name->stringValue.empty() || name->stringValue.size() > 100 ||
+				    !roles || !roles->IsArray() || roles->Size() != 3 ||
+				    std::any_of(parsed.begin(), parsed.end(), [&](const auto& item) { return item.name == name->stringValue; }))
+				{ ensemblePresetNotice = "站位预设文件无效，未覆盖"; return false; }
+				EnsemblePreset preset; preset.name = name->stringValue;
+				for (size_t j = 0; j < preset.roles.size(); ++j)
+				{
+					const auto* role = roles->At(j);
+					if (role && role->IsNull()) continue;
+					if (!role || !role->IsArray() || role->Size() != 4)
+					{ ensemblePresetNotice = "站位预设文件无效，未覆盖"; return false; }
+					for (size_t k = 0; k < 4; ++k)
+						if (!role->At(k)->IsNumber() || !std::isfinite(role->At(k)->AsFloat(NAN)))
+						{ ensemblePresetNotice = "站位预设文件无效，未覆盖"; return false; }
+					preset.roles[j] = {true, {role->At(0)->AsFloat(0), role->At(1)->AsFloat(0), role->At(2)->AsFloat(0)}, role->At(3)->AsFloat(0)};
+				}
+				if (!preset.roles[0].enabled || (!preset.roles[1].enabled && !preset.roles[2].enabled))
+				{ ensemblePresetNotice = "站位预设文件无效，未覆盖"; return false; }
+				parsed.push_back(std::move(preset));
+			}
+			ensemblePresets = std::move(parsed); return true;
+		}
+
+		bool WriteEnsemblePresetFile(const std::vector<EnsemblePreset>& presets)
+		{
+			std::error_code ec;
+			std::filesystem::create_directories(MotionPathFromUtf8(configRoot), ec);
+			if (ec) { ensemblePresetNotice = "站位预设保存失败：无法创建配置目录"; return false; }
+			std::ostringstream out; out << "{\n  \"version\": 1,\n  \"presets\": [";
+			for (size_t i = 0; i < presets.size(); ++i)
+			{
+				if (i) out << ',';
+				out << "\n    {\"name\": \"" << jsonlite::EscapeString(presets[i].name) << "\", \"roles\": [";
+				for (size_t j = 0; j < 3; ++j)
+				{
+					if (j) out << ", ";
+					const auto& role = presets[i].roles[j];
+					if (!role.enabled) out << "null";
+					else out << '[' << jsonlite::FormatNumber(role.world.x, 6) << ',' << jsonlite::FormatNumber(role.world.y, 6)
+					         << ',' << jsonlite::FormatNumber(role.world.z, 6) << ',' << jsonlite::FormatNumber(role.heading, 6) << ']';
+				}
+				out << "]}";
+			}
+			out << "\n  ]\n}\n";
+			const std::string content = out.str();
+			const auto final = MotionPathFromUtf8(ensemblePresetPath).wstring();
+			const auto temp = final + L".tmp." + std::to_wstring(GetCurrentProcessId()) + L"." + std::to_wstring(GetTickCount64());
+			HANDLE file = CreateFileW(temp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+			if (file == INVALID_HANDLE_VALUE) { ensemblePresetNotice = "站位预设保存失败：无法创建临时文件"; return false; }
+			DWORD written = 0;
+			const bool wrote = WriteFile(file, content.data(), static_cast<DWORD>(content.size()), &written, nullptr) &&
+			                   written == content.size() && FlushFileBuffers(file);
+			CloseHandle(file);
+			if (!wrote || !MoveFileExW(temp.c_str(), final.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+			{ DeleteFileW(temp.c_str()); ensemblePresetNotice = "站位预设保存失败：无法写入文件"; return false; }
+			return true;
+		}
+
+		bool ValidEnsemblePresetContext(const GuiCommand& cmd)
+		{
+			if (ensembleRestoreUnconfirmed || cmd.sceneSession != injectionSession || !cmd.actorToken ||
+			    sceneActorRegistry.Resolve(cmd.actorToken, cmd.actorEpoch) != player.controller.targetActor)
+			{ ensemblePresetNotice = "站位预设失败：主角色或场景已变化"; return false; }
+			for (size_t i = 0; i < ensemble.Followers().size(); ++i)
+				if (ensemble.Followers()[i].actorToken != cmd.formationTokens[i] ||
+				    ensemble.Followers()[i].bindingGeneration != cmd.formationGenerations[i])
+				{ ensemblePresetNotice = "站位预设失败：角色绑定已变化，请重试"; return false; }
+			return true;
+		}
+
+		void SaveEnsemblePreset(const GuiCommand& cmd)
+		{
+			if (!ValidEnsemblePresetContext(cmd)) return;
+			if (cmd.key.empty() || cmd.key.size() > 100) { ensemblePresetNotice = "请输入不超过 100 字节的预设名称"; return; }
+			EnsemblePreset preset; preset.name = cmd.key;
+			ActorStart start;
+			if (!ReadActorStart(player, start)) { ensemblePresetNotice = "请先播放或预览，等待主角色骨架就绪"; return; }
+			preset.roles[0] = {true, start.world, std::remainder(start.heading + player.controller.initialYawDegrees, 360.0f)};
+			for (size_t i = 0; i < 2; ++i)
+			{
+				const auto& follower = ensemble.Followers()[i];
+				if (!follower.player) continue;
+				if (sceneActorRegistry.Resolve(follower.actorToken, cmd.actorEpoch) != follower.player->controller.targetActor ||
+				    !ReadActorStart(*follower.player, start)) { ensemblePresetNotice = "请先播放或预览，等待所有副角色骨架就绪"; return; }
+				preset.roles[i+1] = {true, start.world, std::remainder(start.heading + follower.player->controller.initialYawDegrees, 360.0f)};
+			}
+			if (!preset.roles[1].enabled && !preset.roles[2].enabled) { ensemblePresetNotice = "请先绑定至少一个副角色"; return; }
+			if (!LoadEnsemblePresetFile()) return;
+			auto next = ensemblePresets;
+			auto found = std::find_if(next.begin(), next.end(), [&](const auto& p) { return p.name == preset.name; });
+			if (found != next.end()) *found = std::move(preset);
+			else if (next.size() < 32) next.push_back(std::move(preset));
+			else { ensemblePresetNotice = "站位预设已达 32 个上限"; return; }
+			if (!WriteEnsemblePresetFile(next)) return;
+			ensemblePresets = std::move(next);
+			ensemblePresetNotice = "已保存站位预设：" + cmd.key;
+		}
+
+		void ApplyEnsemblePreset(const GuiCommand& cmd)
+		{
+			if (!ValidEnsemblePresetContext(cmd) || !LoadEnsemblePresetFile()) return;
+			const auto found = std::find_if(ensemblePresets.begin(), ensemblePresets.end(), [&](const auto& p) { return p.name == cmd.key; });
+			if (found == ensemblePresets.end()) { ensemblePresetNotice = "未找到站位预设：" + cmd.key; return; }
+			struct Update { Vector3 offset; float yaw; };
+			std::array<Update, 3> updates{};
+			for (size_t i = 0; i < 3; ++i)
+			{
+				MotionPlayer* target = i == 0 ? &player : ensemble.Followers()[i-1].player.get();
+				if (found->roles[i].enabled != (target != nullptr))
+				{ ensemblePresetNotice = "站位预设需要相同的主角及副角色槽位，请先完成绑定"; return; }
+				if (!target) continue;
+				if (i && sceneActorRegistry.Resolve(ensemble.Followers()[i-1].actorToken, cmd.actorEpoch) != target->controller.targetActor)
+				{ ensemblePresetNotice = "站位预设失败：角色名单已变化"; return; }
+				ActorStart start;
+				if (!ReadActorStart(*target, start)) { ensemblePresetNotice = "请先播放或预览，等待所有角色骨架就绪"; return; }
+				const auto& role = found->roles[i];
+				updates[i] = {target->controller.initialPositionOffset + (role.world - start.world),
+				              std::remainder(role.heading - start.heading, 360.0f)};
+				if (!std::isfinite(updates[i].offset.x) || !std::isfinite(updates[i].offset.y) || !std::isfinite(updates[i].offset.z) ||
+				    !std::isfinite(updates[i].yaw)) { ensemblePresetNotice = "站位预设失败：结果无效"; return; }
+			}
+			player.controller.SetInitialPositionOffset(updates[0].offset);
+			player.controller.SetInitialYawDegrees(updates[0].yaw);
+			gui.initialPositionEditing = false;
+			gui.initialYawEditing = false;
+			RememberCurrentPlacement();
+			for (size_t i = 0; i < 2; ++i) if (found->roles[i+1].enabled)
+			{
+				const auto& follower = ensemble.Followers()[i];
+				ensemble.SetPosition(i, follower.actorToken, cmd.actorEpoch, follower.bindingGeneration, updates[i+1].offset, sceneActorRegistry);
+				ensemble.SetYaw(i, follower.actorToken, cmd.actorEpoch, follower.bindingGeneration, updates[i+1].yaw, sceneActorRegistry);
+			}
+			ensemblePresetNotice = "已应用站位预设：" + cmd.key;
+		}
+
+		// One-shot alignment, committed only after all source and live actor data validate.
+		void AlignEnsembleFormation(const GuiCommand& cmd)
+		{
+			if (ensembleRestoreUnconfirmed || cmd.sceneSession != injectionSession ||
+			    !cmd.actorToken || sceneActorRegistry.Resolve(cmd.actorToken, cmd.actorEpoch) != player.controller.targetActor)
+			{ ensembleNotice = "对齐失败：主角色或场景已变化"; return; }
+			if (!fnReadFormationOrigin || !player.clip.IsLocalDeltaStream())
+			{ ensembleNotice = "对齐失败：需要新版导入器和 gkclip 动作"; return; }
+			for (size_t i = 0; i < ensemble.Followers().size(); ++i)
+			{
+				const auto& follower = ensemble.Followers()[i];
+				if (cmd.formationTokens[i] != follower.actorToken || cmd.formationGenerations[i] != follower.bindingGeneration)
+				{ ensembleNotice = "对齐失败：角色绑定已变化，请重试"; return; }
+			}
 			ActorStart main;
 			Vector3 mainOrigin;
-			if (!readStart(player, main)) { ensembleNotice = "对齐失败：请先播放或预览，等待主角色骨架就绪"; return; }
+			if (!ReadActorStart(player, main)) { ensembleNotice = "对齐失败：请先播放或预览，等待主角色骨架就绪"; return; }
 			if (!fnReadFormationOrigin(player.currentMotionDir, mainOrigin))
 			{ ensembleNotice = "对齐失败：主角色曲目缺少可验证的原始 VMD 或导入器不兼容"; return; }
 			const Quaternion basis = Quaternion::FromEulerDegreesXYZ(0, player.controller.initialYawDegrees, 0) * main.rotation;
@@ -2882,7 +3059,7 @@ namespace GakuMotion
 				{ ensembleNotice = "对齐失败：副角色无效或动作格式不支持"; return; }
 				ActorStart start;
 				Vector3 origin;
-				if (!readStart(*follower.player, start)) { ensembleNotice = "对齐失败：请先播放或预览，等待所有角色骨架就绪"; return; }
+				if (!ReadActorStart(*follower.player, start)) { ensembleNotice = "对齐失败：请先播放或预览，等待所有角色骨架就绪"; return; }
 				if (!fnReadFormationOrigin(follower.player->currentMotionDir, origin))
 				{ ensembleNotice = "对齐失败：副角色曲目缺少可验证的原始 VMD"; return; }
 				const Vector3 relative = basis.Rotate({origin.x - mainOrigin.x, 0, origin.z - mainOrigin.z});
@@ -3355,6 +3532,10 @@ namespace GakuMotion
 			};
 			ctx.ensembleNotice = ensembleNotice;
 			ctx.fnAlignEnsemble = [](void* self) { static_cast<Core*>(self)->QueueAlignEnsemble(); };
+			for (const auto& preset : ensemblePresets) ctx.ensemblePresetNames.push_back(preset.name);
+			ctx.ensemblePresetNotice = ensemblePresetNotice;
+			ctx.fnSaveEnsemblePreset = [](void* self, const char* name) { static_cast<Core*>(self)->QueueEnsemblePresetCommand(GuiAction::SaveEnsemblePreset, name); };
+			ctx.fnApplyEnsemblePreset = [](void* self, const char* name) { static_cast<Core*>(self)->QueueEnsemblePresetCommand(GuiAction::ApplyEnsemblePreset, name); };
 			ctx.fnSetEnsembleFollower = [](void* self, int slot, uint64_t token, uint64_t epoch,
 			                                const char* key, float offset, uint64_t revision)
 			{

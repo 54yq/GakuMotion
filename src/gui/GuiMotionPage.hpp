@@ -153,6 +153,32 @@ namespace GakuMotion
 			if (ImGui::Button("以主角色对齐原曲队形")) ctx.fnAlignEnsemble(ctx.self);
 			ImGui::EndDisabled();
 			ImGui::TextWrapped("先绑定并预览各角色；对齐会读取原始 VMD，恢复副角色的初始站位并统一朝向和走位，可再次微调。主角色站位不变。");
+			ImGui::Separator();
+			ImGui::TextUnformatted("多人站位预设");
+			ImGui::SetNextItemWidth((std::min)(300.0f, ImGui::GetContentRegionAvail().x));
+			ImGui::InputText("预设名称", overlay.ensemblePresetName, sizeof(overlay.ensemblePresetName));
+			ImGui::SetNextItemWidth((std::min)(300.0f, ImGui::GetContentRegionAvail().x));
+			const bool selectedPreset = std::find(ctx.ensemblePresetNames.begin(), ctx.ensemblePresetNames.end(), overlay.ensemblePresetName) != ctx.ensemblePresetNames.end();
+			const char* presetLabel = ctx.ensemblePresetNames.empty() ? "暂无预设" : selectedPreset ? overlay.ensemblePresetName : "选择预设";
+			if (ImGui::BeginCombo("已保存预设", presetLabel))
+			{
+				for (const auto& name : ctx.ensemblePresetNames)
+					if (ImGui::Selectable(name.c_str(), name == overlay.ensemblePresetName))
+						std::snprintf(overlay.ensemblePresetName, sizeof(overlay.ensemblePresetName), "%s", name.c_str());
+				ImGui::EndCombo();
+			}
+			ImGui::BeginDisabled(!ctx.injectionAllowed || !ctx.fnSaveEnsemblePreset ||
+			                     (!ctx.ensembleFollowers[0].actorToken && !ctx.ensembleFollowers[1].actorToken));
+			if (ImGui::Button("保存当前多人站位")) ctx.fnSaveEnsemblePreset(ctx.self, overlay.ensemblePresetName);
+			ImGui::EndDisabled();
+			ImGui::SameLine();
+			ImGui::BeginDisabled(!ctx.injectionAllowed || !ctx.fnApplyEnsemblePreset || ctx.ensemblePresetNames.empty());
+			if (ImGui::Button("应用多人站位预设")) ctx.fnApplyEnsemblePreset(ctx.self, overlay.ensemblePresetName);
+			ImGui::EndDisabled();
+			ImGui::TextWrapped("保存主角色和各副位的世界站位与朝向；同名保存会覆盖。先绑定相同槽位并预览，再应用；角色和动作需自行选择。");
+			if (!ctx.ensemblePresetNotice.empty()) ImGui::TextWrapped("%s", ctx.ensemblePresetNotice.c_str());
+			ImGui::Separator();
+
 
 			if (overlay.ensembleDraftEpoch != ctx.actorRosterEpoch)
 			{

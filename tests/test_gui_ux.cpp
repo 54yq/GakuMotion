@@ -761,6 +761,8 @@ namespace
 		formationPositions = {{a,{2,0,5}}, {b,{11,0,7}}, {c,{-3,0,10}}};
 		formationRotations = {{a,Quaternion::FromEulerDegreesXYZ(0,30,0)}, {b,Quaternion::FromEulerDegreesXYZ(0,-40,0)},
 		                      {c,Quaternion::FromEulerDegreesXYZ(0,90,0)}};
+		app.core.configRoot = (app.fixture / "formation-config").string();
+		app.core.ensemblePresetPath = app.core.configRoot + "/ensemble_position_presets.json";
 		app.core.fnReadFormationOrigin = FormationOrigin;
 		app.core.player.controller.fnGetWorldPosition = FormationPosition;
 		app.core.player.controller.fnGetWorldRotation = FormationRotation;
@@ -809,6 +811,49 @@ namespace
 		      app.core.ensembleNotice.find("原始 VMD") != std::string::npos,
 		      "missing source fails visibly without changing actor placement");
 		formationSourceUnavailable = false;
+		app.Click("保存当前多人站位"); app.Settle();
+		Check(app.core.ensemblePresets.size() == 1 && app.core.ensemblePresetNotice.find("已保存") != std::string::npos,
+		      "actual save button writes the selected three-role position preset");
+		Core reloaded;
+		reloaded.configRoot = app.core.configRoot;
+		reloaded.ensemblePresetPath = app.core.ensemblePresetPath;
+		Check(reloaded.LoadEnsemblePresetFile() && reloaded.ensemblePresets.size() == 1,
+		      "formation position preset reloads in a new core instance");
+		const Vector3 desiredA = formationPositions[a] + app.core.player.controller.initialPositionOffset;
+		const Vector3 desiredB = formationPositions[b] + f0.controller.initialPositionOffset;
+		const Vector3 desiredC = formationPositions[c] + f1.controller.initialPositionOffset;
+		formationPositions[a] = {15,0,-3}; formationPositions[b] = {-2,0,4}; formationPositions[c] = {9,0,3};
+		formationRotations[a] = Quaternion::FromEulerDegreesXYZ(0,-15,0);
+		formationRotations[b] = Quaternion::FromEulerDegreesXYZ(0,10,0);
+		formationRotations[c] = Quaternion::FromEulerDegreesXYZ(0,5,0);
+		app.core.player.controller.SetInitialPositionOffset({}); app.core.player.controller.SetInitialYawDegrees(0);
+		f0.controller.SetInitialPositionOffset({}); f0.controller.SetInitialYawDegrees(0);
+		f1.controller.SetInitialPositionOffset({}); f1.controller.SetInitialYawDegrees(0);
+		app.Click("应用多人站位预设"); app.Settle();
+		auto near = [](const Vector3& x, const Vector3& y) { return std::fabs(x.x-y.x)<1e-4f && std::fabs(x.y-y.y)<1e-4f && std::fabs(x.z-y.z)<1e-4f; };
+		Check(near(formationPositions[a] + app.core.player.controller.initialPositionOffset, desiredA) &&
+		      near(formationPositions[b] + f0.controller.initialPositionOffset, desiredB) &&
+		      near(formationPositions[c] + f1.controller.initialPositionOffset, desiredC) &&
+		      std::fabs(app.core.player.controller.initialYawDegrees - 65.0f) < .001f &&
+		      std::fabs(f0.controller.initialYawDegrees - 40.0f) < .001f &&
+		      std::fabs(f1.controller.initialYawDegrees - 45.0f) < .001f,
+		      "preset restores world positions and facing even after actor spawn orientations change");
+		{ std::ofstream out(app.core.ensemblePresetPath, std::ios::binary | std::ios::trunc); out << "broken preset"; }
+		app.core.QueueEnsemblePresetCommand(Core::GuiAction::SaveEnsemblePreset, "默认队形");
+		app.core.ProcessPendingGuiCommands();
+		std::ifstream brokenFile(app.core.ensemblePresetPath, std::ios::binary);
+		std::string preserved((std::istreambuf_iterator<char>(brokenFile)), std::istreambuf_iterator<char>());
+		Check(preserved == "broken preset" && app.core.ensemblePresetNotice.find("无效") != std::string::npos,
+		      "saving never overwrites an invalid existing preset file");
+		const Vector3 appliedB = f0.controller.initialPositionOffset;
+		app.core.QueueEnsemblePresetCommand(Core::GuiAction::ApplyEnsemblePreset, "默认队形");
+		app.core.sceneActorRegistry.Publish({{a,1,""},{b,2,""}});
+		app.core.ProcessPendingGuiCommands();
+		Check(near(f0.controller.initialPositionOffset, appliedB) && app.core.ensemblePresetNotice.find("变化") != std::string::npos,
+		      "a queued preset cannot affect actors after the scene roster changes");
+		{ std::ofstream out(app.core.ensemblePresetPath, std::ios::binary | std::ios::trunc); out << "broken preset"; }
+		Check(!reloaded.LoadEnsemblePresetFile() && reloaded.ensemblePresets.size() == 1,
+		      "invalid preset file is rejected without discarding the last valid snapshot");
 		app.core.player.controller.bindings.clear();
 	}
 
