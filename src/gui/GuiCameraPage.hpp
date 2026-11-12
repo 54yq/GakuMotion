@@ -112,6 +112,12 @@ namespace GakuMotion
 		if (settings.enabled)
 		{
 			ImGui::TextUnformatted("镜头位置与旋转偏移");
+			if (userMode == 0)
+			{
+				ImGui::SetNextItemWidth((std::min)(240.0f, ImGui::GetContentRegionAvail().x));
+				if (ImGui::SliderFloat("VMD 运镜范围", &settings.vmdRangeScale, 0.3f, 1.0f, "%.2f 倍")) changed = true;
+				ImGui::TextWrapped("以角色附近为中心缩小轨迹；会改变构图，不能保证避免穿模。点击下方保存镜头设置可保留。");
+			}
 
 			CameraModeTransform* activeTf = nullptr;
 			if (userMode == 0)

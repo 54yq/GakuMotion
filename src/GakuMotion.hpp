@@ -1562,6 +1562,7 @@ namespace GakuMotion
 			out << ",\n    \"follow_rate\": ";
 			vector(s.followRate);
 			out << ",\n    \"follow_fov\": " << jsonlite::FormatNumber(s.followFov, 6)
+				<< ",\n    \"vmd_range_scale\": " << jsonlite::FormatNumber(s.vmdRangeScale, 6)
 				<< ",\n    \"actor_shadow_experiment_mode\": " << s.actorShadowExperimentMode
 				<< ",\n    \"use_per_mode_transforms\": " << (s.usePerModeTransforms ? "true" : "false");
 			transform("transform_track", s.transformTrack);
