@@ -108,6 +108,8 @@ namespace GakuMotion
 		bool liveViewingConfirmed{false};
 		bool liveTakeoverActive{false}, liveTakeoverAvailable{false};
 		bool liveTakeoverFault{false};
+		uint64_t liveAlignmentLoggedSession{~uint64_t{0}}, liveAlignmentLoggedMotion{~uint64_t{0}};
+		void* liveAlignmentLoggedActor{nullptr}; // identity only
 		uintptr_t liveOwnerToken{0}, livePauseRequestOwner{0}, liveFaultOwner{0};
 		int liveOwnerScene{0}, livePauseRequestScene{0}, liveTakeoverRequestScene{0};
 		int livePauseRequest{0}; // 0 none, 1 pause, 2 resume; stateMutex guarded.
@@ -116,6 +118,12 @@ namespace GakuMotion
 		std::string liveControlNotice;
 		bool (*fnBeforeInjection)(){nullptr};
 		bool InjectionAllowed() const { return !enforceInjectionPolicy || injectionPolicy.CanInject(); }
+		Vector3 LiveCameraTrackAnchor(void* actor) const
+		{
+			const auto& binding = player.controller.currentBinding;
+			if (!liveTakeoverActive || !actor || binding.actor != actor || !binding.bindPoseCaptured) return {};
+			return {binding.restRootPos.x, 0.0f, binding.restRootPos.z};
+		}
 		bool PrepareInjection()
 		{
 			return InjectionAllowed() && !ensembleRestoreUnconfirmed && (!fnBeforeInjection || fnBeforeInjection());
@@ -1234,9 +1242,36 @@ namespace GakuMotion
 				camera.LoadTrack(player.currentMotionDir, player.clip);
 				player.cameraSourceDuration = camera.track.frames.empty() ? 0.0f :
 					static_cast<float>(camera.track.frames.size()) / camera.track.fps;
+				const Vector3 liveTrackAnchor = LiveCameraTrackAnchor(actor);
 				camera.Tick(player.state == PlaybackState::Playing || player.state == PlaybackState::Paused || player.state == PlaybackState::Preview,
 				            player.CameraSourceTime(), cameraDeltaTime >= 0.0f ? cameraDeltaTime : deltaTime,
-				            actor, physicalFrame, player.controller.initialYawDegrees);
+				            actor, physicalFrame, player.controller.initialYawDegrees, liveTrackAnchor);
+				// One local diagnostic per session/clip/actor. These values let us
+				// distinguish a bad baseline from a mismatched imported camera.
+				if (liveTakeoverActive && player.controller.currentBinding.actor == actor &&
+				    player.controller.currentBinding.bindPoseCaptured && camera.owned && camera.settings.mode == CameraMode::Track &&
+				    !camera.track.frames.empty() && camera.fnActorPose &&
+				    (liveAlignmentLoggedSession != injectionSession || liveAlignmentLoggedMotion != loadedMotionGeneration ||
+				     liveAlignmentLoggedActor != actor))
+				{
+					Vector3 origin, hips;
+					Quaternion rotation;
+					if (camera.fnActorPose(actor, origin, rotation, hips))
+					{
+						CameraFrame sample;
+						if (camera.track.Sample(player.CameraSourceTime(), sample))
+						{
+							LogInfo(detail::FormatMsg("[GakuMotion][LiveAlignment] t=%.3f origin=(%.3f,%.3f,%.3f) hips=(%.3f,%.3f,%.3f) baseline=(%.3f,%.3f,%.3f) camera_local=(%.3f,%.3f,%.3f) camera_world=(%.3f,%.3f,%.3f)",
+							    player.CameraSourceTime(), origin.x, origin.y, origin.z, hips.x, hips.y, hips.z,
+							    liveTrackAnchor.x, liveTrackAnchor.y, liveTrackAnchor.z,
+							    sample.position.x, sample.position.y, sample.position.z,
+							    camera.desired.position.x, camera.desired.position.y, camera.desired.position.z));
+							liveAlignmentLoggedSession = injectionSession;
+							liveAlignmentLoggedMotion = loadedMotionGeneration;
+							liveAlignmentLoggedActor = actor;
+						}
+					}
+				}
 			}
 
 			// 4. 角色状态快照（供面板/日志）

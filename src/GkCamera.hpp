@@ -462,7 +462,8 @@ namespace GakuMotion
 			Publish();
 		}
 
-		void Tick(bool active, float time, float dt, void* targetActor, uint64_t physicalFrame = 0, float placementYawDegrees = 0.0f)
+		void Tick(bool active, float time, float dt, void* targetActor, uint64_t physicalFrame = 0,
+		          float placementYawDegrees = 0.0f, Vector3 trackAnchorLocal = {})
 		{
 			if (!active || !settings.enabled || !settings.IsValid() || !targetActor)
 			{
@@ -535,7 +536,10 @@ namespace GakuMotion
 						delta.y * settings.vmdRangeScale, delta.z * settings.vmdRangeScale};
 					frame.orthographicSize *= settings.vmdRangeScale;
 				}
-				frame.position = (settings.followActor ? origin : actorOrigin) + viewBasis.Rotate(frame.position + tf.position);
+				// The Live baseline follows the actor transform, while the authored
+				// track follows the optional placement yaw around that baseline.
+				const Vector3 anchor = CameraFinite(trackAnchorLocal) ? actorRotation.Rotate(trackAnchorLocal) : Vector3{};
+				frame.position = (settings.followActor ? origin : actorOrigin) + anchor + viewBasis.Rotate(frame.position + tf.position);
 				frame.rotation = (viewBasis * frame.rotation * qRot).Normalized();
 			}
 			else if (settings.mode == CameraMode::Track)
@@ -613,6 +617,12 @@ namespace GakuMotion
 			desired = frame;
 			fnWrite(camera, transform, desired);
 			Publish();
+		}
+
+		// Compatibility for callers that pass a Live track anchor without yaw.
+		void Tick(bool active, float time, float dt, void* targetActor, uint64_t physicalFrame, Vector3 trackAnchorLocal)
+		{
+			Tick(active, time, dt, targetActor, physicalFrame, 0.0f, trackAnchorLocal);
 		}
 
 		// Called at the render boundary after all actor/Cinemachine updates.
