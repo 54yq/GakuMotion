@@ -31,6 +31,11 @@ internal sealed class MorphReport
     public bool MikuRawNativeAuthored { get; set; }
     public int MikuRawInvalidFrames { get; set; }
     public List<string> MikuRawUnsupportedNames { get; set; } = new();
+    public bool MikuRawEyeSourcePreserved { get; set; }
+    public bool MikuRawEyeNativeAuthored { get; set; }
+    public int MikuRawEyeKeys { get; set; }
+    public int MikuRawEyeCollapsedKeys { get; set; }
+    public List<string> MikuRawEyeUnsupportedNames { get; set; } = new();
     public List<string> BlendshapeNames { get; } = new();
 }
 
@@ -171,6 +176,15 @@ internal static class MorphTranslator
         report.MikuRawNativeAuthored = rawNative;
         report.MikuRawInvalidFrames = rawInvalid;
         report.MikuRawUnsupportedNames = rawUnsupported;
+        // Eye/brow intent is captured the same way the vowels are: the fit
+        // replaces the whole family, so a clip that names a fitted key only
+        // through the native mapping would otherwise lose it.
+        report.MikuRawEyeSourcePreserved = MikuRawEyeSource.Append(channels, sourceSamples, map, frames,
+            out bool eyeNative, out List<string> eyeUnsupported, out int collapsed);
+        report.MikuRawEyeNativeAuthored = eyeNative;
+        report.MikuRawEyeUnsupportedNames = eyeUnsupported;
+        report.MikuRawEyeCollapsedKeys = collapsed;
+        report.MikuRawEyeKeys = MikuRawEyeKeys.Names.Count;
         // --- Merge -----------------------------------------------------------
         // Several VMD aliases may feed one shape: sum first, clamp once.
         var namesList = new List<string>(channels.Keys);
@@ -240,6 +254,14 @@ internal static class MorphTranslator
         writer.WriteBoolean("native_mouth_authored", report.MikuRawNativeAuthored);
         writer.WriteNumber("serialization_clipped_invalid_frames", report.MikuRawInvalidFrames);
         WriteStringArray(writer, "unsupported_source_names", report.MikuRawUnsupportedNames);
+        writer.WriteEndObject();
+        writer.WriteStartObject("miku_raw_eye_source");
+        writer.WriteString("contract", MikuRawEyeSource.Prefix + "*");
+        writer.WriteBoolean("preserved", report.MikuRawEyeSourcePreserved);
+        writer.WriteBoolean("native_eye_authored", report.MikuRawEyeNativeAuthored);
+        writer.WriteNumber("table_keys", report.MikuRawEyeKeys);
+        writer.WriteNumber("collapsed_alias_keys", report.MikuRawEyeCollapsedKeys);
+        WriteStringArray(writer, "unsupported_source_names", report.MikuRawEyeUnsupportedNames);
         writer.WriteEndObject();
 
         if (report.ToothStatus != null)
