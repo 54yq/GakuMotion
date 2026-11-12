@@ -74,6 +74,42 @@ namespace GakuMotion
 		LookAtManager lookAt;
 		GuiOverlay gui;
 		StageManager stageManager;
+
+		// All scene-node identities and baselines remain provider-owned. Queries
+		// copy StageManager snapshots; only admitted Unity-thread callers mutate.
+		bool SceneNodesAllowed() const
+		{
+			return controlActive && initialized && currentActor && !captureSuspended &&
+				InjectionAllowed() && !stageStoppedByTransport && player.state != PlaybackState::Stopped;
+		}
+
+		void RefreshSceneNodes()
+		{
+			std::lock_guard<std::recursive_mutex> lock(stateMutex);
+			stageManager.RefreshSceneNodes(SceneNodesAllowed());
+		}
+
+		scene_nodes::v1::Status AcquireSceneNodes(uint64_t revision, uint64_t* lease)
+		{
+			if (lease) *lease = 0;
+			std::lock_guard<std::recursive_mutex> lock(stateMutex);
+			if (!controlActive) return scene_nodes::v1::Status::Unavailable;
+			if (captureSuspended || !InjectionAllowed()) return scene_nodes::v1::Status::Protected;
+			if (!SceneNodesAllowed()) return scene_nodes::v1::Status::NotReady;
+			if (!PrepareInjection()) return scene_nodes::v1::Status::Protected;
+			return stageManager.AcquireSceneNodes(revision, lease);
+		}
+
+		scene_nodes::v1::Status ApplySceneNodes(uint64_t lease, uint64_t revision,
+			uint32_t count, const scene_nodes::v1::Visibility* values)
+		{
+			std::lock_guard<std::recursive_mutex> lock(stateMutex);
+			if (!controlActive) return scene_nodes::v1::Status::Unavailable;
+			if (captureSuspended || !InjectionAllowed()) return scene_nodes::v1::Status::Protected;
+			if (!SceneNodesAllowed()) return scene_nodes::v1::Status::NotReady;
+			return stageManager.ApplySceneNodes(lease, revision, count, values);
+		}
+
 		std::string stageLoadNotice;
 		injection::Policy injectionPolicy;
 		// The runtime enables enforcement before initialization. Offline consumers
@@ -341,6 +377,13 @@ namespace GakuMotion
 		std::mutex guiCommandMutex;
 		std::recursive_mutex stateMutex; // Host LateUpdate and render share this guard.
 		std::deque<GuiCommand> guiCommands;
+		bool controlActive{false};
+
+		void SetControlActive(bool active)
+		{
+			std::lock_guard<std::recursive_mutex> lock(stateMutex);
+			controlActive = active;
+		}
 
 		void QueueGui(GuiCommand cmd)
 		{

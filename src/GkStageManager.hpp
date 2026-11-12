@@ -23,6 +23,7 @@
 #include <limits>
 #include "GkStageCleanup.hpp"
 #include "GkStageLoadPolicy.hpp"
+#include "GakuMotionSceneNodes.h"
 
 namespace GakuMotion
 {
@@ -246,6 +247,8 @@ namespace GakuMotion
 
 		StageManager() = default;
 
+#include "GkSceneNodes.inl"
+
 		std::string GetLoadReplacementKey() const
 		{
 			std::lock_guard<std::mutex> lock(stageMutex);
@@ -255,7 +258,7 @@ namespace GakuMotion
 		bool HasCustomizations() const
 		{
 			std::lock_guard<std::mutex> lock(stageMutex);
-			if (settings.hideBackground || settings.greenScreenActive || settings.overrideCameraClear ||
+			if (sceneNodesLease_ || sceneNodesRestorePending_ || settings.hideBackground || settings.greenScreenActive || settings.overrideCameraClear ||
 				!settings.lightingEffectsEnabled || settings.customNodeControl ||
 				!settings.customStageKey.empty() || !mountedStageKey.empty() || stageLoadRequested ||
 				stageUnloadRequested || backgroundCurrentlyHidden || !lightingCurrentlyEnabled || cameraStateSaved) return true;
@@ -275,7 +278,12 @@ namespace GakuMotion
 			}
 			if (enabled && !injectionEnabled) visibilityRefreshRequested = true;
 			injectionEnabled = enabled;
-			if (!enabled) suspensionRestored = RestoreForSuspension(camera);
+			if (!enabled)
+			{
+				sceneNodesAllowed_ = false;
+				sceneNodesReady_ = false;
+				suspensionRestored = RestoreForSuspension(camera);
+			}
 			return enabled || suspensionRestored;
 		}
 
@@ -297,6 +305,7 @@ namespace GakuMotion
 		void ApplySettings(const StageSettings& newSettings)
 		{
 			std::lock_guard<std::mutex> lock(stageMutex);
+			if (newSettings != settings && SceneNodesWriterBusy()) return;
 			StageSettings sanitized = newSettings;
 			const bool invalidReplacement = !sanitized.loadReplacementKey.empty() &&
 				!stage_load::IsTarget(sanitized.loadReplacementKey);
@@ -393,6 +402,7 @@ namespace GakuMotion
 		void RequestMountStage(const std::string& stageKey)
 		{
 			std::lock_guard<std::mutex> lock(stageMutex);
+			if (SceneNodesWriterBusy()) return;
 			if (stageKey.empty()) return;
 			stageMountFailed = false;
 			settings.hideBackground = true;
@@ -410,6 +420,7 @@ namespace GakuMotion
 		void RequestUnloadStage()
 		{
 			std::lock_guard<std::mutex> lock(stageMutex);
+			if (SceneNodesWriterBusy()) return;
 			stageUnloadRequested = true;
 			stageMountFailed = false;
 			settings.customStageKey.clear();
@@ -427,6 +438,7 @@ namespace GakuMotion
 		void ApplyPreset(int presetIndex)
 		{
 			std::lock_guard<std::mutex> lock(stageMutex);
+			if (SceneNodesWriterBusy()) return;
 			if (presetIndex < 0 || presetIndex >= kStagePresetCount) return;
 			stageMountFailed = false;
 			settings.selectedPresetIndex = presetIndex;
@@ -484,6 +496,7 @@ namespace GakuMotion
 		void ToggleCandidate(int index, bool active)
 		{
 			std::lock_guard<std::mutex> lock(stageMutex);
+			if (SceneNodesWriterBusy()) return;
 			if (index < 0 || index >= static_cast<int>(candidates.size())) return;
 			if (!injectionEnabled && !settings.customNodeControl) return;
 			StageAccessScope access(api);
@@ -524,6 +537,7 @@ namespace GakuMotion
 		void RescanCandidates(void* activeActor)
 		{
 			std::lock_guard<std::mutex> lock(stageMutex);
+			if (SceneNodesWriterBusy()) return;
 			candidatesDiscovered = false;
 			DiscoverCandidates(activeActor, currentSceneName);
 		}
@@ -531,6 +545,8 @@ namespace GakuMotion
 		void AbandonScene()
 		{
 			std::lock_guard<std::mutex> lock(stageMutex);
+			InvalidateSceneNodesLocked();
+			sceneNodesAllowed_ = false;
 			if (api.fnAbandonScene) api.fnAbandonScene();
 			candidates.clear();
 			candidatesDiscovered = false;
@@ -558,6 +574,8 @@ namespace GakuMotion
 		void ReleaseCurrentSceneOverrides()
 		{
 			std::lock_guard<std::mutex> lock(stageMutex);
+			const auto nodeRestore = RestoreSceneNodesLeaseLocked();
+			if (nodeRestore != SceneNodesStatus::Ok && nodeRestore != SceneNodesStatus::StaleCatalog) return;
 			StageAccessScope access(api);
 			if (!access.ready || !api.fnSetActive) return;
 			for (const auto& c : candidates)
@@ -957,6 +975,7 @@ namespace GakuMotion
 		{
 			if (settings.customNodeControl) return true;
 			if (!injectionEnabled) return false;
+			if (sceneNodesRestorePending_) return false;
 			StageAccessScope access(api);
 			if (!access.ready || !api.fnSetActive) return false;
 			if (!candidatesDiscovered) DiscoverCandidates(nullptr, currentSceneName);
@@ -966,6 +985,7 @@ namespace GakuMotion
 			for (auto& c : candidates)
 			{
 				if (!c.gameObject) continue;
+				if (SceneNodesOwnsCandidate(c)) continue;
 				if (api.fnIsMountedStageObject && api.fnIsMountedStageObject(c.gameObject)) continue;
 				if (c.isColliderLocked || c.isLightingRoot || c.isLightingNode) continue; // 碰撞与光影节点不随背景隐藏被关闭
 				if (IsActorOrProtectedNode(c.name)) continue;
@@ -1060,6 +1080,8 @@ namespace GakuMotion
 	private:
 		bool RestoreForSuspension(void* camera)
 		{
+			const auto nodeRestore = RestoreSceneNodesLeaseLocked();
+			if (nodeRestore != SceneNodesStatus::Ok && nodeRestore != SceneNodesStatus::StaleCatalog) return false;
 			bool complete = true;
 			bool hasChangedCandidates = false;
 			for (const auto& c : candidates)

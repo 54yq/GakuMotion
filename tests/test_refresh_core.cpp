@@ -2485,6 +2485,7 @@ static void TestOrderedPlaybackCommands()
 #include "test_waist_support.hpp"
 #include "test_waist_support_core.hpp"
 #include "test_waist_support_integration.hpp"
+#include "test_scene_nodes.hpp"
 
 static void TestInjectionRuntimeBoundary()
 {
@@ -2584,6 +2585,7 @@ int main(int argc, char** argv)
  TestWaistSupport();
  TestWaistSupportCore();
  TestWaistSupportIntegration();
+ TestSceneNodes();
  TestClipGroundAnchor();
  TestClipSwitchKeepsActorRest();
  TestPreviewWaitsForHumanoid();
