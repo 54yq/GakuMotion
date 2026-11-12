@@ -1849,6 +1849,7 @@ bool InitializeMotion()
 	core.fnLogInfo = g_hostCaps.hasLogInfo ? g_hostContext.logInfo : nullptr;
 	core.fnLogWarn = g_hostCaps.hasLogWarn ? g_hostContext.logWarn : nullptr;
 	core.fnNotifyMotionPlaying = NotifyHostMotionPlaying;
+	core.fnReadFormationOrigin = GakuMotion::csharp_import::ReadFormationOrigin;
 	core.fnStartImport = StartMotionImport;
 	core.fnPollImport = PollMotionImport;
 	core.fnPollImportProgress = PollMotionImportWithProgress;

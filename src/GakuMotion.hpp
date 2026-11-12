@@ -75,6 +75,7 @@ namespace GakuMotion
 		EnsembleRuntime ensemble;
 		bool ensembleRestoreUnconfirmed{false};
 		std::string ensembleNotice;
+		bool (*fnReadFormationOrigin)(const std::string&, Vector3&){nullptr};
 		void RememberCurrentPlacement()
 		{
 			if (const auto* actor = sceneActorRegistry.Find(player.controller.targetActor))
@@ -369,7 +370,7 @@ namespace GakuMotion
 			StageSettings, StagePreset, ToggleStageCandidate, ScanStageCandidates,
 			MountCustomStage, UnloadCustomStage, RestoreCameraSkybox,
 			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, StageLoadReplacement, SelectTarget,
-			SetEnsembleFollower, ClearEnsembleFollower, EnsemblePosition, EnsembleYaw, FollowerArm, SceneArm
+			SetEnsembleFollower, ClearEnsembleFollower, EnsemblePosition, EnsembleYaw, FollowerArm, SceneArm, AlignEnsemble
 		};
 
 		std::atomic<int> guiPhysicsBackend{2};
@@ -395,6 +396,7 @@ namespace GakuMotion
 			int64_t frame{0};
 			uint64_t loadedGeneration{0}, sceneSession{0}, libraryRevision{0};
 			uint64_t actorToken{0}, actorEpoch{0};
+			std::array<uint64_t, 2> formationTokens{}, formationGenerations{};
 		};
 
 		std::mutex guiCommandMutex;
@@ -417,6 +419,20 @@ namespace GakuMotion
 			if (sameFollowerPosition || sameMainPlacement || sameScrub)
 				guiCommands.back() = std::move(cmd);
 			else guiCommands.push_back(std::move(cmd));
+		}
+
+		void QueueAlignEnsemble()
+		{
+			GuiCommand cmd{GuiAction::AlignEnsemble};
+			cmd.actorEpoch = sceneActorRegistry.Epoch();
+			if (const auto* actor = sceneActorRegistry.Find(player.controller.targetActor)) cmd.actorToken = actor->token;
+			cmd.sceneSession = injectionSession;
+			for (size_t i = 0; i < ensemble.Followers().size(); ++i)
+			{
+				cmd.formationTokens[i] = ensemble.Followers()[i].actorToken;
+				cmd.formationGenerations[i] = ensemble.Followers()[i].bindingGeneration;
+			}
+			QueueGui(std::move(cmd));
 		}
 
 		void QueueSelectMotion(int index, bool autoplay)
@@ -855,6 +871,9 @@ namespace GakuMotion
 					else ensemble.SetSceneArmCalibration(cmd.actorToken, cmd.actorEpoch, cmd.stagePresetIndex, cmd.value, sceneActorRegistry);
 					break;
 				}
+				case GuiAction::AlignEnsemble:
+					AlignEnsembleFormation(cmd);
+					break;
 				case GuiAction::FollowerArm:
 					if (!ensembleRestoreUnconfirmed && cmd.candidateIndex >= 0 && cmd.candidateIndex < 2)
 						ensemble.SetArmCalibration(static_cast<size_t>(cmd.candidateIndex), cmd.actorToken, cmd.actorEpoch,
@@ -2772,6 +2791,84 @@ namespace GakuMotion
 		// 不向 GUI 暴露托管指针；发布实际名单和带生命周期的选择 token。
 		// Called only from a fresh, pinned Unity-thread actor search in the owner scene.
 		// Missing actors are abandoned without touching possibly destroyed objects.
+		// One-shot alignment, committed only after all source and live actor data validate.
+		void AlignEnsembleFormation(const GuiCommand& cmd)
+		{
+			if (ensembleRestoreUnconfirmed || cmd.sceneSession != injectionSession ||
+			    !cmd.actorToken || sceneActorRegistry.Resolve(cmd.actorToken, cmd.actorEpoch) != player.controller.targetActor)
+			{ ensembleNotice = "对齐失败：主角色或场景已变化"; return; }
+			if (!fnReadFormationOrigin || !player.clip.IsLocalDeltaStream())
+			{ ensembleNotice = "对齐失败：需要新版导入器和 gkclip 动作"; return; }
+			for (size_t i = 0; i < ensemble.Followers().size(); ++i)
+			{
+				const auto& follower = ensemble.Followers()[i];
+				if (cmd.formationTokens[i] != follower.actorToken || cmd.formationGenerations[i] != follower.bindingGeneration)
+				{ ensembleNotice = "对齐失败：角色绑定已变化，请重试"; return; }
+			}
+			struct ActorStart { Vector3 world; Quaternion rotation; float heading; };
+			auto readStart = [](MotionPlayer& p, ActorStart& out) -> bool
+			{
+				auto& c = p.controller;
+				const auto it = c.bindings.find(c.targetActor);
+				if (!c.targetActor || it == c.bindings.end() || !it->second.bindPoseCaptured ||
+				    !it->second.actorTransform || !c.fnGetWorldPosition || !c.fnGetWorldRotation || p.clip.root_positions.empty()) return false;
+				const auto& b = it->second;
+				float pos[3]{NAN,NAN,NAN}, q[4]{NAN,NAN,NAN,NAN};
+				c.fnGetWorldPosition(b.actorTransform, pos); c.fnGetWorldRotation(b.actorTransform, q);
+				const float n = q[0]*q[0] + q[1]*q[1] + q[2]*q[2] + q[3]*q[3];
+				if (!std::isfinite(pos[0]) || !std::isfinite(pos[1]) || !std::isfinite(pos[2]) || !std::isfinite(n) || n < 1e-8f) return false;
+				const float inv = 1.0f / std::sqrt(n);
+				out.rotation = Quaternion(q[0]*inv, q[1]*inv, q[2]*inv, q[3]*inv);
+				const Vector3 forward = out.rotation.Rotate({0,0,1});
+				if (!std::isfinite(forward.x) || !std::isfinite(forward.z) || forward.x*forward.x + forward.z*forward.z < 1e-8f) return false;
+				out.heading = std::atan2(forward.x, forward.z) * (180.0f / 3.14159265358979323846f);
+				const Vector3 r = p.clip.root_positions.front();
+				const Vector3 local{b.restRootPos.x + r.x,
+					(b.clipGroundAnchored ? 0.0f : b.restRootPos.y) + r.y + b.groundLift +
+					(c.rootHeightCalibrationEnabled ? b.calibratedRootHeight : 0.0f), b.restRootPos.z + r.z};
+				out.world = Vector3{pos[0],pos[1],pos[2]} + out.rotation.Rotate(local) + c.initialPositionOffset;
+				return std::isfinite(out.world.x) && std::isfinite(out.world.y) && std::isfinite(out.world.z);
+			};
+			ActorStart main;
+			Vector3 mainOrigin;
+			if (!readStart(player, main)) { ensembleNotice = "对齐失败：请先播放或预览，等待主角色骨架就绪"; return; }
+			if (!fnReadFormationOrigin(player.currentMotionDir, mainOrigin))
+			{ ensembleNotice = "对齐失败：主角色曲目缺少可验证的原始 VMD 或导入器不兼容"; return; }
+			const Quaternion basis = Quaternion::FromEulerDegreesXYZ(0, player.controller.initialYawDegrees, 0) * main.rotation;
+			struct Update { bool active{false}; Vector3 position; float yaw{0}; };
+			std::array<Update, 2> updates{};
+			int count = 0;
+			for (size_t i = 0; i < ensemble.Followers().size(); ++i)
+			{
+				const auto& follower = ensemble.Followers()[i];
+				if (!follower.player) continue;
+				if (sceneActorRegistry.Resolve(follower.actorToken, cmd.actorEpoch) != follower.player->controller.targetActor ||
+				    !follower.player->clip.IsLocalDeltaStream())
+				{ ensembleNotice = "对齐失败：副角色无效或动作格式不支持"; return; }
+				ActorStart start;
+				Vector3 origin;
+				if (!readStart(*follower.player, start)) { ensembleNotice = "对齐失败：请先播放或预览，等待所有角色骨架就绪"; return; }
+				if (!fnReadFormationOrigin(follower.player->currentMotionDir, origin))
+				{ ensembleNotice = "对齐失败：副角色曲目缺少可验证的原始 VMD"; return; }
+				const Vector3 relative = basis.Rotate({origin.x - mainOrigin.x, 0, origin.z - mainOrigin.z});
+				const Vector3 target = main.world + relative;
+				const auto& old = follower.player->controller.initialPositionOffset;
+				updates[i] = {true, {old.x + target.x - start.world.x, old.y, old.z + target.z - start.world.z},
+				              std::remainder(main.heading + player.controller.initialYawDegrees - start.heading, 360.0f)};
+				if (!std::isfinite(updates[i].position.x) || !std::isfinite(updates[i].position.z) || !std::isfinite(updates[i].yaw))
+				{ ensembleNotice = "对齐失败：站位计算结果无效"; return; }
+				++count;
+			}
+			if (!count) { ensembleNotice = "请先绑定至少一个副角色动作"; return; }
+			for (size_t i = 0; i < updates.size(); ++i) if (updates[i].active)
+			{
+				const auto& follower = ensemble.Followers()[i];
+				ensemble.SetPosition(i, follower.actorToken, cmd.actorEpoch, follower.bindingGeneration, updates[i].position, sceneActorRegistry);
+				ensemble.SetYaw(i, follower.actorToken, cmd.actorEpoch, follower.bindingGeneration, updates[i].yaw, sceneActorRegistry);
+			}
+			ensembleNotice = "已按主角色恢复分轨初始站位并统一朝向与走位；可继续微调站位";
+		}
+
 		bool PublishSceneActors(const std::vector<SceneActorObservation>& observations)
 		{
 			const uint64_t previousEpoch = sceneActorRegistry.Epoch();
@@ -3222,6 +3319,7 @@ namespace GakuMotion
 				static_cast<Core*>(self)->QueueGui(std::move(cmd));
 			};
 			ctx.ensembleNotice = ensembleNotice;
+			ctx.fnAlignEnsemble = [](void* self) { static_cast<Core*>(self)->QueueAlignEnsemble(); };
 			ctx.fnSetEnsembleFollower = [](void* self, int slot, uint64_t token, uint64_t epoch,
 			                                const char* key, float offset, uint64_t revision)
 			{

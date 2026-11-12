@@ -41,6 +41,19 @@ namespace
 	void AudioSeekPaused(float) {}
 	int importRequests = 0;
 	void CountImportRequest(void*, const MotionImportRequest&) { ++importRequests; }
+	std::map<void*, Vector3> formationPositions;
+	std::map<void*, Quaternion> formationRotations;
+	bool formationSourceUnavailable = false;
+	void FormationPosition(void* actor, float* out)
+	{ const auto p = formationPositions[actor]; out[0] = p.x; out[1] = p.y; out[2] = p.z; }
+	void FormationRotation(void* actor, float* out)
+	{ const auto q = formationRotations[actor]; out[0] = q.x; out[1] = q.y; out[2] = q.z; out[3] = q.w; }
+	bool FormationOrigin(const std::string& directory, Vector3& out)
+	{
+		if (formationSourceUnavailable) return false;
+		out = directory.ends_with("B") ? Vector3{1,0,0} : Vector3{};
+		return true;
+	}
 	int actorSelections = 0;
 	uint64_t selectedActorToken = 0, selectedActorEpoch = 0;
 	void SelectSceneActor(void*, uint64_t token, uint64_t epoch)
@@ -738,6 +751,67 @@ namespace
 		Check(app.core.player.controller.targetActor == a && app.core.player.controller.forearmAxisAdjustmentDeg != 33.0f,
 		      "switching primary actors restores each actor's own calibration");
 	}
+	void TestFormationAlignment(const std::filesystem::path& root)
+	{
+		Harness app(root);
+		app.windowHeight = 1400;
+		app.core.gui.activePage = GuiPage::Motion;
+		app.core.player.state = PlaybackState::Preview;
+		void* a = reinterpret_cast<void*>(0xa2000), *b = reinterpret_cast<void*>(0xb2000), *c = reinterpret_cast<void*>(0xc2000);
+		formationPositions = {{a,{2,0,5}}, {b,{11,0,7}}, {c,{-3,0,10}}};
+		formationRotations = {{a,Quaternion::FromEulerDegreesXYZ(0,30,0)}, {b,Quaternion::FromEulerDegreesXYZ(0,-40,0)},
+		                      {c,Quaternion::FromEulerDegreesXYZ(0,90,0)}};
+		app.core.fnReadFormationOrigin = FormationOrigin;
+		app.core.player.controller.fnGetWorldPosition = FormationPosition;
+		app.core.player.controller.fnGetWorldRotation = FormationRotation;
+		app.core.PublishSceneActors({{a,1,""},{b,2,""},{c,3,""}});
+		app.core.player.controller.SetInitialYawDegrees(20);
+		app.core.player.clip.format = MotionClip::Format::kGkClip;
+		app.core.player.clip.root_positions = {Vector3{}};
+		const auto roster = app.core.BuildGuiContext().sceneActors;
+		const auto epoch = app.core.sceneActorRegistry.Epoch();
+		Check(app.core.ensemble.Set(0, roster[1].token, epoch, app.core.motions[1], 0, app.core.sceneActorRegistry,
+		                            app.core.player, app.core.globalOverrides, true) &&
+		      app.core.ensemble.Set(1, roster[2].token, epoch, app.core.motions[0], 0, app.core.sceneActorRegistry,
+		                            app.core.player, app.core.globalOverrides, true), "formation test binds both source tracks");
+		auto bind = [](MotionPlayer& player, void* actor)
+		{
+			IdolBoneBinding binding; binding.actor = actor; binding.actorTransform = actor; binding.bindPoseCaptured = true;
+			binding.clipGroundAnchored = true; player.controller.bindings[actor] = binding;
+		};
+		bind(app.core.player, a);
+		auto& f0 = *app.core.ensemble.Followers()[0].player;
+		auto& f1 = *app.core.ensemble.Followers()[1].player;
+		bind(f0, b); bind(f1, c);
+		app.Settle();
+		if (!app.ItemWithLabel("以主角色对齐原曲队形")) app.Click("多人同步播放（最多三人）");
+		app.Settle();
+		app.Click("以主角色对齐原曲队形"); app.Settle();
+		const Quaternion basis = Quaternion::FromEulerDegreesXYZ(0,50,0);
+		const Vector3 expected = formationPositions[a] + basis.Rotate({1,0,0});
+		const Vector3 actual = formationPositions[b] + f0.controller.initialPositionOffset;
+		Check(std::fabs(actual.x-expected.x)<1e-4f && std::fabs(actual.z-expected.z)<1e-4f &&
+		      std::fabs(f0.controller.initialYawDegrees-90.0f)<1e-4f &&
+		      std::fabs(f1.controller.initialYawDegrees+40.0f)<1e-4f,
+		      "button restores source formation and compensates each actor's native facing");
+		const Quaternion followerBasis = Quaternion::FromEulerDegreesXYZ(0,f0.controller.initialYawDegrees,0) * formationRotations[b];
+		const Vector3 travel = followerBasis.Rotate({0,0,1}), mainTravel = basis.Rotate({0,0,1});
+		Check(std::fabs(travel.x-mainTravel.x)<1e-4f && std::fabs(travel.z-mainTravel.z)<1e-4f,
+		      "all source motion travel uses the primary actor's world-facing basis");
+		const auto firstOffset = f0.controller.initialPositionOffset;
+		app.Click("以主角色对齐原曲队形"); app.Settle();
+		Check(std::fabs(f0.controller.initialPositionOffset.x-firstOffset.x)<1e-4f &&
+		      std::fabs(f0.controller.initialPositionOffset.z-firstOffset.z)<1e-4f,
+		      "repeating formation alignment does not accumulate offsets");
+		formationSourceUnavailable = true;
+		app.Click("以主角色对齐原曲队形"); app.Settle();
+		Check(std::fabs(f0.controller.initialPositionOffset.x-firstOffset.x)<1e-4f &&
+		      app.core.ensembleNotice.find("原始 VMD") != std::string::npos,
+		      "missing source fails visibly without changing actor placement");
+		formationSourceUnavailable = false;
+		app.core.player.controller.bindings.clear();
+	}
+
 }
 
 void ImGuiTestEngineHook_ItemAdd(ImGuiContext* context, ImGuiID id, const ImRect& rect, const ImGuiLastItemData* data)
@@ -790,6 +864,7 @@ int main(int argc, char** argv)
 	TestUnifiedCameraModeControls(root);
 	TestAuxDriveModeControls(root);
 	TestEnsembleControls(root);
+	TestFormationAlignment(root);
 	{
 		const ImGuiConfigFlags originalConfigFlags = io.ConfigFlags;
 		io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // Escape closes native combo popups.

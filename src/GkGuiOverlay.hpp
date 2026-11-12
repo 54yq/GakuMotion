@@ -176,6 +176,7 @@ namespace GakuMotion
 		void (*fnPickFocusedActor)(void* self){nullptr}; // Legacy developer callback: select bound actor
 		std::array<GuiEnsembleFollower, 2> ensembleFollowers{};
 		std::string ensembleNotice;
+		void (*fnAlignEnsemble)(void*){nullptr};
 		void (*fnSetEnsembleFollower)(void*, int, uint64_t, uint64_t, const char*, float, uint64_t){nullptr};
 		void (*fnClearEnsembleFollower)(void*, int, uint64_t){nullptr};
 		void (*fnSetEnsemblePosition)(void*, int, uint64_t, uint64_t, uint64_t, const Vector3&){nullptr};

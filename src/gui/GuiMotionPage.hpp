@@ -149,6 +149,11 @@ namespace GakuMotion
 		{
 			ImGui::TextWrapped("上方角色为主角色。其他角色分别选择曲库中的动作，统一使用主角色的音乐、镜头和进度。停止播放后可修改绑定。");
 			ImGui::TextWrapped("绑定后可分别调整角色站位；额外角色的次级物理暂不由插件驱动。");
+			ImGui::BeginDisabled(!ctx.fnAlignEnsemble || (!ctx.ensembleFollowers[0].actorToken && !ctx.ensembleFollowers[1].actorToken));
+			if (ImGui::Button("以主角色对齐原曲队形")) ctx.fnAlignEnsemble(ctx.self);
+			ImGui::EndDisabled();
+			ImGui::TextWrapped("先绑定并预览各角色；对齐会读取原始 VMD，恢复副角色的初始站位并统一朝向和走位，可再次微调。主角色站位不变。");
+
 			if (overlay.ensembleDraftEpoch != ctx.actorRosterEpoch)
 			{
 				overlay.ensembleDraftEpoch = ctx.actorRosterEpoch;
@@ -214,6 +219,12 @@ namespace GakuMotion
 					if (overlay.ensemblePositionGeneration[i] != follower.bindingGeneration)
 					{
 						overlay.ensemblePositionGeneration[i] = follower.bindingGeneration;
+						overlay.ensemblePositionDraft[i] = follower.position;
+						overlay.ensembleYawDraft[i] = follower.yawDegrees;
+					}
+					// Apply programmatic formation changes once no position/yaw widget is being dragged.
+					if (!ImGui::IsAnyItemActive())
+					{
 						overlay.ensemblePositionDraft[i] = follower.position;
 						overlay.ensembleYawDraft[i] = follower.yawDegrees;
 					}
