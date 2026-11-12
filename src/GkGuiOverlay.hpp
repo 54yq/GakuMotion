@@ -63,6 +63,8 @@ namespace GakuMotion
 		uint64_t bindingGeneration{0};
 		Vector3 position{};
 		float yawDegrees{0};
+		float wristTwistShare{0}, forearmAxisDegrees{45};
+		bool armLocked{false};
 	};
 
 	struct GuiContext
@@ -169,6 +171,7 @@ namespace GakuMotion
 		void (*fnClearEnsembleFollower)(void*, int, uint64_t){nullptr};
 		void (*fnSetEnsemblePosition)(void*, int, uint64_t, uint64_t, uint64_t, const Vector3&){nullptr};
 		void (*fnSetEnsembleYaw)(void*, int, uint64_t, uint64_t, uint64_t, float){nullptr};
+		void (*fnSetFollowerArm)(void*, int, uint64_t, uint64_t, uint64_t, int, float){nullptr};
 
 		// ---- 写动作（回调到 Core） ----
 		void* self{nullptr};
@@ -293,6 +296,8 @@ namespace GakuMotion
 		float initialYawEdit{0};
 		bool initialYawEditing{false};
 		uint64_t initialPlacementActorToken{0};
+		int armCalibrationSlot{0};
+		uint64_t armCalibrationEpoch{0}, armCalibrationGeneration{0};
 		uint64_t ensembleDraftEpoch{0};
 		std::array<uint64_t, 2> ensembleDraftActor{};
 		std::array<std::string, 2> ensembleDraftMotion{};

@@ -16,6 +16,7 @@ namespace GakuMotion
 	public:
 		static constexpr size_t kFollowerCount = EnsembleAssignments::kMaxParts - 1;
 		struct Placement { Vector3 position{}; float yawDegrees{0}; };
+		struct ArmCalibration { float share{0.0f}; float degrees{45.0f}; bool locked{false}; };
 		struct Follower
 		{
 			uint64_t actorToken{0};
@@ -23,6 +24,7 @@ namespace GakuMotion
 			std::string motionKey;
 			float offsetSeconds{0};
 			bool active{false};
+			bool armLocked{false};
 			std::unique_ptr<MotionPlayer> player;
 			BoneOverrideSet motionOverrides;
 			BoneOverrideSet overrides;
@@ -91,6 +93,7 @@ namespace GakuMotion
 			for (auto& follower : followers_) follower = {};
 			assignments_.Reset();
 			placements_.clear();
+			armCalibrations_.clear();
 			restoreUnconfirmed_ = false;
 		}
 
@@ -124,6 +127,11 @@ namespace GakuMotion
 				next->controller.SetInitialYawDegrees(0);
 			}
 			next->controller.auxGroundTruth = {};
+			const auto foundCalibration = armCalibrations_.find(actorToken);
+			const ArmCalibration calibration = foundCalibration == armCalibrations_.end() ? ArmCalibration{} : foundCalibration->second;
+			next->controller.wristTwistShare = calibration.share;
+			next->controller.forearmAxisAdjustmentDeg = calibration.degrees;
+			next->controller.wristDiagnosticPending = false;
 			if (!next->LoadMotion(motion.dir)) return false;
 			next->timing = motion.timing;
 			BoneOverrideSet motionOverrides, effective;
@@ -135,6 +143,7 @@ namespace GakuMotion
 			if (!Clear(index, registry)) return false;
 			auto& follower = followers_[index];
 			follower.actorToken = actorToken;
+			follower.armLocked = calibration.locked;
 			follower.bindingGeneration = nextBindingGeneration_++;
 			if (!nextBindingGeneration_) ++nextBindingGeneration_;
 			follower.motionKey = motion.name;
@@ -169,6 +178,28 @@ namespace GakuMotion
 			    !follower.player->controller.SetInitialYawDegrees(yawDegrees)) return false;
 			RememberPlacement(actorToken, follower.player->controller.initialPositionOffset,
 			                  follower.player->controller.initialYawDegrees);
+			return true;
+		}
+
+		// The generation and actor identity prevent a queued edit from reaching a replacement binding.
+		bool SetArmCalibration(size_t index, uint64_t token, uint64_t epoch, uint64_t generation,
+		                       int operation, float value, const SceneActorRegistry& registry)
+		{
+			if (index >= kFollowerCount || restoreUnconfirmed_) return false;
+			auto& follower = followers_[index];
+			if (!follower.player || !generation || follower.bindingGeneration != generation ||
+			    follower.actorToken != token || registry.Resolve(token, epoch) != follower.player->controller.targetActor)
+				return false;
+			auto& controller = follower.player->controller;
+			if (operation == 3) follower.armLocked = value != 0.0f;
+			else if (operation == 0 && std::isfinite(value) && value >= -1.0f && value <= 1.0f)
+				controller.wristTwistShare = value;
+			else if (operation == 1 && !follower.armLocked && std::isfinite(value) && value >= -90.0f && value <= 90.0f)
+				controller.forearmAxisAdjustmentDeg = value;
+			else if (operation == 2 && !follower.armLocked)
+			{ controller.wristTwistShare = 0.0f; controller.forearmAxisAdjustmentDeg = 45.0f; }
+			else return false;
+			armCalibrations_[token] = {controller.wristTwistShare, controller.forearmAxisAdjustmentDeg, follower.armLocked};
 			return true;
 		}
 
@@ -228,6 +259,7 @@ namespace GakuMotion
 		std::array<Follower, kFollowerCount> followers_{};
 		EnsembleAssignments assignments_;
 		std::unordered_map<uint64_t, Placement> placements_;
+		std::unordered_map<uint64_t, ArmCalibration> armCalibrations_;
 		bool restoreUnconfirmed_{false};
 		uint64_t nextBindingGeneration_{1};
 	};

@@ -597,6 +597,50 @@ namespace
 		Check(app.core.ensemble.Followers()[1].actorToken == roster[2].token &&
 		      app.core.ensemble.Followers()[1].motionKey == "A",
 		      "second follower controls bind a different actor and clip");
+		const auto& f0 = app.core.ensemble.Followers()[0];
+		const auto& f1 = app.core.ensemble.Followers()[1];
+		const auto epoch = app.core.sceneActorRegistry.Epoch();
+		Check(f0.player->controller.forearmAxisAdjustmentDeg == 45.0f && f1.player->controller.forearmAxisAdjustmentDeg == 45.0f &&
+		      f0.player->controller.wristTwistShare == 0.0f && f1.player->controller.wristTwistShare == 0.0f,
+		      "both follower calibrations start independently at 45 degrees and zero share");
+		Check(app.core.ensemble.SetArmCalibration(0, f0.actorToken, epoch, f0.bindingGeneration, 1, 27.5f, app.core.sceneActorRegistry) &&
+		      f0.player->controller.forearmAxisAdjustmentDeg == 27.5f && f1.player->controller.forearmAxisAdjustmentDeg == 45.0f,
+		      "editing one follower leaves the other unchanged");
+		Check(!app.core.ensemble.SetArmCalibration(0, f0.actorToken, epoch, f0.bindingGeneration + 1, 1, 20, app.core.sceneActorRegistry) &&
+		      f0.player->controller.forearmAxisAdjustmentDeg == 27.5f,
+		      "a stale binding cannot be adjusted");
+		Check(app.core.ensemble.SetArmCalibration(0, f0.actorToken, epoch, f0.bindingGeneration, 0, 0.5f, app.core.sceneActorRegistry) &&
+		      app.core.ensemble.SetArmCalibration(0, f0.actorToken, epoch, f0.bindingGeneration, 2, 0, app.core.sceneActorRegistry) &&
+		      f0.player->controller.forearmAxisAdjustmentDeg == 45.0f && f0.player->controller.wristTwistShare == 0.0f,
+		      "reset restores 45 degrees and zero share");
+		Check(app.core.ensemble.SetArmCalibration(0, f0.actorToken, epoch, f0.bindingGeneration, 3, 1, app.core.sceneActorRegistry) &&
+		      !app.core.ensemble.SetArmCalibration(0, f0.actorToken, epoch, f0.bindingGeneration, 1, 20, app.core.sceneActorRegistry) &&
+		      app.core.ensemble.SetArmCalibration(0, f0.actorToken, epoch, f0.bindingGeneration, 3, 0, app.core.sceneActorRegistry),
+		      "follower lock prevents axis edits and can be released");
+		app.Click("多人同步播放（最多三人）"); app.Settle();
+		if (auto* page = FindResponsiveWindow("/##gkmotion_main_content_")) page->Scroll.y = 0.0f;
+		app.Settle();
+		if (!app.ItemWithLabel("校正角色")) app.Click("高级动作设置");
+		app.Settle();
+		ImRect armHeader;
+		if (app.Find("高级动作设置", armHeader))
+			if (auto* page = FindResponsiveWindow("/##gkmotion_main_content_"))
+				page->Scroll.y = (std::max)(0.0f, page->Scroll.y + armHeader.Min.y - page->InnerRect.Min.y - 30.0f);
+		app.Settle();
+		app.Click("校正角色"); app.Click(("角色 2：" + roster[1].label).c_str()); app.Settle();
+		Check(app.core.gui.armCalibrationSlot == 1, "calibration selector chooses the first follower");
+		app.Click("+0.1°"); app.Settle();
+		Check(std::fabs(f0.player->controller.forearmAxisAdjustmentDeg - 45.1f) < 0.01f &&
+		      f1.player->controller.forearmAxisAdjustmentDeg == 45.0f,
+		      "0.1 degree button adjusts only the selected follower");
+		app.Click("设为 +45°"); app.Settle();
+		Check(f0.player->controller.forearmAxisAdjustmentDeg == 45.0f, "45 degree shortcut reaches the selected follower");
+		app.core.ensemble.SetArmCalibration(0, f0.actorToken, epoch, f0.bindingGeneration, 0, .5f, app.core.sceneActorRegistry);
+		app.Click("重置前臂校正"); app.Settle();
+		Check(f0.player->controller.wristTwistShare == 0.0f && f0.player->controller.forearmAxisAdjustmentDeg == 45.0f,
+		      "actual reset button restores both follower settings");
+		app.Click("高级动作设置"); app.Settle();
+		app.Click("多人同步播放（最多三人）"); app.Settle();
 		app.core.player.state = PlaybackState::Playing; app.Settle();
 		const auto* actorCombo = app.ItemWithLabel("##ensemble_actor");
 		Check(actorCombo && (actorCombo->flags & ImGuiItemFlags_Disabled),
@@ -672,7 +716,7 @@ void ImGuiTestEngineHook_ItemAdd(ImGuiContext* context, ImGuiID id, const ImRect
 	// This vendored BeginCombo emits ItemAdd but no ItemInfo. Identify its real
 	// submitted item by the current ID stack without changing production code.
 	if (context->CurrentWindow && !context->CurrentWindow->IDStack.empty())
-		for (const char* label : {"##play_mode", "##playback_speed", "##camera_quick_mode", "##physics_engine_select", "##drive_actor_combo", "##camera_mode", "跟随部位", "##ensemble_actor", "##ensemble_motion", "##aux_drive_mode"})
+		for (const char* label : {"##play_mode", "##playback_speed", "##camera_quick_mode", "##physics_engine_select", "##drive_actor_combo", "##camera_mode", "跟随部位", "##ensemble_actor", "##ensemble_motion", "##aux_drive_mode", "校正角色"})
 			if (ImHashStr(label, 0, context->CurrentWindow->IDStack.back()) == id) items[id].label = label;
 }
 void ImGuiTestEngineHook_ItemInfo(ImGuiContext*, ImGuiID id, const char* label, ImGuiItemStatusFlags status)
