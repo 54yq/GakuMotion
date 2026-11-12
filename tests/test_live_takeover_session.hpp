@@ -1,0 +1,41 @@
+#pragma once
+#include "GkLiveTakeoverSession.hpp"
+
+// These are synthetic state transitions, not a game or API compatibility test.
+inline void TestLiveTakeoverSession()
+{
+    using namespace GakuMotion::live_takeover;
+    auto check = [](bool ok, const char* what) { StageRuntimeHarness::Check(ok, what); };
+    const Evidence running{1, true, true, false};
+    const Evidence paused{1, true, true, true};
+    const Evidence another{2, true, true, true};
+    Session s;
+    check(!s.MayInject() && s.State() == Phase::Off, "Live takeover defaults off");
+    check(s.Enable({1, false, true, false}) == Action::None && !s.MayInject(), "unverified Live remains blocked");
+    check(s.Enable(running) == Action::PauseLive && !s.MayInject(), "pause is requested before injection");
+    check(s.PauseFinished(paused, true) == Action::None && s.MayInject() && s.OwnsPause(), "observed pause permits injection");
+    check(s.Disable(paused) == Action::RestoreActors && !s.MayInject(), "disable first revokes injection and restores actors");
+    check(s.RestoreFinished(paused, true) == Action::ResumeLive, "owned pause resumes only after confirmed restoration");
+    s.ResumeFinished(running, true);
+    check(s.State() == Phase::Off, "confirmed resume returns to off");
+
+    check(s.Enable(paused) == Action::None && s.MayInject() && !s.OwnsPause(), "already paused Live stays user-owned");
+    check(s.Disable(paused) == Action::RestoreActors && s.RestoreFinished(paused, true) == Action::None &&
+        s.State() == Phase::Off, "already paused Live is not resumed");
+
+    s.Enable(running); s.PauseFinished(paused, true); s.Disable(paused);
+    check(s.RestoreFinished(paused, false) == Action::None && s.State() == Phase::Failed && !s.MayInject(),
+        "failed actor restoration cannot resume Live");
+    s.ObserveOwner(another);
+    check(s.State() == Phase::Off, "scene change drops stale ownership without a game action");
+
+    s.Enable(running); s.Disable(running);
+    check(s.PauseFinished(paused, true) == Action::ResumeLive && !s.MayInject(),
+        "cancel during pending pause resumes without taking over actors");
+    s.ResumeFinished(running, true);
+    s.Enable(running); s.PauseFinished(paused, false);
+    check(s.State() == Phase::Failed && !s.MayInject(), "unconfirmed pause cannot grant takeover");
+    s.ObserveOwner(another);
+    s.Enable(paused); s.ObserveOwner(running);
+    check(!s.MayInject() && s.State() == Phase::Failed, "external Live resume revokes injection");
+}

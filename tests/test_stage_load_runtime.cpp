@@ -372,10 +372,12 @@ namespace StageRuntimeHarness
     }
 }
 
+#include "test_live_takeover_session.hpp"
+
 int main()
 {
     using namespace StageRuntimeHarness;
-    TestDetour(); TestInstall(); TestShutdown();
+    TestDetour(); TestInstall(); TestShutdown(); TestLiveTakeoverSession();
     std::printf("Stage-load runtime detour: %d passed, %d failed\n", passed, failed);
     return failed ? 1 : 0;
 }
