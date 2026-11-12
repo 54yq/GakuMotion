@@ -16,6 +16,29 @@ namespace GakuMotion
         return 0;
     }
 
+    struct FacialWeights
+    {
+        float overall{1.0f}, brow{1.0f}, eye{1.0f}, mouth{1.0f};
+
+        static float SafeMultiplier(float value)
+        {
+            return std::isfinite(value) ? std::clamp(value, 0.0f, 2.0f) : 1.0f;
+        }
+
+        float Apply(const std::string& name, float weight) const
+        {
+            const unsigned family = FacialFamily(name);
+            // Do not alter unrelated native or corrective channels.
+            if (!family) return weight;
+            const float part = family == 1 ? brow : family == 2 ? eye : mouth;
+            if (!std::isfinite(weight)) return 0.0f;
+            const float multiplier = SafeMultiplier(overall) * SafeMultiplier(part);
+            // Preserve an intentionally over-range pre-existing baseline at
+            // the default while never amplifying beyond that existing value.
+            return std::clamp(weight * multiplier, 0.0f, (std::max)(1.0f, weight));
+        }
+    };
+
     inline const CharacterBaselineProfile* FindCharacterBaseline(const std::string& codeOrName)
     {
         if (codeOrName.empty()) return nullptr;

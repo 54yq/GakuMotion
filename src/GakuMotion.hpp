@@ -242,6 +242,8 @@ namespace GakuMotion
 		std::string playlistPath;
 		std::string initialPositionPath;
 		std::string initialPositionNotice;
+		std::string facialWeightsNotice;
+		std::string musicVolumeNotice;
 		SoleMeasurementSettings soleSettings;
 		SoleMeasurementSnapshot soleSnapshot;
 		sole_pitch::Settings experimentalSolePitchSettings;
@@ -343,7 +345,7 @@ namespace GakuMotion
 			Select, Cycle, Play, Pause, Resume, Stop, Seek,
 			ScrubBegin, ScrubUpdate, ScrubEnd, Refresh, Move,
 			SaveList, LoadList, Mode, Mute, Speed, Import, ClearTarget, NextTarget, PickTarget,
-			InitialPosition, SaveInitialPosition, PhysicsBackend,
+			InitialPosition, SaveInitialPosition, SaveFacialWeights, MusicVolume, SaveMusicVolume, PhysicsBackend,
 			CameraSettings, SaveCameraSettings, CameraImport, ReloadCamera,
 			SoleSettings, SaveSoleSettings, LoadSoleSettings, ExperimentalSolePitch, ExperimentalWaistSupport,
 			BeforeQuartzExperiment,
@@ -711,6 +713,12 @@ namespace GakuMotion
 				case GuiAction::Speed:
 					player.SetPlaybackSpeed(cmd.value);
 					break;
+				case GuiAction::MusicVolume:
+					if (!player.SetMusicVolume(cmd.value)) musicVolumeNotice = "音乐音量暂不可调，原播放音量未改变";
+					else musicVolumeNotice.clear();
+					break;
+				case GuiAction::SaveMusicVolume: SaveMusicVolume();
+					break;
 				case GuiAction::Import: StartImport(cmd.import);
 					break;
 				case GuiAction::CameraSettings:
@@ -753,6 +761,8 @@ namespace GakuMotion
 				case GuiAction::InitialPosition: player.controller.SetInitialPositionOffset(cmd.position);
 					break;
 				case GuiAction::SaveInitialPosition: SaveInitialPosition();
+					break;
+				case GuiAction::SaveFacialWeights: SaveFacialWeights();
 					break;
 				case GuiAction::PhysicsBackend:
 					{
@@ -869,6 +879,8 @@ namespace GakuMotion
 			playlistPath = dataLayout.Playlist();
 			initialPositionPath = configRoot + "/initial_position.json";
 			LoadInitialPosition();
+			LoadFacialWeights();
+			LoadMusicVolume();
 			globalOverridePath = configRoot + "/bone_overrides.json";
 
 			gui.motionsRoot = motionsRoot;
@@ -1897,6 +1909,98 @@ namespace GakuMotion
 			return true;
 		}
 
+		bool LoadMusicVolume()
+		{
+			const auto path = configRoot + "/music_volume.json";
+			std::error_code ec;
+			if (!std::filesystem::exists(MotionPathFromUtf8(path), ec)) return false;
+			jsonlite::Value root;
+			std::string error;
+			if (!jsonlite::ParseFile(path, root, error) || root.IntPath("version", 0) != 1)
+			{ musicVolumeNotice = "音乐音量载入失败：配置无效"; return false; }
+			const auto* value = root.Find("volume");
+			if (!value || !value->IsNumber()) { musicVolumeNotice = "音乐音量载入失败：配置无效"; return false; }
+			const float volume = value->AsFloat(-1.0f);
+			if (!std::isfinite(volume) || volume < 0.0f || volume > 1.0f)
+			{ musicVolumeNotice = "音乐音量载入失败：数值应在 0 到 1 之间"; return false; }
+			if (!player.SetMusicVolume(volume)) { musicVolumeNotice = "音乐音量暂不可调"; return false; }
+			musicVolumeNotice.clear();
+			return true;
+		}
+
+		bool SaveMusicVolume()
+		{
+			const float volume = player.musicVolume;
+			if (!std::isfinite(volume) || volume < 0.0f || volume > 1.0f)
+			{ musicVolumeNotice = "音乐音量保存失败：数值无效"; return false; }
+			std::error_code ec;
+			std::filesystem::create_directories(MotionPathFromUtf8(configRoot), ec);
+			if (ec) { musicVolumeNotice = "音乐音量保存失败: " + ec.message(); return false; }
+			const auto path = configRoot + "/music_volume.json", temporary = path + ".tmp";
+			std::ofstream out(MotionPathFromUtf8(temporary), std::ios::binary | std::ios::trunc);
+			out << "{\n  \"version\": 1,\n  \"volume\": " << jsonlite::FormatNumber(volume, 6) << "\n}\n";
+			out.close();
+			if (!out) { musicVolumeNotice = "音乐音量保存失败：无法写入文件"; return false; }
+			std::filesystem::copy_file(MotionPathFromUtf8(temporary), MotionPathFromUtf8(path),
+			                           std::filesystem::copy_options::overwrite_existing, ec);
+			if (ec) { musicVolumeNotice = "音乐音量保存失败: " + ec.message(); return false; }
+			std::filesystem::remove(MotionPathFromUtf8(temporary), ec);
+			return true;
+		}
+
+		bool LoadFacialWeights()
+		{
+			const auto path = configRoot + "/facial_weights.json";
+			std::error_code ec;
+			if (!std::filesystem::exists(MotionPathFromUtf8(path), ec)) return false;
+			jsonlite::Value root;
+			std::string error;
+			if (!jsonlite::ParseFile(path, root, error) || root.IntPath("version", 0) != 1)
+			{
+				facialWeightsNotice = "表情幅度载入失败：配置无效";
+				return false;
+			}
+			FacialWeights weights;
+			for (const auto& entry : {std::pair<const char*, float*>{"overall", &weights.overall},
+			     {"brow", &weights.brow}, {"eye", &weights.eye}, {"mouth", &weights.mouth}})
+			{
+				const auto* value = root.Find(entry.first);
+				if (!value || !value->IsNumber()) { facialWeightsNotice = "表情幅度载入失败：配置无效"; return false; }
+				const float number = value->AsFloat(-1.0f);
+				if (!std::isfinite(number) || number < 0.0f || number > 2.0f)
+				{ facialWeightsNotice = "表情幅度载入失败：数值应在 0 到 2 之间"; return false; }
+				*entry.second = number;
+			}
+			player.controller.facialWeights = weights;
+			facialWeightsNotice = "已载入保存的表情幅度";
+			return true;
+		}
+
+		bool SaveFacialWeights()
+		{
+			const auto& w = player.controller.facialWeights;
+			for (const float value : {w.overall, w.brow, w.eye, w.mouth})
+				if (!std::isfinite(value) || value < 0.0f || value > 2.0f)
+				{ facialWeightsNotice = "表情幅度保存失败：数值无效"; return false; }
+			std::error_code ec;
+			std::filesystem::create_directories(MotionPathFromUtf8(configRoot), ec);
+			if (ec) { facialWeightsNotice = "表情幅度保存失败: " + ec.message(); return false; }
+			const auto path = configRoot + "/facial_weights.json", temporary = path + ".tmp";
+			std::ofstream out(MotionPathFromUtf8(temporary), std::ios::binary | std::ios::trunc);
+			out << "{\n  \"version\": 1,\n  \"overall\": " << jsonlite::FormatNumber(w.overall, 6)
+				<< ",\n  \"brow\": " << jsonlite::FormatNumber(w.brow, 6)
+				<< ",\n  \"eye\": " << jsonlite::FormatNumber(w.eye, 6)
+				<< ",\n  \"mouth\": " << jsonlite::FormatNumber(w.mouth, 6) << "\n}\n";
+			out.close();
+			if (!out) { facialWeightsNotice = "表情幅度保存失败：无法写入文件"; return false; }
+			std::filesystem::copy_file(MotionPathFromUtf8(temporary), MotionPathFromUtf8(path),
+			                           std::filesystem::copy_options::overwrite_existing, ec);
+			if (ec) { facialWeightsNotice = "表情幅度保存失败: " + ec.message(); return false; }
+			std::filesystem::remove(MotionPathFromUtf8(temporary), ec);
+			facialWeightsNotice = "表情幅度已保存，下次启动自动载入";
+			return true;
+		}
+
 		bool LoadInitialPosition()
 		{
 			std::error_code ec;
@@ -2827,6 +2931,8 @@ namespace GakuMotion
 			ctx.importProgress = &guiImportProgressSnapshot;
 			ctx.playlistNotice = playlistNotice;
 			ctx.initialPositionNotice = initialPositionNotice;
+			ctx.facialWeightsNotice = facialWeightsNotice;
+			ctx.fnSaveFacialWeights = [](void* self) { static_cast<Core*>(self)->QueueGui({GuiAction::SaveFacialWeights}); };
 			ctx.soleSettings = soleSettings;
 			ctx.soleSnapshot = soleSnapshot;
 			ctx.soleNotice = soleNotice;
@@ -2893,6 +2999,13 @@ namespace GakuMotion
 			{
 				static_cast<Core*>(self)->QueueGui({GuiAction::Speed, value});
 			};
+			ctx.fnSetMusicVolume = [](void* self, float value)
+			{
+				static_cast<Core*>(self)->QueueGui({GuiAction::MusicVolume, value});
+			};
+			ctx.fnSaveMusicVolume = [](void* self) { static_cast<Core*>(self)->QueueGui({GuiAction::SaveMusicVolume}); };
+			ctx.musicVolumeSupport = player.fnAudioVolumeSupport ? player.fnAudioVolumeSupport() : 0;
+			ctx.musicVolumeNotice = musicVolumeNotice;
 			ctx.fnSeekFrame = [](void* self, int64_t frame) { static_cast<Core*>(self)->QueueSeekFrame(frame); };
 			ctx.fnStepFrame = [](void* self, int delta) { static_cast<Core*>(self)->QueueStepFrame(delta); };
 			ctx.fnReloadMotion = [](void* self) { static_cast<Core*>(self)->QueueReloadMotion(); };

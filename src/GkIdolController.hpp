@@ -456,6 +456,7 @@ namespace GakuMotion
 		};
 		FacialUiSnapshot guiMikuFitSnapshot; // Coherent GUI read; preserves controller fixture copy semantics.
 		float facialBaselineMultiplier{1.0f};
+		FacialWeights facialWeights;
 		std::string facialCharacterOverride{"auto"};
 
 	private:
@@ -957,6 +958,7 @@ namespace GakuMotion
 			b.actor = actor;
 			b.face.enableBaseline = facialEnableBaseline;
 			b.face.baselineMultiplier = facialBaselineMultiplier;
+			b.face.facialWeights = facialWeights;
 			b.face.characterOverride = facialCharacterOverride;
 			b.face.enableMikuMouthFit = facialMikuMouthFit;
 			b.face.enableMikuEyeFit = facialMikuEyeFit;
@@ -2111,6 +2113,7 @@ namespace GakuMotion
 			}
 			b.face.enableBaseline = facialEnableBaseline;
 			b.face.baselineMultiplier = facialBaselineMultiplier;
+			b.face.facialWeights = facialWeights;
 			b.face.characterOverride = facialCharacterOverride;
 			b.face.enableMikuMouthFit = facialMikuMouthFit;
 			b.face.enableMikuEyeFit = facialMikuEyeFit;
