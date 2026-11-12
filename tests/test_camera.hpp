@@ -140,6 +140,62 @@ static void TestCameraController(const std::string& repoRoot)
 	Check(writes == priorWrites && !camera.owned, "destroyed scene camera never restored");
 	alive = true;
 
+	BeginTest("Live VMD track baseline alignment / restore");
+	{
+		Core core;
+		core.player.controller.currentBinding.actor = actor;
+		core.player.controller.currentBinding.bindPoseCaptured = true;
+		core.player.controller.currentBinding.restRootPos = {2, .9f, -3};
+		auto zero = core.LiveCameraTrackAnchor(actor);
+		Check(zero.x == 0 && zero.y == 0 && zero.z == 0, "ordinary scenes retain original camera anchor");
+		core.liveTakeoverActive = true;
+		const auto anchor = core.LiveCameraTrackAnchor(actor);
+		Check(anchor.x == 2 && anchor.y == 0 && anchor.z == -3,
+		      "Live anchor includes only captured horizontal root baseline");
+		Check(core.LiveCameraTrackAnchor(reinterpret_cast<void*>(0x31)).x == 0,
+		      "another actor cannot inherit the selected actor baseline");
+		actual = before;
+		camera.settings = CameraSettings{};
+		camera.settings.mode = CameraMode::Track;
+		camera.track.fps = 30;
+		CameraFrame first; first.position = {0, 1.2f, 1.7f};
+		first.rotation = Quaternion::FromEulerDegreesXYZ(0, 180, 0);
+		first.fov = 22;
+		CameraFrame second = first; second.position.x += 1; second.fov = 30;
+		camera.track.frames = {first, second};
+		camera.Tick(true, 0, .016f, actor, 1, anchor);
+		const Vector3 expected = Vector3{10, 0, 20} + Quaternion::FromEulerDegreesXYZ(0, 90, 0).Rotate(anchor + first.position);
+		Check(std::fabs(actual.position.x - expected.x) < 1e-4f &&
+		      std::fabs(actual.position.y - expected.y) < 1e-4f && std::fabs(actual.position.z - expected.z) < 1e-4f,
+		      "captured Live displacement shifts track into the motion's reference frame");
+		const Vector3 motionLocal{.4f, 1.0f, -.2f};
+		const auto actorRotation = Quaternion::FromEulerDegreesXYZ(0, 90, 0);
+		const Vector3 motionWorld = Vector3{10, 0, 20} + actorRotation.Rotate(anchor + motionLocal);
+		const Vector3 relative = motionWorld - actual.position;
+		const Vector3 intendedRelative = actorRotation.Rotate(motionLocal - first.position);
+		Check(std::fabs(relative.x - intendedRelative.x) < 1e-4f &&
+		      std::fabs(relative.y - intendedRelative.y) < 1e-4f &&
+		      std::fabs(relative.z - intendedRelative.z) < 1e-4f,
+		      "motion and camera retain their source relative framing despite the Live baseline");
+		const auto expectedRotation = Quaternion::FromEulerDegreesXYZ(0, 90, 0) * first.rotation;
+		Check(QuatNear(actual.rotation, expectedRotation) && actual.fov == 22,
+		      "alignment keeps source camera orientation and field of view");
+		camera.Tick(true, 1.0f / 30, .016f, actor, 2, anchor);
+		const Vector3 nextExpected = Vector3{10, 0, 20} + Quaternion::FromEulerDegreesXYZ(0, 90, 0).Rotate(anchor + second.position);
+		Check(std::fabs(actual.position.x - nextExpected.x) < 1e-4f &&
+		      std::fabs(actual.position.z - nextExpected.z) < 1e-4f && actual.fov == 30,
+		      "later camera keyframes retain their movement and field of view");
+		const auto restored = camera.ReleaseForCapture(); // Live exit uses the protected-capture restoration path.
+		Check(restored.modified && restored.confirmed && !camera.owned &&
+		      QuatNear(actual.rotation, before.rotation) && actual.fov == before.fov &&
+		      std::fabs(actual.position.x - before.position.x) < 1e-5f &&
+		      std::fabs(actual.position.y - before.position.y) < 1e-5f &&
+		      std::fabs(actual.position.z - before.position.z) < 1e-5f,
+		      "release restores the original camera pose and field of view");
+		core.liveTakeoverActive = false;
+		Check(core.LiveCameraTrackAnchor(actor).x == 0, "disabling Live removes its alignment");
+	}
+
 	BeginTest("camera settings validity / placement anchor");
 	{
 		auto valid = CameraSettings{};

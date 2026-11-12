@@ -78,22 +78,6 @@ namespace GakuMotion
 
 	static_assert(sizeof(CameraFrame) == 40);
 
-	// Compute a new world-space placement without moving the scene actor itself.
-	// Using the current hips position makes the operation idempotent after the
-	// previous offset has been applied, including in an animated preview pose.
-	inline bool CameraFrontPlacement(const CameraFrame& frame, const Vector3& hips,
-	                                 const Vector3& offset, float distance, Vector3& result)
-	{
-		const float norm = Quaternion::Dot(frame.rotation, frame.rotation);
-		if (!CameraFinite(frame.position) || !CameraFinite(hips) || !CameraFinite(offset) ||
-		    !std::isfinite(norm) || norm < 1e-8f || !std::isfinite(distance) || distance < 0.5f || distance > 20.0f)
-			return false;
-		const Vector3 forward = frame.rotation.Normalized().Rotate({0, 0, 1});
-		const Vector3 desired = frame.position + Vector3{forward.x * distance, forward.y * distance, forward.z * distance};
-		result = offset + desired - hips;
-		return CameraFinite(result);
-	}
-
 	class CameraTrack
 	{
 	public:
@@ -477,7 +461,8 @@ namespace GakuMotion
 			Publish();
 		}
 
-		void Tick(bool active, float time, float dt, void* targetActor, uint64_t physicalFrame = 0)
+		void Tick(bool active, float time, float dt, void* targetActor, uint64_t physicalFrame = 0,
+		          Vector3 trackAnchorLocal = {})
 		{
 			if (!active || !settings.enabled || !settings.IsValid() || !targetActor)
 			{
@@ -545,7 +530,12 @@ namespace GakuMotion
 						delta.y * settings.vmdRangeScale, delta.z * settings.vmdRangeScale};
 					frame.orthographicSize *= settings.vmdRangeScale;
 				}
-				frame.position = (settings.followActor ? origin : actorOrigin) + originRotation.Rotate(frame.position + tf.position);
+				// The Live actor may have been captured mid-performance. The motion's
+				// root includes this baseline in the actor's current local frame, so
+				// the VMD path must share it. It is constant per binding, not hips
+				// following, and therefore preserves the track's intended composition.
+				const Vector3 anchor = CameraFinite(trackAnchorLocal) ? actorRotation.Rotate(trackAnchorLocal) : Vector3{};
+				frame.position = (settings.followActor ? origin : actorOrigin) + anchor + originRotation.Rotate(frame.position + tf.position);
 				frame.rotation = (originRotation * frame.rotation * qRot).Normalized();
 			}
 			else if (settings.mode == CameraMode::Track)

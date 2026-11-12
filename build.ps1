@@ -145,15 +145,6 @@ try {
     if ($LASTEXITCODE -ne 0) { throw ('Live capture contract build failed: ' + $LASTEXITCODE) }
     & $captureExe
     if ($LASTEXITCODE -ne 0) { throw ('Live capture contract tests failed: ' + $LASTEXITCODE) }
-    $placementExe = Join-Path $OutputRoot 'live_camera_placement.exe'
-    $placementObj = Join-Path $OutputRoot 'live_camera_placement.obj'
-    $placementArgs = @('/nologo', '/std:c++20', '/utf-8', '/EHsc', '/MT', '/W4',
-        "/I$(Join-Path $repo 'src')", "/I$(Join-Path $repo 'include')", "/I$(Join-Path $repo 'deps/KineTexture/src')",
-        (Join-Path $repo 'tests\test_live_camera_placement.cpp'), "/Fe:$placementExe", "/Fo:$placementObj")
-    & $compiler @placementArgs
-    if ($LASTEXITCODE -ne 0) { throw ('Live camera placement build failed: ' + $LASTEXITCODE) }
-    & $placementExe
-    if ($LASTEXITCODE -ne 0) { throw ('Live camera placement tests failed: ' + $LASTEXITCODE) }
     $coreExe = Join-Path $OutputRoot 'synthetic_core.exe'
     $coreObj = Join-Path $OutputRoot 'synthetic_core.obj'
     $coreArgs = @('/nologo', '/std:c++20', '/utf-8', '/EHsc', '/MT', '/W3',
