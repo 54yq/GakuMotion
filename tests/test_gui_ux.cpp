@@ -521,6 +521,9 @@ namespace
 		Check(app.core.player.controller.auxDriveMode == kAuxNormal, "selector restores normal mode directly");
 		app.Click("记录手腕诊断"); app.Settle();
 		Check(app.core.player.controller.wristDiagnosticPending, "wrist diagnostic button queues a one-shot capture");
+		app.Click("前臂扭转分担 [实验]"); app.Settle();
+		Check(app.core.player.controller.wristTwistShare > 0.3f && app.core.player.controller.wristTwistShare < 0.7f,
+		      "twist share slider queues its value to the active controller");
 	}
 
 	void TestEnsembleControls(const std::filesystem::path& root)

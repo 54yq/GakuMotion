@@ -548,6 +548,42 @@ static void TestWristDiagnosticIsOneShot()
 	Check(fake::wristDiagnosticLines == 13, "wrist diagnostics do not repeat without another request");
 }
 
+static void TestWristTwistRedistribution()
+{
+	BeginTest("wrist_twist_redistribution");
+	MotionClip clip = MakeSmallClip();
+	clip.format = MotionClip::Format::kGkClip;
+	clip.version = 5;
+	clip.bones = {{15, "LeftLowerArm", true}, {17, "LeftHand", true}};
+	clip.bone_parent_hids = {-1, 15};
+	const Quaternion forearm = Quaternion::FromEulerDegreesXYZ(10, 50, 25);
+	const Quaternion hand = Quaternion::FromEulerDegreesXYZ(-60, 20, 10);
+	clip.bone_rotations = {forearm, hand, forearm, hand};
+	IdolController controller;
+	WireControllerCallbacks(controller);
+	controller.fnSetLocalRotation = fake::SetWorldRot;
+	IdolBoneBinding binding;
+	binding.actor = reinterpret_cast<void*>(0x901);
+	binding.bindPoseCaptured = true;
+	binding.boneTransforms = {reinterpret_cast<void*>(0x915), reinterpret_cast<void*>(0x917)};
+	binding.restRotations.resize(2);
+	fake::rotationCalls.clear(); controller.ApplyMotionToBinding(binding, clip, 0);
+	Check(fake::rotationCalls.size() == 2 && QuatNear(fake::rotationCalls[0].second, forearm) &&
+	      QuatNear(fake::rotationCalls[1].second, hand), "zero share leaves the authored pose unchanged");
+	controller.wristTwistShare = 0.5f;
+	fake::rotationCalls.clear(); controller.ApplyMotionToBinding(binding, clip, 0);
+	Check(fake::rotationCalls.size() == 2 && !QuatNear(fake::rotationCalls[0].second, forearm) &&
+	      QuatNear(fake::rotationCalls[0].second * fake::rotationCalls[1].second, forearm * hand),
+	      "twist share rotates the forearm while preserving the hand world orientation");
+	const Quaternion share = IdolController::WristTwistShareRotation(hand, 0.5f);
+	const Quaternion neg(-hand.x, -hand.y, -hand.z, -hand.w);
+	Check(QuatNear(share, IdolController::WristTwistShareRotation(neg, 0.5f)), "twist share is quaternion-sign invariant");
+	clip.bone_parent_hids[1] = -1;
+	fake::rotationCalls.clear(); controller.ApplyMotionToBinding(binding, clip, 0);
+	Check(fake::rotationCalls.size() == 2 && QuatNear(fake::rotationCalls[0].second, forearm) &&
+	      QuatNear(fake::rotationCalls[1].second, hand), "missing forearm parent disables twist sharing");
+}
+
 static void TestAuxQuaternionSignInvariance()
 {
 	BeginTest("auxiliary model uses rotation, not quaternion sign");
@@ -2784,6 +2820,7 @@ int main(int argc, char** argv)
  TestOverrideInjection();
  TestGkClipWristOverrideSpaces();
  TestWristDiagnosticIsOneShot();
+ TestWristTwistRedistribution();
  TestAuxQuaternionSignInvariance();
  TestPlayerSeekSync();
  TestPlaybackSpeedAndClock();

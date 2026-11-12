@@ -669,7 +669,19 @@ namespace GakuMotion
 		// 实机靶向对照组：辅助骨驱动模式（详见 AuxDriveMode 注释）
 		// 由 control.json (`aux.mode`) 声明式驱动，或由热键 F8 现场循环切换。
 		int auxDriveMode{kAuxNormal};
+		float wristTwistShare{0.0f}; // Opt-in: move hand-axis twist to the forearm while preserving hand world pose.
 		bool wristDiagnosticPending{false};
+
+		static Quaternion WristTwistShareRotation(const Quaternion& handLocal, float fraction) noexcept
+		{
+			if (!std::isfinite(fraction) || fraction <= 0.0f) return Quaternion::Identity();
+			fraction = (std::min)(fraction, 1.0f);
+			float x = handLocal.x, w = handLocal.w;
+			if (w < 0.0f || (w == 0.0f && x < 0.0f)) { x = -x; w = -w; }
+			if (x * x + w * w < 1e-12f) return Quaternion::Identity();
+			const float halfAngle = std::atan2(x, w) * fraction;
+			return Quaternion(std::sin(halfAngle), 0.0f, 0.0f, std::cos(halfAngle));
+		}
 
 		// One bounded snapshot, on the Unity thread after the motion and auxiliary
 		// writes. It observes transforms only; it does not modify the pose.
@@ -677,8 +689,8 @@ namespace GakuMotion
 		{
 			if (!wristDiagnosticPending || !fnLogInfo) return;
 			wristDiagnosticPending = false;
-			fnLogInfo("[GakuMotion][WristDiag] actor=%p time=%.4f aux=%d overrides=%d getters(localRot=%d worldRot=%d localPos=%d worldPos=%d parent=%d)",
-			          b.actor, timeSeconds, auxDriveMode, appliedOverrides,
+			fnLogInfo("[GakuMotion][WristDiag] actor=%p time=%.4f aux=%d twistShare=%.3f overrides=%d getters(localRot=%d worldRot=%d localPos=%d worldPos=%d parent=%d)",
+			          b.actor, timeSeconds, auxDriveMode, wristTwistShare, appliedOverrides,
 			          fnGetLocalRotation != nullptr, fnGetWorldRotation != nullptr, fnGetLocalPosition != nullptr,
 			          fnGetWorldPosition != nullptr, fnGetTransformParent != nullptr);
 			auto capture = [&](const char* label, void* transform)
@@ -2139,6 +2151,29 @@ namespace GakuMotion
 			Vector3 vmdRootPos;
 			std::vector<Quaternion> vmdRotations;
 			clip.Sample(currentTimeSeconds, vmdRootPos, vmdRotations);
+			Quaternion wristShare[2]{Quaternion::Identity(), Quaternion::Identity()};
+			bool wristShareActive[2]{false, false};
+			if (clip.IsLocalDeltaStream() && wristTwistShare > 0.0f)
+			{
+				for (int side = 0; side < 2; ++side)
+				{
+					const int foreHid = 15 + side, handHid = 17 + side;
+					int foreIndex = -1, handIndex = -1;
+					for (size_t i = 0; i < clip.bones.size() && i < b.boneTransforms.size(); ++i)
+					{
+						if (!b.boneTransforms[i]) continue;
+						if (clip.bones[i].humanoid_id == foreHid) foreIndex = static_cast<int>(i);
+						if (clip.bones[i].humanoid_id == handHid) handIndex = static_cast<int>(i);
+					}
+					if (foreIndex >= 0 && handIndex > foreIndex && static_cast<size_t>(handIndex) < vmdRotations.size() &&
+					    static_cast<size_t>(handIndex) < clip.bone_parent_hids.size() &&
+					    clip.bone_parent_hids[handIndex] == foreHid)
+					{
+						wristShare[side] = WristTwistShareRotation(vmdRotations[handIndex], wristTwistShare);
+						wristShareActive[side] = true;
+					}
+				}
+			}
 			if (facialTimeSeconds < 0.0f) facialTimeSeconds = currentTimeSeconds;
 			if (facialTimeSeconds != currentTimeSeconds && std::any_of(clip.bones.begin(), clip.bones.end(),
 				[](const auto& bone) { return bone.head_space_eye_delta; }))
@@ -2566,6 +2601,26 @@ namespace GakuMotion
 					{
 						rTarget = rTarget * qArmRight;
 						if (isGkClip) gkLocalOut = gkLocalOut * qArmRight;
+					}
+				}
+
+				// Transfer axial rotation from hand to forearm. Forearm offsets lie
+				// along local X; the inverse hand pre-rotation preserves P*L exactly.
+				if (isGkClip && hid >= 15 && hid <= 18)
+				{
+					const int side = (hid == 15 || hid == 17) ? 0 : 1;
+					if (wristShareActive[side])
+					{
+						if (hid == 15 || hid == 16)
+						{
+							gkLocalOut = gkLocalOut * wristShare[side];
+							rTarget = rTarget * wristShare[side];
+						}
+						else
+						{
+							gkLocalOut = wristShare[side].Inverse() * gkLocalOut;
+							if (writtenWorldRotValid[15 + side]) rTarget = writtenWorldRots[15 + side] * gkLocalOut;
+						}
 					}
 				}
 
