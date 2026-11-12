@@ -295,15 +295,16 @@ namespace GakuMotion
 			if (controller.wristDiagnosticStatus == 1)
 				ImGui::TextWrapped("诊断请求已发送，等待角色姿态。");
 			else if (controller.wristDiagnosticStatus == 2)
-				ImGui::TextWrapped("已记录到日志（动作时间 %.3f 秒）。", controller.wristDiagnosticTime);
+				ImGui::TextWrapped("已记录到日志（第 %llu 次，动作时间 %.3f 秒）。",
+				                   static_cast<unsigned long long>(controller.wristDiagnosticCount), controller.wristDiagnosticTime);
 			else if (controller.wristDiagnosticStatus == 3)
 				ImGui::TextWrapped("记录失败：日志服务不可用。");
 			float wristShare = controller.wristTwistShare;
 			ImGui::BeginDisabled(!ctx.injectionAllowed || !ctx.fnSetWristTwistShare);
-			if (ImGui::SliderFloat("前臂扭转分担 [实验]", &wristShare, 0.0f, 1.0f, "%.2f") && ctx.fnSetWristTwistShare)
+			if (ImGui::SliderFloat("前臂扭转分担 [实验]", &wristShare, -1.0f, 1.0f, "%.2f") && ctx.fnSetWristTwistShare)
 				ctx.fnSetWristTwistShare(ctx.self, wristShare);
 			ImGui::EndDisabled();
-			ImGui::TextWrapped("默认 0。调整前臂与手腕的扭转分配，同时保持手掌朝向；适用于 gkclip 主角色，重启后恢复默认。");
+			ImGui::TextWrapped("默认 0。正负数调整相反方向的扭转分配，同时保持手掌朝向；适用于 gkclip 主角色，重启后恢复默认。");
 			ImGui::Spacing();
 			overlay.DrawBoneOverridesSection(ctx);
 			ImGui::Unindent(10.0f);

@@ -525,12 +525,14 @@ namespace
 		app.core.player.controller.wristDiagnosticPending = false;
 		app.core.player.controller.wristDiagnosticStatus = 2;
 		app.core.player.controller.wristDiagnosticTime = 20.23f;
-		Check(app.Text().find("已记录到日志") != std::string::npos, "completed wrist capture is visible to the user");
+		app.core.player.controller.wristDiagnosticCount = 2;
+		Check(app.Text().find("第 2 次") != std::string::npos, "completed wrist capture displays its updated count");
 		app.core.player.controller.wristDiagnosticStatus = 3;
 		Check(app.Text().find("记录失败") != std::string::npos, "unavailable logger is visible to the user");
+		app.core.player.controller.wristTwistShare = -0.5f; app.Settle();
 		app.Click("前臂扭转分担 [实验]"); app.Settle();
-		Check(app.core.player.controller.wristTwistShare > 0.3f && app.core.player.controller.wristTwistShare < 0.7f,
-		      "twist share slider queues its value to the active controller");
+		Check(std::fabs(app.core.player.controller.wristTwistShare) < 0.2f,
+		      "twist share slider queues its centered value to the active controller");
 	}
 
 	void TestEnsembleControls(const std::filesystem::path& root)

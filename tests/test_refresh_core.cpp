@@ -542,12 +542,16 @@ static void TestWristDiagnosticIsOneShot()
 	Check(fake::wristDiagnosticLines == 0, "wrist diagnostics are silent until requested");
 	controller.wristDiagnosticPending = true;
 	controller.CaptureWristDiagnostic(binding, 20.23f, 0);
-	Check(!controller.wristDiagnosticPending && controller.wristDiagnosticStatus == 2 &&
+	Check(!controller.wristDiagnosticPending && controller.wristDiagnosticStatus == 2 && controller.wristDiagnosticCount == 1 &&
 	      std::fabs(controller.wristDiagnosticTime - 20.23f) < 0.001f &&
 	      fake::wristDiagnosticLines == 13 && fake::rotationCalls.empty(),
 	      "wrist diagnostics capture a bounded read-only snapshot including missing bones");
 	controller.CaptureWristDiagnostic(binding, 20.23f, 0);
 	Check(fake::wristDiagnosticLines == 13, "wrist diagnostics do not repeat without another request");
+	controller.wristDiagnosticPending = true;
+	controller.CaptureWristDiagnostic(binding, 20.23f, 0);
+	Check(controller.wristDiagnosticCount == 2 && fake::wristDiagnosticLines == 26,
+	      "repeated capture at the same time increments the visible completion count");
 	controller.fnLogInfo = nullptr; controller.wristDiagnosticPending = true; controller.wristDiagnosticStatus = 1;
 	controller.CaptureWristDiagnostic(binding, 20.23f, 0);
 	Check(!controller.wristDiagnosticPending && controller.wristDiagnosticStatus == 3,
@@ -581,6 +585,11 @@ static void TestWristTwistRedistribution()
 	Check(fake::rotationCalls.size() == 2 && !QuatNear(fake::rotationCalls[0].second, forearm) &&
 	      QuatNear(fake::rotationCalls[0].second * fake::rotationCalls[1].second, forearm * hand),
 	      "twist share rotates the forearm while preserving the hand world orientation");
+	controller.wristTwistShare = -0.5f;
+	fake::rotationCalls.clear(); controller.ApplyMotionToBinding(binding, clip, 0);
+	Check(fake::rotationCalls.size() == 2 && !QuatNear(fake::rotationCalls[0].second, forearm) &&
+	      QuatNear(fake::rotationCalls[0].second * fake::rotationCalls[1].second, forearm * hand),
+	      "negative twist share also preserves hand orientation");
 	const Quaternion share = IdolController::WristTwistShareRotation(hand, 0.5f);
 	const Quaternion neg(-hand.x, -hand.y, -hand.z, -hand.w);
 	Check(QuatNear(share, IdolController::WristTwistShareRotation(neg, 0.5f)), "twist share is quaternion-sign invariant");

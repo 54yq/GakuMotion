@@ -780,7 +780,7 @@ namespace GakuMotion
 					}
 					break;
 				case GuiAction::WristTwistShare:
-					if (std::isfinite(cmd.value) && cmd.value >= 0.0f && cmd.value <= 1.0f)
+					if (std::isfinite(cmd.value) && cmd.value >= -1.0f && cmd.value <= 1.0f)
 						player.controller.wristTwistShare = cmd.value;
 					break;
 				case GuiAction::BeforeQuartzExperiment:

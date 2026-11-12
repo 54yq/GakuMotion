@@ -673,11 +673,12 @@ namespace GakuMotion
 		bool wristDiagnosticPending{false};
 		int wristDiagnosticStatus{0}; // 0=idle, 1=waiting for pose, 2=logged, 3=logger unavailable
 		float wristDiagnosticTime{0.0f};
+		uint64_t wristDiagnosticCount{0};
 
 		static Quaternion WristTwistShareRotation(const Quaternion& handLocal, float fraction) noexcept
 		{
-			if (!std::isfinite(fraction) || fraction <= 0.0f) return Quaternion::Identity();
-			fraction = (std::min)(fraction, 1.0f);
+			if (!std::isfinite(fraction) || fraction == 0.0f) return Quaternion::Identity();
+			fraction = (std::clamp)(fraction, -1.0f, 1.0f);
 			float x = handLocal.x, w = handLocal.w;
 			if (w < 0.0f || (w == 0.0f && x < 0.0f)) { x = -x; w = -w; }
 			if (x * x + w * w < 1e-12f) return Quaternion::Identity();
@@ -723,6 +724,7 @@ namespace GakuMotion
 			capture("RightHand", b.rightArmAux.hand);
 			capture("RightHand_H", b.rightArmAux.handH);
 			wristDiagnosticTime = timeSeconds;
+			++wristDiagnosticCount;
 			wristDiagnosticStatus = 2;
 		}
 
@@ -2158,7 +2160,7 @@ namespace GakuMotion
 			clip.Sample(currentTimeSeconds, vmdRootPos, vmdRotations);
 			Quaternion wristShare[2]{Quaternion::Identity(), Quaternion::Identity()};
 			bool wristShareActive[2]{false, false};
-			if (clip.IsLocalDeltaStream() && wristTwistShare > 0.0f)
+			if (clip.IsLocalDeltaStream() && wristTwistShare != 0.0f)
 			{
 				for (int side = 0; side < 2; ++side)
 				{
