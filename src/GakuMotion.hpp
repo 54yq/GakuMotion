@@ -771,7 +771,11 @@ namespace GakuMotion
 						player.controller.SetAuxDriveMode(static_cast<int>(cmd.value));
 					break;
 				case GuiAction::WristDiagnostic:
-					if (player.state != PlaybackState::Stopped) player.controller.wristDiagnosticPending = true;
+					if (player.state != PlaybackState::Stopped)
+					{
+						player.controller.wristDiagnosticPending = true;
+						player.controller.wristDiagnosticStatus = 1;
+					}
 					break;
 				case GuiAction::WristTwistShare:
 					if (std::isfinite(cmd.value) && cmd.value >= 0.0f && cmd.value <= 1.0f)

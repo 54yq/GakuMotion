@@ -292,6 +292,12 @@ namespace GakuMotion
 			if (ImGui::Button("记录手腕诊断") && ctx.fnCaptureWristDiagnostic) ctx.fnCaptureWristDiagnostic(ctx.self);
 			ImGui::EndDisabled();
 			ImGui::TextWrapped("记录当前主角色的手臂和手腕骨骼状态到日志，用于分析变形。");
+			if (controller.wristDiagnosticStatus == 1)
+				ImGui::TextWrapped("诊断请求已发送，等待角色姿态。");
+			else if (controller.wristDiagnosticStatus == 2)
+				ImGui::TextWrapped("已记录到日志（动作时间 %.3f 秒）。", controller.wristDiagnosticTime);
+			else if (controller.wristDiagnosticStatus == 3)
+				ImGui::TextWrapped("记录失败：日志服务不可用。");
 			float wristShare = controller.wristTwistShare;
 			ImGui::BeginDisabled(!ctx.injectionAllowed || !ctx.fnSetWristTwistShare);
 			if (ImGui::SliderFloat("前臂扭转分担 [实验]", &wristShare, 0.0f, 1.0f, "%.2f") && ctx.fnSetWristTwistShare)

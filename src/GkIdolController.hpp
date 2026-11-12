@@ -671,6 +671,8 @@ namespace GakuMotion
 		int auxDriveMode{kAuxNormal};
 		float wristTwistShare{0.0f}; // Opt-in: move hand-axis twist to the forearm while preserving hand world pose.
 		bool wristDiagnosticPending{false};
+		int wristDiagnosticStatus{0}; // 0=idle, 1=waiting for pose, 2=logged, 3=logger unavailable
+		float wristDiagnosticTime{0.0f};
 
 		static Quaternion WristTwistShareRotation(const Quaternion& handLocal, float fraction) noexcept
 		{
@@ -687,8 +689,9 @@ namespace GakuMotion
 		// writes. It observes transforms only; it does not modify the pose.
 		void CaptureWristDiagnostic(const IdolBoneBinding& b, float timeSeconds, int appliedOverrides)
 		{
-			if (!wristDiagnosticPending || !fnLogInfo) return;
+			if (!wristDiagnosticPending) return;
 			wristDiagnosticPending = false;
+			if (!fnLogInfo) { wristDiagnosticStatus = 3; return; }
 			fnLogInfo("[GakuMotion][WristDiag] actor=%p time=%.4f aux=%d twistShare=%.3f overrides=%d getters(localRot=%d worldRot=%d localPos=%d worldPos=%d parent=%d)",
 			          b.actor, timeSeconds, auxDriveMode, wristTwistShare, appliedOverrides,
 			          fnGetLocalRotation != nullptr, fnGetWorldRotation != nullptr, fnGetLocalPosition != nullptr,
@@ -719,6 +722,8 @@ namespace GakuMotion
 			capture("RightForeArm_H", b.rightArmAux.foreArmH);
 			capture("RightHand", b.rightArmAux.hand);
 			capture("RightHand_H", b.rightArmAux.handH);
+			wristDiagnosticTime = timeSeconds;
+			wristDiagnosticStatus = 2;
 		}
 
 		// =====================================================================

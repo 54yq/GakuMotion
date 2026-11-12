@@ -542,10 +542,16 @@ static void TestWristDiagnosticIsOneShot()
 	Check(fake::wristDiagnosticLines == 0, "wrist diagnostics are silent until requested");
 	controller.wristDiagnosticPending = true;
 	controller.CaptureWristDiagnostic(binding, 20.23f, 0);
-	Check(!controller.wristDiagnosticPending && fake::wristDiagnosticLines == 13 && fake::rotationCalls.empty(),
+	Check(!controller.wristDiagnosticPending && controller.wristDiagnosticStatus == 2 &&
+	      std::fabs(controller.wristDiagnosticTime - 20.23f) < 0.001f &&
+	      fake::wristDiagnosticLines == 13 && fake::rotationCalls.empty(),
 	      "wrist diagnostics capture a bounded read-only snapshot including missing bones");
 	controller.CaptureWristDiagnostic(binding, 20.23f, 0);
 	Check(fake::wristDiagnosticLines == 13, "wrist diagnostics do not repeat without another request");
+	controller.fnLogInfo = nullptr; controller.wristDiagnosticPending = true; controller.wristDiagnosticStatus = 1;
+	controller.CaptureWristDiagnostic(binding, 20.23f, 0);
+	Check(!controller.wristDiagnosticPending && controller.wristDiagnosticStatus == 3,
+	      "missing logger reports failure instead of a false completion");
 }
 
 static void TestWristTwistRedistribution()

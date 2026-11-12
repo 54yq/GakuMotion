@@ -520,7 +520,14 @@ namespace
 		app.Click("##aux_drive_mode"); app.Click(labels[0]); app.Settle();
 		Check(app.core.player.controller.auxDriveMode == kAuxNormal, "selector restores normal mode directly");
 		app.Click("记录手腕诊断"); app.Settle();
-		Check(app.core.player.controller.wristDiagnosticPending, "wrist diagnostic button queues a one-shot capture");
+		Check(app.core.player.controller.wristDiagnosticPending && app.Text().find("诊断请求已发送") != std::string::npos,
+		      "wrist diagnostic button reports that capture is waiting for a pose");
+		app.core.player.controller.wristDiagnosticPending = false;
+		app.core.player.controller.wristDiagnosticStatus = 2;
+		app.core.player.controller.wristDiagnosticTime = 20.23f;
+		Check(app.Text().find("已记录到日志") != std::string::npos, "completed wrist capture is visible to the user");
+		app.core.player.controller.wristDiagnosticStatus = 3;
+		Check(app.Text().find("记录失败") != std::string::npos, "unavailable logger is visible to the user");
 		app.Click("前臂扭转分担 [实验]"); app.Settle();
 		Check(app.core.player.controller.wristTwistShare > 0.3f && app.core.player.controller.wristTwistShare < 0.7f,
 		      "twist share slider queues its value to the active controller");
