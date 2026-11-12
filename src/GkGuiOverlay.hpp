@@ -70,6 +70,8 @@ namespace GakuMotion
 		// ---- 只读状态 ----
 		bool injectionAllowed{false};
 		std::string injectionNotice;
+		bool liveObserved{false}, livePaused{false};
+		float liveTime{0}, liveDuration{0};
 		MotionPlayer* player{nullptr};
 		CameraController::Snapshot cameraSnapshot;
 		void (*fnSetCameraSettings)(void*, const CameraSettings&){nullptr};
@@ -384,6 +386,13 @@ namespace GakuMotion
 					ImGui::Spacing();
 					ImGui::Separator();
 					ImGui::Spacing();
+					if (ctx.liveObserved)
+					{
+						ImGui::Text("Live: %.1f / %.1f 秒 (%s)", ctx.liveTime, ctx.liveDuration,
+						            ctx.livePaused ? "已暂停" : "播放中");
+						ImGui::TextWrapped("Live 接管尚未就绪：角色归属与恢复流程需要验证。");
+						ImGui::Spacing();
+					}
 					if (!ctx.stageSettings.loadReplacementKey.empty())
 						ImGui::TextWrapped("已保留实验舞台选择；可在下方开发者选项中修改或恢复原生背景。");
 					if (ImGui::CollapsingHeader("开发者选项"))

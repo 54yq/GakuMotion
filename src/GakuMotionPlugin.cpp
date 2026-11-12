@@ -1516,6 +1516,20 @@ namespace
 		const auto ownerObservation = SceneOwnerRuntime::Read(name, forceOwnerRead || g_pendingProtectionFault.load(std::memory_order_acquire));
 		g_sceneOwner = ownerObservation.owner;
 		g_verifiedOwnerSceneName = ownerObservation.sceneName;
+		// Read only the fresh, exact current presenter; never scan unrelated Live
+		// objects or retain managed pointers across frames. This does not admit
+		// injection or change the game playback state.
+		if (g_activeSceneVerified && g_sceneOwner.Valid() &&
+			ownerObservation.rootClassName == "Campus.Live.LiveScenePresenter")
+		{
+			const GakuMotion::live_takeover::RuntimeAccess access{
+				g_faceRuntime.objectClass, g_faceRuntime.findField, g_faceRuntime.fieldType,
+				g_faceRuntime.fieldFlags, g_faceRuntime.typeCode, StageLoader::metadata.classFromType,
+				g_faceRuntime.readField, g_faceRuntime.invoke, g_safeBones.unbox};
+			core.liveObservation = GakuMotion::live_takeover::Observe(g_liveApi, access,
+				reinterpret_cast<void*>(g_sceneOwner.presenterIdentity));
+		}
+		else core.liveObservation = {};
 		StageLoadOverride::ObserveActiveScene(g_verifiedActiveSceneHandle, name);
 		core.injectionPolicy.SetContext(g_activeSceneVerified ? ownerObservation.context :
 			GakuMotion::injection::Context::Unknown);

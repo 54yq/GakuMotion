@@ -13,6 +13,7 @@
 #include "GkLibraryState.hpp"
 #include "GkLibraryDelete.hpp"
 #include "GkInjectionPolicy.hpp"
+#include "GkLiveObservation.hpp"
 #include "GkCaptureSafety.hpp"
 #include "GkStageLoadSettings.hpp"
 #include "GkDataLayout.hpp"
@@ -102,6 +103,7 @@ namespace GakuMotion
 		bool customWasActivated{false};
 		bool stageStoppedByTransport{false};
 		std::string injectionStatus;
+		live_takeover::Observation liveObservation;
 		bool (*fnBeforeInjection)(){nullptr};
 		bool InjectionAllowed() const { return !enforceInjectionPolicy || injectionPolicy.CanInject(); }
 		bool PrepareInjection()
@@ -2987,6 +2989,10 @@ namespace GakuMotion
 		{
 			GuiContext ctx;
 			ctx.injectionAllowed = InjectionAllowed();
+			ctx.liveObserved = liveObservation.confirmed;
+			ctx.livePaused = liveObservation.paused;
+			ctx.liveTime = liveObservation.time;
+			ctx.liveDuration = liveObservation.duration;
 			ctx.injectionNotice = injectionStatus.empty()
 				? "仅偶像摄影与更衣室可以使用；其他页面保留设置但不生效。" : injectionStatus;
 			ctx.player = &player;
