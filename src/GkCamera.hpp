@@ -78,6 +78,22 @@ namespace GakuMotion
 
 	static_assert(sizeof(CameraFrame) == 40);
 
+	// Compute a new world-space placement without moving the scene actor itself.
+	// Using the current hips position makes the operation idempotent after the
+	// previous offset has been applied, including in an animated preview pose.
+	inline bool CameraFrontPlacement(const CameraFrame& frame, const Vector3& hips,
+	                                 const Vector3& offset, float distance, Vector3& result)
+	{
+		const float norm = Quaternion::Dot(frame.rotation, frame.rotation);
+		if (!CameraFinite(frame.position) || !CameraFinite(hips) || !CameraFinite(offset) ||
+		    !std::isfinite(norm) || norm < 1e-8f || !std::isfinite(distance) || distance < 0.5f || distance > 20.0f)
+			return false;
+		const Vector3 forward = frame.rotation.Normalized().Rotate({0, 0, 1});
+		const Vector3 desired = frame.position + Vector3{forward.x * distance, forward.y * distance, forward.z * distance};
+		result = offset + desired - hips;
+		return CameraFinite(result);
+	}
+
 	class CameraTrack
 	{
 	public:

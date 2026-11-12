@@ -362,7 +362,7 @@ namespace GakuMotion
 			Select, Cycle, Play, Pause, Resume, Stop, Seek,
 			ScrubBegin, ScrubUpdate, ScrubEnd, Refresh, Move,
 			SaveList, LoadList, Mode, Mute, Speed, Import, ClearTarget, NextTarget, PickTarget,
-			InitialPosition, InitialYaw, SaveInitialPosition, SaveFacialWeights, MusicVolume, SaveMusicVolume, PhysicsBackend,
+			InitialPosition, InitialYaw, PlaceInFrontOfCamera, SaveInitialPosition, SaveFacialWeights, MusicVolume, SaveMusicVolume, PhysicsBackend,
 			CameraSettings, SaveCameraSettings, CameraImport, ReloadCamera,
 			SoleSettings, SaveSoleSettings, LoadSoleSettings, ExperimentalSolePitch, ExperimentalWaistSupport,
 			BeforeQuartzExperiment, AuxDriveMode, WristDiagnostic, WristTwistShare, ForearmAxisAdjustment, ForearmAxisLock,
@@ -473,6 +473,40 @@ namespace GakuMotion
 			cmd.actorEpoch = sceneActorRegistry.Epoch();
 			if (const auto* actor = sceneActorRegistry.Find(player.controller.targetActor)) cmd.actorToken = actor->token;
 			QueueGui(std::move(cmd));
+		}
+		void QueuePlaceInFrontOfCamera()
+		{
+			GuiCommand cmd{GuiAction::PlaceInFrontOfCamera};
+			cmd.actorEpoch = sceneActorRegistry.Epoch();
+			if (const auto* actor = sceneActorRegistry.Find(player.controller.targetActor)) cmd.actorToken = actor->token;
+			QueueGui(std::move(cmd));
+		}
+		void PlaceInFrontOfCamera(const GuiCommand& cmd)
+		{
+			auto& ctrl = player.controller;
+			void* actor = ctrl.targetActor;
+			if (!liveTakeoverActive || !InjectionAllowed() || !IsCurrentPlacementTarget(cmd) || !actor ||
+			    player.state == PlaybackState::Stopped || ctrl.currentBinding.actor != actor ||
+			    !camera.fnGetCamera || !camera.fnGetTransform || !camera.fnAlive || !camera.fnRead || !camera.fnActorPose)
+			{
+				initialPositionNotice = "定位失败：请在 Live 接管中载入动作并等待角色绑定";
+				return;
+			}
+			void* mainCamera = camera.fnGetCamera();
+			void* transform = mainCamera && camera.fnAlive(mainCamera) ? camera.fnGetTransform(mainCamera) : nullptr;
+			CameraFrame frame;
+			Vector3 origin, hips, offset;
+			Quaternion rotation;
+			if (!transform || !camera.fnAlive(transform) || !camera.fnRead(mainCamera, transform, frame) ||
+			    !camera.fnActorPose(actor, origin, rotation, hips) ||
+			    !CameraFrontPlacement(frame, hips, ctrl.initialPositionOffset, 4.0f, offset) ||
+			    !ctrl.SetInitialPositionOffset(offset))
+			{
+				initialPositionNotice = "定位失败：无法读取当前镜头或角色位置";
+				return;
+			}
+			RememberCurrentPlacement();
+			initialPositionNotice = "已移至镜头前，可继续微调站位和高度";
 		}
 		bool IsCurrentPlacementTarget(const GuiCommand& cmd) const
 		{
@@ -854,6 +888,8 @@ namespace GakuMotion
 					break;
 				case GuiAction::InitialPosition:
 					if (IsCurrentPlacementTarget(cmd) && player.controller.SetInitialPositionOffset(cmd.position)) RememberCurrentPlacement();
+					break;
+				case GuiAction::PlaceInFrontOfCamera: PlaceInFrontOfCamera(cmd);
 					break;
 				case GuiAction::InitialYaw:
 					if (IsCurrentPlacementTarget(cmd) && player.controller.SetInitialYawDegrees(cmd.value)) RememberCurrentPlacement();
@@ -3270,6 +3306,7 @@ namespace GakuMotion
 			{
 				static_cast<Core*>(self)->QueueInitialPosition(offset);
 			};
+			ctx.fnPlaceInFrontOfCamera = [](void* self) { static_cast<Core*>(self)->QueuePlaceInFrontOfCamera(); };
 			ctx.fnSetInitialYaw = [](void* self, float yaw)
 			{
 				static_cast<Core*>(self)->QueueInitialYaw(yaw);

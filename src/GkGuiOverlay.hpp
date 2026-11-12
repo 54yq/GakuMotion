@@ -134,6 +134,7 @@ namespace GakuMotion
 		int musicVolumeSupport{0};
 		std::string musicVolumeNotice;
 		void (*fnSetInitialPosition)(void*, const Vector3&){nullptr};
+		void (*fnPlaceInFrontOfCamera)(void*){nullptr};
 		void (*fnSetInitialYaw)(void*, float){nullptr};
 		void (*fnSaveInitialPosition)(void*){nullptr};
 

@@ -110,6 +110,11 @@ namespace GakuMotion
 		}
 
 		// 重置与保存按钮
+		if (ctx.liveTakeoverActive && ctx.fnPlaceInFrontOfCamera && ImGui::Button("将角色移到镜头前"))
+		{
+			overlay.initialPositionEditing = false;
+			ctx.fnPlaceInFrontOfCamera(ctx.self);
+		}
 		if (GuiIcons::Button("重置站位", GuiIcons::Icon::Reset, ImVec2(120, 24)))
 		{
 			overlay.initialPositionEdit[0] = 0.0f;
