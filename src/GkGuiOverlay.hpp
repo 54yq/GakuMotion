@@ -67,6 +67,13 @@ namespace GakuMotion
 		bool armLocked{false};
 	};
 
+	struct GuiArmCalibration
+	{
+		uint64_t token{0};
+		float share{0}, degrees{45};
+		bool locked{false}, bound{false}, primary{false};
+	};
+
 	struct GuiContext
 	{
 		// ---- 只读状态 ----
@@ -160,6 +167,8 @@ namespace GakuMotion
 		// 普通动作页始终选择单个角色，空名单不表示驱动全部。
 		unsigned knownActorCount{0};
 		std::vector<GuiSceneActor> sceneActors;
+		std::vector<GuiArmCalibration> sceneArmCalibrations;
+		void (*fnSetSceneArm)(void*, uint64_t, uint64_t, int, float){nullptr};
 		uint64_t actorRosterEpoch{0};
 		void (*fnSelectTargetActor)(void*, uint64_t token, uint64_t epoch){nullptr};
 		void (*fnClearTargetActor)(void* self){nullptr}; // Legacy developer callback: reselect bound/first actor
@@ -296,8 +305,8 @@ namespace GakuMotion
 		float initialYawEdit{0};
 		bool initialYawEditing{false};
 		uint64_t initialPlacementActorToken{0};
-		int armCalibrationSlot{0};
-		uint64_t armCalibrationEpoch{0}, armCalibrationGeneration{0};
+		uint64_t armCalibrationToken{0};
+		uint64_t armCalibrationEpoch{0};
 		uint64_t ensembleDraftEpoch{0};
 		std::array<uint64_t, 2> ensembleDraftActor{};
 		std::array<std::string, 2> ensembleDraftMotion{};

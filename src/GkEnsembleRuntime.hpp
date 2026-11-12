@@ -56,6 +56,40 @@ namespace GakuMotion
 				placements_[actorToken] = {position, yawDegrees};
 		}
 
+		bool GetArmCalibration(uint64_t token, ArmCalibration& result) const
+		{
+			const auto found = armCalibrations_.find(token);
+			if (found == armCalibrations_.end()) return false;
+			result = found->second;
+			return true;
+		}
+		void RememberArmCalibration(uint64_t token, const ArmCalibration& value)
+		{
+			if (token) armCalibrations_[token] = value;
+		}
+		bool SetSceneArmCalibration(uint64_t token, uint64_t epoch, int operation, float value,
+		                            const SceneActorRegistry& registry)
+		{
+			void* actor = registry.Resolve(token, epoch);
+			if (!actor || restoreUnconfirmed_) return false;
+			ArmCalibration calibration;
+			GetArmCalibration(token, calibration);
+			if (operation == 3) calibration.locked = value != 0.0f;
+			else if (operation == 0 && std::isfinite(value) && value >= -1.0f && value <= 1.0f) calibration.share = value;
+			else if (operation == 1 && !calibration.locked && std::isfinite(value) && value >= -90.0f && value <= 90.0f) calibration.degrees = value;
+			else if (operation == 2 && !calibration.locked) { calibration.share = 0.0f; calibration.degrees = 45.0f; }
+			else return false;
+			armCalibrations_[token] = calibration;
+			for (auto& follower : followers_)
+				if (follower.player && follower.actorToken == token && follower.player->controller.targetActor == actor)
+				{
+					follower.player->controller.wristTwistShare = calibration.share;
+					follower.player->controller.forearmAxisAdjustmentDeg = calibration.degrees;
+					follower.armLocked = calibration.locked;
+				}
+			return true;
+		}
+
 		// A missing or replaced actor is never touched during cleanup. If it was
 		// active, retain its snapshot and fail closed until the scene is discarded.
 		bool Clear(size_t index, const SceneActorRegistry& registry)
@@ -190,17 +224,7 @@ namespace GakuMotion
 			if (!follower.player || !generation || follower.bindingGeneration != generation ||
 			    follower.actorToken != token || registry.Resolve(token, epoch) != follower.player->controller.targetActor)
 				return false;
-			auto& controller = follower.player->controller;
-			if (operation == 3) follower.armLocked = value != 0.0f;
-			else if (operation == 0 && std::isfinite(value) && value >= -1.0f && value <= 1.0f)
-				controller.wristTwistShare = value;
-			else if (operation == 1 && !follower.armLocked && std::isfinite(value) && value >= -90.0f && value <= 90.0f)
-				controller.forearmAxisAdjustmentDeg = value;
-			else if (operation == 2 && !follower.armLocked)
-			{ controller.wristTwistShare = 0.0f; controller.forearmAxisAdjustmentDeg = 45.0f; }
-			else return false;
-			armCalibrations_[token] = {controller.wristTwistShare, controller.forearmAxisAdjustmentDeg, follower.armLocked};
-			return true;
+			return SetSceneArmCalibration(token, epoch, operation, value, registry);
 		}
 
 		void RebuildOverrides(const BoneOverrideSet& global, bool enabled)

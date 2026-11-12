@@ -299,57 +299,55 @@ namespace GakuMotion
 				                   static_cast<unsigned long long>(controller.wristDiagnosticCount), controller.wristDiagnosticTime);
 			else if (controller.wristDiagnosticStatus == 3)
 				ImGui::TextWrapped("记录失败：日志服务不可用。");
-			// Calibration is independent for each player. Invalidate the selection on rebind.
-			if (overlay.armCalibrationEpoch != ctx.actorRosterEpoch ||
-			    (overlay.armCalibrationSlot > 0 &&
-			     (overlay.armCalibrationSlot > 2 || !ctx.ensembleFollowers[overlay.armCalibrationSlot - 1].actorToken ||
-			      ctx.ensembleFollowers[overlay.armCalibrationSlot - 1].bindingGeneration != overlay.armCalibrationGeneration)))
+			// Offer every current scene actor, including those not yet motion-bound.
+			const GuiSceneActor* selectedActor = nullptr;
+			for (const auto& actor : ctx.sceneActors)
+				if (actor.token == overlay.armCalibrationToken) selectedActor = &actor;
+			if (!selectedActor)
 			{
-				overlay.armCalibrationSlot = 0;
-				overlay.armCalibrationEpoch = ctx.actorRosterEpoch;
-				overlay.armCalibrationGeneration = 0;
+				for (const auto& actor : ctx.sceneActors) if (actor.selected) { selectedActor = &actor; break; }
+				if (!selectedActor && !ctx.sceneActors.empty()) selectedActor = &ctx.sceneActors.front();
+				overlay.armCalibrationToken = selectedActor ? selectedActor->token : 0;
 			}
-			auto followerLabel = [&](int index) {
-				std::string label = "角色 " + std::to_string(index + 2);
-				for (const auto& actor : ctx.sceneActors)
-					if (actor.token == ctx.ensembleFollowers[index].actorToken) { label += "：" + actor.label; break; }
-				return label;
-			};
-			const std::string selectedLabel = overlay.armCalibrationSlot == 0 ?
-				("主角色：" + ctx.targetActorLabel) : followerLabel(overlay.armCalibrationSlot - 1);
+			overlay.armCalibrationEpoch = ctx.actorRosterEpoch;
+			const std::string selectedLabel = selectedActor ? selectedActor->label : "尚未检测到角色";
 			ImGui::SetNextItemWidth((std::min)(360.0f, ImGui::GetContentRegionAvail().x));
+			ImGui::BeginDisabled(ctx.sceneActors.empty());
 			if (ImGui::BeginCombo("校正角色", selectedLabel.c_str()))
 			{
-				if (ImGui::Selectable("主角色", overlay.armCalibrationSlot == 0)) overlay.armCalibrationSlot = 0;
-				for (int i = 0; i < 2; ++i)
-					if (ctx.ensembleFollowers[i].actorToken && ImGui::Selectable(followerLabel(i).c_str(), overlay.armCalibrationSlot == i + 1))
-					{ overlay.armCalibrationSlot = i + 1; overlay.armCalibrationGeneration = ctx.ensembleFollowers[i].bindingGeneration; }
+				for (const auto& actor : ctx.sceneActors)
+				{
+					const std::string label = actor.label + (actor.selected ? "（主角色）" : "") + "##arm_" + std::to_string(actor.token);
+					if (ImGui::Selectable(label.c_str(), actor.token == overlay.armCalibrationToken)) overlay.armCalibrationToken = actor.token;
+				}
 				ImGui::EndCombo();
 			}
-			const int slot = overlay.armCalibrationSlot - 1;
-			const GuiEnsembleFollower* follower = slot >= 0 ? &ctx.ensembleFollowers[slot] : nullptr;
+			ImGui::EndDisabled();
+			const GuiArmCalibration* selectedArm = nullptr;
+			for (const auto& arm : ctx.sceneArmCalibrations) if (arm.token == overlay.armCalibrationToken) selectedArm = &arm;
+			const bool isPrimary = !selectedArm || selectedArm->primary;
 			auto setArm = [&](int operation, float value) {
-				if (follower && ctx.fnSetFollowerArm)
-					ctx.fnSetFollowerArm(ctx.self, slot, follower->actorToken, ctx.actorRosterEpoch, follower->bindingGeneration, operation, value);
-				else if (!follower)
+				if (selectedArm && ctx.fnSetSceneArm)
+					ctx.fnSetSceneArm(ctx.self, selectedArm->token, ctx.actorRosterEpoch, operation, value);
+				else if (!selectedArm)
 				{
 					if ((operation == 0 || operation == 2) && ctx.fnSetWristTwistShare) ctx.fnSetWristTwistShare(ctx.self, operation == 2 ? 0.0f : value);
 					if ((operation == 1 || operation == 2) && ctx.fnSetForearmAxisAdjustment) ctx.fnSetForearmAxisAdjustment(ctx.self, operation == 2 ? 45.0f : value);
 					if (operation == 3 && ctx.fnSetForearmAxisLock) ctx.fnSetForearmAxisLock(ctx.self, value != 0.0f);
 				}
 			};
-			float wristShare = follower ? follower->wristTwistShare : controller.wristTwistShare;
-			bool locked = follower ? follower->armLocked : ctx.forearmAxisLocked;
-			ImGui::BeginDisabled(!ctx.injectionAllowed || (follower ? !ctx.fnSetFollowerArm : !ctx.fnSetWristTwistShare));
+			float wristShare = selectedArm ? selectedArm->share : controller.wristTwistShare;
+			bool locked = selectedArm ? selectedArm->locked : ctx.forearmAxisLocked;
+			ImGui::BeginDisabled(!ctx.injectionAllowed || (selectedArm ? !ctx.fnSetSceneArm : !ctx.fnSetWristTwistShare));
 			if (ImGui::SliderFloat("前臂扭转分担 [实验]", &wristShare, -1.0f, 1.0f, "%.2f")) setArm(0, wristShare);
 			ImGui::EndDisabled();
-			float axisDegrees = follower ? follower->forearmAxisDegrees : controller.forearmAxisAdjustmentDeg;
-			ImGui::BeginDisabled(!ctx.injectionAllowed || locked || (follower ? !ctx.fnSetFollowerArm : !ctx.fnSetForearmAxisAdjustment));
+			float axisDegrees = selectedArm ? selectedArm->degrees : controller.forearmAxisAdjustmentDeg;
+			ImGui::BeginDisabled(!ctx.injectionAllowed || locked || (selectedArm ? !ctx.fnSetSceneArm : !ctx.fnSetForearmAxisAdjustment));
 			if (ImGui::SliderFloat("前臂轴向校正 [实验]", &axisDegrees, -90.0f, 90.0f, "%.1f°")) setArm(1, axisDegrees);
 			ImGui::SetNextItemWidth(120.0f);
 			if (ImGui::InputFloat("角度（度）", &axisDegrees, 0.0f, 0.0f, "%.1f") && std::isfinite(axisDegrees))
 				setArm(1, (std::max)(-90.0f, (std::min)(90.0f, axisDegrees)));
-			if (ImGui::Button("−0.1°")) setArm(1, (std::max)(-90.0f, std::round(axisDegrees * 10.0f - 1.0f) / 10.0f));
+			if (ImGui::Button("-0.1°")) setArm(1, (std::max)(-90.0f, std::round(axisDegrees * 10.0f - 1.0f) / 10.0f));
 			ImGui::SameLine();
 			if (ImGui::Button("+0.1°")) setArm(1, (std::min)(90.0f, std::round(axisDegrees * 10.0f + 1.0f) / 10.0f));
 			ImGui::SameLine();
@@ -357,12 +355,13 @@ namespace GakuMotion
 			ImGui::SameLine();
 			if (ImGui::Button("重置前臂校正")) setArm(2, 0.0f);
 			ImGui::EndDisabled();
-			ImGui::BeginDisabled(!ctx.injectionAllowed || (follower ? !ctx.fnSetFollowerArm : !ctx.fnSetForearmAxisLock));
-			if (ImGui::Checkbox(follower ? "锁定当前角色前臂校正" : "锁定并保存前臂校正", &locked)) setArm(3, locked ? 1.0f : 0.0f);
+			ImGui::BeginDisabled(!ctx.injectionAllowed || (selectedArm ? !ctx.fnSetSceneArm : !ctx.fnSetForearmAxisLock));
+			if (ImGui::Checkbox(!isPrimary ? "锁定当前角色前臂校正" : "锁定并保存前臂校正", &locked)) setArm(3, locked ? 1.0f : 0.0f);
 			ImGui::EndDisabled();
 			ImGui::TextWrapped("对所选角色的 gkclip 生效。重置为轴向 +45°、分担 0；锁定时请先解锁再调整或重置。");
 			ImGui::TextWrapped("主角色锁定会保存；其他角色默认 +45°，调整和锁定在当前场景内保留。");
-			if (!follower && !ctx.forearmAxisNotice.empty()) ImGui::TextWrapped("%s", ctx.forearmAxisNotice.c_str());
+			if (selectedArm && !selectedArm->bound) ImGui::TextWrapped("该角色尚未绑定动作；设置将在绑定后生效。");
+			if (isPrimary && !ctx.forearmAxisNotice.empty()) ImGui::TextWrapped("%s", ctx.forearmAxisNotice.c_str());
 			ImGui::Spacing();
 			overlay.DrawBoneOverridesSection(ctx);
 			ImGui::Unindent(10.0f);

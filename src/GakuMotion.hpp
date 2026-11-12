@@ -369,7 +369,7 @@ namespace GakuMotion
 			StageSettings, StagePreset, ToggleStageCandidate, ScanStageCandidates,
 			MountCustomStage, UnloadCustomStage, RestoreCameraSkybox,
 			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, StageLoadReplacement, SelectTarget,
-			SetEnsembleFollower, ClearEnsembleFollower, EnsemblePosition, EnsembleYaw, FollowerArm
+			SetEnsembleFollower, ClearEnsembleFollower, EnsemblePosition, EnsembleYaw, FollowerArm, SceneArm
 		};
 
 		std::atomic<int> guiPhysicsBackend{2};
@@ -836,6 +836,25 @@ namespace GakuMotion
 					{ ++injectionSession; ensembleNotice = "已解除角色动作"; }
 					else { ensembleRestoreUnconfirmed = true; ensembleNotice = "角色恢复未确认，已停止动作注入"; }
 					break;
+				case GuiAction::SceneArm:
+				{
+					void* actor = sceneActorRegistry.Resolve(cmd.actorToken, cmd.actorEpoch);
+					if (!actor || ensembleRestoreUnconfirmed) break;
+					if (actor == player.controller.targetActor)
+					{
+						if (cmd.stagePresetIndex == 0 && std::isfinite(cmd.value) && cmd.value >= -1.0f && cmd.value <= 1.0f)
+							player.controller.wristTwistShare = cmd.value;
+						else if (cmd.stagePresetIndex == 1 && !forearmAxisLocked && std::isfinite(cmd.value) && cmd.value >= -90.0f && cmd.value <= 90.0f)
+							player.controller.forearmAxisAdjustmentDeg = cmd.value;
+						else if (cmd.stagePresetIndex == 2 && !forearmAxisLocked)
+						{ player.controller.wristTwistShare = 0.0f; player.controller.forearmAxisAdjustmentDeg = 45.0f; }
+						else if (cmd.stagePresetIndex == 3) SaveForearmAxisLock(cmd.value != 0.0f);
+						else break;
+						ensemble.RememberArmCalibration(cmd.actorToken, {player.controller.wristTwistShare, player.controller.forearmAxisAdjustmentDeg, forearmAxisLocked});
+					}
+					else ensemble.SetSceneArmCalibration(cmd.actorToken, cmd.actorEpoch, cmd.stagePresetIndex, cmd.value, sceneActorRegistry);
+					break;
+				}
 				case GuiAction::FollowerArm:
 					if (!ensembleRestoreUnconfirmed && cmd.candidateIndex >= 0 && cmd.candidateIndex < 2)
 						ensemble.SetArmCalibration(static_cast<size_t>(cmd.candidateIndex), cmd.actorToken, cmd.actorEpoch,
@@ -2832,6 +2851,18 @@ namespace GakuMotion
 				}
 			}
 			RememberCurrentPlacement();
+			if (const auto* previous = sceneActorRegistry.Find(player.controller.targetActor))
+				ensemble.RememberArmCalibration(previous->token, {player.controller.wristTwistShare, player.controller.forearmAxisAdjustmentDeg, forearmAxisLocked});
+			if (const auto* nextActor = sceneActorRegistry.Find(a))
+			{
+				EnsembleRuntime::ArmCalibration savedArm;
+				if (ensemble.GetArmCalibration(nextActor->token, savedArm) || hadTarget)
+				{
+					player.controller.wristTwistShare = savedArm.share;
+					player.controller.forearmAxisAdjustmentDeg = savedArm.degrees;
+					forearmAxisLocked = savedArm.locked;
+				}
+			}
 			EnsembleRuntime::Placement savedPlacement;
 			if (const auto* next = sceneActorRegistry.Find(a); next && ensemble.GetPlacement(next->token, savedPlacement))
 			{
@@ -3220,8 +3251,22 @@ namespace GakuMotion
 				cmd.loadedGeneration = generation; cmd.value = yaw;
 				static_cast<Core*>(self)->QueueGui(std::move(cmd));
 			};
+			ctx.fnSetSceneArm = [](void* self, uint64_t token, uint64_t epoch, int operation, float value)
+			{
+				GuiCommand cmd{GuiAction::SceneArm, value};
+				cmd.actorToken = token; cmd.actorEpoch = epoch; cmd.stagePresetIndex = operation;
+				static_cast<Core*>(self)->QueueGui(std::move(cmd));
+			};
 			for (const auto& item : sceneActorRegistry.Entries())
 			{
+				EnsembleRuntime::ArmCalibration arm;
+				ensemble.GetArmCalibration(item.token, arm);
+				const bool primary = item.actor == player.controller.targetActor;
+				if (primary) arm = {player.controller.wristTwistShare, player.controller.forearmAxisAdjustmentDeg, forearmAxisLocked};
+				bool bound = primary;
+				for (const auto& follower : ensemble.Followers())
+					if (follower.player && follower.actorToken == item.token) bound = true;
+				ctx.sceneArmCalibrations.push_back({item.token, arm.share, arm.degrees, arm.locked, bound, primary});
 				const std::string name = item.character.empty() ? "未识别角色" : FormatIdolDisplayName(item.character.c_str());
 				ctx.sceneActors.push_back({item.token, name + " · " + std::to_string(ctx.sceneActors.size() + 1),
 					item.actor == player.controller.targetActor});

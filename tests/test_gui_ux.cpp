@@ -583,6 +583,26 @@ namespace
 		Check(app.ItemWithLabel("##ensemble_actor") && app.ItemWithLabel("##ensemble_motion"),
 		      "ensemble panel exposes actor and motion selectors");
 		const auto roster = app.core.BuildGuiContext().sceneActors;
+		// Calibrate an actor before it has an ensemble binding.
+		app.Click("多人同步播放（最多三人）"); app.Settle();
+		if (auto* page = FindResponsiveWindow("/##gkmotion_main_content_")) page->Scroll.y = 0.0f;
+		app.Settle();
+		if (!app.ItemWithLabel("校正角色")) app.Click("高级动作设置");
+		app.Settle();
+		ImRect prebindHeader;
+		if (app.Find("高级动作设置", prebindHeader))
+			if (auto* page = FindResponsiveWindow("/##gkmotion_main_content_"))
+				page->Scroll.y = (std::max)(0.0f, page->Scroll.y + prebindHeader.Min.y - page->InnerRect.Min.y - 30.0f);
+		app.Settle();
+		app.Click("校正角色"); app.Click((roster[2].label + "##arm_" + std::to_string(roster[2].token)).c_str()); app.Settle();
+		Check(app.core.gui.armCalibrationToken == roster[2].token && app.Text().find("尚未绑定动作") != std::string::npos,
+		      "unbound scene actor is selectable and identified as awaiting a motion");
+		app.Click("+0.1°"); app.Settle();
+		EnsembleRuntime::ArmCalibration preset;
+		Check(app.core.ensemble.GetArmCalibration(roster[2].token, preset) && std::fabs(preset.degrees - 45.1f) < .01f,
+		      "unbound actor accepts an independent calibration before binding");
+		app.Click("高级动作设置"); app.Settle();
+		app.Click("多人同步播放（最多三人）"); app.Settle();
 		const std::string actorB = roster[1].label + "##ensemble_" + std::to_string(roster[1].token);
 		const std::string actorC = roster[2].label + "##ensemble_" + std::to_string(roster[2].token);
 		app.Click("##ensemble_actor", 0); app.Click(actorB.c_str());
@@ -600,6 +620,9 @@ namespace
 		const auto& f0 = app.core.ensemble.Followers()[0];
 		const auto& f1 = app.core.ensemble.Followers()[1];
 		const auto epoch = app.core.sceneActorRegistry.Epoch();
+		Check(std::fabs(f1.player->controller.forearmAxisAdjustmentDeg - 45.1f) < .01f,
+		      "the pre-binding calibration is applied when that actor is bound");
+		app.core.ensemble.SetArmCalibration(1, f1.actorToken, epoch, f1.bindingGeneration, 2, 0, app.core.sceneActorRegistry);
 		Check(f0.player->controller.forearmAxisAdjustmentDeg == 45.0f && f1.player->controller.forearmAxisAdjustmentDeg == 45.0f &&
 		      f0.player->controller.wristTwistShare == 0.0f && f1.player->controller.wristTwistShare == 0.0f,
 		      "both follower calibrations start independently at 45 degrees and zero share");
@@ -627,8 +650,8 @@ namespace
 			if (auto* page = FindResponsiveWindow("/##gkmotion_main_content_"))
 				page->Scroll.y = (std::max)(0.0f, page->Scroll.y + armHeader.Min.y - page->InnerRect.Min.y - 30.0f);
 		app.Settle();
-		app.Click("校正角色"); app.Click(("角色 2：" + roster[1].label).c_str()); app.Settle();
-		Check(app.core.gui.armCalibrationSlot == 1, "calibration selector chooses the first follower");
+		app.Click("校正角色"); app.Click((roster[1].label + "##arm_" + std::to_string(roster[1].token)).c_str()); app.Settle();
+		Check(app.core.gui.armCalibrationToken == roster[1].token, "calibration selector chooses the first follower");
 		app.Click("+0.1°"); app.Settle();
 		Check(std::fabs(f0.player->controller.forearmAxisAdjustmentDeg - 45.1f) < 0.01f &&
 		      f1.player->controller.forearmAxisAdjustmentDeg == 45.0f,
@@ -702,6 +725,15 @@ namespace
 		app.Click("解除绑定", 0); app.Settle();
 		Check(!app.core.ensemble.Followers()[0].player && app.core.ensemble.Followers()[1].player,
 		      "removing one follower leaves the other binding intact");
+		Check(!app.core.ensemble.SetSceneArmCalibration(roster[2].token, epoch + 1, 1, 12, app.core.sceneActorRegistry),
+		      "stale scene roster cannot modify a calibration");
+		app.core.ensemble.SetSceneArmCalibration(roster[2].token, epoch, 1, 33, app.core.sceneActorRegistry);
+		app.core.SetTargetActor(c);
+		Check(app.core.player.controller.targetActor == c && app.core.player.controller.forearmAxisAdjustmentDeg == 33.0f,
+		      "a configured scene actor retains its calibration when selected as primary");
+		app.core.SetTargetActor(a);
+		Check(app.core.player.controller.targetActor == a && app.core.player.controller.forearmAxisAdjustmentDeg != 33.0f,
+		      "switching primary actors restores each actor's own calibration");
 	}
 }
 
