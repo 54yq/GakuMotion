@@ -484,6 +484,44 @@ static void TestOverrideInjection()
 	ctrl.armOffsetRoll = 0.0f;
 }
 
+static void TestGkClipWristOverrideSpaces()
+{
+	BeginTest("gkclip_wrist_override_spaces");
+	MotionClip clip = MakeSmallClip();
+	clip.format = MotionClip::Format::kGkClip;
+	clip.version = 5;
+	clip.bones = {{15, "LeftLowerArm", true}, {17, "LeftHand", true}};
+	clip.bone_parent_hids = {-1, 15};
+	const Quaternion parent = Quaternion::FromEulerDegreesXYZ(0, 55, 25);
+	const Quaternion hand = Quaternion::FromEulerDegreesXYZ(15, 5, -20);
+	clip.bone_rotations = {parent, hand, parent, hand};
+	IdolController controller;
+	WireControllerCallbacks(controller);
+	controller.fnSetLocalRotation = fake::SetWorldRot;
+	IdolBoneBinding binding;
+	binding.actor = reinterpret_cast<void*>(0x901);
+	binding.bindPoseCaptured = true;
+	binding.boneTransforms = {reinterpret_cast<void*>(0x915), reinterpret_cast<void*>(0x917)};
+	binding.restRotations.resize(2);
+	BoneOverrideSet overrides;
+	BoneRotationOffset offset;
+	offset.humanoidId = 17;
+	offset.eulerDeg = {30, 0, 0};
+	overrides.SetDynamic({offset});
+	controller.SetBoneOverrides(&overrides);
+	const Quaternion q = offset.Resolve();
+	fake::rotationCalls.clear();
+	controller.ApplyMotionToBinding(binding, clip, 0);
+	Check(fake::rotationCalls.size() == 2 && QuatNear(fake::rotationCalls[1].second, hand * q),
+	      "gkclip wrist local override remains in the hand's local frame under a rotated parent");
+	offset.spaceWorld = true;
+	overrides.SetDynamic({offset});
+	fake::rotationCalls.clear();
+	controller.ApplyMotionToBinding(binding, clip, 0);
+	Check(fake::rotationCalls.size() == 2 && QuatNear(parent * fake::rotationCalls[1].second, q * parent * hand),
+	      "gkclip wrist world override rotates the final world orientation");
+}
+
 static void TestAuxQuaternionSignInvariance()
 {
 	BeginTest("auxiliary model uses rotation, not quaternion sign");
@@ -2718,6 +2756,7 @@ int main(int argc, char** argv)
  TestInitialPosition();
  TestInitialYaw();
  TestOverrideInjection();
+ TestGkClipWristOverrideSpaces();
  TestAuxQuaternionSignInvariance();
  TestPlayerSeekSync();
  TestPlaybackSpeedAndClock();

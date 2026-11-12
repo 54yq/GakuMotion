@@ -2507,7 +2507,7 @@ namespace GakuMotion
 							const Quaternion qOffLocal = parentWorld.Inverse() * qOff * parentWorld;
 							gkLocalOut = off->spaceWorld
 								             ? (qOffLocal * gkLocalOut)
-								             : (gkLocalOut * qOffLocal);
+								             : (gkLocalOut * qOff);
 						}
 						++appliedOverrides;
 					}
