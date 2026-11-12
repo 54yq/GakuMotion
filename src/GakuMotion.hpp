@@ -255,6 +255,8 @@ namespace GakuMotion
 		std::string initialPositionPath;
 		std::string initialPositionNotice;
 		std::string facialWeightsNotice;
+		bool forearmAxisLocked{false};
+		std::string forearmAxisNotice;
 		std::string musicVolumeNotice;
 		SoleMeasurementSettings soleSettings;
 		SoleMeasurementSnapshot soleSnapshot;
@@ -358,7 +360,7 @@ namespace GakuMotion
 			InitialPosition, InitialYaw, SaveInitialPosition, SaveFacialWeights, MusicVolume, SaveMusicVolume, PhysicsBackend,
 			CameraSettings, SaveCameraSettings, CameraImport, ReloadCamera,
 			SoleSettings, SaveSoleSettings, LoadSoleSettings, ExperimentalSolePitch, ExperimentalWaistSupport,
-			BeforeQuartzExperiment, AuxDriveMode, WristDiagnostic, WristTwistShare, ForearmAxisAdjustment,
+			BeforeQuartzExperiment, AuxDriveMode, WristDiagnostic, WristTwistShare, ForearmAxisAdjustment, ForearmAxisLock,
 			StageSettings, StagePreset, ToggleStageCandidate, ScanStageCandidates,
 			MountCustomStage, UnloadCustomStage, RestoreCameraSkybox,
 			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, StageLoadReplacement, SelectTarget,
@@ -788,8 +790,11 @@ namespace GakuMotion
 						player.controller.wristTwistShare = cmd.value;
 					break;
 				case GuiAction::ForearmAxisAdjustment:
-					if (std::isfinite(cmd.value) && cmd.value >= -90.0f && cmd.value <= 90.0f)
+					if (!forearmAxisLocked && std::isfinite(cmd.value) && cmd.value >= -90.0f && cmd.value <= 90.0f)
 						player.controller.forearmAxisAdjustmentDeg = cmd.value;
+					break;
+				case GuiAction::ForearmAxisLock:
+					SaveForearmAxisLock(cmd.flag);
 					break;
 				case GuiAction::BeforeQuartzExperiment:
 					config.beforeQuartzExperiment = cmd.flag && config.secondaryPhysicsBackend == 2;
@@ -969,6 +974,7 @@ namespace GakuMotion
 			LoadInitialPosition();
 			LoadFacialWeights();
 			LoadMusicVolume();
+			LoadForearmAxisLock();
 			globalOverridePath = configRoot + "/bone_overrides.json";
 
 			gui.motionsRoot = motionsRoot;
@@ -1601,6 +1607,76 @@ namespace GakuMotion
 			stageLoadNotice = key.empty() ? "已记住恢复原生背景；下次进入偶像摄影时生效" :
 				"舞台选择已保存；下次进入偶像摄影时生效（跨区域和重启保留）";
 			LogInfo("[GakuMotion][StageLoad] saved next Photography key=" + (key.empty() ? std::string("native") : key));
+			return true;
+		}
+
+		void LoadForearmAxisLock()
+		{
+			const auto path = configRoot + "/forearm_axis_lock.json";
+			std::error_code ec;
+			if (!std::filesystem::exists(MotionPathFromUtf8(path), ec) && !ec)
+			{
+				player.controller.forearmAxisAdjustmentDeg = 45.0f;
+				forearmAxisLocked = true;
+				forearmAxisNotice = "默认锁定 45°；仅用于当前绑定主角色的 gkclip";
+				return;
+			}
+			jsonlite::Value root; std::string error;
+			if (ec || !jsonlite::ParseFile(path, root, error) || root.IntPath("version", 0) != 1)
+			{
+				player.controller.forearmAxisAdjustmentDeg = 0.0f;
+				forearmAxisLocked = false;
+				forearmAxisNotice = "前臂校正载入失败，已恢复 0°";
+				return;
+			}
+			const auto* value = root.Find("degrees");
+			const auto* locked = root.Find("locked");
+			if (!value || !value->IsNumber() || !std::isfinite(value->AsFloat(0)) ||
+			    value->AsFloat(0) < -90.0f || value->AsFloat(0) > 90.0f || !locked || !locked->IsBool())
+			{
+				player.controller.forearmAxisAdjustmentDeg = 0.0f;
+				forearmAxisLocked = false;
+				forearmAxisNotice = "前臂校正载入失败，已恢复 0°";
+				return;
+			}
+			player.controller.forearmAxisAdjustmentDeg = value->AsFloat(0);
+			forearmAxisLocked = locked->AsBool(false);
+			forearmAxisNotice = "已载入前臂校正设置";
+		}
+
+		bool SaveForearmAxisLock(bool locked)
+		{
+			const float degrees = player.controller.forearmAxisAdjustmentDeg;
+			if (!std::isfinite(degrees) || degrees < -90.0f || degrees > 90.0f || configRoot.empty())
+			{ forearmAxisNotice = "保存失败：前臂校正数值或路径无效"; return false; }
+			std::error_code ec;
+			std::filesystem::create_directories(MotionPathFromUtf8(configRoot), ec);
+			if (ec) { forearmAxisNotice = "保存失败：无法创建配置目录"; return false; }
+			const auto path = configRoot + "/forearm_axis_lock.json";
+			if (std::filesystem::exists(MotionPathFromUtf8(path), ec))
+			{
+				jsonlite::Value existing; std::string error;
+				if (!jsonlite::ParseFile(path, existing, error) || existing.IntPath("version", 0) != 1)
+				{ forearmAxisNotice = "保存失败：已有校正文件无效，未覆盖"; return false; }
+			}
+			if (ec) { forearmAxisNotice = "保存失败：无法检查配置文件"; return false; }
+			const auto temp = MotionPathFromUtf8(path + ".tmp"), final = MotionPathFromUtf8(path);
+			HANDLE file = CreateFileW(temp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+			if (file == INVALID_HANDLE_VALUE) { forearmAxisNotice = "保存失败：无法创建临时文件"; return false; }
+			const std::string content = "{\n  \"version\": 1,\n  \"degrees\": " +
+				jsonlite::FormatNumber(degrees, 6) + ",\n  \"locked\": " + (locked ? "true" : "false") + "\n}\n";
+			DWORD written = 0;
+			const bool wrote = WriteFile(file, content.data(), static_cast<DWORD>(content.size()), &written, nullptr) &&
+				written == content.size() && FlushFileBuffers(file);
+			CloseHandle(file);
+			if (!wrote || !MoveFileExW(temp.c_str(), final.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+			{
+				DeleteFileW(temp.c_str());
+				forearmAxisNotice = "保存失败：无法写入校正文件";
+				return false;
+			}
+			forearmAxisLocked = locked;
+			forearmAxisNotice = locked ? "已锁定并保存前臂校正" : "已解锁；调整后可重新锁定保存";
 			return true;
 		}
 
@@ -3028,6 +3104,12 @@ namespace GakuMotion
 			ctx.fnSetForearmAxisAdjustment = [](void* self, float degrees)
 			{
 				static_cast<Core*>(self)->QueueGui({GuiAction::ForearmAxisAdjustment, degrees});
+			};
+			ctx.forearmAxisLocked = forearmAxisLocked;
+			ctx.forearmAxisNotice = forearmAxisNotice;
+			ctx.fnSetForearmAxisLock = [](void* self, bool locked)
+			{
+				static_cast<Core*>(self)->QueueGui({GuiAction::ForearmAxisLock, 0, locked});
 			};
 			ctx.cameraSnapshot = camera.ReadSnapshot();
 			ctx.cameraImportBusy = cameraImportBusy;

@@ -189,6 +189,9 @@ namespace GakuMotion
 		void (*fnCaptureWristDiagnostic)(void* self){nullptr};
 		void (*fnSetWristTwistShare)(void* self, float value){nullptr};
 		void (*fnSetForearmAxisAdjustment)(void* self, float degrees){nullptr};
+		bool forearmAxisLocked{false};
+		std::string forearmAxisNotice;
+		void (*fnSetForearmAxisLock)(void* self, bool locked){nullptr};
 		// 进度拖动三段式：拖动中冻结主时钟（否则滑条每帧被播放时钟覆盖回原位而回弹）
 		void (*fnScrubBegin)(void* self, float seconds){nullptr};
 		void (*fnScrubUpdate)(void* self, float seconds){nullptr};

@@ -537,6 +537,33 @@ namespace
 		app.Click("前臂轴向校正 [实验]"); app.Settle();
 		Check(std::fabs(app.core.player.controller.forearmAxisAdjustmentDeg) < 18.0f,
 		      "forearm axis slider queues a centered correction");
+		app.core.configRoot = app.fixture.string();
+		app.core.LoadForearmAxisLock(); app.Settle();
+		Check(app.core.forearmAxisLocked && app.core.player.controller.forearmAxisAdjustmentDeg == 45.0f &&
+		      app.ItemWithLabel("前臂轴向校正 [实验]") &&
+		      (app.ItemWithLabel("前臂轴向校正 [实验]")->flags & ImGuiItemFlags_Disabled),
+		      "first launch defaults to a locked 45 degree forearm correction");
+		app.Click("前臂轴向校正 [实验]"); app.Settle();
+		Check(app.core.player.controller.forearmAxisAdjustmentDeg == 45.0f,
+		      "locked forearm slider cannot alter the default correction");
+		app.Click("锁定并保存前臂校正"); app.Settle();
+		Check(!app.core.forearmAxisLocked && std::filesystem::exists(app.fixture / "forearm_axis_lock.json"),
+		      "unlock control persists the unlocked setting");
+		app.Click("前臂轴向校正 [实验]"); app.Settle();
+		Check(std::fabs(app.core.player.controller.forearmAxisAdjustmentDeg) < 18.0f,
+		      "unlocked forearm correction can be changed");
+		app.Click("锁定并保存前臂校正"); app.Settle();
+		Core reloaded;
+		reloaded.configRoot = app.fixture.string();
+		reloaded.LoadForearmAxisLock();
+		Check(app.core.forearmAxisLocked && reloaded.forearmAxisLocked &&
+		      std::fabs(reloaded.player.controller.forearmAxisAdjustmentDeg - app.core.player.controller.forearmAxisAdjustmentDeg) < .01f,
+		      "locking saves the selected correction across a new core instance");
+		const auto badFile = app.fixture / "forearm_axis_lock.json";
+		{ std::ofstream out(badFile, std::ios::binary | std::ios::trunc); out << "invalid"; }
+		reloaded.LoadForearmAxisLock();
+		Check(!reloaded.forearmAxisLocked && reloaded.player.controller.forearmAxisAdjustmentDeg == 0.0f &&
+		      !reloaded.SaveForearmAxisLock(true), "invalid saved calibration fails closed and is not overwritten");
 	}
 
 	void TestEnsembleControls(const std::filesystem::path& root)
