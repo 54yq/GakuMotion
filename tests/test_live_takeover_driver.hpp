@@ -11,6 +11,7 @@ inline void TestLiveTakeoverDriver()
         std::string calls;
         bool restoreOk{true};
         bool pauseApplies{true};
+        bool loseReadinessOnPause{};
     };
     auto check = [](bool ok, const char* what) { StageRuntimeHarness::Check(ok, what); };
     FakeLive fake;
@@ -20,6 +21,7 @@ inline void TestLiveTakeoverDriver()
             auto& f = *static_cast<FakeLive*>(p); f.calls += 'P';
             if (f.evidence.owner != owner) return false;
             if (f.pauseApplies) f.evidence.paused = true;
+            if (f.loseReadinessOnPause) f.evidence.ready = false;
             return true;
         },
         [](void* p, uint64_t owner) {
@@ -29,7 +31,7 @@ inline void TestLiveTakeoverDriver()
         [](void* p, uint64_t owner) {
             auto& f = *static_cast<FakeLive*>(p); f.calls += 'U';
             if (f.evidence.owner != owner) return false;
-            f.evidence.paused = false; return true;
+            f.evidence.paused = false; f.evidence.ready = true; return true;
         }};
     Driver driver(adapter);
     driver.Enable();
@@ -57,6 +59,12 @@ inline void TestLiveTakeoverDriver()
     driver.Enable();
     check(driver.State() == Phase::Failed && !driver.MayInject() && fake.calls == "P",
         "successful pause call without observed pause cannot grant access");
+
+    fake.evidence = {100, true, true, false}; driver.Check();
+    fake.calls.clear(); fake.pauseApplies = true; fake.loseReadinessOnPause = true;
+    driver.Enable();
+    check(driver.State() == Phase::Off && fake.calls == "PU" && !fake.evidence.paused,
+        "failed admission after a confirmed pause resumes the previously playing Live");
 
     Driver unavailable;
     unavailable.Enable();

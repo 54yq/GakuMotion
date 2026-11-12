@@ -34,7 +34,17 @@ namespace GakuMotion::live_takeover
             const Evidence before = Observe();
             if (session_.Enable(before) != Action::PauseLive) return;
             const bool called = adapter_.pause(adapter_.context, before.owner);
-            session_.PauseFinished(Observe(), called);
+            const Evidence after = Observe();
+            session_.PauseFinished(after, called);
+            // If pause was confirmed but admission subsequently failed, put
+            // back a previously playing Live before leaving the failed start.
+            if (session_.State() == Phase::Failed && after.owner == before.owner &&
+                after.pauseKnown && after.paused && adapter_.resume(adapter_.context, before.owner))
+            {
+                const Evidence resumed = Observe();
+                if (resumed.owner == before.owner && resumed.pauseKnown && !resumed.paused)
+                    session_.ResetFailedStart(before.owner);
+            }
         }
 
         void Disable()
@@ -52,5 +62,6 @@ namespace GakuMotion::live_takeover
         {
             if (session_.State() != Phase::Off) session_.ObserveOwner(Observe());
         }
+		void Observe(const Evidence& evidence) { session_.ObserveOwner(evidence); }
     };
 }

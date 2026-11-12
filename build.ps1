@@ -136,5 +136,14 @@ try {
     if ($LASTEXITCODE -ne 0) { throw ('Synthetic contract build failed: ' + $LASTEXITCODE) }
     & $exe
     if ($LASTEXITCODE -ne 0) { throw ('Synthetic contract tests failed: ' + $LASTEXITCODE) }
+    $captureExe = Join-Path $OutputRoot 'live_capture_contracts.exe'
+    $captureObj = Join-Path $OutputRoot 'live_capture_contracts.obj'
+    $captureArgs = @('/nologo', '/std:c++20', '/utf-8', '/EHsc', '/MT', '/W4',
+        "/I$(Join-Path $repo 'src')", "/I$(Join-Path $repo 'include')",
+        (Join-Path $repo 'tests\test_live_capture_guard.cpp'), "/Fe:$captureExe", "/Fo:$captureObj")
+    & $compiler @captureArgs
+    if ($LASTEXITCODE -ne 0) { throw ('Live capture contract build failed: ' + $LASTEXITCODE) }
+    & $captureExe
+    if ($LASTEXITCODE -ne 0) { throw ('Live capture contract tests failed: ' + $LASTEXITCODE) }
 } finally { Pop-Location }
 Write-Host 'Synthetic contracts passed.'

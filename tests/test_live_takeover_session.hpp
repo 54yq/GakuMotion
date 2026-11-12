@@ -10,6 +10,23 @@ inline void TestLiveTakeoverSession()
     const Evidence paused{1, true, true, true};
     const Evidence another{2, true, true, true};
     Session s;
+    GakuMotion::injection::OwnerSnapshot liveOwner;
+    liveOwner.confirmed = true; liveOwner.presenterIdentity = 1; liveOwner.sceneHandle = 3;
+    liveOwner.sceneLoaded = true; liveOwner.role = GakuMotion::injection::OwnerRole::Live;
+    check(liveOwner.OwnsActor(3) && !liveOwner.OwnsActor(4) &&
+        GakuMotion::injection::PreviewContext("Live", "Live", liveOwner) == GakuMotion::injection::Context::Unknown,
+        "Live owner alone never admits injection and cannot own another scene's actor");
+    using GakuMotion::injection::LiveTakeoverContext;
+    using GakuMotion::injection::Context;
+    check(LiveTakeoverContext(liveOwner, 1, 3, false, true, true, true) == Context::Unknown &&
+          LiveTakeoverContext(liveOwner, 1, 3, true, true, true, true) == Context::Live,
+          "Live takeover needs explicit opt-in even with a paused confirmed owner");
+    check(LiveTakeoverContext(liveOwner, 2, 3, true, true, true, true) == Context::Unknown &&
+          LiveTakeoverContext(liveOwner, 1, 4, true, true, true, true) == Context::Unknown &&
+          LiveTakeoverContext(liveOwner, 1, 3, true, false, true, true) == Context::Unknown &&
+          LiveTakeoverContext(liveOwner, 1, 3, true, true, false, true) == Context::Unknown &&
+          LiveTakeoverContext(liveOwner, 1, 3, true, true, true, false) == Context::Unknown,
+          "Live injection rejects changed ownership, wrong mode, resumed playback and missing guard");
     check(!s.MayInject() && s.State() == Phase::Off, "Live takeover defaults off");
     check(s.Enable({1, false, true, false}) == Action::None && !s.MayInject(), "unverified Live remains blocked");
     check(s.Enable(running) == Action::PauseLive && !s.MayInject(), "pause is requested before injection");
@@ -38,4 +55,7 @@ inline void TestLiveTakeoverSession()
     s.ObserveOwner(another);
     s.Enable(paused); s.ObserveOwner(running);
     check(!s.MayInject() && s.State() == Phase::Failed, "external Live resume revokes injection");
+    s.ObserveOwner(another); s.Enable(paused); s.ObserveOwner({});
+    check(s.State() == Phase::Failed && !s.MayInject(),
+        "an unobserved owner fails closed without assuming scene destruction");
 }

@@ -72,9 +72,11 @@ namespace GakuMotion
 		std::string injectionNotice;
 		bool liveObserved{false}, livePaused{false};
 		bool liveViewingConfirmed{false};
+		bool liveTakeoverActive{false}, liveTakeoverAvailable{false};
 		float liveTime{0}, liveDuration{0};
 		std::string liveControlNotice;
 		void (*fnSetLivePaused)(void*, bool){nullptr};
+		void (*fnSetLiveTakeover)(void*, bool){nullptr};
 		MotionPlayer* player{nullptr};
 		CameraController::Snapshot cameraSnapshot;
 		void (*fnSetCameraSettings)(void*, const CameraSettings&){nullptr};
@@ -397,13 +399,17 @@ namespace GakuMotion
 					{
 						ImGui::Text("Live: %.1f / %.1f 秒 (%s)", ctx.liveTime, ctx.liveDuration,
 						            ctx.livePaused ? "已暂停" : "播放中");
-						ImGui::BeginDisabled(!ctx.liveViewingConfirmed || !ctx.fnSetLivePaused);
+						ImGui::BeginDisabled(!ctx.liveViewingConfirmed || ctx.liveTakeoverActive || !ctx.fnSetLivePaused);
 						if (ImGui::Button(ctx.livePaused ? "继续 Live" : "暂停 Live") && ctx.fnSetLivePaused)
 							ctx.fnSetLivePaused(ctx.self, !ctx.livePaused);
 						ImGui::EndDisabled();
 						if (!ctx.liveControlNotice.empty()) ImGui::TextWrapped("%s", ctx.liveControlNotice.c_str());
 						if (!ctx.liveViewingConfirmed) ImGui::TextWrapped("尚未确认 Live 观看模式，暂停控制不可用。");
-						ImGui::TextWrapped("Live 接管尚未就绪：角色归属与恢复流程需要验证。");
+						ImGui::BeginDisabled(!ctx.liveTakeoverAvailable || !ctx.fnSetLiveTakeover);
+						if (ImGui::Button(ctx.liveTakeoverActive ? "退出 Live 动作接管" : "启用 Live 动作接管") && ctx.fnSetLiveTakeover)
+							ctx.fnSetLiveTakeover(ctx.self, !ctx.liveTakeoverActive);
+						ImGui::EndDisabled();
+						if (!ctx.liveTakeoverAvailable) ImGui::TextWrapped("等待角色、拍照保护和 Live 状态就绪。");
 						ImGui::Spacing();
 					}
 					if (!ctx.stageSettings.loadReplacementKey.empty())

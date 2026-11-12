@@ -12,6 +12,7 @@
 #include "GkExactMethod.hpp"
 #include "GkLiveApi.hpp"
 #include "GkLiveViewingGate.hpp"
+#include "GkLiveTakeoverDriver.hpp"
 #include "GkBgmSuppression.hpp"
 #include <cstddef>
 #include "GkFaceRuntime.hpp"
@@ -388,6 +389,11 @@ namespace
 	GakuMotion::injection::OwnerSnapshot g_sceneOwner, g_boundSceneOwner;
 	GakuMotion::live_takeover::Api g_liveApi;
 	GakuMotion::live_takeover::ViewingGate g_liveViewingGate;
+	GakuMotion::live_takeover::Driver g_liveDriver;
+	std::atomic<bool> g_liveTakeoverEnabled{false};
+	uintptr_t g_liveTakeoverOwner = 0, g_lastLiveActorOwner = 0;
+	int g_liveTakeoverScene = 0, g_lastLiveActorScene = 0;
+	std::chrono::steady_clock::time_point g_lastLiveActorTime{};
 	std::string g_verifiedOwnerSceneName;
 
 	bool HelperCanDriveActor(void* actor)
@@ -1284,6 +1290,8 @@ namespace
 
 	bool PrepareProtectedInjection()
 	{
+		if (GakuMotion::Core::Instance().liveTakeoverActive && !GakuMotion::capture::LiveAutoPhotoIdle())
+			return false;
 		// Only a local provenance marker for unknown-scene capture cancellation.
 		// It is not a claim that any particular photo is contaminated.
 		GakuMotion::Core::Instance().customWasActivated = true;
@@ -1295,7 +1303,8 @@ namespace
 		auto& core = GakuMotion::Core::Instance();
 		std::lock_guard<std::recursive_mutex> lock(core.stateMutex);
 		return core.player.state != GakuMotion::PlaybackState::Stopped ||
-			core.camera.owned || core.stageManager.injectionEnabled;
+			core.camera.owned || core.stageManager.injectionEnabled ||
+			(core.liveTakeoverFault && core.liveOwnerToken && core.liveOwnerToken == core.liveFaultOwner);
 	}
 
 	void ManualCaptureFault(const char* reason)
@@ -1445,6 +1454,45 @@ namespace
 #endif
 	}
 
+	GakuMotion::live_takeover::RuntimeAccess LiveRuntimeAccess()
+	{
+		return {g_faceRuntime.objectClass, g_faceRuntime.findField, g_faceRuntime.fieldType,
+			g_faceRuntime.fieldFlags, g_faceRuntime.typeCode, StageLoader::metadata.classFromType,
+			g_faceRuntime.readField, g_faceRuntime.invoke, g_safeBones.unbox};
+	}
+	GakuMotion::live_takeover::Evidence ObserveLiveTakeover(void*)
+	{
+		RefreshProtectedContext();
+		auto& core = GakuMotion::Core::Instance();
+		const auto recent = std::chrono::steady_clock::now() - g_lastLiveActorTime < std::chrono::seconds(2);
+		const bool actors = core.liveTakeoverActive || (core.liveOwnerToken &&
+			core.liveOwnerToken == g_lastLiveActorOwner && core.liveOwnerScene == g_lastLiveActorScene && recent);
+		const bool ready = core.liveViewingConfirmed && core.liveObservation.confirmed &&
+			GakuMotion::capture::LiveAutoPhotoIdle() && core.injectionPolicy.Read().captureHooksReady &&
+			!core.captureSuspended && !core.ensembleRestoreUnconfirmed && actors;
+		const bool sameScene = !g_liveTakeoverOwner || (core.liveOwnerToken == g_liveTakeoverOwner &&
+			core.liveOwnerScene == g_liveTakeoverScene);
+		return {sameScene ? core.liveOwnerToken : 0, ready && sameScene,
+			core.liveObservation.confirmed && sameScene, core.liveObservation.paused};
+	}
+	bool PauseLiveForTakeover(void*, uint64_t owner)
+	{
+		auto& core = GakuMotion::Core::Instance();
+		return owner && owner == core.liveOwnerToken && core.liveViewingConfirmed &&
+			GakuMotion::live_takeover::SetPaused(g_liveApi, LiveRuntimeAccess(), reinterpret_cast<void*>(owner), true);
+	}
+	bool RestoreLiveActors(void*, uint64_t owner)
+	{
+		auto& core = GakuMotion::Core::Instance();
+		return owner && owner == core.liveOwnerToken && BeginProtectedCapture("Live takeover exit");
+	}
+	bool ResumeLiveAfterTakeover(void*, uint64_t owner)
+	{
+		auto& core = GakuMotion::Core::Instance();
+		return owner && owner == core.liveOwnerToken && core.liveViewingConfirmed &&
+			GakuMotion::live_takeover::SetPaused(g_liveApi, LiveRuntimeAccess(), reinterpret_cast<void*>(owner), false);
+	}
+
 	void ProtectedCaptureFault(const char* reason)
 	{
 		auto& core = GakuMotion::Core::Instance();
@@ -1531,10 +1579,11 @@ namespace
 			core.liveObservation = GakuMotion::live_takeover::Observe(g_liveApi, access,
 				reinterpret_cast<void*>(g_sceneOwner.presenterIdentity));
 			core.liveOwnerToken = core.liveObservation.confirmed ? g_sceneOwner.presenterIdentity : 0;
+			core.liveOwnerScene = core.liveObservation.confirmed ? g_sceneOwner.sceneHandle : 0;
 			core.liveViewingConfirmed = core.liveObservation.confirmed && g_liveViewingGate.Allows(
 				g_liveApi, access, reinterpret_cast<void*>(g_sceneOwner.presenterIdentity));
 		}
-		else { core.liveObservation = {}; core.liveOwnerToken = 0; core.liveViewingConfirmed = false; }
+		else { core.liveObservation = {}; core.liveOwnerToken = 0; core.liveOwnerScene = 0; core.liveViewingConfirmed = false; }
 		// Read-only diagnostic for Live entry and pause tests. Log only class and
 		// scene state; do not log account data, actor names or managed pointers.
 		if (name == "Live" || name.rfind("env_3d_live_", 0) == 0 ||
@@ -1553,8 +1602,21 @@ namespace
 			}
 		}
 		StageLoadOverride::ObserveActiveScene(g_verifiedActiveSceneHandle, name);
-		core.injectionPolicy.SetContext(g_activeSceneVerified ? ownerObservation.context :
-			GakuMotion::injection::Context::Unknown);
+		const bool liveOwner = core.liveViewingConfirmed && core.liveOwnerToken &&
+			g_sceneOwner.role == GakuMotion::injection::OwnerRole::Live;
+		const bool recentLiveActor = g_lastLiveActorOwner == core.liveOwnerToken && core.liveOwnerToken &&
+			g_lastLiveActorScene == core.liveOwnerScene &&
+			(std::chrono::steady_clock::now() - g_lastLiveActorTime < std::chrono::seconds(2));
+		core.liveTakeoverAvailable = liveOwner && GakuMotion::capture::LiveAutoPhotoIdle() &&
+			core.injectionPolicy.Read().captureHooksReady && core.injectionPolicy.Read().captureDepth == 0 &&
+			!core.ensembleRestoreUnconfirmed && !core.liveTakeoverFault && (core.liveTakeoverActive || recentLiveActor);
+		auto admitted = g_activeSceneVerified ? ownerObservation.context : GakuMotion::injection::Context::Unknown;
+		const auto liveAdmission = GakuMotion::injection::LiveTakeoverContext(g_sceneOwner,
+			g_liveTakeoverOwner, g_liveTakeoverScene, core.liveTakeoverActive,
+			core.liveViewingConfirmed && g_activeSceneVerified, core.liveObservation.paused,
+			GakuMotion::capture::LiveReady());
+		if (liveAdmission != GakuMotion::injection::Context::Unknown) admitted = liveAdmission;
+		core.injectionPolicy.SetContext(admitted);
 		g_motionSceneAllowed = core.InjectionAllowed();
 		const bool oldSceneLost = g_currentSceneHandle != INT_MIN &&
 			(g_boundSceneOwner.ReplacedBy(g_sceneOwner) ||
@@ -2208,6 +2270,8 @@ void MotionRuntimeReady(void*)
 	g_liveViewingGate = GakuMotion::live_takeover::ViewingGate::Resolve(FindClass, StageLoader::metadata,
 		g_faceRuntime.findField, g_faceRuntime.fieldType, g_faceRuntime.fieldFlags,
 		readStaticField, StageLoader::valueSize);
+	g_liveDriver.SetAdapter({nullptr, ObserveLiveTakeover, PauseLiveForTakeover,
+		RestoreLiveActors, ResumeLiveAfterTakeover});
 	if (g_hostContext.logInfo) g_hostContext.logInfo(
 		"[GakuMotion][Live] exact playback metadata %s; viewing gate %s; takeover remains disabled",
 		g_liveApi.Ready() ? "resolved" : "unavailable", g_liveViewingGate.ready ? "resolved" : "unavailable");
@@ -2220,8 +2284,9 @@ void MotionRuntimeReady(void*)
 	if (!StageLoader::valueSize || StageLoader::valueSize(sceneClass, &sceneAlignment) != sizeof(int))
 		g_activeSceneMethod = nullptr;
 	const GakuMotion::capture::Callbacks protection{
-		CustomCaptureActive, nullptr, nullptr, ManualCaptureFault, ProtectedPageChanged,
-		ObserveCapture, nullptr};
+		CustomCaptureActive, BeginProtectedCapture, EndProtectedCapture, ManualCaptureFault, ProtectedPageChanged,
+		ObserveCapture, ContinueProtectedCapture,
+		[]() { return g_liveTakeoverEnabled.load(std::memory_order_acquire); }, ProtectionOnUnityThread};
 	const bool captureReady = GakuMotion::capture::Install(g_gameAssembly, FindClass, protection);
 	const bool ownerSceneReady = SceneOwnerRuntime::Resolve();
 	StageLoadOverride::nestedTypes = reinterpret_cast<decltype(StageLoadOverride::nestedTypes)>(
@@ -2527,6 +2592,12 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	}
 	if (core.liveObservation.confirmed && activeActor)
 	{
+		if (core.liveViewingConfirmed && g_sceneOwner.Valid() && sceneHandle == g_sceneOwner.sceneHandle)
+		{
+			g_lastLiveActorOwner = core.liveOwnerToken;
+			g_lastLiveActorScene = sceneHandle;
+			g_lastLiveActorTime = std::chrono::steady_clock::now();
+		}
 		static auto nextReport = std::chrono::steady_clock::time_point{};
 		static unsigned callbacks = 0, ownerMatches = 0;
 		++callbacks;
@@ -3251,15 +3322,92 @@ void MotionTick(void*, float)
 		RefreshProtectedContext();
 		auto& core = GakuMotion::Core::Instance();
 		std::lock_guard<std::recursive_mutex> lock(core.stateMutex);
+		if (core.liveTakeoverFault && core.liveOwnerToken && core.liveFaultOwner &&
+			core.liveOwnerToken != core.liveFaultOwner)
+		{
+			g_liveDriver.Observe({core.liveOwnerToken, false, false, false});
+			if (g_liveDriver.State() == GakuMotion::live_takeover::Phase::Off)
+			{
+				core.liveTakeoverFault = false;
+				core.liveFaultOwner = 0;
+				g_liveTakeoverEnabled.store(false, std::memory_order_release);
+			}
+		}
+		if (core.liveTakeoverActive && core.injectionPolicy.Read().captureDepth == 0 &&
+			GakuMotion::capture::LiveAutoPhotoIdle())
+		{
+			g_liveDriver.Check();
+			if (!g_liveDriver.MayInject())
+			{
+				core.liveTakeoverFault = g_liveDriver.State() == GakuMotion::live_takeover::Phase::Failed;
+				if (core.liveTakeoverFault) core.liveFaultOwner = g_liveTakeoverOwner;
+				core.liveTakeoverActive = false;
+				g_liveTakeoverEnabled.store(core.liveTakeoverFault, std::memory_order_release);
+				g_liveTakeoverOwner = 0;
+				g_liveTakeoverScene = 0;
+				core.liveControlNotice = core.liveTakeoverFault ?
+					"Live 状态或角色归属无法确认，已停止接管；请重新进入场景。" : "Live 已离开，接管已结束。";
+				RefreshProtectedContext(true);
+			}
+		}
+		if (core.liveTakeoverRequest)
+		{
+			const int request = core.liveTakeoverRequest;
+			const uintptr_t requestedOwner = core.liveTakeoverRequestOwner;
+			const int requestedScene = core.liveTakeoverRequestScene;
+			core.liveTakeoverRequest = 0; core.liveTakeoverRequestOwner = 0; core.liveTakeoverRequestScene = 0;
+			core.livePauseRequest = 0; core.livePauseRequestOwner = 0; core.livePauseRequestScene = 0;
+			RefreshProtectedContext(true);
+			if (request == 1 && requestedOwner && requestedOwner == core.liveOwnerToken && requestedScene == core.liveOwnerScene &&
+				core.liveTakeoverAvailable && !core.liveTakeoverActive)
+			{
+				g_liveTakeoverOwner = requestedOwner;
+				g_liveTakeoverScene = requestedScene;
+				g_liveDriver.Enable();
+				core.liveTakeoverActive = g_liveDriver.MayInject();
+				g_liveTakeoverEnabled.store(core.liveTakeoverActive, std::memory_order_release);
+				core.liveTakeoverFault = g_liveDriver.State() == GakuMotion::live_takeover::Phase::Failed;
+				if (core.liveTakeoverFault) core.liveFaultOwner = requestedOwner;
+				if (!core.liveTakeoverActive) { g_liveTakeoverOwner = 0; g_liveTakeoverScene = 0; }
+				core.liveControlNotice = core.liveTakeoverActive ? "Live 已暂停，可以为场景角色选择动作。" :
+					"未能确认 Live 暂停和角色状态，未开启接管。";
+			}
+			else if (request == 2 && requestedOwner && requestedOwner == core.liveOwnerToken && requestedScene == core.liveOwnerScene &&
+				core.liveTakeoverActive && core.injectionPolicy.Read().captureDepth == 0)
+			{
+				const bool resumeLive = g_liveDriver.OwnsPause();
+				g_liveDriver.Disable();
+				const bool clean = g_liveDriver.State() == GakuMotion::live_takeover::Phase::Off;
+				if (core.injectionPolicy.Read().captureDepth != 0) core.injectionPolicy.EndCapture();
+				if (clean)
+				{
+					core.captureSuspended = false;
+					core.capturePerformanceWasActive = false;
+					++core.injectionSession;
+				}
+				core.liveTakeoverActive = false;
+				core.liveTakeoverFault = !clean;
+				if (core.liveTakeoverFault) core.liveFaultOwner = requestedOwner;
+				g_liveTakeoverEnabled.store(core.liveTakeoverFault, std::memory_order_release);
+				g_liveTakeoverOwner = 0;
+				g_liveTakeoverScene = 0;
+				core.liveControlNotice = clean ? (resumeLive ? "已恢复角色与 Live 播放。" : "已恢复角色，Live 保持原有暂停状态。") :
+					"角色或 Live 恢复未确认；已停止接管，请重新进入场景。";
+			}
+			else core.liveControlNotice = "Live 场景或拍照状态已变化，操作未执行。";
+			RefreshProtectedContext(true);
+		}
 		if (core.livePauseRequest)
 		{
 			const int request = core.livePauseRequest;
 			const uintptr_t requestedOwner = core.livePauseRequestOwner;
+			const int requestedScene = core.livePauseRequestScene;
 			core.livePauseRequest = 0;
 			core.livePauseRequestOwner = 0;
+			core.livePauseRequestScene = 0;
 			RefreshProtectedContext(true);
 			bool changed = false;
-			if (requestedOwner && requestedOwner == core.liveOwnerToken && core.liveViewingConfirmed &&
+			if (requestedOwner && requestedOwner == core.liveOwnerToken && requestedScene == core.liveOwnerScene && core.liveViewingConfirmed &&
 				core.liveObservation.confirmed)
 			{
 				const GakuMotion::live_takeover::RuntimeAccess access{

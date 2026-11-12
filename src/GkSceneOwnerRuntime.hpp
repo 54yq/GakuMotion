@@ -65,7 +65,8 @@ namespace SceneOwnerRuntime
 		auto& owner = result.owner;
 		owner.presenterIdentity = reinterpret_cast<uintptr_t>(root);
 		owner.role = klass == photoClass ? GakuMotion::injection::OwnerRole::Photography :
-			klass == outGameClass ? GakuMotion::injection::OwnerRole::OutGame : GakuMotion::injection::OwnerRole::Other;
+			klass == outGameClass ? GakuMotion::injection::OwnerRole::OutGame :
+			klass == g_liveApi.sceneClass ? GakuMotion::injection::OwnerRole::Live : GakuMotion::injection::OwnerRole::Other;
 		exception = nullptr;
 		void* go = g_faceRuntime.invoke(StageLoader::componentGo, root, nullptr, &exception);
 		if (!go || exception) { result.reason = "presenter-gameobject-unconfirmed"; return result; }

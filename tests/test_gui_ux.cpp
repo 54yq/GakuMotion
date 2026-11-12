@@ -1295,10 +1295,11 @@ int main(int argc, char** argv)
 		app.core.enforceInjectionPolicy = true;
 		app.core.liveObservation = {true, false, 12.0f, 150.0f};
 		app.core.liveOwnerToken = 55;
+		app.core.liveOwnerScene = 73;
 		app.core.liveViewingConfirmed = true;
 		app.Settle();
 		app.Click("暂停 Live");
-		Check(app.core.livePauseRequest == 1 && app.core.livePauseRequestOwner == 55,
+		Check(app.core.livePauseRequest == 1 && app.core.livePauseRequestOwner == 55 && app.core.livePauseRequestScene == 73,
 			"Live pause button queues an owner-scoped pause while injection remains disabled");
 		app.core.liveObservation.paused = true;
 		app.Settle();
@@ -1310,6 +1311,16 @@ int main(int argc, char** argv)
 		app.Settle();
 		app.Click("继续 Live");
 		Check(app.core.livePauseRequest == 0, "unconfirmed viewing mode cannot queue Live control");
+		app.core.liveViewingConfirmed = true;
+		app.core.liveTakeoverAvailable = true;
+		app.Settle(); app.Click("启用 Live 动作接管");
+		Check(app.core.liveTakeoverRequest == 1 && app.core.liveTakeoverRequestOwner == 55 && app.core.liveTakeoverRequestScene == 73,
+			"Live takeover enable is scoped to the observed owner");
+		app.core.liveTakeoverActive = true;
+		app.core.enforceInjectionPolicy = false;
+		app.Settle(); app.Click("退出 Live 动作接管");
+		Check(app.core.liveTakeoverRequest == 2 && app.core.liveTakeoverRequestOwner == 55,
+			"active Live takeover exposes an owner-scoped restore button");
 	}
 	ImGui::DestroyContext();
 	std::printf("GUI UX interaction checks: %d passed, %d failed\n", passed, failed);
