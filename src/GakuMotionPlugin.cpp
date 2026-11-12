@@ -2007,10 +2007,10 @@ void MotionRuntimeReady(void*)
 			HelperBeginFaceBinding, HelperGetActorName
 		};
 		ctrl.faceApi.getModelName = HelperGetFaceModelName;
-		ctrl.faceApi.reportMikuMouthFit = [](const char* decision, const char* faceName)
+		ctrl.faceApi.reportFacialFit = [](const char* component, const char* decision, const char* faceName)
 		{
-			GM_DEBUG("[GakuMotion][MikuMouthFit] decision=%s actual_face=%s (prefab identity; asset bytes not runtime-verified)",
-				decision, faceName);
+			GM_DEBUG("[GakuMotion][FacialFit] component=%s decision=%s actual_face=%s (prefab identity; asset bytes not runtime-verified)",
+				component, decision, faceName);
 		};
 		if (g_hostContext.logInfo)
 			g_hostContext.logInfo(

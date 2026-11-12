@@ -287,6 +287,8 @@ namespace GakuMotion
 			float playbackSpeed{-1.0f};
 			int facialEnableBaseline{-1};
 			int facialMikuMouthFit{-1};
+			int facialMikuEyeFit{-1};
+			int facialMikuFitAllowUnverified{-1};
 			float facialBaselineMultiplier{-1.0f};
 			std::string facialCharacterOverride;
 		} applied;
@@ -2162,6 +2164,23 @@ namespace GakuMotion
 				for (auto& pair : player.controller.bindings)
 					pair.second.face.enableMikuMouthFit = player.controller.facialMikuMouthFit;
 				player.controller.currentBinding.face.enableMikuMouthFit = player.controller.facialMikuMouthFit;
+			}
+			if (config.facialMikuEyeFit >= 0 && config.facialMikuEyeFit != applied.facialMikuEyeFit)
+			{
+				applied.facialMikuEyeFit = config.facialMikuEyeFit;
+				player.controller.facialMikuEyeFit = config.facialMikuEyeFit != 0;
+				for (auto& pair : player.controller.bindings)
+					pair.second.face.enableMikuEyeFit = player.controller.facialMikuEyeFit;
+				player.controller.currentBinding.face.enableMikuEyeFit = player.controller.facialMikuEyeFit;
+			}
+			if (config.facialMikuFitAllowUnverified >= 0 &&
+				config.facialMikuFitAllowUnverified != applied.facialMikuFitAllowUnverified)
+			{
+				applied.facialMikuFitAllowUnverified = config.facialMikuFitAllowUnverified;
+				player.controller.facialMikuFitAllowUnverified = config.facialMikuFitAllowUnverified != 0;
+				for (auto& pair : player.controller.bindings)
+					pair.second.face.facialFitAllowUnverified = player.controller.facialMikuFitAllowUnverified;
+				player.controller.currentBinding.face.facialFitAllowUnverified = player.controller.facialMikuFitAllowUnverified;
 			}
 			if (config.facialEnableBaseline >= 0 && config.facialEnableBaseline != applied.facialEnableBaseline)
 			{
