@@ -380,7 +380,7 @@ namespace StageRuntimeHarness
 int main()
 {
     using namespace StageRuntimeHarness;
-    TestDetour(); TestInstall(); TestShutdown(); TestLiveTakeoverSession(); TestLiveTakeoverDriver(); LiveApiHarness::Test(); LiveObservationHarness::Test();
+    TestDetour(); TestInstall(); TestShutdown(); TestLiveTakeoverSession(); TestLiveTakeoverDriver(); LiveApiHarness::Test(); LiveGateResolveHarness::Test(); LiveObservationHarness::Test();
     std::printf("Stage-load runtime detour: %d passed, %d failed\n", passed, failed);
     return failed ? 1 : 0;
 }

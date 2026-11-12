@@ -1259,6 +1259,27 @@ int main(int argc, char** argv)
         context.fnPlaylistAction(context.self, static_cast<int>(GuiPlaylistAction::DeleteFiles), secondKey.c_str(), 1);
         Check(preview.motions.size() == 2, "standalone mock deletes after import is no longer busy");
     }
+	{
+		Harness app(root);
+		app.core.enforceInjectionPolicy = true;
+		app.core.liveObservation = {true, false, 12.0f, 150.0f};
+		app.core.liveOwnerToken = 55;
+		app.core.liveViewingConfirmed = true;
+		app.Settle();
+		app.Click("暂停 Live");
+		Check(app.core.livePauseRequest == 1 && app.core.livePauseRequestOwner == 55,
+			"Live pause button queues an owner-scoped pause while injection remains disabled");
+		app.core.liveObservation.paused = true;
+		app.Settle();
+		app.Click("继续 Live");
+		Check(app.core.livePauseRequest == 2 && app.core.livePauseRequestOwner == 55,
+			"Live resume button queues an owner-scoped resume");
+		app.core.livePauseRequest = 0;
+		app.core.liveViewingConfirmed = false;
+		app.Settle();
+		app.Click("继续 Live");
+		Check(app.core.livePauseRequest == 0, "unconfirmed viewing mode cannot queue Live control");
+	}
 	ImGui::DestroyContext();
 	std::printf("GUI UX interaction checks: %d passed, %d failed\n", passed, failed);
 	return failed ? EXIT_FAILURE : EXIT_SUCCESS;

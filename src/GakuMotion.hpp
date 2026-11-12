@@ -104,6 +104,10 @@ namespace GakuMotion
 		bool stageStoppedByTransport{false};
 		std::string injectionStatus;
 		live_takeover::Observation liveObservation;
+		bool liveViewingConfirmed{false};
+		uintptr_t liveOwnerToken{0}, livePauseRequestOwner{0};
+		int livePauseRequest{0}; // 0 none, 1 pause, 2 resume; stateMutex guarded.
+		std::string liveControlNotice;
 		bool (*fnBeforeInjection)(){nullptr};
 		bool InjectionAllowed() const { return !enforceInjectionPolicy || injectionPolicy.CanInject(); }
 		bool PrepareInjection()
@@ -2993,6 +2997,15 @@ namespace GakuMotion
 			ctx.livePaused = liveObservation.paused;
 			ctx.liveTime = liveObservation.time;
 			ctx.liveDuration = liveObservation.duration;
+			ctx.liveViewingConfirmed = liveViewingConfirmed;
+			ctx.liveControlNotice = liveControlNotice;
+			ctx.fnSetLivePaused = [](void* self, bool paused)
+			{
+				auto* core = static_cast<Core*>(self);
+				if (!core->liveViewingConfirmed || !core->liveObservation.confirmed || !core->liveOwnerToken) return;
+				core->livePauseRequest = paused ? 1 : 2;
+				core->livePauseRequestOwner = core->liveOwnerToken;
+			};
 			ctx.injectionNotice = injectionStatus.empty()
 				? "仅偶像摄影与更衣室可以使用；其他页面保留设置但不生效。" : injectionStatus;
 			ctx.player = &player;

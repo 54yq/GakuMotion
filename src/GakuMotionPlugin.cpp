@@ -11,6 +11,7 @@
 #include "GakuSafeBoneLookup.h"
 #include "GkExactMethod.hpp"
 #include "GkLiveApi.hpp"
+#include "GkLiveViewingGate.hpp"
 #include "GkBgmSuppression.hpp"
 #include <cstddef>
 #include "GkFaceRuntime.hpp"
@@ -386,6 +387,7 @@ namespace
 	int g_verifiedActiveSceneHandle = 0;
 	GakuMotion::injection::OwnerSnapshot g_sceneOwner, g_boundSceneOwner;
 	GakuMotion::live_takeover::Api g_liveApi;
+	GakuMotion::live_takeover::ViewingGate g_liveViewingGate;
 	std::string g_verifiedOwnerSceneName;
 
 	bool HelperCanDriveActor(void* actor)
@@ -1528,8 +1530,11 @@ namespace
 				g_faceRuntime.readField, g_faceRuntime.invoke, g_safeBones.unbox};
 			core.liveObservation = GakuMotion::live_takeover::Observe(g_liveApi, access,
 				reinterpret_cast<void*>(g_sceneOwner.presenterIdentity));
+			core.liveOwnerToken = core.liveObservation.confirmed ? g_sceneOwner.presenterIdentity : 0;
+			core.liveViewingConfirmed = core.liveObservation.confirmed && g_liveViewingGate.Allows(
+				g_liveApi, access, reinterpret_cast<void*>(g_sceneOwner.presenterIdentity));
 		}
-		else core.liveObservation = {};
+		else { core.liveObservation = {}; core.liveOwnerToken = 0; core.liveViewingConfirmed = false; }
 		// Read-only diagnostic for Live entry and pause tests. Log only class and
 		// scene state; do not log account data, actor names or managed pointers.
 		if (name == "Live" || name.rfind("env_3d_live_", 0) == 0 ||
@@ -2198,9 +2203,14 @@ void MotionRuntimeReady(void*)
 	// Metadata inspection only. Live remains denied by the existing policy;
 	// resolving these signatures does not discover or modify a game object.
 	g_liveApi = GakuMotion::live_takeover::Api::Resolve(FindClass, StageLoader::metadata);
+	auto readStaticField = reinterpret_cast<void (*)(void*, void*)>(
+		GetProcAddress(g_gameAssembly, "il2cpp_field_static_get_value"));
+	g_liveViewingGate = GakuMotion::live_takeover::ViewingGate::Resolve(FindClass, StageLoader::metadata,
+		g_faceRuntime.findField, g_faceRuntime.fieldType, g_faceRuntime.fieldFlags,
+		readStaticField, StageLoader::valueSize);
 	if (g_hostContext.logInfo) g_hostContext.logInfo(
-		"[GakuMotion][Live] exact playback metadata %s; takeover remains disabled",
-		g_liveApi.Ready() ? "resolved" : "unavailable");
+		"[GakuMotion][Live] exact playback metadata %s; viewing gate %s; takeover remains disabled",
+		g_liveApi.Ready() ? "resolved" : "unavailable", g_liveViewingGate.ready ? "resolved" : "unavailable");
 	g_captureAnimatorUpdateMethod = StageLoader::metadata.Find(g_animatorKlass, "Update", false, {0x01}, {{0x0c}});
 	void* sceneClass = FindClass("UnityEngine.CoreModule.dll", "UnityEngine.SceneManagement", "Scene");
 	g_activeSceneMethod = StageLoader::metadata.Find(
@@ -3241,6 +3251,28 @@ void MotionTick(void*, float)
 		RefreshProtectedContext();
 		auto& core = GakuMotion::Core::Instance();
 		std::lock_guard<std::recursive_mutex> lock(core.stateMutex);
+		if (core.livePauseRequest)
+		{
+			const int request = core.livePauseRequest;
+			const uintptr_t requestedOwner = core.livePauseRequestOwner;
+			core.livePauseRequest = 0;
+			core.livePauseRequestOwner = 0;
+			RefreshProtectedContext(true);
+			bool changed = false;
+			if (requestedOwner && requestedOwner == core.liveOwnerToken && core.liveViewingConfirmed &&
+				core.liveObservation.confirmed)
+			{
+				const GakuMotion::live_takeover::RuntimeAccess access{
+					g_faceRuntime.objectClass, g_faceRuntime.findField, g_faceRuntime.fieldType,
+					g_faceRuntime.fieldFlags, g_faceRuntime.typeCode, StageLoader::metadata.classFromType,
+					g_faceRuntime.readField, g_faceRuntime.invoke, g_safeBones.unbox};
+				changed = GakuMotion::live_takeover::SetPaused(g_liveApi, access,
+					reinterpret_cast<void*>(requestedOwner), request == 1);
+			}
+			core.liveControlNotice = changed ? (request == 1 ? "Live 已暂停。" : "Live 已恢复播放。") :
+				"未能确认 Live 状态，操作未完成；请检查场景或日志。";
+			RefreshProtectedContext(true);
+		}
 		RefreshSceneActors(core);
 	}
 }

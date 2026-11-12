@@ -1,5 +1,6 @@
 #pragma once
 #include "GkLiveApi.hpp"
+#include "GkLiveViewingGate.hpp"
 
 namespace LiveApiHarness
 {
@@ -50,5 +51,51 @@ namespace LiveApiHarness
         Check(!GakuMotion::live_takeover::Api::Resolve(Find, metadata).Ready(),
             "Live API rejects ambiguous metadata");
         methods.clear();
+    }
+}
+
+namespace LiveGateResolveHarness
+{
+    using namespace StageRuntimeHarness;
+    inline MetadataClass model{"LiveModel"}, fixed{"LiveFixedData"}, from{"LiveFromType", true, 4, 4};
+    struct Field { MetadataType type; uint32_t flags; int value; };
+    inline Field picture{{0x11, &from}, 0x50, 2}, roster{{0x11, &from}, 0x50, 3};
+    inline void* Find(const char* image, const char* space, const char* name)
+    {
+        if (std::strcmp(image, "Assembly-CSharp.dll")) return nullptr;
+        if (!std::strcmp(space, "Campus.Live") && !std::strcmp(name, model.name)) return &model;
+        if (!std::strcmp(space, "Campus.Live") && !std::strcmp(name, from.name)) return &from;
+        if (!std::strcmp(space, "Campus.Live.Data") && !std::strcmp(name, fixed.name)) return &fixed;
+        return nullptr;
+    }
+    inline void* FindField(void* klass, const char* name)
+    {
+        if (klass != &from) return nullptr;
+        if (!std::strcmp(name, "PictureBook")) return &picture;
+        if (!std::strcmp(name, "RosterLive")) return &roster;
+        return nullptr;
+    }
+    inline void* FieldType(void* field) { return &static_cast<Field*>(field)->type; }
+    inline uint32_t FieldFlags(void* field) { return static_cast<Field*>(field)->flags; }
+    inline void ReadStatic(void* field, void* value) { *static_cast<int*>(value) = static_cast<Field*>(field)->value; }
+    inline void Test()
+    {
+        GakuMotion::ExactMethodMetadata metadata{Methods, MethodName, MethodCount, MethodFlags,
+            MethodGeneric, MethodInflated, MethodClass, MethodParameter, MethodResult,
+            TypeCode, TypeByRef, TypeClass};
+        MetadataMethod fixedGetter{}, typeGetter{};
+        fixedGetter.name = "get_FixedData"; fixedGetter.owner = &model; fixedGetter.returns = {0x12, &fixed};
+        fixedGetter.count = 0; fixedGetter.flags = 0x86;
+        typeGetter.name = "get_LiveFromType"; typeGetter.owner = &fixed; typeGetter.returns = {0x11, &from};
+        typeGetter.count = 0; typeGetter.flags = 0x86;
+        methods = {&fixedGetter, &typeGetter};
+        auto resolve = [&] { return GakuMotion::live_takeover::ViewingGate::Resolve(
+            Find, metadata, FindField, FieldType, FieldFlags, ReadStatic, ValueSize); };
+        Check(resolve().ready, "viewing gate reads exact enum members and accessors");
+        roster.flags = 0;
+        Check(!resolve().ready, "viewing gate rejects non-static enum constants");
+        roster.flags = 0x50; roster.value = 2;
+        Check(!resolve().ready, "viewing gate rejects indistinguishable viewing enum values");
+        roster.value = 3; methods.clear();
     }
 }
