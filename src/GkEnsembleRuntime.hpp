@@ -17,6 +17,7 @@ namespace GakuMotion
 		struct Follower
 		{
 			uint64_t actorToken{0};
+			uint64_t bindingGeneration{0};
 			std::string motionKey;
 			float offsetSeconds{0};
 			bool active{false};
@@ -108,6 +109,8 @@ namespace GakuMotion
 			if (!Clear(index, registry)) return false;
 			auto& follower = followers_[index];
 			follower.actorToken = actorToken;
+			follower.bindingGeneration = nextBindingGeneration_++;
+			if (!nextBindingGeneration_) ++nextBindingGeneration_;
 			follower.motionKey = motion.name;
 			follower.offsetSeconds = offset;
 			follower.motionOverrides = std::move(motionOverrides);
@@ -116,6 +119,17 @@ namespace GakuMotion
 			follower.player->controller.SetBoneOverrides(&follower.overrides);
 			assignments_ = std::move(nextAssignments);
 			return true;
+		}
+
+		bool SetPosition(size_t index, uint64_t actorToken, uint64_t epoch, uint64_t generation,
+		                 const Vector3& position, const SceneActorRegistry& registry)
+		{
+			if (index >= kFollowerCount || restoreUnconfirmed_) return false;
+			auto& follower = followers_[index];
+			if (!follower.player || !generation || follower.bindingGeneration != generation ||
+			    follower.actorToken != actorToken || registry.Resolve(actorToken, epoch) != follower.player->controller.targetActor)
+				return false;
+			return follower.player->controller.SetInitialPositionOffset(position);
 		}
 
 		void RebuildOverrides(const BoneOverrideSet& global, bool enabled)
@@ -174,5 +188,6 @@ namespace GakuMotion
 		std::array<Follower, kFollowerCount> followers_{};
 		EnsembleAssignments assignments_;
 		bool restoreUnconfirmed_{false};
+		uint64_t nextBindingGeneration_{1};
 	};
 }

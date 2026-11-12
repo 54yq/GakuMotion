@@ -350,7 +350,7 @@ namespace GakuMotion
 			StageSettings, StagePreset, ToggleStageCandidate, ScanStageCandidates,
 			MountCustomStage, UnloadCustomStage, RestoreCameraSkybox,
 			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, StageLoadReplacement, SelectTarget,
-			SetEnsembleFollower, ClearEnsembleFollower
+			SetEnsembleFollower, ClearEnsembleFollower, EnsemblePosition
 		};
 
 		std::atomic<int> guiPhysicsBackend{2};
@@ -387,9 +387,12 @@ namespace GakuMotion
 			std::lock_guard<std::mutex> lock(guiCommandMutex);
 			// Only adjacent scrub/placement updates may coalesce. Begin/end/save/
 			// transport events retain their order across physical frames.
-			if ((cmd.action == GuiAction::ScrubUpdate || cmd.action == GuiAction::InitialPosition) && !guiCommands.
-				empty() &&
-				guiCommands.back().action == cmd.action)
+			const bool sameFollowerPosition = cmd.action == GuiAction::EnsemblePosition && !guiCommands.empty() &&
+				guiCommands.back().action == cmd.action && guiCommands.back().candidateIndex == cmd.candidateIndex &&
+				guiCommands.back().actorToken == cmd.actorToken && guiCommands.back().actorEpoch == cmd.actorEpoch &&
+				guiCommands.back().loadedGeneration == cmd.loadedGeneration;
+			if (sameFollowerPosition || ((cmd.action == GuiAction::ScrubUpdate || cmd.action == GuiAction::InitialPosition) &&
+			    !guiCommands.empty() && guiCommands.back().action == cmd.action))
 				guiCommands.back() = std::move(cmd);
 			else guiCommands.push_back(std::move(cmd));
 		}
@@ -768,6 +771,11 @@ namespace GakuMotion
 					if (ensemble.Clear(static_cast<size_t>(cmd.candidateIndex), sceneActorRegistry))
 					{ ++injectionSession; ensembleNotice = "已解除角色动作"; }
 					else { ensembleRestoreUnconfirmed = true; ensembleNotice = "角色恢复未确认，已停止动作注入"; }
+					break;
+				case GuiAction::EnsemblePosition:
+					if (!ensembleRestoreUnconfirmed && cmd.candidateIndex >= 0 && cmd.candidateIndex < 2)
+						ensemble.SetPosition(static_cast<size_t>(cmd.candidateIndex), cmd.actorToken, cmd.actorEpoch,
+						                     cmd.loadedGeneration, cmd.position, sceneActorRegistry);
 					break;
 				case GuiAction::ClearTarget: PickBoundActorAsTarget();
 					break;
@@ -2943,7 +2951,9 @@ namespace GakuMotion
 			for (size_t i = 0; i < ensemble.Followers().size(); ++i)
 			{
 				const auto& follower = ensemble.Followers()[i];
-				ctx.ensembleFollowers[i] = {follower.actorToken, follower.motionKey, follower.offsetSeconds, follower.active};
+				ctx.ensembleFollowers[i] = {follower.actorToken, follower.motionKey, follower.offsetSeconds, follower.active,
+				                            follower.bindingGeneration,
+				                            follower.player ? follower.player->controller.initialPositionOffset : Vector3{}};
 			}
 			ctx.ensembleNotice = ensembleNotice;
 			ctx.fnSetEnsembleFollower = [](void* self, int slot, uint64_t token, uint64_t epoch,
@@ -2958,6 +2968,14 @@ namespace GakuMotion
 			{
 				GuiCommand cmd{GuiAction::ClearEnsembleFollower};
 				cmd.candidateIndex = slot; cmd.actorEpoch = epoch;
+				static_cast<Core*>(self)->QueueGui(std::move(cmd));
+			};
+			ctx.fnSetEnsemblePosition = [](void* self, int slot, uint64_t token, uint64_t epoch,
+			                               uint64_t generation, const Vector3& offset)
+			{
+				GuiCommand cmd{GuiAction::EnsemblePosition};
+				cmd.candidateIndex = slot; cmd.actorToken = token; cmd.actorEpoch = epoch;
+				cmd.loadedGeneration = generation; cmd.position = offset;
 				static_cast<Core*>(self)->QueueGui(std::move(cmd));
 			};
 			for (const auto& item : sceneActorRegistry.Entries())

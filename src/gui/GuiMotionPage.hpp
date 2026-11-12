@@ -46,7 +46,7 @@ namespace GakuMotion
 		if (ImGui::CollapsingHeader("多人同步播放（最多三人）"))
 		{
 			ImGui::TextWrapped("上方角色为主角色。其他角色分别选择曲库中的动作，统一使用主角色的音乐、镜头和进度。停止播放后可修改绑定。");
-			ImGui::TextWrapped("角色站位沿用场景位置；额外角色的次级物理暂不由插件驱动。");
+			ImGui::TextWrapped("绑定后可分别调整角色站位；额外角色的次级物理暂不由插件驱动。");
 			if (overlay.ensembleDraftEpoch != ctx.actorRosterEpoch)
 			{
 				overlay.ensembleDraftEpoch = ctx.actorRosterEpoch;
@@ -57,11 +57,11 @@ namespace GakuMotion
 					overlay.ensembleDraftOffset[i] = ctx.ensembleFollowers[i].offsetSeconds;
 				}
 			}
-			ImGui::BeginDisabled(player.state == PlaybackState::Playing || player.state == PlaybackState::Paused);
 			for (size_t i = 0; i < ctx.ensembleFollowers.size(); ++i)
 			{
 				ImGui::PushID(static_cast<int>(i));
 				ImGui::Text("角色 %d", static_cast<int>(i) + 2);
+				ImGui::BeginDisabled(player.state == PlaybackState::Playing || player.state == PlaybackState::Paused);
 				std::string actorLabel = "请选择角色";
 				for (const auto& candidate : ctx.sceneActors)
 					if (candidate.token == overlay.ensembleDraftActor[i]) actorLabel = candidate.label;
@@ -102,15 +102,36 @@ namespace GakuMotion
 				ImGui::BeginDisabled(!ctx.fnClearEnsembleFollower || !ctx.ensembleFollowers[i].actorToken);
 				if (ImGui::Button("解除绑定")) ctx.fnClearEnsembleFollower(ctx.self, static_cast<int>(i), ctx.actorRosterEpoch);
 				ImGui::EndDisabled();
+				ImGui::EndDisabled();
 				if (!ctx.ensembleFollowers[i].motionKey.empty())
 				{
 					ImGui::TextWrapped("当前动作：%s", ctx.ensembleFollowers[i].motionKey.c_str());
 					ImGui::TextWrapped("状态：%s", ctx.ensembleFollowers[i].active ? "角色已驱动" :
 					                   player.state == PlaybackState::Stopped ? "等待播放" : "等待可恢复的角色骨架");
+					const auto& follower = ctx.ensembleFollowers[i];
+					if (overlay.ensemblePositionGeneration[i] != follower.bindingGeneration)
+					{
+						overlay.ensemblePositionGeneration[i] = follower.bindingGeneration;
+						overlay.ensemblePositionDraft[i] = follower.position;
+					}
+					auto& offset = overlay.ensemblePositionDraft[i];
+					const float width = (std::max)(40.0f, (std::min)(110.0f, (ImGui::GetContentRegionAvail().x - 16.0f) / 3.0f));
+					ImGui::TextUnformatted("角色站位偏移（世界坐标，米）");
+					ImGui::BeginDisabled(!ctx.fnSetEnsemblePosition || !follower.actorToken || !follower.bindingGeneration);
+					ImGui::SetNextItemWidth(width);
+					bool positionChanged = ImGui::DragFloat("##ensemble_pos_x", &offset.x, .01f, -10.0f, 10.0f, "X: %.2f");
+					ImGui::SameLine(); ImGui::SetNextItemWidth(width);
+					positionChanged |= ImGui::DragFloat("##ensemble_pos_y", &offset.y, .01f, -10.0f, 10.0f, "Y: %.2f");
+					ImGui::SameLine(); ImGui::SetNextItemWidth(width);
+					positionChanged |= ImGui::DragFloat("##ensemble_pos_z", &offset.z, .01f, -10.0f, 10.0f, "Z: %.2f");
+					if (ImGui::Button("重置角色站位")) { offset = {}; positionChanged = true; }
+					if (positionChanged && ctx.fnSetEnsemblePosition)
+						ctx.fnSetEnsemblePosition(ctx.self, static_cast<int>(i), follower.actorToken, ctx.actorRosterEpoch,
+						                          follower.bindingGeneration, offset);
+					ImGui::EndDisabled();
 				}
 				ImGui::PopID();
 			}
-			ImGui::EndDisabled();
 			if (!ctx.ensembleNotice.empty()) ImGui::TextWrapped("%s", ctx.ensembleNotice.c_str());
 		}
 		ImGui::Spacing();

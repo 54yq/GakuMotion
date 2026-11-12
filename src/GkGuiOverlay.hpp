@@ -60,6 +60,8 @@ namespace GakuMotion
 		std::string motionKey;
 		float offsetSeconds{0};
 		bool active{false};
+		uint64_t bindingGeneration{0};
+		Vector3 position{};
 	};
 
 	struct GuiContext
@@ -156,6 +158,7 @@ namespace GakuMotion
 		std::string ensembleNotice;
 		void (*fnSetEnsembleFollower)(void*, int, uint64_t, uint64_t, const char*, float, uint64_t){nullptr};
 		void (*fnClearEnsembleFollower)(void*, int, uint64_t){nullptr};
+		void (*fnSetEnsemblePosition)(void*, int, uint64_t, uint64_t, uint64_t, const Vector3&){nullptr};
 
 		// ---- 写动作（回调到 Core） ----
 		void* self{nullptr};
@@ -274,6 +277,8 @@ namespace GakuMotion
 		std::array<uint64_t, 2> ensembleDraftActor{};
 		std::array<std::string, 2> ensembleDraftMotion{};
 		std::array<float, 2> ensembleDraftOffset{};
+		std::array<uint64_t, 2> ensemblePositionGeneration{};
+		std::array<Vector3, 2> ensemblePositionDraft{};
 #ifdef GKMOTION_GUI_ACTIVE
 		ImGuiTextFilter motionFilter;
 #ifdef GKMOTION_GUI_TEST

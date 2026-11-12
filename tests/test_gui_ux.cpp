@@ -526,6 +526,25 @@ namespace
 		const auto* actorCombo = app.ItemWithLabel("##ensemble_actor");
 		Check(actorCombo && (actorCombo->flags & ImGuiItemFlags_Disabled),
 		      "ensemble configuration is disabled while playback owns actors");
+		const auto* positionControl = app.ItemWithLabel("##ensemble_pos_x");
+		Check(positionControl && !(positionControl->flags & ImGuiItemFlags_Disabled),
+		      "each follower position remains adjustable during playback");
+		ImRect positionRect;
+		if (app.Find("##ensemble_pos_x", positionRect, 0))
+		{
+			auto& input = ImGui::GetIO();
+			const auto center = positionRect.GetCenter();
+			input.AddMousePosEvent(center.x, center.y); app.Frame();
+			input.AddMouseButtonEvent(0, true); app.Frame();
+			input.AddMousePosEvent(center.x + 40.0f, center.y); app.Frame();
+			input.AddMouseButtonEvent(0, false); app.Settle();
+			Check(app.core.ensemble.Followers()[0].player->controller.initialPositionOffset.x > 0.0f &&
+			      app.core.ensemble.Followers()[1].player->controller.initialPositionOffset.x == 0.0f,
+			      "dragging a follower's position updates that follower only");
+			app.Click("重置角色站位", 0); app.Settle();
+			Check(app.core.ensemble.Followers()[0].player->controller.initialPositionOffset.x == 0.0f,
+			      "the follower position reset takes effect while playing");
+		}
 		app.core.player.state = PlaybackState::Preview; app.Settle();
 		app.Click("解除绑定", 0); app.Settle();
 		Check(!app.core.ensemble.Followers()[0].player && app.core.ensemble.Followers()[1].player,

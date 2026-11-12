@@ -116,6 +116,34 @@ static void TestEnsembleIntegration(const std::string& repoRoot)
 	Check(std::fabs(EnsembleFixture::faces[b].weight - 20) < .001f &&
 	      std::fabs(EnsembleFixture::faces[c].weight - 45) < .001f,
 	      "separate facial tracks drive the corresponding actors independently");
+	const auto positionsView = core.BuildGuiContext();
+	const auto savedC = EnsembleFixture::positions[EnsembleFixture::Bone(c, 0)];
+	positionsView.fnSetEnsemblePosition(positionsView.self, 0, tokenB, positionsView.actorRosterEpoch,
+	                                    positionsView.ensembleFollowers[0].bindingGeneration, {1.0f, .2f, -.5f});
+	core.ProcessPendingGuiCommands();
+	core.OnLateUpdate(b, animB, nullptr, .016f, false);
+	const auto movedB = EnsembleFixture::positions[EnsembleFixture::Bone(b, 0)];
+	const auto unchangedC = EnsembleFixture::positions[EnsembleFixture::Bone(c, 0)];
+	Check(std::fabs(movedB.x - 1.0f) < 1e-5f && std::fabs(movedB.y - .2f) < 1e-5f &&
+	      std::fabs(movedB.z + .5f) < 1e-5f && unchangedC.x == savedC.x && unchangedC.z == savedC.z &&
+	      core.player.controller.initialPositionOffset.x == 0,
+	      "follower position changes its own actor without moving the main or other actor");
+	positionsView.fnSetEnsemblePosition(positionsView.self, 1, tokenC, positionsView.actorRosterEpoch,
+	                                    positionsView.ensembleFollowers[1].bindingGeneration, {-2.0f, 0, 1.0f});
+	core.ProcessPendingGuiCommands();
+	core.OnLateUpdate(c, animC, nullptr, .016f, false);
+	const auto movedC = EnsembleFixture::positions[EnsembleFixture::Bone(c, 0)];
+	Check(std::fabs(movedC.x + 2.0f) < 1e-5f && std::fabs(movedC.z - 1.0f) < 1e-5f &&
+	      std::fabs(core.ensemble.Followers()[0].player->controller.initialPositionOffset.x - 1.0f) < 1e-5f,
+	      "both followers retain independent position offsets");
+	positionsView.fnSetEnsemblePosition(positionsView.self, 0, tokenB, positionsView.actorRosterEpoch,
+	                                    positionsView.ensembleFollowers[0].bindingGeneration + 1, {8, 0, 0});
+	positionsView.fnSetEnsemblePosition(positionsView.self, 0, tokenB, positionsView.actorRosterEpoch,
+	                                    positionsView.ensembleFollowers[0].bindingGeneration,
+	                                    {std::numeric_limits<float>::quiet_NaN(), 0, 0});
+	core.ProcessPendingGuiCommands();
+	Check(std::fabs(core.ensemble.Followers()[0].player->controller.initialPositionOffset.x - 1.0f) < 1e-5f,
+	      "invalid or stale follower position commands leave its current placement unchanged");
 	Check(std::fabs(fb.player->currentTime - .03f) < 1e-5f &&
 	      std::fabs(fc.player->currentTime - .05f) < 1e-5f && core.player.currentTime == .04f,
 	      "both sample the shared paused time with independent offsets");
@@ -146,6 +174,9 @@ static void TestEnsembleIntegration(const std::string& repoRoot)
 	core.StopPerformance();
 	Check(!fb.active && !fc.active && EnsembleFixture::GetEnabled(animB) && EnsembleFixture::GetEnabled(animC),
 	      "stop restores both follower animators");
+	Check(std::fabs(EnsembleFixture::positions[EnsembleFixture::Bone(b, 0)].x) < 1e-5f &&
+	      std::fabs(EnsembleFixture::positions[EnsembleFixture::Bone(c, 0)].x) < 1e-5f,
+	      "stop restores the original positions without baking in follower offsets");
 	core.player.state = PlaybackState::Preview;
 	core.OnLateUpdate(b, animB, nullptr, .016f, false);
 	core.OnLateUpdate(c, animC, nullptr, .016f, false);
