@@ -5,6 +5,7 @@
 #include "GkCaptureSafety.hpp"
 #include "GkGmlClient.hpp"
 #include "GakuMotion.hpp"
+#include "GakuMotionControl.h"
 #include "GkLog.hpp"
 #include "GkCsharpImport.hpp"
 #include "GkHotkey.hpp"
@@ -3048,6 +3049,31 @@ void MotionShutdown(void*)
 }
 
 namespace {
+// The loader copies this domain service table. No new loader ABI or DLL export
+// is needed, and the resident functions reject mutations after shutdown.
+template<class Function>
+GakuMotion::control::v0::Error ControlCall(Function&& function) noexcept
+{
+	try { return function(GakuMotion::Core::Instance()); }
+	catch (...) { return GakuMotion::control::v0::Error::Failed; }
+}
+
+GakuStatus PublishControlApi()
+{
+	using namespace GakuMotion::control::v0;
+	const Api service{Version, sizeof(Api),
+		[](uint32_t size, State* output) { return ControlCall([&](auto& core) { return core.ReadControlState(size, output); }); },
+		[](uint32_t size, Capabilities* output) { return ControlCall([&](auto& core) { return core.ReadControlCapabilities(size, output); }); },
+		[](uint64_t revision, uint32_t index, uint32_t size, Motion* output) {
+			return ControlCall([&](auto& core) { return core.ReadControlMotion(revision, index, size, output); }); },
+		[](const Command* command, uint64_t* ticket) {
+			if (ticket) *ticket = 0;
+			return ControlCall([&](auto& core) { return core.SubmitControl(command, ticket); }); },
+		[](uint64_t ticket, uint32_t size, Result* output) { return ControlCall([&](auto& core) { return core.PollControl(ticket, size, output); }); },
+		[](uint64_t ticket) { return ControlCall([&](auto& core) { return core.ReleaseControl(ticket); }); }};
+	return GakuMotion::host::api.registerService(GakuMotion::host::api.hostContext, ServiceName, sizeof(service), &service);
+}
+
 template<class Function>
 GakuMotion::scene_nodes::v1::Status SceneNodesCall(bool mutation, Function&& function) noexcept
 {
@@ -3089,6 +3115,8 @@ GakuStatus MotionActivate(const GakuHostApi* host, void** pluginState)
 	if (status != GAKU_OK) return status;
 	const auto published = GakuMotion::host::PublishPlayback();
 	if (published != GAKU_OK) return published;
+	const auto controlPublished = PublishControlApi();
+	if (controlPublished != GAKU_OK) return controlPublished;
 	const auto sceneNodesPublished = PublishSceneNodesApi();
 	if (sceneNodesPublished != GAKU_OK) return sceneNodesPublished;
 
@@ -3155,6 +3183,7 @@ void MotionTick(void*, float)
 		auto& core = GakuMotion::Core::Instance();
 		std::lock_guard<std::recursive_mutex> lock(core.stateMutex);
 		RefreshSceneActors(core);
+		core.RejectObsoleteControlCommands();
 	}
 }
 
