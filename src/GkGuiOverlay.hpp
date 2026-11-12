@@ -54,6 +54,13 @@ namespace GakuMotion
 		float fps{60}, scale{0.083f};
 		bool detectCuts{true};
 	};
+	struct GuiEnsembleFollower
+	{
+		uint64_t actorToken{0};
+		std::string motionKey;
+		float offsetSeconds{0};
+		bool active{false};
+	};
 
 	struct GuiContext
 	{
@@ -145,6 +152,10 @@ namespace GakuMotion
 		void (*fnClearTargetActor)(void* self){nullptr}; // Legacy developer callback: reselect bound/first actor
 		void (*fnNextTargetActor)(void* self){nullptr}; // Legacy developer callback: cycle current actors
 		void (*fnPickFocusedActor)(void* self){nullptr}; // Legacy developer callback: select bound actor
+		std::array<GuiEnsembleFollower, 2> ensembleFollowers{};
+		std::string ensembleNotice;
+		void (*fnSetEnsembleFollower)(void*, int, uint64_t, uint64_t, const char*, float, uint64_t){nullptr};
+		void (*fnClearEnsembleFollower)(void*, int, uint64_t){nullptr};
 
 		// ---- 写动作（回调到 Core） ----
 		void* self{nullptr};
@@ -259,6 +270,10 @@ namespace GakuMotion
 		float solePlotSpanM{.65f};
 		float initialPositionEdit[3]{};
 		bool initialPositionEditing{false};
+		uint64_t ensembleDraftEpoch{0};
+		std::array<uint64_t, 2> ensembleDraftActor{};
+		std::array<std::string, 2> ensembleDraftMotion{};
+		std::array<float, 2> ensembleDraftOffset{};
 #ifdef GKMOTION_GUI_ACTIVE
 		ImGuiTextFilter motionFilter;
 #ifdef GKMOTION_GUI_TEST

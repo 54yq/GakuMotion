@@ -36,6 +36,8 @@
 #include <locale>
 #include "GkWindowsPaths.hpp"
 
+static bool RefreshSceneActors(GakuMotion::Core& core, bool force = false);
+
 namespace
 {
 	// File-local view of the host services. Field names deliberately match the
@@ -1323,6 +1325,7 @@ namespace
 		auto& core = GakuMotion::Core::Instance();
 		std::lock_guard<std::recursive_mutex> lock(core.stateMutex);
 		RefreshProtectedContext(true);
+		const bool rosterConfirmed = !core.ensemble.HasActiveFollowers() || RefreshSceneActors(core, true);
 		core.injectionPolicy.BeginCapture();
 		if (core.injectionPolicy.Read().captureDepth > 1) return ContinueProtectedCapture(type);
 		g_captureOriginOwner = g_sceneOwner;
@@ -1333,6 +1336,14 @@ namespace
 			core.captureRestoreReport = {};
 			core.captureRestoreReport.body = GakuMotion::capture::RestoreState::Unconfirmed;
 			LogCaptureRestore("restore", "owner-unconfirmed-snapshots-retained", false);
+			return false;
+		}
+		if (!rosterConfirmed || core.ensembleRestoreUnconfirmed)
+		{
+			core.ensembleRestoreUnconfirmed = true;
+			core.captureRestoreReport = {};
+			core.captureRestoreReport.body = GakuMotion::capture::RestoreState::Unconfirmed;
+			LogCaptureRestore("restore", "multi-actor-restore-unconfirmed", false);
 			return false;
 		}
 		const bool orphansClean = StageLoader::EnsureNoOrphanedStages();
@@ -1360,14 +1371,22 @@ namespace
 		// synchronously cannot consume the previous custom skeleton/rest pose.
 		if (report.body != RestoreState::NotModified || report.gaze != RestoreState::NotModified)
 		{
-			for (const auto& entry : core.player.controller.bindings)
+			auto evaluateAnimator = [&](void* actor)
 			{
-				void* animator = HelperGetActorAnimator(entry.first);
-				if (!animator || !g_captureAnimatorUpdateMethod) { report.body = RestoreState::Unconfirmed; continue; }
+				void* animator = HelperGetActorAnimator(actor);
+				if (!animator || !g_captureAnimatorUpdateMethod) { report.body = RestoreState::Unconfirmed; return; }
 				float zero = 0.0f;
 				void* args[]{&zero}; void* exception = nullptr;
 				g_faceRuntime.invoke(g_captureAnimatorUpdateMethod, animator, args, &exception);
 				if (exception) report.body = RestoreState::Unconfirmed;
+			};
+			for (const auto& entry : core.player.controller.bindings) evaluateAnimator(entry.first);
+			for (const auto& follower : core.ensemble.Followers())
+			{
+				if (!follower.player) continue;
+				void* actor = core.sceneActorRegistry.Resolve(follower.actorToken, core.sceneActorRegistry.Epoch());
+				if (actor && follower.player->controller.bindings.find(actor) != follower.player->controller.bindings.end())
+					evaluateAnimator(actor);
 			}
 		}
 		g_restoringNative = false;
@@ -2311,7 +2330,7 @@ static bool EnsureRuntimeReadyForActor(void* activeActor, void (*initialize)(voi
 // Search only an admitted owner scene, at most four times per second unless a
 // scene boundary or a target-selection command requires a fresh admission check.
 // No callbacks, managed pointers or speculative metadata are exposed to ImGui.
-static bool RefreshSceneActors(GakuMotion::Core& core, bool force = false)
+static bool RefreshSceneActors(GakuMotion::Core& core, bool force)
 {
 	static auto lastScan = std::chrono::steady_clock::time_point{};
 	const auto now = std::chrono::steady_clock::now();
@@ -2321,6 +2340,17 @@ static bool RefreshSceneActors(GakuMotion::Core& core, bool force = false)
 	lastScan = now;
 	auto unavailable = [&]
 	{
+		if (core.ensemble.HasActiveFollowers())
+		{
+			// A failed scan is not proof of destruction. Retain ownership without
+			// touching actor pointers; block further injection and native capture.
+			core.ensembleRestoreUnconfirmed = true;
+			core.ensembleNotice = "无法确认多角色状态，已暂停注入；请重新进入场景";
+			core.player.Pause();
+			if (core.fnNotifyMotionPlaying) core.fnNotifyMotionPlaying(false);
+			g_motionSceneAllowed = false;
+			return false;
+		}
 		// A failed fresh check must not admit a command through yesterday's token.
 		if (core.PublishSceneActors({}))
 		{
@@ -2588,6 +2618,9 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 			const bool editingPanel = core.guiTextInputActive.load(std::memory_order_relaxed) &&
 				(!GakuMotion::host::desktopWindow.getWindow ||
 					GetForegroundWindow() == static_cast<HWND>(GakuMotion::host::desktopWindow.getWindow()));
+			if (pressed && !editingPanel && core.ensemble.HasActiveFollowers() &&
+			    (vk == VK_F10 || vk == VK_OEM_COMMA || vk == VK_OEM_PERIOD) &&
+			    (!RefreshSceneActors(core, true) || core.ensembleRestoreUnconfirmed)) return false;
 			return pressed && core.InjectionAllowed() && !editingPanel;
 		};
 		// 非焦点期间仍需逐帧喂入按键态，否则焦点切回时会补发历史按键。
@@ -2788,7 +2821,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	{
 		auto binding = player.controller.bindings.find(activeActor);
 		const int frame = unityFrame >= 0 ? unityFrame : s_fallbackFrame;
-		const bool canDrive = g_motionSceneAllowed && binding != player.controller.bindings.end() &&
+		const bool canDrive = g_motionSceneAllowed && !core.ensembleRestoreUnconfirmed && binding != player.controller.bindings.end() &&
 			binding->second.bindPoseCaptured && player.controller.CanDriveActor(activeActor);
 		if (!canDrive || player.state == GakuMotion::PlaybackState::Stopped)
 		{

@@ -43,6 +43,76 @@ namespace GakuMotion
 		}
 		ImGui::EndDisabled();
 		ImGui::TextWrapped("表情随驱动角色自动适配。");
+		if (ImGui::CollapsingHeader("多人同步播放（最多三人）"))
+		{
+			ImGui::TextWrapped("上方角色为主角色。其他角色分别选择曲库中的动作，统一使用主角色的音乐、镜头和进度。停止播放后可修改绑定。");
+			ImGui::TextWrapped("角色站位沿用场景位置；额外角色的次级物理暂不由插件驱动。");
+			if (overlay.ensembleDraftEpoch != ctx.actorRosterEpoch)
+			{
+				overlay.ensembleDraftEpoch = ctx.actorRosterEpoch;
+				for (size_t i = 0; i < ctx.ensembleFollowers.size(); ++i)
+				{
+					overlay.ensembleDraftActor[i] = ctx.ensembleFollowers[i].actorToken;
+					overlay.ensembleDraftMotion[i] = ctx.ensembleFollowers[i].motionKey;
+					overlay.ensembleDraftOffset[i] = ctx.ensembleFollowers[i].offsetSeconds;
+				}
+			}
+			ImGui::BeginDisabled(player.state == PlaybackState::Playing || player.state == PlaybackState::Paused);
+			for (size_t i = 0; i < ctx.ensembleFollowers.size(); ++i)
+			{
+				ImGui::PushID(static_cast<int>(i));
+				ImGui::Text("角色 %d", static_cast<int>(i) + 2);
+				std::string actorLabel = "请选择角色";
+				for (const auto& candidate : ctx.sceneActors)
+					if (candidate.token == overlay.ensembleDraftActor[i]) actorLabel = candidate.label;
+				ImGui::SetNextItemWidth((std::min)(360.0f, ImGui::GetContentRegionAvail().x));
+				if (ImGui::BeginCombo("##ensemble_actor", actorLabel.c_str()))
+				{
+					for (const auto& candidate : ctx.sceneActors)
+					{
+						if (candidate.selected) continue;
+						const std::string label = candidate.label + "##ensemble_" + std::to_string(candidate.token);
+						if (ImGui::Selectable(label.c_str(), candidate.token == overlay.ensembleDraftActor[i]))
+							overlay.ensembleDraftActor[i] = candidate.token;
+					}
+					ImGui::EndCombo();
+				}
+				std::string motionLabel = "请选择动作";
+				if (ctx.motions) for (const auto& motion : *ctx.motions)
+					if (motion.name == overlay.ensembleDraftMotion[i]) motionLabel = motion.DisplayLabel();
+				ImGui::SetNextItemWidth((std::min)(360.0f, ImGui::GetContentRegionAvail().x));
+				if (ImGui::BeginCombo("##ensemble_motion", motionLabel.c_str()))
+				{
+					if (ctx.motions) for (const auto& motion : *ctx.motions)
+					{
+						const std::string label = motion.DisplayLabel() + "##ensemble_motion_" + motion.name;
+						if (ImGui::Selectable(label.c_str(), motion.name == overlay.ensembleDraftMotion[i]))
+							overlay.ensembleDraftMotion[i] = motion.name;
+					}
+					ImGui::EndCombo();
+				}
+				ImGui::SetNextItemWidth(180.0f);
+				ImGui::DragFloat("动作延迟（秒）", &overlay.ensembleDraftOffset[i], 0.01f, -30.0f, 30.0f, "%.2f");
+				ImGui::BeginDisabled(!ctx.fnSetEnsembleFollower || !overlay.ensembleDraftActor[i] || overlay.ensembleDraftMotion[i].empty());
+				if (ImGui::Button("绑定动作"))
+					ctx.fnSetEnsembleFollower(ctx.self, static_cast<int>(i), overlay.ensembleDraftActor[i], ctx.actorRosterEpoch,
+					                          overlay.ensembleDraftMotion[i].c_str(), overlay.ensembleDraftOffset[i], ctx.libraryRevision);
+				ImGui::EndDisabled();
+				ImGui::SameLine();
+				ImGui::BeginDisabled(!ctx.fnClearEnsembleFollower || !ctx.ensembleFollowers[i].actorToken);
+				if (ImGui::Button("解除绑定")) ctx.fnClearEnsembleFollower(ctx.self, static_cast<int>(i), ctx.actorRosterEpoch);
+				ImGui::EndDisabled();
+				if (!ctx.ensembleFollowers[i].motionKey.empty())
+				{
+					ImGui::TextWrapped("当前动作：%s", ctx.ensembleFollowers[i].motionKey.c_str());
+					ImGui::TextWrapped("状态：%s", ctx.ensembleFollowers[i].active ? "角色已驱动" :
+					                   player.state == PlaybackState::Stopped ? "等待播放" : "等待可恢复的角色骨架");
+				}
+				ImGui::PopID();
+			}
+			ImGui::EndDisabled();
+			if (!ctx.ensembleNotice.empty()) ImGui::TextWrapped("%s", ctx.ensembleNotice.c_str());
+		}
 		ImGui::Spacing();
 		ImGui::Separator();
 		ImGui::TextUnformatted("表情幅度");

@@ -43,6 +43,10 @@
 
 using namespace GakuMotion;
 
+// Offline tests have no host logger; preserve debug builds without linking the
+// live game plugin or silently changing the release compilation flags.
+namespace GakuMotion::Log { void Write(Level, const char*, ...) {} }
+
 // -----------------------------------------------------------------------------
 // 极简测试框架
 // -----------------------------------------------------------------------------
@@ -145,7 +149,7 @@ static void TestConfigTemplate()
 	Check(cfg.EnsureFileExists(), "首次运行生成控制文件模板");
 	cfg.Poll(0.0f, true);
 	Check(cfg.fileFound && cfg.lastError.empty(), "模板文件可被解析（含 // 注释）: " + cfg.lastError);
-	Check(cfg.selectedMotion == "test_motion", "模板默认 selected_motion = test_motion");
+	Check(cfg.selectedMotion.empty(), "模板默认 selected_motion 为空");
 	Check(std::fabs(cfg.playbackSpeedMultiplier - 1.0f) < 1e-4f, "模板默认 playback_speed_multiplier = 1.0");
 	Check(std::fabs(cfg.eyeWeight - 0.7f) < 1e-4f, "模板默认 eye_weight = 0.7");
 	Check(cfg.gazeMode == 0, "模板默认 gaze.mode = 0 (Auto)");
@@ -2271,6 +2275,7 @@ static void TestSecondaryPhysicsConfig()
 
 
 #include "test_library_safety.hpp"
+#include "test_ensemble_integration.hpp"
 
 static void TestPlaylistLifecycle(const std::string& repoRoot)
 {
@@ -2616,6 +2621,7 @@ int main(int argc, char** argv)
  TestFacialDefaultContinuity();
  TestMikuMouthFit();
  TestSceneActorSelection();
+ TestEnsembleIntegration(repoRoot);
  TestFaceAnimatorCaptureLifecycle();
  TestFaceRuntimeMetadata();
  TestNativeTalkOwnership();

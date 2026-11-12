@@ -4,6 +4,7 @@
 #include "GkLog.hpp"
 #include "GkIdolController.hpp"
 #include "GkMotionPlayer.hpp"
+#include "GkEnsembleRuntime.hpp"
 #include "GkLookAtManager.hpp"
 #include "GkRuntimeConfig.hpp"
 #include "GkBoneOverride.hpp"
@@ -70,6 +71,19 @@ namespace GakuMotion
 		}
 
 		MotionPlayer player;
+		EnsembleRuntime ensemble;
+		bool ensembleRestoreUnconfirmed{false};
+		std::string ensembleNotice;
+		bool RestoreEnsemble()
+		{
+			if (ensembleRestoreUnconfirmed) return false;
+			if (ensemble.RestoreLive(sceneActorRegistry) && !ensemble.RestoreUnconfirmed()) return !ensembleRestoreUnconfirmed;
+			ensembleRestoreUnconfirmed = true;
+			ensembleNotice = "多角色恢复未确认，已停止动作注入";
+			player.Pause();
+			NotifyMotionPlaying(false);
+			return false;
+		}
 		CameraController camera;
 		LookAtManager lookAt;
 		GuiOverlay gui;
@@ -86,7 +100,7 @@ namespace GakuMotion
 		bool InjectionAllowed() const { return !enforceInjectionPolicy || injectionPolicy.CanInject(); }
 		bool PrepareInjection()
 		{
-			return InjectionAllowed() && (!fnBeforeInjection || fnBeforeInjection());
+			return InjectionAllowed() && !ensembleRestoreUnconfirmed && (!fnBeforeInjection || fnBeforeInjection());
 		}
 
 		bool captureSuspended{false};
@@ -101,6 +115,14 @@ namespace GakuMotion
 		bool SuspendForCapture()
 		{
 			if (captureSuspended) return captureRestoreReport.AllConfirmed();
+			if (ensembleRestoreUnconfirmed)
+			{
+				captureSuspended = true;
+				captureRestoreReport = {};
+				captureRestoreReport.body = capture::RestoreState::Unconfirmed;
+				captureSession = injectionSession;
+				return false;
+			}
 			captureSuspended = true;
 			captureRestoreReport = {};
 			capturePlaybackState = player.state;
@@ -123,12 +145,15 @@ namespace GakuMotion
 			player.scrubbing = false;
 			player.audioStarted = false;
 			player.state = PlaybackState::Stopped;
+			const bool ensembleWasActive = ensemble.HasActiveFollowers();
 			const auto actorRestore = player.controller.RestoreForCapture();
+			const bool ensembleRestored = RestoreEnsemble();
 			auto status = [](bool modified, bool confirmed) {
 				return !confirmed ? capture::RestoreState::Unconfirmed :
 					modified ? capture::RestoreState::Confirmed : capture::RestoreState::NotModified;
 			};
-			captureRestoreReport.body = status(actorRestore.bodyModified, actorRestore.bodyConfirmed);
+			captureRestoreReport.body = status(actorRestore.bodyModified || ensembleWasActive,
+			                                   actorRestore.bodyConfirmed && ensembleRestored);
 			captureRestoreReport.face = status(actorRestore.faceModified, actorRestore.faceConfirmed);
 			captureRestoreReport.gaze = status(actorRestore.gazeModified, actorRestore.gazeConfirmed);
 			const auto cameraRestore = camera.ReleaseForCapture();
@@ -170,6 +195,13 @@ namespace GakuMotion
 			captureResumeReason = "gm_revoked";
 			++injectionSession;
 			captureSuspended = false;
+			if (ensembleRestoreUnconfirmed)
+			{
+				if (player.fnStopAudio) player.fnStopAudio();
+				player.audioStarted = false; player.state = PlaybackState::Stopped;
+				camera.Release(false); NotifyMotionPlaying(false); return;
+			}
+			RestoreEnsemble();
 			if (player.state != PlaybackState::Stopped) player.Stop();
 			camera.Release();
 			stageManager.SetInjectionEnabled(false);
@@ -181,6 +213,13 @@ namespace GakuMotion
 			captureSuspended = false;
 			captureResumeReason = "gm_stopped";
 			stageStoppedByTransport = true;
+			if (ensembleRestoreUnconfirmed)
+			{
+				if (player.fnStopAudio) player.fnStopAudio();
+				player.audioStarted = false; player.state = PlaybackState::Stopped;
+				camera.Release(false); NotifyMotionPlaying(false); return;
+			}
+			RestoreEnsemble();
 			player.Stop();
 			camera.Release();
 			stageManager.SetInjectionEnabled(false);
@@ -310,7 +349,8 @@ namespace GakuMotion
 			BeforeQuartzExperiment,
 			StageSettings, StagePreset, ToggleStageCandidate, ScanStageCandidates,
 			MountCustomStage, UnloadCustomStage, RestoreCameraSkybox,
-			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, StageLoadReplacement, SelectTarget
+			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, StageLoadReplacement, SelectTarget,
+			SetEnsembleFollower, ClearEnsembleFollower
 		};
 
 		std::atomic<int> guiPhysicsBackend{2};
@@ -519,8 +559,13 @@ namespace GakuMotion
 		bool HasPendingTargetSelection()
 		{
 			std::lock_guard<std::mutex> lock(guiCommandMutex);
-			return std::any_of(guiCommands.begin(), guiCommands.end(), [](const auto& command)
-				{ return command.action == GuiAction::SelectTarget; });
+			const bool activeFollowers = ensemble.HasActiveFollowers();
+			return std::any_of(guiCommands.begin(), guiCommands.end(), [activeFollowers](const auto& command)
+				{ return command.action == GuiAction::SelectTarget || command.action == GuiAction::SetEnsembleFollower ||
+				         command.action == GuiAction::ClearEnsembleFollower ||
+				         (activeFollowers && (command.action == GuiAction::Stop || command.action == GuiAction::Select ||
+				                              command.action == GuiAction::Cycle || command.action == GuiAction::ReloadMotion ||
+				                              command.action == GuiAction::DeleteFiles)); });
 		}
 
 		// File work must keep progressing on host frames even when Photography
@@ -695,6 +740,34 @@ namespace GakuMotion
 					break;
 				case GuiAction::SelectTarget:
 					if (void* actor = sceneActorRegistry.Resolve(cmd.actorToken, cmd.actorEpoch)) SetTargetActor(actor);
+					break;
+				case GuiAction::SetEnsembleFollower:
+				{
+					if (ensemble.HasActiveFollowers() && !PrepareInjection())
+					{ ensembleNotice = "当前场景无法安全调整多角色绑定"; break; }
+					const int motionIndex = FindPlaylistIndex(motions, cmd.key);
+					if (cmd.libraryRevision != libraryRevision || motionIndex < 0 ||
+					    cmd.candidateIndex < 0 || cmd.candidateIndex >= 2 || ensembleRestoreUnconfirmed ||
+					    player.state == PlaybackState::Playing || player.state == PlaybackState::Paused)
+					{ ensembleNotice = "绑定失败：请停止播放并确认角色和曲库未变化"; break; }
+					const bool ok = ensemble.Set(static_cast<size_t>(cmd.candidateIndex), cmd.actorToken,
+					                             cmd.actorEpoch, motions[motionIndex], cmd.value, sceneActorRegistry,
+					                             player, globalOverrides, masterOverridesEnabled);
+					if (ok) { ++injectionSession; ensembleNotice = "已绑定角色动作"; }
+					else if (ensemble.RestoreUnconfirmed())
+					{ ensembleRestoreUnconfirmed = true; ensembleNotice = "角色恢复未确认，已停止动作注入"; }
+					else ensembleNotice = "绑定失败：角色重复、名单已变化或动作无法读取";
+					break;
+				}
+				case GuiAction::ClearEnsembleFollower:
+					if (ensemble.HasActiveFollowers() && !PrepareInjection())
+					{ ensembleNotice = "当前场景无法安全解除多角色绑定"; break; }
+					if (cmd.actorEpoch != sceneActorRegistry.Epoch() || cmd.candidateIndex < 0 || cmd.candidateIndex >= 2 ||
+					    player.state == PlaybackState::Playing || player.state == PlaybackState::Paused)
+					{ ensembleNotice = "请停止播放后解除绑定"; break; }
+					if (ensemble.Clear(static_cast<size_t>(cmd.candidateIndex), sceneActorRegistry))
+					{ ++injectionSession; ensembleNotice = "已解除角色动作"; }
+					else { ensembleRestoreUnconfirmed = true; ensembleNotice = "角色恢复未确认，已停止动作注入"; }
 					break;
 				case GuiAction::ClearTarget: PickBoundActorAsTarget();
 					break;
@@ -908,6 +981,8 @@ namespace GakuMotion
 			// The old scene may already be unloading. Drop references without
 			// calling RestoreMute/Rebind on its destroyed Unity objects.
 			camera.Release(false);
+			ensemble.Abandon();
+			ensembleRestoreUnconfirmed = false;
 			player.AbandonScene();
 			stageManager.AbandonScene();
 			ResetSoleObservation();
@@ -923,12 +998,14 @@ namespace GakuMotion
 			// Stop restores animation but keeps rest snapshots for switching songs.
 			// When the actor set changes, those snapshots are no longer safe, even
 			// if playback was already stopped before the actor was destroyed.
-			if (player.controller.bindings.empty()) return false;
+			if (player.controller.bindings.empty() && !ensemble.HasFollowers()) return false;
 			++injectionSession;
 			// Actor replacement in the SAME scene must retain stage ownership.
 			// The stage manager restores/rescans independently before this call.
 			captureSuspended = false;
 			camera.Release(false);
+			ensemble.Abandon();
+			ensembleRestoreUnconfirmed = false;
 			player.AbandonScene();
 			ResetSoleObservation();
 			sceneActors.clear();
@@ -990,6 +1067,16 @@ namespace GakuMotion
 			player.controller.eyePoseWriteStamp.mask = 0;
 			player.controller.eyePoseWriteStamp.transforms = {};
 			player.Tick(deltaTime, actor, animator, playableDirector, advanceClock);
+			if (player.state == PlaybackState::Stopped) RestoreEnsemble();
+			else ensemble.Tick(actor, animator, playableDirector, player, sceneActorRegistry);
+			if (ensemble.RestoreUnconfirmed())
+			{
+				ensembleRestoreUnconfirmed = true;
+				ensembleNotice = "角色状态不可安全恢复，已停止动作注入";
+				player.Pause();
+				NotifyMotionPlaying(false);
+				return;
+			}
 			ObserveSoles(actor); // Read-only Unity queries, on the same main-thread frame.
 			ApplyExperimentalSolePitch(actor); // Opt-in demo, separate from #078 evidence.
 			WriteRequestedSolePitchSnapshot(actor);
@@ -1159,6 +1246,7 @@ namespace GakuMotion
 				return false;
 			}
 			if (version != ReadMotionFileVersion(directory)) { libraryNotice = "文件仍在更新，请稍后重新加载"; return false; }
+			if (!RestoreEnsemble()) { libraryNotice = "多角色恢复未确认，无法重新加载"; return false; }
 			const float time = player.currentTime;
 			const bool preview = player.state == PlaybackState::Stopped || player.state == PlaybackState::Preview;
 			player.AdoptLoadedMotion(directory, file, std::move(next));
@@ -1180,6 +1268,7 @@ namespace GakuMotion
 
 		void ClearCurrentMotion()
 		{
+			if (!RestoreEnsemble()) return;
 			player.Stop();
 			camera.Release();
 			player.clip = MotionClip{};
@@ -1206,6 +1295,9 @@ namespace GakuMotion
 		bool DeleteMotionFiles(const std::string& key, bool confirmed = false)
 		{
 			if (!confirmed) return false;
+			for (const auto& follower : ensemble.Followers())
+				if (follower.player && follower.motionKey == key)
+				{ playlistNotice = "曲目正被多角色使用，请先解除绑定"; return false; }
 			if (importBusy || cameraImportBusy) { playlistNotice = "正在导入，完成后可删除曲目"; return false; }
 			const int index = FindPlaylistIndex(motions, key);
 			if (index < 0) return false;
@@ -1224,7 +1316,11 @@ namespace GakuMotion
 			const auto current = CurrentMotion() ? CurrentMotion()->name : "";
 			const bool deletingLoaded = loadedMotionKey == key ||
 				(!player.currentMotionDir.empty() && DataLayout::SamePath(player.currentMotionDir, motions[index].dir));
-			if (deletingLoaded) { player.Stop(); camera.Release(); NotifyMotionPlaying(false); }
+			if (deletingLoaded)
+			{
+				if (!RestoreEnsemble()) { playlistNotice = "多角色恢复未确认，无法删除曲目"; return false; }
+				player.Stop(); camera.Release(); NotifyMotionPlaying(false);
+			}
 			bool changed = false;
 			if (!LibraryDelete::PermanentlyDelete(root, source, changed, error))
 			{
@@ -2036,6 +2132,7 @@ namespace GakuMotion
 			// 因此「选中但未播放」不再退回官方待机造型。
 			if (player.state != PlaybackState::Stopped)
 			{
+				if (!RestoreEnsemble()) return false;
 				player.Stop();
 				NotifyMotionPlaying(false);
 			}
@@ -2467,6 +2564,7 @@ namespace GakuMotion
 		{
 			BoneOverrideSet::BuildEffective(globalOverrides, motionOverrides,
 			                                masterOverridesEnabled, effectiveOverrides);
+			ensemble.RebuildOverrides(globalOverrides, masterOverridesEnabled);
 			player.controller.SetBoneOverrides(&effectiveOverrides);
 		}
 
@@ -2487,9 +2585,21 @@ namespace GakuMotion
 		// Missing actors are abandoned without touching possibly destroyed objects.
 		bool PublishSceneActors(const std::vector<SceneActorObservation>& observations)
 		{
+			const uint64_t previousEpoch = sceneActorRegistry.Epoch();
 			const auto* old = sceneActorRegistry.Find(player.controller.targetActor);
 			const uint64_t oldToken = old ? old->token : 0;
 			sceneActorRegistry.Publish(observations);
+			if (previousEpoch != sceneActorRegistry.Epoch() && ensemble.HasFollowers() && !ensembleRestoreUnconfirmed)
+			{
+				if (!ensemble.ClearAll(sceneActorRegistry))
+				{
+					ensembleRestoreUnconfirmed = true;
+					ensembleNotice = "角色名单变化，恢复未确认；已停止多角色注入";
+					player.Pause();
+					NotifyMotionPlaying(false);
+				}
+				else ensembleNotice = "角色名单变化，请重新绑定多角色动作";
+			}
 			sceneActors.clear();
 			for (const auto& item : sceneActorRegistry.Entries()) sceneActors.push_back(item.actor);
 			const auto* selected = sceneActorRegistry.Find(player.controller.targetActor);
@@ -2526,10 +2636,19 @@ namespace GakuMotion
 
 		void SetTargetActor(void* a)
 		{
+			if (ensembleRestoreUnconfirmed) return;
 			if (!a || !sceneActorRegistry.Find(a) || player.controller.targetActor == a) return;
 			if (fnBeforeTargetChange && !fnBeforeTargetChange())
 			{
 				LogWarn("[GakuMotion][Target] selection rejected: secondary physics restore unconfirmed");
+				return;
+			}
+			if (!ensemble.ClearAll(sceneActorRegistry))
+			{
+				ensembleRestoreUnconfirmed = true;
+				ensembleNotice = "切换主角色失败：多角色恢复未确认";
+				player.Pause();
+				NotifyMotionPlaying(false);
 				return;
 			}
 			// Restore only a still-live old target, then release its cached body/face state.
@@ -2821,6 +2940,26 @@ namespace GakuMotion
 			ctx.loadedSourceMissing = loadedSourceMissing;
 			ctx.loadedSourceChanged = loadedSourceChanged;
 			ctx.actorRosterEpoch = sceneActorRegistry.Epoch();
+			for (size_t i = 0; i < ensemble.Followers().size(); ++i)
+			{
+				const auto& follower = ensemble.Followers()[i];
+				ctx.ensembleFollowers[i] = {follower.actorToken, follower.motionKey, follower.offsetSeconds, follower.active};
+			}
+			ctx.ensembleNotice = ensembleNotice;
+			ctx.fnSetEnsembleFollower = [](void* self, int slot, uint64_t token, uint64_t epoch,
+			                                const char* key, float offset, uint64_t revision)
+			{
+				GuiCommand cmd{GuiAction::SetEnsembleFollower};
+				cmd.candidateIndex = slot; cmd.actorToken = token; cmd.actorEpoch = epoch;
+				cmd.key = key ? key : ""; cmd.value = offset; cmd.libraryRevision = revision;
+				static_cast<Core*>(self)->QueueGui(std::move(cmd));
+			};
+			ctx.fnClearEnsembleFollower = [](void* self, int slot, uint64_t epoch)
+			{
+				GuiCommand cmd{GuiAction::ClearEnsembleFollower};
+				cmd.candidateIndex = slot; cmd.actorEpoch = epoch;
+				static_cast<Core*>(self)->QueueGui(std::move(cmd));
+			};
 			for (const auto& item : sceneActorRegistry.Entries())
 			{
 				const std::string name = item.character.empty() ? "未识别角色" : FormatIdolDisplayName(item.character.c_str());

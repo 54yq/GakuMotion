@@ -13,6 +13,9 @@
 
 using namespace GakuMotion;
 
+// The headless harness does not load the host plugin's logging service.
+namespace GakuMotion::Log { void Write(Level, const char*, ...) {} }
+
 namespace
 {
 	struct Item
@@ -490,6 +493,44 @@ namespace
 			app.Text().find("镜头: 游戏") != std::string::npos,
 			"page Game selection releases takeover, synchronizes the player and disables inactive camera parameters");
 	}
+
+	void TestEnsembleControls(const std::filesystem::path& root)
+	{
+		Harness app(root);
+		app.windowHeight = 1400;
+		app.core.gui.activePage = GuiPage::Motion;
+		app.core.player.state = PlaybackState::Preview;
+		void* a = reinterpret_cast<void*>(0xa1000), *b = reinterpret_cast<void*>(0xb1000), *c = reinterpret_cast<void*>(0xc1000);
+		app.core.PublishSceneActors({{a, 1, ""}, {b, 2, ""}, {c, 3, ""}});
+		app.Settle();
+		app.Click("多人同步播放（最多三人）");
+		app.Settle();
+		Check(app.ItemWithLabel("##ensemble_actor") && app.ItemWithLabel("##ensemble_motion"),
+		      "ensemble panel exposes actor and motion selectors");
+		const auto roster = app.core.BuildGuiContext().sceneActors;
+		const std::string actorB = roster[1].label + "##ensemble_" + std::to_string(roster[1].token);
+		const std::string actorC = roster[2].label + "##ensemble_" + std::to_string(roster[2].token);
+		app.Click("##ensemble_actor", 0); app.Click(actorB.c_str());
+		app.Click("##ensemble_motion", 0); app.Click("Song B##ensemble_motion_B");
+		app.Click("绑定动作", 0); app.Settle();
+		Check(app.core.ensemble.Followers()[0].actorToken == roster[1].token &&
+		      app.core.ensemble.Followers()[0].motionKey == "B",
+		      "first follower controls enqueue and bind its selected actor and clip");
+		app.Click("##ensemble_actor", 1); app.Click(actorC.c_str());
+		app.Click("##ensemble_motion", 1); app.Click("Song A##ensemble_motion_A");
+		app.Click("绑定动作", 1); app.Settle();
+		Check(app.core.ensemble.Followers()[1].actorToken == roster[2].token &&
+		      app.core.ensemble.Followers()[1].motionKey == "A",
+		      "second follower controls bind a different actor and clip");
+		app.core.player.state = PlaybackState::Playing; app.Settle();
+		const auto* actorCombo = app.ItemWithLabel("##ensemble_actor");
+		Check(actorCombo && (actorCombo->flags & ImGuiItemFlags_Disabled),
+		      "ensemble configuration is disabled while playback owns actors");
+		app.core.player.state = PlaybackState::Preview; app.Settle();
+		app.Click("解除绑定", 0); app.Settle();
+		Check(!app.core.ensemble.Followers()[0].player && app.core.ensemble.Followers()[1].player,
+		      "removing one follower leaves the other binding intact");
+	}
 }
 
 void ImGuiTestEngineHook_ItemAdd(ImGuiContext* context, ImGuiID id, const ImRect& rect, const ImGuiLastItemData* data)
@@ -503,7 +544,7 @@ void ImGuiTestEngineHook_ItemAdd(ImGuiContext* context, ImGuiID id, const ImRect
 	// This vendored BeginCombo emits ItemAdd but no ItemInfo. Identify its real
 	// submitted item by the current ID stack without changing production code.
 	if (context->CurrentWindow && !context->CurrentWindow->IDStack.empty())
-		for (const char* label : {"##play_mode", "##playback_speed", "##camera_quick_mode", "##physics_engine_select", "##drive_actor_combo", "##camera_mode", "跟随部位"})
+		for (const char* label : {"##play_mode", "##playback_speed", "##camera_quick_mode", "##physics_engine_select", "##drive_actor_combo", "##camera_mode", "跟随部位", "##ensemble_actor", "##ensemble_motion"})
 			if (ImHashStr(label, 0, context->CurrentWindow->IDStack.back()) == id) items[id].label = label;
 }
 void ImGuiTestEngineHook_ItemInfo(ImGuiContext*, ImGuiID id, const char* label, ImGuiItemStatusFlags status)
@@ -540,6 +581,7 @@ int main(int argc, char** argv)
 	TestCameraPursuitControls(root);
 	TestCameraFollowTargetControls(root);
 	TestUnifiedCameraModeControls(root);
+	TestEnsembleControls(root);
 	{
 		const ImGuiConfigFlags originalConfigFlags = io.ConfigFlags;
 		io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // Escape closes native combo popups.
