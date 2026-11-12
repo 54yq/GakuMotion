@@ -352,7 +352,7 @@ namespace GakuMotion
 			InitialPosition, InitialYaw, SaveInitialPosition, SaveFacialWeights, MusicVolume, SaveMusicVolume, PhysicsBackend,
 			CameraSettings, SaveCameraSettings, CameraImport, ReloadCamera,
 			SoleSettings, SaveSoleSettings, LoadSoleSettings, ExperimentalSolePitch, ExperimentalWaistSupport,
-			BeforeQuartzExperiment,
+			BeforeQuartzExperiment, AuxDriveMode,
 			StageSettings, StagePreset, ToggleStageCandidate, ScanStageCandidates,
 			MountCustomStage, UnloadCustomStage, RestoreCameraSkybox,
 			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, StageLoadReplacement, SelectTarget,
@@ -505,6 +505,11 @@ namespace GakuMotion
 		void QueuePhysicsBackend(int backend)
 		{
 			if (backend >= 0 && backend <= 2) QueueGui({GuiAction::PhysicsBackend, static_cast<float>(backend)});
+		}
+
+		void QueueAuxDriveMode(int mode)
+		{
+			if (mode >= 0 && mode < kAuxModeCount) QueueGui({GuiAction::AuxDriveMode, static_cast<float>(mode)});
 		}
 
 		void QueueExperimentalWaistSupport(bool enabled)
@@ -760,6 +765,10 @@ namespace GakuMotion
 				case GuiAction::ExperimentalWaistSupport:
 					config.experimentalWaistSupport = cmd.flag ? 1 : 0;
 					ApplyDeclarativeConfig();
+					break;
+				case GuiAction::AuxDriveMode:
+					if (cmd.value >= 0 && cmd.value < static_cast<float>(kAuxModeCount))
+						player.controller.SetAuxDriveMode(static_cast<int>(cmd.value));
 					break;
 				case GuiAction::BeforeQuartzExperiment:
 					config.beforeQuartzExperiment = cmd.flag && config.secondaryPhysicsBackend == 2;
@@ -2970,6 +2979,10 @@ namespace GakuMotion
 			ctx.injectionNotice = injectionStatus.empty()
 				? "仅偶像摄影与更衣室可以使用；其他页面保留设置但不生效。" : injectionStatus;
 			ctx.player = &player;
+			ctx.fnSetAuxDriveMode = [](void* self, int mode)
+			{
+				static_cast<Core*>(self)->QueueAuxDriveMode(mode);
+			};
 			ctx.cameraSnapshot = camera.ReadSnapshot();
 			ctx.cameraImportBusy = cameraImportBusy;
 			ctx.cameraNotice = cameraNotice;

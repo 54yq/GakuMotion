@@ -265,11 +265,30 @@ namespace GakuMotion
 		ImGui::Spacing();
 
 		// =========================================================================
-		// 4. 高级动作设置 (折叠) — 仅保留骨骼微调选单
+		// 4. 高级动作设置 (折叠)
 		// =========================================================================
 		if (ImGui::CollapsingHeader("高级动作设置"))
 		{
 			ImGui::Indent(10.0f);
+			ImGui::TextUnformatted("手臂辅助骨模式（对照实验）");
+			const char* auxLabels[] = {"正常：拟合模型", "静默：锁定初始姿态", "归零：单位旋转",
+			                           "回放：录制数据", "旧版：世界空间解算"};
+			const int auxMode = controller.auxDriveMode;
+			const char* currentAuxLabel = auxMode >= 0 && auxMode < kAuxModeCount ? auxLabels[auxMode] : "未知";
+			ImGui::SetNextItemWidth((std::min)(360.0f, ImGui::GetContentRegionAvail().x));
+			ImGui::BeginDisabled(!ctx.injectionAllowed || !ctx.fnSetAuxDriveMode);
+			if (ImGui::BeginCombo("##aux_drive_mode", currentAuxLabel))
+			{
+				for (int mode = 0; mode < kAuxModeCount; ++mode)
+				{
+					if (ImGui::Selectable(auxLabels[mode], mode == auxMode)) ctx.fnSetAuxDriveMode(ctx.self, mode);
+					if (mode == auxMode) ImGui::SetItemDefaultFocus();
+				}
+				ImGui::EndCombo();
+			}
+			ImGui::EndDisabled();
+			ImGui::TextWrapped("与 F8 切换相同，仅影响主角色，本次运行有效。对照可能导致手臂破面；正常模式可恢复默认。回放缺少录制数据时会退回静默。");
+			ImGui::Spacing();
 			overlay.DrawBoneOverridesSection(ctx);
 			ImGui::Unindent(10.0f);
 		}

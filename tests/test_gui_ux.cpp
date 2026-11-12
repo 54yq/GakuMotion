@@ -494,6 +494,33 @@ namespace
 			"page Game selection releases takeover, synchronizes the player and disables inactive camera parameters");
 	}
 
+	void TestAuxDriveModeControls(const std::filesystem::path& root)
+	{
+		Harness app(root);
+		app.windowHeight = 1400;
+		app.core.gui.activePage = GuiPage::Motion;
+		app.Settle();
+		app.Click("高级动作设置"); app.Settle();
+		ImRect header;
+		if (app.Find("高级动作设置", header))
+			if (auto* page = FindResponsiveWindow("/##gkmotion_main_content_"))
+				page->Scroll.y = (std::max)(0.0f, page->Scroll.y + header.Min.y - page->InnerRect.Min.y - 40.0f);
+		app.Settle();
+		const char* labels[] = {"正常：拟合模型", "静默：锁定初始姿态", "归零：单位旋转",
+		                        "回放：录制数据", "旧版：世界空间解算"};
+		for (int mode = 1; mode < kAuxModeCount; ++mode)
+		{
+			app.Click("##aux_drive_mode"); app.Click(labels[mode]); app.Settle();
+			Check(app.core.player.controller.auxDriveMode == mode, "auxiliary mode selector applies the chosen runtime mode");
+		}
+		app.core.player.controller.CycleAuxDriveMode(); app.Settle();
+		Check(app.core.player.controller.auxDriveMode == kAuxNormal && app.Text().find(labels[0]) != std::string::npos,
+		      "F8-style cycling is reflected in the selector");
+		app.Click("##aux_drive_mode"); app.Click(labels[1]); app.Settle();
+		app.Click("##aux_drive_mode"); app.Click(labels[0]); app.Settle();
+		Check(app.core.player.controller.auxDriveMode == kAuxNormal, "selector restores normal mode directly");
+	}
+
 	void TestEnsembleControls(const std::filesystem::path& root)
 	{
 		Harness app(root);
@@ -600,7 +627,7 @@ void ImGuiTestEngineHook_ItemAdd(ImGuiContext* context, ImGuiID id, const ImRect
 	// This vendored BeginCombo emits ItemAdd but no ItemInfo. Identify its real
 	// submitted item by the current ID stack without changing production code.
 	if (context->CurrentWindow && !context->CurrentWindow->IDStack.empty())
-		for (const char* label : {"##play_mode", "##playback_speed", "##camera_quick_mode", "##physics_engine_select", "##drive_actor_combo", "##camera_mode", "跟随部位", "##ensemble_actor", "##ensemble_motion"})
+		for (const char* label : {"##play_mode", "##playback_speed", "##camera_quick_mode", "##physics_engine_select", "##drive_actor_combo", "##camera_mode", "跟随部位", "##ensemble_actor", "##ensemble_motion", "##aux_drive_mode"})
 			if (ImHashStr(label, 0, context->CurrentWindow->IDStack.back()) == id) items[id].label = label;
 }
 void ImGuiTestEngineHook_ItemInfo(ImGuiContext*, ImGuiID id, const char* label, ImGuiItemStatusFlags status)
@@ -637,6 +664,7 @@ int main(int argc, char** argv)
 	TestCameraPursuitControls(root);
 	TestCameraFollowTargetControls(root);
 	TestUnifiedCameraModeControls(root);
+	TestAuxDriveModeControls(root);
 	TestEnsembleControls(root);
 	{
 		const ImGuiConfigFlags originalConfigFlags = io.ConfigFlags;
