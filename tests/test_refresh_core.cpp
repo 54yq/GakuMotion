@@ -2545,6 +2545,7 @@ static void TestInjectionRuntimeBoundary()
 #include "test_playback_timing.hpp"
 #include "test_track_timing.hpp"
 #include "test_actorless_library.hpp"
+#include "test_control_api.hpp"
 
 int main(int argc, char** argv)
 {
@@ -2586,6 +2587,7 @@ int main(int argc, char** argv)
  TestWaistSupportCore();
  TestWaistSupportIntegration();
  TestSceneNodes();
+ TestControlApi();
  TestClipGroundAnchor();
  TestClipSwitchKeepsActorRest();
  TestPreviewWaitsForHumanoid();

@@ -254,11 +254,15 @@
     <ClInclude Include="src\GkSoleProxyProfile.hpp" />
     <ClInclude Include="src\GkStageManager.hpp" />
     <ClInclude Include="src\GkWaistSupport.hpp" />
+    <ClInclude Include="src\GkControlRequests.hpp" />
+    <ClInclude Include="src\GkControlCore.inl" />
   </ItemGroup>
   <!-- ======================================================================
        Header files (include\)
        ====================================================================== -->
   <ItemGroup>
+    <ClInclude Include="include\GakuMotionControl.h" />
+    <ClInclude Include="include\GakuMotionSceneNodes.h" />
     <ClInclude Include="include\GakuBurstBridge.h" />
     <ClInclude Include="include\GakuFaceDiagnostics.h" />
     <ClInclude Include="include\GakuPlugin.h" />

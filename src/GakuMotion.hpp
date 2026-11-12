@@ -15,6 +15,7 @@
 #include "GkCaptureSafety.hpp"
 #include "GkStageLoadSettings.hpp"
 #include "GkDataLayout.hpp"
+#include "GkControlRequests.hpp"
 
 #include <cstdarg>
 #include <cstdio>
@@ -29,6 +30,7 @@
 
 namespace GakuMotion
 {
+	namespace control_v0 = control::v0;
 	// -----------------------------------------------------------------------------
 	// 日志格式化小工具（避免在 Core 各处重复写 snprintf 样板）
 	// -----------------------------------------------------------------------------
@@ -137,6 +139,7 @@ namespace GakuMotion
 		bool SuspendForCapture()
 		{
 			if (captureSuspended) return captureRestoreReport.AllConfirmed();
+			InvalidateControlSession();
 			captureSuspended = true;
 			captureRestoreReport = {};
 			capturePlaybackState = player.state;
@@ -346,7 +349,8 @@ namespace GakuMotion
 			BeforeQuartzExperiment,
 			StageSettings, StagePreset, ToggleStageCandidate, ScanStageCandidates,
 			MountCustomStage, UnloadCustomStage, RestoreCameraSkybox,
-			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, StageLoadReplacement, SelectTarget
+			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, StageLoadReplacement, SelectTarget,
+			Control
 		};
 
 		std::atomic<int> guiPhysicsBackend{2};
@@ -372,18 +376,16 @@ namespace GakuMotion
 			int64_t frame{0};
 			uint64_t loadedGeneration{0}, sceneSession{0}, libraryRevision{0};
 			uint64_t actorToken{0}, actorEpoch{0};
+			control_v0::Command controlCommand{};
+			uint64_t controlTicket{0};
 		};
 
 		std::mutex guiCommandMutex;
 		std::recursive_mutex stateMutex; // Host LateUpdate and render share this guard.
 		std::deque<GuiCommand> guiCommands;
+		control_v0::Requests controlRequests;
 		bool controlActive{false};
-
-		void SetControlActive(bool active)
-		{
-			std::lock_guard<std::recursive_mutex> lock(stateMutex);
-			controlActive = active;
-		}
+		uint64_t controlSession{1}, controlObservedInjectionSession{0};
 
 		void QueueGui(GuiCommand cmd)
 		{
@@ -396,6 +398,8 @@ namespace GakuMotion
 				guiCommands.back() = std::move(cmd);
 			else guiCommands.push_back(std::move(cmd));
 		}
+
+#include "GkControlCore.inl"
 
 		void QueueSelectMotion(int index, bool autoplay)
 		{
@@ -449,6 +453,21 @@ namespace GakuMotion
 			GuiCommand cmd{GuiAction::CameraSettings};
 			cmd.cameraSettings = settings;
 			QueueGui(std::move(cmd));
+		}
+
+		bool ApplyCameraSettings(const GakuMotion::CameraSettings& settings, bool persistMode = true)
+		{
+			if (!settings.IsValid()) return false;
+			const auto prevMode = camera.settings.mode;
+			const auto prevBehavior = camera.settings.followBehavior;
+			const bool prevEnabled = camera.settings.enabled;
+			camera.settings = settings;
+			if (!camera.settings.enabled) camera.Release();
+			camera.Publish();
+			if (persistMode && (prevEnabled != settings.enabled || prevMode != settings.mode || prevBehavior != settings.followBehavior) &&
+				!configRoot.empty() && std::filesystem::exists(MotionPathFromUtf8(configRoot + "/camera.json")))
+				SaveCameraSettings();
+			return true;
 		}
 
 		void QueueSoleSettings(const SoleMeasurementSettings& settings)
@@ -603,6 +622,11 @@ namespace GakuMotion
 			}
 			for (const auto& cmd : commands)
 			{
+				if (cmd.action == GuiAction::Control)
+				{
+					CompleteControlCommand(cmd);
+					continue;
+				}
 				// This command stores a future Photography-load preference only.
 				// It never touches Unity, playback or the current background.
 				if (cmd.action == GuiAction::StageLoadReplacement)
@@ -690,20 +714,7 @@ namespace GakuMotion
 				case GuiAction::Import: StartImport(cmd.import);
 					break;
 				case GuiAction::CameraSettings:
-					if (cmd.cameraSettings.IsValid())
-					{
-						const auto prevMode = camera.settings.mode;
-						const auto prevBehavior = camera.settings.followBehavior;
-						const bool prevEnabled = camera.settings.enabled;
-						camera.settings = cmd.cameraSettings;
-						if (!camera.settings.enabled) camera.Release();
-						camera.Publish();
-						if ((prevEnabled != cmd.cameraSettings.enabled || prevMode != cmd.cameraSettings.mode || prevBehavior != cmd.cameraSettings.followBehavior) &&
-							!configRoot.empty() && std::filesystem::exists(MotionPathFromUtf8(configRoot + "/camera.json")))
-						{
-							SaveCameraSettings();
-						}
-					}
+					ApplyCameraSettings(cmd.cameraSettings);
 					break;
 				case GuiAction::SaveCameraSettings: SaveCameraSettings();
 					break;
