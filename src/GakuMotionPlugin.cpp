@@ -10,6 +10,7 @@
 #include "GkHotkey.hpp"
 #include "GakuSafeBoneLookup.h"
 #include "GkExactMethod.hpp"
+#include "GkLiveApi.hpp"
 #include "GkBgmSuppression.hpp"
 #include <cstddef>
 #include "GkFaceRuntime.hpp"
@@ -384,6 +385,7 @@ namespace
 	std::atomic<bool> g_pendingProtectionFault{false};
 	int g_verifiedActiveSceneHandle = 0;
 	GakuMotion::injection::OwnerSnapshot g_sceneOwner, g_boundSceneOwner;
+	GakuMotion::live_takeover::Api g_liveApi;
 	std::string g_verifiedOwnerSceneName;
 
 	bool HelperCanDriveActor(void* actor)
@@ -2162,6 +2164,12 @@ void MotionRuntimeReady(void*)
 	stageApi.fnIsMountedStageObject = StageLoader::IsMountedStageObject;
 
 	StageLoader::ResolveReflection(g_gameAssembly);
+	// Metadata inspection only. Live remains denied by the existing policy;
+	// resolving these signatures does not discover or modify a game object.
+	g_liveApi = GakuMotion::live_takeover::Api::Resolve(FindClass, StageLoader::metadata);
+	if (g_hostContext.logInfo) g_hostContext.logInfo(
+		"[GakuMotion][Live] exact playback metadata %s; takeover remains disabled",
+		g_liveApi.Ready() ? "resolved" : "unavailable");
 	g_captureAnimatorUpdateMethod = StageLoader::metadata.Find(g_animatorKlass, "Update", false, {0x01}, {{0x0c}});
 	void* sceneClass = FindClass("UnityEngine.CoreModule.dll", "UnityEngine.SceneManagement", "Scene");
 	g_activeSceneMethod = StageLoader::metadata.Find(
