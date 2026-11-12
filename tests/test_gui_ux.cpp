@@ -533,6 +533,10 @@ namespace
 		app.Click("前臂扭转分担 [实验]"); app.Settle();
 		Check(std::fabs(app.core.player.controller.wristTwistShare) < 0.2f,
 		      "twist share slider queues its centered value to the active controller");
+		app.core.player.controller.forearmAxisAdjustmentDeg = -30.0f; app.Settle();
+		app.Click("前臂轴向校正 [实验]"); app.Settle();
+		Check(std::fabs(app.core.player.controller.forearmAxisAdjustmentDeg) < 18.0f,
+		      "forearm axis slider queues a centered correction");
 	}
 
 	void TestEnsembleControls(const std::filesystem::path& root)

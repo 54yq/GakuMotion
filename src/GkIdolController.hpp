@@ -670,6 +670,7 @@ namespace GakuMotion
 		// 由 control.json (`aux.mode`) 声明式驱动，或由热键 F8 现场循环切换。
 		int auxDriveMode{kAuxNormal};
 		float wristTwistShare{0.0f}; // Opt-in: move hand-axis twist to the forearm while preserving hand world pose.
+		float forearmAxisAdjustmentDeg{0.0f}; // Fixed-axis experiment, independent of the wrist rotation.
 		bool wristDiagnosticPending{false};
 		int wristDiagnosticStatus{0}; // 0=idle, 1=waiting for pose, 2=logged, 3=logger unavailable
 		float wristDiagnosticTime{0.0f};
@@ -693,8 +694,8 @@ namespace GakuMotion
 			if (!wristDiagnosticPending) return;
 			wristDiagnosticPending = false;
 			if (!fnLogInfo) { wristDiagnosticStatus = 3; return; }
-			fnLogInfo("[GakuMotion][WristDiag] actor=%p time=%.4f aux=%d twistShare=%.3f overrides=%d getters(localRot=%d worldRot=%d localPos=%d worldPos=%d parent=%d)",
-			          b.actor, timeSeconds, auxDriveMode, wristTwistShare, appliedOverrides,
+			fnLogInfo("[GakuMotion][WristDiag] actor=%p time=%.4f aux=%d twistShare=%.3f forearmAxisDeg=%.1f overrides=%d getters(localRot=%d worldRot=%d localPos=%d worldPos=%d parent=%d)",
+			          b.actor, timeSeconds, auxDriveMode, wristTwistShare, forearmAxisAdjustmentDeg, appliedOverrides,
 			          fnGetLocalRotation != nullptr, fnGetWorldRotation != nullptr, fnGetLocalPosition != nullptr,
 			          fnGetWorldPosition != nullptr, fnGetTransformParent != nullptr);
 			auto capture = [&](const char* label, void* transform)
@@ -2160,7 +2161,7 @@ namespace GakuMotion
 			clip.Sample(currentTimeSeconds, vmdRootPos, vmdRotations);
 			Quaternion wristShare[2]{Quaternion::Identity(), Quaternion::Identity()};
 			bool wristShareActive[2]{false, false};
-			if (clip.IsLocalDeltaStream() && wristTwistShare != 0.0f)
+			if (clip.IsLocalDeltaStream() && (wristTwistShare != 0.0f || forearmAxisAdjustmentDeg != 0.0f))
 			{
 				for (int side = 0; side < 2; ++side)
 				{
@@ -2176,7 +2177,8 @@ namespace GakuMotion
 					    static_cast<size_t>(handIndex) < clip.bone_parent_hids.size() &&
 					    clip.bone_parent_hids[handIndex] == foreHid)
 					{
-						wristShare[side] = WristTwistShareRotation(vmdRotations[handIndex], wristTwistShare);
+						wristShare[side] = WristTwistShareRotation(vmdRotations[handIndex], wristTwistShare) *
+							Quaternion::FromEulerDegreesXYZ(forearmAxisAdjustmentDeg, 0.0f, 0.0f);
 						wristShareActive[side] = true;
 					}
 				}

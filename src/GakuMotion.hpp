@@ -358,7 +358,7 @@ namespace GakuMotion
 			InitialPosition, InitialYaw, SaveInitialPosition, SaveFacialWeights, MusicVolume, SaveMusicVolume, PhysicsBackend,
 			CameraSettings, SaveCameraSettings, CameraImport, ReloadCamera,
 			SoleSettings, SaveSoleSettings, LoadSoleSettings, ExperimentalSolePitch, ExperimentalWaistSupport,
-			BeforeQuartzExperiment, AuxDriveMode, WristDiagnostic, WristTwistShare,
+			BeforeQuartzExperiment, AuxDriveMode, WristDiagnostic, WristTwistShare, ForearmAxisAdjustment,
 			StageSettings, StagePreset, ToggleStageCandidate, ScanStageCandidates,
 			MountCustomStage, UnloadCustomStage, RestoreCameraSkybox,
 			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, StageLoadReplacement, SelectTarget,
@@ -786,6 +786,10 @@ namespace GakuMotion
 				case GuiAction::WristTwistShare:
 					if (std::isfinite(cmd.value) && cmd.value >= -1.0f && cmd.value <= 1.0f)
 						player.controller.wristTwistShare = cmd.value;
+					break;
+				case GuiAction::ForearmAxisAdjustment:
+					if (std::isfinite(cmd.value) && cmd.value >= -90.0f && cmd.value <= 90.0f)
+						player.controller.forearmAxisAdjustmentDeg = cmd.value;
 					break;
 				case GuiAction::BeforeQuartzExperiment:
 					config.beforeQuartzExperiment = cmd.flag && config.secondaryPhysicsBackend == 2;
@@ -3020,6 +3024,10 @@ namespace GakuMotion
 			ctx.fnSetWristTwistShare = [](void* self, float value)
 			{
 				static_cast<Core*>(self)->QueueGui({GuiAction::WristTwistShare, value});
+			};
+			ctx.fnSetForearmAxisAdjustment = [](void* self, float degrees)
+			{
+				static_cast<Core*>(self)->QueueGui({GuiAction::ForearmAxisAdjustment, degrees});
 			};
 			ctx.cameraSnapshot = camera.ReadSnapshot();
 			ctx.cameraImportBusy = cameraImportBusy;

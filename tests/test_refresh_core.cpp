@@ -590,6 +590,13 @@ static void TestWristTwistRedistribution()
 	Check(fake::rotationCalls.size() == 2 && !QuatNear(fake::rotationCalls[0].second, forearm) &&
 	      QuatNear(fake::rotationCalls[0].second * fake::rotationCalls[1].second, forearm * hand),
 	      "negative twist share also preserves hand orientation");
+	controller.wristTwistShare = 0.0f;
+	controller.forearmAxisAdjustmentDeg = 30.0f;
+	fake::rotationCalls.clear(); controller.ApplyMotionToBinding(binding, clip, 0);
+	const auto axisCorrection = Quaternion::FromEulerDegreesXYZ(30, 0, 0);
+	Check(fake::rotationCalls.size() == 2 && QuatNear(fake::rotationCalls[0].second, forearm * axisCorrection) &&
+	      QuatNear(fake::rotationCalls[0].second * fake::rotationCalls[1].second, forearm * hand),
+	      "fixed forearm axis adjustment preserves the hand world orientation");
 	const Quaternion share = IdolController::WristTwistShareRotation(hand, 0.5f);
 	const Quaternion neg(-hand.x, -hand.y, -hand.z, -hand.w);
 	Check(QuatNear(share, IdolController::WristTwistShareRotation(neg, 0.5f)), "twist share is quaternion-sign invariant");

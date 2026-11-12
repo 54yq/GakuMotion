@@ -305,6 +305,12 @@ namespace GakuMotion
 				ctx.fnSetWristTwistShare(ctx.self, wristShare);
 			ImGui::EndDisabled();
 			ImGui::TextWrapped("默认 0。正负数调整相反方向的扭转分配，同时保持手掌朝向；适用于 gkclip 主角色，重启后恢复默认。");
+			float axisDegrees = controller.forearmAxisAdjustmentDeg;
+			ImGui::BeginDisabled(!ctx.injectionAllowed || !ctx.fnSetForearmAxisAdjustment);
+			if (ImGui::SliderFloat("前臂轴向校正 [实验]", &axisDegrees, -90.0f, 90.0f, "%.1f°") && ctx.fnSetForearmAxisAdjustment)
+				ctx.fnSetForearmAxisAdjustment(ctx.self, axisDegrees);
+			ImGui::EndDisabled();
+			ImGui::TextWrapped("默认 0°。固定调整前臂轴向并保持手掌朝向，与上方滑条叠加；当前仅用于观察效果。");
 			ImGui::Spacing();
 			overlay.DrawBoneOverridesSection(ctx);
 			ImGui::Unindent(10.0f);
