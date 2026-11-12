@@ -43,6 +43,108 @@ namespace GakuMotion
 		}
 		ImGui::EndDisabled();
 		ImGui::TextWrapped("表情随驱动角色自动适配。");
+
+		// =========================================================================
+		// 3. 初始角色位置偏移
+		// =========================================================================
+		ImGui::TextUnformatted("主角色初始站位");
+		uint64_t selectedActorToken = 0;
+		for (const auto& actor : ctx.sceneActors) if (actor.selected) selectedActorToken = actor.token;
+		if (overlay.initialPlacementActorToken != selectedActorToken)
+		{
+			overlay.initialPlacementActorToken = selectedActorToken;
+			overlay.initialPositionEditing = false;
+			overlay.initialYawEditing = false;
+		}
+
+		if (!overlay.initialPositionEditing)
+		{
+			const auto offset = controller.initialPositionOffset;
+			overlay.initialPositionEdit[0] = offset.x;
+			overlay.initialPositionEdit[1] = offset.y;
+			overlay.initialPositionEdit[2] = offset.z;
+		}
+
+		const float dragItemWidth = (std::max)(40.0f, (ImGui::GetContentRegionAvail().x - 16.0f) / 3.0f);
+		bool posChanged = false;
+
+		// 位置 X / Y / Z
+		ImGui::TextUnformatted("世界坐标偏移 (米)");
+		ImGui::SetNextItemWidth(dragItemWidth);
+		if (ImGui::DragFloat("##pos_x", &overlay.initialPositionEdit[0], 0.01f, -10.0f, 10.0f, "X: %.2f"))
+			posChanged = true;
+
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(dragItemWidth);
+		if (ImGui::DragFloat("##pos_y", &overlay.initialPositionEdit[1], 0.01f, -10.0f, 10.0f, "Y: %.2f"))
+			posChanged = true;
+
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(dragItemWidth);
+		if (ImGui::DragFloat("##pos_z", &overlay.initialPositionEdit[2], 0.01f, -10.0f, 10.0f, "Z: %.2f"))
+			posChanged = true;
+
+		if (posChanged)
+		{
+			overlay.initialPositionEditing = true;
+			if (ctx.fnSetInitialPosition)
+			{
+				ctx.fnSetInitialPosition(ctx.self, Vector3(overlay.initialPositionEdit[0],
+				                                           overlay.initialPositionEdit[1],
+				                                           overlay.initialPositionEdit[2]));
+			}
+			else
+			{
+				controller.SetInitialPositionOffset(Vector3(overlay.initialPositionEdit[0],
+				                                            overlay.initialPositionEdit[1],
+				                                            overlay.initialPositionEdit[2]));
+			}
+		}
+		if (!overlay.initialYawEditing) overlay.initialYawEdit = controller.initialYawDegrees;
+		ImGui::SetNextItemWidth((std::min)(220.0f, ImGui::GetContentRegionAvail().x));
+		if (ImGui::DragFloat("##main_yaw", &overlay.initialYawEdit, .5f, -180.0f, 180.0f, "朝向: %.1f 度"))
+		{
+			overlay.initialYawEditing = true;
+			if (ctx.fnSetInitialYaw) ctx.fnSetInitialYaw(ctx.self, overlay.initialYawEdit);
+			else controller.SetInitialYawDegrees(overlay.initialYawEdit);
+		}
+
+		// 重置与保存按钮
+		if (GuiIcons::Button("重置站位", GuiIcons::Icon::Reset, ImVec2(120, 24)))
+		{
+			overlay.initialPositionEdit[0] = 0.0f;
+			overlay.initialPositionEdit[1] = 0.0f;
+			overlay.initialPositionEdit[2] = 0.0f;
+			overlay.initialPositionEditing = false;
+			overlay.initialYawEdit = 0.0f;
+			overlay.initialYawEditing = false;
+			if (ctx.fnSetInitialPosition)
+				ctx.fnSetInitialPosition(ctx.self, Vector3(0.0f, 0.0f, 0.0f));
+			else
+				controller.SetInitialPositionOffset(Vector3(0.0f, 0.0f, 0.0f));
+			if (ctx.fnSetInitialYaw) ctx.fnSetInitialYaw(ctx.self, 0.0f);
+			else controller.SetInitialYawDegrees(0.0f);
+		}
+		GuiIcons::SameLineIfRoom("保存初始位置为默认", ImVec2(150, 24));
+		if (GuiIcons::Button("保存初始位置为默认", GuiIcons::Icon::Save, ImVec2(150, 24)))
+		{
+			if (ctx.fnSaveInitialPosition) ctx.fnSaveInitialPosition(ctx.self);
+		}
+		if (!ctx.initialPositionNotice.empty())
+		{
+			const bool failed = ctx.initialPositionNotice.find("失败") != std::string::npos ||
+				ctx.initialPositionNotice.find("无效") != std::string::npos;
+			if (failed) ImGui::PushStyleColor(ImGuiCol_Text, GuiTheme::ErrorColor());
+			ImGui::TextWrapped("%s", ctx.initialPositionNotice.c_str());
+			if (failed) ImGui::PopStyleColor();
+		}
+		ImGui::TextWrapped("位置与朝向即时生效，切换动作时保留；停止后恢复场景原位。保存后作为下次启动的默认站位。");
+
+		ImGui::Spacing();
+		ImGui::Separator();
+		ImGui::Spacing();
+
+
 		if (ImGui::CollapsingHeader("多人同步播放（最多三人）"))
 		{
 			ImGui::TextWrapped("上方角色为主角色。其他角色分别选择曲库中的动作，统一使用主角色的音乐、镜头和进度。停止播放后可修改绑定。");
@@ -113,6 +215,7 @@ namespace GakuMotion
 					{
 						overlay.ensemblePositionGeneration[i] = follower.bindingGeneration;
 						overlay.ensemblePositionDraft[i] = follower.position;
+						overlay.ensembleYawDraft[i] = follower.yawDegrees;
 					}
 					auto& offset = overlay.ensemblePositionDraft[i];
 					const float width = (std::max)(40.0f, (std::min)(110.0f, (ImGui::GetContentRegionAvail().x - 16.0f) / 3.0f));
@@ -124,10 +227,19 @@ namespace GakuMotion
 					positionChanged |= ImGui::DragFloat("##ensemble_pos_y", &offset.y, .01f, -10.0f, 10.0f, "Y: %.2f");
 					ImGui::SameLine(); ImGui::SetNextItemWidth(width);
 					positionChanged |= ImGui::DragFloat("##ensemble_pos_z", &offset.z, .01f, -10.0f, 10.0f, "Z: %.2f");
-					if (ImGui::Button("重置角色站位")) { offset = {}; positionChanged = true; }
+					ImGui::SetNextItemWidth((std::min)(220.0f, ImGui::GetContentRegionAvail().x));
+					ImGui::BeginDisabled(!ctx.fnSetEnsembleYaw);
+					bool yawChanged = ImGui::DragFloat("##ensemble_yaw", &overlay.ensembleYawDraft[i], .5f,
+					                                   -180.0f, 180.0f, "朝向: %.1f 度");
+					ImGui::EndDisabled();
+					if (ImGui::Button("重置角色站位"))
+					{ offset = {}; overlay.ensembleYawDraft[i] = 0.0f; positionChanged = yawChanged = true; }
 					if (positionChanged && ctx.fnSetEnsemblePosition)
 						ctx.fnSetEnsemblePosition(ctx.self, static_cast<int>(i), follower.actorToken, ctx.actorRosterEpoch,
 						                          follower.bindingGeneration, offset);
+					if (yawChanged && ctx.fnSetEnsembleYaw)
+						ctx.fnSetEnsembleYaw(ctx.self, static_cast<int>(i), follower.actorToken, ctx.actorRosterEpoch,
+						                     follower.bindingGeneration, overlay.ensembleYawDraft[i]);
 					ImGui::EndDisabled();
 				}
 				ImGui::PopID();
@@ -147,86 +259,6 @@ namespace GakuMotion
 		ImGui::SameLine();
 		if (ImGui::Button("保存表情幅度") && ctx.fnSaveFacialWeights) ctx.fnSaveFacialWeights(ctx.self);
 		if (!ctx.facialWeightsNotice.empty()) ImGui::TextWrapped("%s", ctx.facialWeightsNotice.c_str());
-
-		ImGui::Spacing();
-		ImGui::Separator();
-		ImGui::Spacing();
-
-		// =========================================================================
-		// 3. 初始角色位置偏移
-		// =========================================================================
-		ImGui::TextUnformatted("初始角色位置偏移");
-
-		if (!overlay.initialPositionEditing)
-		{
-			const auto offset = controller.initialPositionOffset;
-			overlay.initialPositionEdit[0] = offset.x;
-			overlay.initialPositionEdit[1] = offset.y;
-			overlay.initialPositionEdit[2] = offset.z;
-		}
-
-		const float dragItemWidth = (std::max)(40.0f, (ImGui::GetContentRegionAvail().x - 16.0f) / 3.0f);
-		bool posChanged = false;
-
-		// 位置 X / Y / Z
-		ImGui::TextUnformatted("世界坐标偏移 (米)");
-		ImGui::SetNextItemWidth(dragItemWidth);
-		if (ImGui::DragFloat("##pos_x", &overlay.initialPositionEdit[0], 0.01f, -10.0f, 10.0f, "X: %.2f"))
-			posChanged = true;
-
-		ImGui::SameLine();
-		ImGui::SetNextItemWidth(dragItemWidth);
-		if (ImGui::DragFloat("##pos_y", &overlay.initialPositionEdit[1], 0.01f, -10.0f, 10.0f, "Y: %.2f"))
-			posChanged = true;
-
-		ImGui::SameLine();
-		ImGui::SetNextItemWidth(dragItemWidth);
-		if (ImGui::DragFloat("##pos_z", &overlay.initialPositionEdit[2], 0.01f, -10.0f, 10.0f, "Z: %.2f"))
-			posChanged = true;
-
-		if (posChanged)
-		{
-			overlay.initialPositionEditing = true;
-			if (ctx.fnSetInitialPosition)
-			{
-				ctx.fnSetInitialPosition(ctx.self, Vector3(overlay.initialPositionEdit[0],
-				                                           overlay.initialPositionEdit[1],
-				                                           overlay.initialPositionEdit[2]));
-			}
-			else
-			{
-				controller.SetInitialPositionOffset(Vector3(overlay.initialPositionEdit[0],
-				                                            overlay.initialPositionEdit[1],
-				                                            overlay.initialPositionEdit[2]));
-			}
-		}
-
-		// 重置与保存按钮
-		if (GuiIcons::Button("重置位置偏移", GuiIcons::Icon::Reset, ImVec2(120, 24)))
-		{
-			overlay.initialPositionEdit[0] = 0.0f;
-			overlay.initialPositionEdit[1] = 0.0f;
-			overlay.initialPositionEdit[2] = 0.0f;
-			overlay.initialPositionEditing = false;
-			if (ctx.fnSetInitialPosition)
-				ctx.fnSetInitialPosition(ctx.self, Vector3(0.0f, 0.0f, 0.0f));
-			else
-				controller.SetInitialPositionOffset(Vector3(0.0f, 0.0f, 0.0f));
-		}
-		GuiIcons::SameLineIfRoom("保存初始位置为默认", ImVec2(150, 24));
-		if (GuiIcons::Button("保存初始位置为默认", GuiIcons::Icon::Save, ImVec2(150, 24)))
-		{
-			if (ctx.fnSaveInitialPosition) ctx.fnSaveInitialPosition(ctx.self);
-		}
-		if (!ctx.initialPositionNotice.empty())
-		{
-			const bool failed = ctx.initialPositionNotice.find("失败") != std::string::npos ||
-				ctx.initialPositionNotice.find("无效") != std::string::npos;
-			if (failed) ImGui::PushStyleColor(ImGuiCol_Text, GuiTheme::ErrorColor());
-			ImGui::TextWrapped("%s", ctx.initialPositionNotice.c_str());
-			if (failed) ImGui::PopStyleColor();
-		}
-		ImGui::TextWrapped("修改立即作用于当前驱动对象，切歌保留，停止后恢复场景原位；保存后作为下次启动的默认偏移。");
 
 		ImGui::Spacing();
 		ImGui::Separator();

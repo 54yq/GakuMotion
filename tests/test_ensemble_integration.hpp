@@ -15,6 +15,8 @@ namespace EnsembleFixture
 	{ return reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(actor) + 0x100 + static_cast<unsigned>(hid)); }
 	inline void* Transform(void* actor)
 	{ return reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(actor) + 0x500); }
+	inline void* Parent(void* transform)
+	{ return reinterpret_cast<void*>((reinterpret_cast<uintptr_t>(transform) & ~uintptr_t{0xfffff}) + 0x500); }
 	inline void GetRot(void* t, float* out)
 	{
 		const auto it = rotations.find(t);
@@ -39,6 +41,7 @@ namespace EnsembleFixture
 	{
 		c.fnGetBoneTransform = Bone; c.fnGetComponentTransform = Transform;
 		c.fnGetWorldRotation = GetRot; c.fnSetWorldRotation = SetRot;
+		c.fnGetTransformParent = Parent; c.fnSetLocalRotation = SetRot;
 		c.fnGetWorldPosition = GetPos; c.fnSetWorldPosition = SetPos;
 		c.fnGetAnimatorEnabled = GetEnabled; c.fnSetAnimatorEnabled = SetEnabled;
 		c.fnGetAnimatorController = GetController; c.fnSetAnimatorController = SetController;
@@ -144,6 +147,36 @@ static void TestEnsembleIntegration(const std::string& repoRoot)
 	core.ProcessPendingGuiCommands();
 	Check(std::fabs(core.ensemble.Followers()[0].player->controller.initialPositionOffset.x - 1.0f) < 1e-5f,
 	      "invalid or stale follower position commands leave its current placement unchanged");
+	positionsView.fnSetEnsembleYaw(positionsView.self, 0, tokenB, positionsView.actorRosterEpoch,
+	                               positionsView.ensembleFollowers[0].bindingGeneration, 90);
+	positionsView.fnSetEnsembleYaw(positionsView.self, 1, tokenC, positionsView.actorRosterEpoch,
+	                               positionsView.ensembleFollowers[1].bindingGeneration, -90);
+	core.ProcessPendingGuiCommands();
+	core.OnLateUpdate(b, animB, nullptr, .016f, false);
+	core.OnLateUpdate(c, animC, nullptr, .016f, false);
+	Check(core.ensemble.Followers()[0].player->controller.initialYawDegrees == 90 &&
+	      core.ensemble.Followers()[1].player->controller.initialYawDegrees == -90 &&
+	      core.player.controller.initialYawDegrees == 0,
+	      "followers keep independent yaw without changing the main actor");
+	Check(std::fabs(EnsembleFixture::positions[EnsembleFixture::Bone(b, 0)].x - movedB.x) < 1e-5f &&
+	      std::fabs(EnsembleFixture::positions[EnsembleFixture::Bone(c, 0)].x - movedC.x) < 1e-5f,
+	      "yaw changes facing without orbiting either actor's current position");
+	core.player.state = PlaybackState::Preview;
+	const uint64_t oldGeneration = positionsView.ensembleFollowers[0].bindingGeneration;
+	positionsView.fnSetEnsembleFollower(positionsView.self, 0, tokenB, positionsView.actorRosterEpoch,
+	                                    "C", .01f, positionsView.libraryRevision);
+	core.ProcessPendingGuiCommands();
+	Check(core.ensemble.Followers()[0].motionKey == "C" &&
+	      core.ensemble.Followers()[0].bindingGeneration != oldGeneration &&
+	      core.ensemble.Followers()[0].player->controller.initialYawDegrees == 90 &&
+	      std::fabs(core.ensemble.Followers()[0].player->controller.initialPositionOffset.x - 1.0f) < 1e-5f,
+	      "changing a follower's clip preserves its actor's position and yaw");
+	positionsView.fnSetEnsembleYaw(positionsView.self, 0, tokenB, positionsView.actorRosterEpoch, oldGeneration, 10);
+	core.ProcessPendingGuiCommands();
+	Check(core.ensemble.Followers()[0].player->controller.initialYawDegrees == 90,
+	      "queued yaw from the old binding cannot alter the replacement clip");
+	core.player.state = PlaybackState::Paused;
+	core.OnLateUpdate(b, animB, nullptr, .016f, false);
 	Check(std::fabs(fb.player->currentTime - .03f) < 1e-5f &&
 	      std::fabs(fc.player->currentTime - .05f) < 1e-5f && core.player.currentTime == .04f,
 	      "both sample the shared paused time with independent offsets");
@@ -177,6 +210,18 @@ static void TestEnsembleIntegration(const std::string& repoRoot)
 	Check(std::fabs(EnsembleFixture::positions[EnsembleFixture::Bone(b, 0)].x) < 1e-5f &&
 	      std::fabs(EnsembleFixture::positions[EnsembleFixture::Bone(c, 0)].x) < 1e-5f,
 	      "stop restores the original positions without baking in follower offsets");
+	Check(fb.player->controller.initialYawDegrees == 90 &&
+	      std::fabs(fb.player->controller.initialPositionOffset.x - 1.0f) < 1e-5f,
+	      "stop restores the scene but retains configured placement for replay");
+	const auto resetView = core.BuildGuiContext();
+	resetView.fnSetEnsemblePosition(resetView.self, 0, tokenB, resetView.actorRosterEpoch,
+	                                resetView.ensembleFollowers[0].bindingGeneration, {});
+	resetView.fnSetEnsembleYaw(resetView.self, 0, tokenB, resetView.actorRosterEpoch,
+	                           resetView.ensembleFollowers[0].bindingGeneration, 0);
+	core.ProcessPendingGuiCommands();
+	Check(fb.player->controller.initialPositionOffset.x == 0 && fb.player->controller.initialYawDegrees == 0 &&
+	      fc.player->controller.initialYawDegrees == -90,
+	      "reset clears only that actor's position and yaw");
 	core.player.state = PlaybackState::Preview;
 	core.OnLateUpdate(b, animB, nullptr, .016f, false);
 	core.OnLateUpdate(c, animC, nullptr, .016f, false);
@@ -253,4 +298,55 @@ static void TestEnsembleIntegration(const std::string& repoRoot)
 	      "disappearing animator blocks injection without touching an unconfirmed actor");
 	Check(!missingAnimator.SuspendForCapture() && EnsembleFixture::writes == priorWrites,
 	      "capture refuses unconfirmed ownership without dereferencing the old animator");
+
+	Core switching;
+	switching.PublishSceneActors({{a, 1, ""}, {b, 2, ""}});
+	auto mainView = switching.BuildGuiContext();
+	mainView.fnSetInitialPosition(mainView.self, {1, 0, 2});
+	mainView.fnSetInitialYaw(mainView.self, 30);
+	switching.ProcessPendingGuiCommands();
+	switching.SetTargetActor(b);
+	Check(switching.player.controller.initialPositionOffset.x == 0 && switching.player.controller.initialYawDegrees == 0,
+	      "switching to a new main actor does not inherit the prior actor's placement");
+	mainView = switching.BuildGuiContext();
+	mainView.fnSetInitialPosition(mainView.self, {-2, 0, 0}); mainView.fnSetInitialYaw(mainView.self, -45);
+	switching.ProcessPendingGuiCommands();
+	switching.SetTargetActor(a);
+	Check(switching.player.controller.initialPositionOffset.x == 1 && switching.player.controller.initialYawDegrees == 30,
+	      "returning to a main actor restores its own remembered placement");
+	switching.SetTargetActor(b);
+	Check(switching.player.controller.initialPositionOffset.x == -2 && switching.player.controller.initialYawDegrees == -45,
+	      "main actor placements are independent when switching back and forth");
+
+	Core crossRole;
+	EnsembleFixture::Wire(crossRole.player.controller);
+	crossRole.PublishSceneActors({{a, 1, ""}, {b, 2, ""}});
+	crossRole.motions = {trackB}; crossRole.libraryRevision = 13;
+	crossRole.player.clip = MakeSmallClip(); crossRole.player.state = PlaybackState::Preview;
+	auto roleView = crossRole.BuildGuiContext();
+	roleView.fnSetInitialPosition(roleView.self, {2, 0, 0}); roleView.fnSetInitialYaw(roleView.self, 25);
+	roleView.fnSetEnsembleFollower(roleView.self, 0, roleView.sceneActors[1].token, roleView.actorRosterEpoch, "B", 0, 13);
+	crossRole.ProcessPendingGuiCommands();
+	roleView = crossRole.BuildGuiContext();
+	roleView.fnSetEnsemblePosition(roleView.self, 0, roleView.ensembleFollowers[0].actorToken, roleView.actorRosterEpoch,
+	                               roleView.ensembleFollowers[0].bindingGeneration, {-3, 0, 0});
+	roleView.fnSetEnsembleYaw(roleView.self, 0, roleView.ensembleFollowers[0].actorToken, roleView.actorRosterEpoch,
+	                          roleView.ensembleFollowers[0].bindingGeneration, -60);
+	crossRole.ProcessPendingGuiCommands();
+	crossRole.SetTargetActor(b);
+	Check(crossRole.player.controller.initialPositionOffset.x == -3 && crossRole.player.controller.initialYawDegrees == -60,
+	      "a follower's own placement follows it when selected as the primary actor");
+	roleView = crossRole.BuildGuiContext();
+	roleView.fnSetEnsembleFollower(roleView.self, 0, roleView.sceneActors[0].token, roleView.actorRosterEpoch, "B", 0, 13);
+	crossRole.ProcessPendingGuiCommands();
+	Check(crossRole.ensemble.Followers()[0].player &&
+	      crossRole.ensemble.Followers()[0].player->controller.initialPositionOffset.x == 2 &&
+	      crossRole.ensemble.Followers()[0].player->controller.initialYawDegrees == 25,
+	      "the previous main actor keeps its placement when assigned as a follower");
+	roleView = crossRole.BuildGuiContext();
+	roleView.fnSelectTargetActor(roleView.self, roleView.sceneActors[0].token, roleView.actorRosterEpoch);
+	roleView.fnSetInitialYaw(roleView.self, 99);
+	crossRole.ProcessPendingGuiCommands();
+	Check(crossRole.player.controller.targetActor == a && crossRole.player.controller.initialYawDegrees == 25,
+	      "queued yaw for the previous main actor is not applied to a newly selected actor");
 }

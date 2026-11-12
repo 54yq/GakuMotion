@@ -62,6 +62,7 @@ namespace GakuMotion
 		bool active{false};
 		uint64_t bindingGeneration{0};
 		Vector3 position{};
+		float yawDegrees{0};
 	};
 
 	struct GuiContext
@@ -126,6 +127,7 @@ namespace GakuMotion
 		int musicVolumeSupport{0};
 		std::string musicVolumeNotice;
 		void (*fnSetInitialPosition)(void*, const Vector3&){nullptr};
+		void (*fnSetInitialYaw)(void*, float){nullptr};
 		void (*fnSaveInitialPosition)(void*){nullptr};
 
 		// ---- 场景与舞台 (Phase 1 & 2 官方舞台挂载与绿幕) ----
@@ -159,6 +161,7 @@ namespace GakuMotion
 		void (*fnSetEnsembleFollower)(void*, int, uint64_t, uint64_t, const char*, float, uint64_t){nullptr};
 		void (*fnClearEnsembleFollower)(void*, int, uint64_t){nullptr};
 		void (*fnSetEnsemblePosition)(void*, int, uint64_t, uint64_t, uint64_t, const Vector3&){nullptr};
+		void (*fnSetEnsembleYaw)(void*, int, uint64_t, uint64_t, uint64_t, float){nullptr};
 
 		// ---- 写动作（回调到 Core） ----
 		void* self{nullptr};
@@ -273,12 +276,16 @@ namespace GakuMotion
 		float solePlotSpanM{.65f};
 		float initialPositionEdit[3]{};
 		bool initialPositionEditing{false};
+		float initialYawEdit{0};
+		bool initialYawEditing{false};
+		uint64_t initialPlacementActorToken{0};
 		uint64_t ensembleDraftEpoch{0};
 		std::array<uint64_t, 2> ensembleDraftActor{};
 		std::array<std::string, 2> ensembleDraftMotion{};
 		std::array<float, 2> ensembleDraftOffset{};
 		std::array<uint64_t, 2> ensemblePositionGeneration{};
 		std::array<Vector3, 2> ensemblePositionDraft{};
+		std::array<float, 2> ensembleYawDraft{};
 #ifdef GKMOTION_GUI_ACTIVE
 		ImGuiTextFilter motionFilter;
 #ifdef GKMOTION_GUI_TEST

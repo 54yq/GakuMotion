@@ -2356,6 +2356,86 @@ static void TestPlaylistLifecycle(const std::string& repoRoot)
 	fs::remove_all(root);
 }
 
+static void TestInitialYaw()
+{
+	BeginTest("initial_yaw_turns_pose_in_place");
+	MotionClip clip = MakeSmallClip();
+	clip.format = MotionClip::Format::kGkClip;
+	clip.version = 4;
+	clip.bones = {BoneMeta{0, "Hips", false}, BoneMeta{13, "LeftUpperArm", false}};
+	clip.bone_parent_hids = {-1, 0};
+	clip.root_positions = {{.4f, .2f, .8f}, {.4f, .2f, .8f}};
+	const Quaternion original = Quaternion::FromEulerDegreesXYZ(12, 5, -8);
+	const Quaternion child = Quaternion::FromEulerDegreesXYZ(15, 0, 30);
+	clip.bone_rotations = {original, child, original, child};
+	IdolController controller;
+	WireControllerCallbacks(controller);
+	controller.fnSetLocalRotation = fake::SetWorldRot;
+	controller.fnGetTransformParent = [](void*) -> void* { return reinterpret_cast<void*>(0x909); };
+	IdolBoneBinding binding;
+	binding.actor = reinterpret_cast<void*>(0x901);
+	binding.actorTransform = reinterpret_cast<void*>(0x902);
+	binding.rootTransform = reinterpret_cast<void*>(0x903);
+	binding.bindPoseCaptured = true;
+	binding.restActorPos = {3, 0, 4};
+	binding.restRootPos = {.1f, .8f, -.2f};
+	binding.boneTransforms = {binding.rootTransform, reinterpret_cast<void*>(0x904)};
+	binding.restRotations = {Quaternion::Identity(), Quaternion::Identity()};
+	const Quaternion parent = Quaternion::FromEulerDegreesXYZ(20, 35, 10);
+	fake::worldPos[binding.actorTransform] = binding.restActorPos;
+	fake::worldRot[binding.actorTransform] = Quaternion::FromEulerDegreesXYZ(0, 20, 0);
+	fake::worldRot[reinterpret_cast<void*>(0x909)] = parent;
+	controller.currentBinding = binding;
+	fake::rotationCalls.clear();
+	controller.ApplyMotion(clip, 0);
+	const auto originalPosition = fake::worldPos[binding.rootTransform];
+	const auto originalRoot = fake::rotationCalls[0].second;
+	const auto originalChild = fake::rotationCalls[1].second;
+	Check(controller.SetInitialYawDegrees(90), "finite yaw accepted");
+	fake::rotationCalls.clear();
+	controller.ApplyMotion(clip, 0);
+	const auto turn = Quaternion::FromEulerDegreesXYZ(0, 90, 0);
+	Check(QuatNear(parent * fake::rotationCalls[0].second, turn * parent * originalRoot),
+	      "world-up turn is transformed to the actual root parent frame");
+	Check(QuatNear(fake::rotationCalls[1].second, originalChild),
+	      "child local motion stays authored under the rotated root");
+	const auto turnedPosition = fake::worldPos[binding.rootTransform];
+	Check(std::fabs(turnedPosition.x-originalPosition.x) < 1e-5f &&
+	      std::fabs(turnedPosition.y-originalPosition.y) < 1e-5f &&
+	      std::fabs(turnedPosition.z-originalPosition.z) < 1e-5f,
+	      "turning never moves the character's current root position");
+	fake::rotationCalls.clear(); controller.ApplyMotion(clip, 0);
+	Check(QuatNear(parent * fake::rotationCalls[0].second, turn * parent * originalRoot),
+	      "repeated samples do not accumulate yaw");
+	fake::worldRot[reinterpret_cast<void*>(0x909)] = {0, 0, 0, 0};
+	fake::rotationCalls.clear(); controller.ApplyMotion(clip, 0);
+	Check(QuatNear(fake::rotationCalls[0].second, originalRoot),
+	      "invalid parent rotation leaves the authored root pose intact");
+	fake::worldRot[reinterpret_cast<void*>(0x909)] = parent;
+	Check(!controller.SetInitialYawDegrees(std::numeric_limits<float>::quiet_NaN()) &&
+	      controller.initialYawDegrees == 90.0f, "invalid yaw cannot overwrite valid state");
+	controller.SetInitialYawDegrees(0);
+	fake::rotationCalls.clear(); controller.ApplyMotion(clip, 0);
+	Check(QuatNear(fake::rotationCalls[0].second, originalRoot), "reset restores the original root orientation");
+
+	controller.fnSetLocalRotation = nullptr;
+	fake::rotationCalls.clear(); controller.ApplyMotion(clip, 0);
+	const auto gkWorldBefore = fake::rotationCalls[0].second;
+	controller.SetInitialYawDegrees(90);
+	fake::rotationCalls.clear(); controller.ApplyMotion(clip, 0);
+	Check(QuatNear(fake::rotationCalls[0].second, turn * gkWorldBefore),
+	      "degraded gkclip world-write path applies yaw in world coordinates");
+
+	clip.format = MotionClip::Format::kGkWorldDump;
+	controller.SetInitialYawDegrees(0);
+	fake::rotationCalls.clear(); controller.ApplyMotion(clip, 0);
+	const auto worldBefore = fake::rotationCalls[0].second;
+	controller.SetInitialYawDegrees(-90);
+	fake::rotationCalls.clear(); controller.ApplyMotion(clip, 0);
+	Check(QuatNear(fake::rotationCalls[0].second, Quaternion::FromEulerDegreesXYZ(0, -90, 0) * worldBefore),
+	      "world-rotation streams turn in world coordinates too");
+}
+
 static void TestInitialPosition()
 {
 	BeginTest("initial_position_world_translation");
@@ -2444,24 +2524,30 @@ static void TestInitialPosition()
 	core.initialPositionPath = (root / "GakuMotion" / "initial_position.json").string();
 	core.QueueInitialPosition({1, 2, 3});
 	core.QueueInitialPosition(offset);
+	core.QueueInitialYaw(45.0f);
 	Check(near(core.player.controller.initialPositionOffset, {0, 0, 0}),
 	      "GUI placement command does not mutate main-thread state early");
 	core.QueueGui({Core::GuiAction::SaveInitialPosition});
 	core.ProcessPendingGuiCommands();
-	Check(near(core.player.controller.initialPositionOffset, offset),
-	      "queued placement and save use final XYZ values in order");
+	Check(near(core.player.controller.initialPositionOffset, offset) && core.player.controller.initialYawDegrees == 45,
+	      "queued placement and save use final XYZ and yaw values in order");
 	Core restarted;
 	restarted.Initialize(root.string());
-	Check(near(restarted.player.controller.initialPositionOffset, offset),
-	      "saved initial position loads on next startup");
+	Check(near(restarted.player.controller.initialPositionOffset, offset) && restarted.player.controller.initialYawDegrees == 45,
+	      "saved initial position and yaw load on next startup");
 	WriteTextFile(core.initialPositionPath, R"({"version":1,"space":"world","offset_m":[1,"bad",2]})");
 	Check(!core.LoadInitialPosition() && near(core.player.controller.initialPositionOffset, offset),
 	      "invalid saved XYZ leaves valid runtime placement intact");
 	core.QueueInitialPosition({0, 0, 0});
+	core.QueueInitialYaw(0);
 	core.QueueGui({Core::GuiAction::SaveInitialPosition});
 	core.ProcessPendingGuiCommands();
-	Check(restarted.LoadInitialPosition() && near(restarted.player.controller.initialPositionOffset, {0, 0, 0}),
-	      "saved three-axis reset persists across restart");
+	Check(restarted.LoadInitialPosition() && near(restarted.player.controller.initialPositionOffset, {0, 0, 0}) &&
+	      restarted.player.controller.initialYawDegrees == 0,
+	      "saved position and yaw reset persists across restart");
+	WriteTextFile(core.initialPositionPath, R"({"version":1,"space":"world","offset_m":[1,2,3]})");
+	Check(restarted.LoadInitialPosition() && near(restarted.player.controller.initialPositionOffset, {1, 2, 3}) &&
+	      restarted.player.controller.initialYawDegrees == 0, "legacy position files load with zero yaw");
 	core.player.controller.facialWeights = {0.8f, 0.9f, 0.7f, 0.5f};
 	core.QueueGui({Core::GuiAction::SaveFacialWeights});
 	core.ProcessPendingGuiCommands();
@@ -2630,6 +2716,7 @@ int main(int argc, char** argv)
  TestSecondaryPhysicsConfig();
  TestOrderedPlaybackCommands();
  TestInitialPosition();
+ TestInitialYaw();
  TestOverrideInjection();
  TestAuxQuaternionSignInvariance();
  TestPlayerSeekSync();

@@ -74,6 +74,12 @@ namespace GakuMotion
 		EnsembleRuntime ensemble;
 		bool ensembleRestoreUnconfirmed{false};
 		std::string ensembleNotice;
+		void RememberCurrentPlacement()
+		{
+			if (const auto* actor = sceneActorRegistry.Find(player.controller.targetActor))
+				ensemble.RememberPlacement(actor->token, player.controller.initialPositionOffset,
+				                           player.controller.initialYawDegrees);
+		}
 		bool RestoreEnsemble()
 		{
 			if (ensembleRestoreUnconfirmed) return false;
@@ -343,14 +349,14 @@ namespace GakuMotion
 			Select, Cycle, Play, Pause, Resume, Stop, Seek,
 			ScrubBegin, ScrubUpdate, ScrubEnd, Refresh, Move,
 			SaveList, LoadList, Mode, Mute, Speed, Import, ClearTarget, NextTarget, PickTarget,
-			InitialPosition, SaveInitialPosition, SaveFacialWeights, MusicVolume, SaveMusicVolume, PhysicsBackend,
+			InitialPosition, InitialYaw, SaveInitialPosition, SaveFacialWeights, MusicVolume, SaveMusicVolume, PhysicsBackend,
 			CameraSettings, SaveCameraSettings, CameraImport, ReloadCamera,
 			SoleSettings, SaveSoleSettings, LoadSoleSettings, ExperimentalSolePitch, ExperimentalWaistSupport,
 			BeforeQuartzExperiment,
 			StageSettings, StagePreset, ToggleStageCandidate, ScanStageCandidates,
 			MountCustomStage, UnloadCustomStage, RestoreCameraSkybox,
 			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, StageLoadReplacement, SelectTarget,
-			SetEnsembleFollower, ClearEnsembleFollower, EnsemblePosition
+			SetEnsembleFollower, ClearEnsembleFollower, EnsemblePosition, EnsembleYaw
 		};
 
 		std::atomic<int> guiPhysicsBackend{2};
@@ -387,12 +393,15 @@ namespace GakuMotion
 			std::lock_guard<std::mutex> lock(guiCommandMutex);
 			// Only adjacent scrub/placement updates may coalesce. Begin/end/save/
 			// transport events retain their order across physical frames.
-			const bool sameFollowerPosition = cmd.action == GuiAction::EnsemblePosition && !guiCommands.empty() &&
+			const bool sameFollowerPosition = (cmd.action == GuiAction::EnsemblePosition || cmd.action == GuiAction::EnsembleYaw) && !guiCommands.empty() &&
 				guiCommands.back().action == cmd.action && guiCommands.back().candidateIndex == cmd.candidateIndex &&
 				guiCommands.back().actorToken == cmd.actorToken && guiCommands.back().actorEpoch == cmd.actorEpoch &&
 				guiCommands.back().loadedGeneration == cmd.loadedGeneration;
-			if (sameFollowerPosition || ((cmd.action == GuiAction::ScrubUpdate || cmd.action == GuiAction::InitialPosition) &&
-			    !guiCommands.empty() && guiCommands.back().action == cmd.action))
+			const bool sameMainPlacement = (cmd.action == GuiAction::InitialPosition || cmd.action == GuiAction::InitialYaw) &&
+				!guiCommands.empty() && guiCommands.back().action == cmd.action &&
+				guiCommands.back().actorToken == cmd.actorToken && guiCommands.back().actorEpoch == cmd.actorEpoch;
+			const bool sameScrub = cmd.action == GuiAction::ScrubUpdate && !guiCommands.empty() && guiCommands.back().action == cmd.action;
+			if (sameFollowerPosition || sameMainPlacement || sameScrub)
 				guiCommands.back() = std::move(cmd);
 			else guiCommands.push_back(std::move(cmd));
 		}
@@ -441,7 +450,22 @@ namespace GakuMotion
 		{
 			GuiCommand cmd{GuiAction::InitialPosition};
 			cmd.position = offset;
+			cmd.actorEpoch = sceneActorRegistry.Epoch();
+			if (const auto* actor = sceneActorRegistry.Find(player.controller.targetActor)) cmd.actorToken = actor->token;
 			QueueGui(std::move(cmd));
+		}
+		void QueueInitialYaw(float yaw)
+		{
+			GuiCommand cmd{GuiAction::InitialYaw, yaw};
+			cmd.actorEpoch = sceneActorRegistry.Epoch();
+			if (const auto* actor = sceneActorRegistry.Find(player.controller.targetActor)) cmd.actorToken = actor->token;
+			QueueGui(std::move(cmd));
+		}
+		bool IsCurrentPlacementTarget(const GuiCommand& cmd) const
+		{
+			if (cmd.actorEpoch != sceneActorRegistry.Epoch()) return false;
+			if (!cmd.actorToken) return player.controller.targetActor == nullptr;
+			return sceneActorRegistry.Resolve(cmd.actorToken, cmd.actorEpoch) == player.controller.targetActor;
 		}
 
 		void QueueCameraSettings(const GakuMotion::CameraSettings& settings)
@@ -777,13 +801,22 @@ namespace GakuMotion
 						ensemble.SetPosition(static_cast<size_t>(cmd.candidateIndex), cmd.actorToken, cmd.actorEpoch,
 						                     cmd.loadedGeneration, cmd.position, sceneActorRegistry);
 					break;
+				case GuiAction::EnsembleYaw:
+					if (!ensembleRestoreUnconfirmed && cmd.candidateIndex >= 0 && cmd.candidateIndex < 2)
+						ensemble.SetYaw(static_cast<size_t>(cmd.candidateIndex), cmd.actorToken, cmd.actorEpoch,
+						                cmd.loadedGeneration, cmd.value, sceneActorRegistry);
+					break;
 				case GuiAction::ClearTarget: PickBoundActorAsTarget();
 					break;
 				case GuiAction::NextTarget: CycleTargetActor();
 					break;
 				case GuiAction::PickTarget: PickBoundActorAsTarget();
 					break;
-				case GuiAction::InitialPosition: player.controller.SetInitialPositionOffset(cmd.position);
+				case GuiAction::InitialPosition:
+					if (IsCurrentPlacementTarget(cmd) && player.controller.SetInitialPositionOffset(cmd.position)) RememberCurrentPlacement();
+					break;
+				case GuiAction::InitialYaw:
+					if (IsCurrentPlacementTarget(cmd) && player.controller.SetInitialYawDegrees(cmd.value)) RememberCurrentPlacement();
 					break;
 				case GuiAction::SaveInitialPosition: SaveInitialPosition();
 					break;
@@ -2062,15 +2095,25 @@ namespace GakuMotion
 				return false;
 			}
 			const auto* values = root.Find("offset_m");
+			const auto* yawValue = root.Find("yaw_degrees");
 			if (root.IntPath("version", 0) != 1 || root.StringPath("space", "") != "world" ||
 				!values || !values->IsArray() || values->Size() != 3 ||
 				!values->At(0)->IsNumber() || !values->At(1)->IsNumber() || !values->At(2)->IsNumber() ||
-				!player.controller.SetInitialPositionOffset(
-					Vector3(values->At(0)->AsFloat(0), values->At(1)->AsFloat(0), values->At(2)->AsFloat(0))))
+				(yawValue && !yawValue->IsNumber()))
 			{
-				initialPositionNotice = "初始位置文件无效：需要 world 坐标下的三个有限数值";
+				initialPositionNotice = "初始站位文件无效：需要三个坐标和可选朝向数值";
 				return false;
 			}
+			const Vector3 offset(values->At(0)->AsFloat(0), values->At(1)->AsFloat(0), values->At(2)->AsFloat(0));
+			const float yaw = yawValue ? yawValue->AsFloat(0) : 0.0f;
+			if (!std::isfinite(offset.x) || !std::isfinite(offset.y) || !std::isfinite(offset.z) || !std::isfinite(yaw))
+			{
+				initialPositionNotice = "初始站位文件无效：坐标和朝向必须为有限数值";
+				return false;
+			}
+			player.controller.SetInitialPositionOffset(offset);
+			player.controller.SetInitialYawDegrees(yaw);
+			RememberCurrentPlacement();
 			initialPositionNotice = "已载入保存的初始位置";
 			return true;
 		}
@@ -2078,7 +2121,8 @@ namespace GakuMotion
 		bool SaveInitialPosition()
 		{
 			const auto offset = player.controller.initialPositionOffset;
-			if (!std::isfinite(offset.x) || !std::isfinite(offset.y) || !std::isfinite(offset.z))
+			if (!std::isfinite(offset.x) || !std::isfinite(offset.y) || !std::isfinite(offset.z) ||
+			    !std::isfinite(player.controller.initialYawDegrees))
 			{
 				initialPositionNotice = "初始位置保存失败：坐标必须为有限数值";
 				return false;
@@ -2094,7 +2138,8 @@ namespace GakuMotion
 			std::ofstream out(MotionPathFromUtf8(temporary), std::ios::binary | std::ios::trunc);
 			out << "{\n  \"version\": 1,\n  \"space\": \"world\",\n  \"offset_m\": ["
 				<< jsonlite::FormatNumber(offset.x, 6) << ", " << jsonlite::FormatNumber(offset.y, 6) << ", "
-				<< jsonlite::FormatNumber(offset.z, 6) << "]\n}\n";
+				<< jsonlite::FormatNumber(offset.z, 6) << "],\n  \"yaw_degrees\": "
+				<< jsonlite::FormatNumber(player.controller.initialYawDegrees, 6) << "\n}\n";
 			out.close();
 			if (!out)
 			{
@@ -2646,6 +2691,7 @@ namespace GakuMotion
 		{
 			if (ensembleRestoreUnconfirmed) return;
 			if (!a || !sceneActorRegistry.Find(a) || player.controller.targetActor == a) return;
+			const bool hadTarget = player.controller.targetActor != nullptr;
 			if (fnBeforeTargetChange && !fnBeforeTargetChange())
 			{
 				LogWarn("[GakuMotion][Target] selection rejected: secondary physics restore unconfirmed");
@@ -2668,6 +2714,18 @@ namespace GakuMotion
 					LogWarn("[GakuMotion][Target] selection rejected: old actor restore unconfirmed");
 					return;
 				}
+			}
+			RememberCurrentPlacement();
+			EnsembleRuntime::Placement savedPlacement;
+			if (const auto* next = sceneActorRegistry.Find(a); next && ensemble.GetPlacement(next->token, savedPlacement))
+			{
+				player.controller.SetInitialPositionOffset(savedPlacement.position);
+				player.controller.SetInitialYawDegrees(savedPlacement.yawDegrees);
+			}
+			else if (hadTarget)
+			{
+				player.controller.SetInitialPositionOffset({});
+				player.controller.SetInitialYawDegrees(0);
 			}
 			player.controller.DiscardBindings();
 			camera.Release();
@@ -2953,7 +3011,8 @@ namespace GakuMotion
 				const auto& follower = ensemble.Followers()[i];
 				ctx.ensembleFollowers[i] = {follower.actorToken, follower.motionKey, follower.offsetSeconds, follower.active,
 				                            follower.bindingGeneration,
-				                            follower.player ? follower.player->controller.initialPositionOffset : Vector3{}};
+				                            follower.player ? follower.player->controller.initialPositionOffset : Vector3{},
+				                            follower.player ? follower.player->controller.initialYawDegrees : 0.0f};
 			}
 			ctx.ensembleNotice = ensembleNotice;
 			ctx.fnSetEnsembleFollower = [](void* self, int slot, uint64_t token, uint64_t epoch,
@@ -2976,6 +3035,14 @@ namespace GakuMotion
 				GuiCommand cmd{GuiAction::EnsemblePosition};
 				cmd.candidateIndex = slot; cmd.actorToken = token; cmd.actorEpoch = epoch;
 				cmd.loadedGeneration = generation; cmd.position = offset;
+				static_cast<Core*>(self)->QueueGui(std::move(cmd));
+			};
+			ctx.fnSetEnsembleYaw = [](void* self, int slot, uint64_t token, uint64_t epoch,
+			                          uint64_t generation, float yaw)
+			{
+				GuiCommand cmd{GuiAction::EnsembleYaw};
+				cmd.candidateIndex = slot; cmd.actorToken = token; cmd.actorEpoch = epoch;
+				cmd.loadedGeneration = generation; cmd.value = yaw;
 				static_cast<Core*>(self)->QueueGui(std::move(cmd));
 			};
 			for (const auto& item : sceneActorRegistry.Entries())
@@ -3043,6 +3110,10 @@ namespace GakuMotion
 			ctx.fnSetInitialPosition = [](void* self, const Vector3& offset)
 			{
 				static_cast<Core*>(self)->QueueInitialPosition(offset);
+			};
+			ctx.fnSetInitialYaw = [](void* self, float yaw)
+			{
+				static_cast<Core*>(self)->QueueInitialYaw(yaw);
 			};
 			ctx.fnSaveInitialPosition = [](void* self)
 			{

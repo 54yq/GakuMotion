@@ -503,6 +503,9 @@ namespace
 		void* a = reinterpret_cast<void*>(0xa1000), *b = reinterpret_cast<void*>(0xb1000), *c = reinterpret_cast<void*>(0xc1000);
 		app.core.PublishSceneActors({{a, 1, ""}, {b, 2, ""}, {c, 3, ""}});
 		app.Settle();
+		ImRect mainPositionRect, ensembleHeaderRect;
+		if (app.Find("##pos_x", mainPositionRect) && app.Find("多人同步播放（最多三人）", ensembleHeaderRect))
+			Check(mainPositionRect.Min.y < ensembleHeaderRect.Min.y, "main placement is above multiplayer controls");
 		app.Click("多人同步播放（最多三人）");
 		app.Settle();
 		Check(app.ItemWithLabel("##ensemble_actor") && app.ItemWithLabel("##ensemble_motion"),
@@ -529,6 +532,24 @@ namespace
 		const auto* positionControl = app.ItemWithLabel("##ensemble_pos_x");
 		Check(positionControl && !(positionControl->flags & ImGuiItemFlags_Disabled),
 		      "each follower position remains adjustable during playback");
+		const auto* mainYaw = app.ItemWithLabel("##main_yaw");
+		const auto* followerYaw = app.ItemWithLabel("##ensemble_yaw");
+		Check(mainYaw && followerYaw && !(mainYaw->flags & ImGuiItemFlags_Disabled) &&
+		      !(followerYaw->flags & ImGuiItemFlags_Disabled), "main and follower yaw controls remain usable during playback");
+		ImRect yawRect;
+		if (app.Find("##ensemble_yaw", yawRect, 0))
+		{
+			auto& input = ImGui::GetIO();
+			const auto center = yawRect.GetCenter();
+			input.AddMousePosEvent(center.x, center.y); app.Frame();
+			input.AddMouseButtonEvent(0, true); app.Frame();
+			input.AddMousePosEvent(center.x + 40.0f, center.y); app.Frame();
+			input.AddMouseButtonEvent(0, false); app.Settle();
+			Check(app.core.ensemble.Followers()[0].player->controller.initialYawDegrees > 0 &&
+			      app.core.ensemble.Followers()[1].player->controller.initialYawDegrees == 0 &&
+			      app.core.player.controller.initialYawDegrees == 0,
+			      "turning one follower leaves the other two orientations unchanged");
+		}
 		ImRect positionRect;
 		if (app.Find("##ensemble_pos_x", positionRect, 0))
 		{
@@ -542,8 +563,24 @@ namespace
 			      app.core.ensemble.Followers()[1].player->controller.initialPositionOffset.x == 0.0f,
 			      "dragging a follower's position updates that follower only");
 			app.Click("重置角色站位", 0); app.Settle();
-			Check(app.core.ensemble.Followers()[0].player->controller.initialPositionOffset.x == 0.0f,
-			      "the follower position reset takes effect while playing");
+			Check(app.core.ensemble.Followers()[0].player->controller.initialPositionOffset.x == 0.0f &&
+			      app.core.ensemble.Followers()[0].player->controller.initialYawDegrees == 0.0f,
+			      "the follower reset clears both position and yaw while playing");
+		}
+		ImRect mainYawRect;
+		if (app.Find("##main_yaw", mainYawRect))
+		{
+			auto& input = ImGui::GetIO();
+			const auto center = mainYawRect.GetCenter();
+			input.AddMousePosEvent(center.x, center.y); app.Frame();
+			input.AddMouseButtonEvent(0, true); app.Frame();
+			input.AddMousePosEvent(center.x + 35.0f, center.y); app.Frame();
+			input.AddMouseButtonEvent(0, false); app.Settle();
+			Check(app.core.player.controller.initialYawDegrees > 0 &&
+			      app.core.ensemble.Followers()[1].player->controller.initialYawDegrees == 0,
+			      "main yaw adjusts only the primary actor");
+			app.Click("重置站位"); app.Settle();
+			Check(app.core.player.controller.initialYawDegrees == 0, "main placement reset clears yaw");
 		}
 		app.core.player.state = PlaybackState::Preview; app.Settle();
 		app.Click("解除绑定", 0); app.Settle();

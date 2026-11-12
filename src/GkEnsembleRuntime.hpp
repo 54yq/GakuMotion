@@ -5,6 +5,7 @@
 #include "GkSceneActors.hpp"
 #include <array>
 #include <memory>
+#include <unordered_map>
 
 namespace GakuMotion
 {
@@ -14,6 +15,7 @@ namespace GakuMotion
 	{
 	public:
 		static constexpr size_t kFollowerCount = EnsembleAssignments::kMaxParts - 1;
+		struct Placement { Vector3 position{}; float yawDegrees{0}; };
 		struct Follower
 		{
 			uint64_t actorToken{0};
@@ -37,6 +39,19 @@ namespace GakuMotion
 		{
 			for (const auto& follower : followers_) if (follower.active) return true;
 			return false;
+		}
+		bool GetPlacement(uint64_t actorToken, Placement& result) const
+		{
+			const auto found = placements_.find(actorToken);
+			if (found == placements_.end()) return false;
+			result = found->second;
+			return true;
+		}
+		void RememberPlacement(uint64_t actorToken, const Vector3& position, float yawDegrees)
+		{
+			if (actorToken && std::isfinite(position.x) && std::isfinite(position.y) &&
+			    std::isfinite(position.z) && std::isfinite(yawDegrees))
+				placements_[actorToken] = {position, yawDegrees};
 		}
 
 		// A missing or replaced actor is never touched during cleanup. If it was
@@ -75,6 +90,7 @@ namespace GakuMotion
 		{
 			for (auto& follower : followers_) follower = {};
 			assignments_.Reset();
+			placements_.clear();
 			restoreUnconfirmed_ = false;
 		}
 
@@ -96,7 +112,17 @@ namespace GakuMotion
 			next->controller = primary.controller;
 			next->controller.DiscardBindings();
 			next->controller.SetTargetActor(actor);
-			next->controller.initialPositionOffset = {};
+			Placement saved;
+			if (GetPlacement(actorToken, saved))
+			{
+				next->controller.SetInitialPositionOffset(saved.position);
+				next->controller.SetInitialYawDegrees(saved.yawDegrees);
+			}
+			else
+			{
+				next->controller.SetInitialPositionOffset({});
+				next->controller.SetInitialYawDegrees(0);
+			}
 			next->controller.auxGroundTruth = {};
 			if (!next->LoadMotion(motion.dir)) return false;
 			next->timing = motion.timing;
@@ -129,7 +155,21 @@ namespace GakuMotion
 			if (!follower.player || !generation || follower.bindingGeneration != generation ||
 			    follower.actorToken != actorToken || registry.Resolve(actorToken, epoch) != follower.player->controller.targetActor)
 				return false;
-			return follower.player->controller.SetInitialPositionOffset(position);
+			if (!follower.player->controller.SetInitialPositionOffset(position)) return false;
+			RememberPlacement(actorToken, position, follower.player->controller.initialYawDegrees);
+			return true;
+		}
+		bool SetYaw(size_t index, uint64_t actorToken, uint64_t epoch, uint64_t generation,
+		            float yawDegrees, const SceneActorRegistry& registry)
+		{
+			if (index >= kFollowerCount || restoreUnconfirmed_) return false;
+			auto& follower = followers_[index];
+			if (!follower.player || !generation || follower.bindingGeneration != generation ||
+			    follower.actorToken != actorToken || registry.Resolve(actorToken, epoch) != follower.player->controller.targetActor ||
+			    !follower.player->controller.SetInitialYawDegrees(yawDegrees)) return false;
+			RememberPlacement(actorToken, follower.player->controller.initialPositionOffset,
+			                  follower.player->controller.initialYawDegrees);
+			return true;
 		}
 
 		void RebuildOverrides(const BoneOverrideSet& global, bool enabled)
@@ -187,6 +227,7 @@ namespace GakuMotion
 	private:
 		std::array<Follower, kFollowerCount> followers_{};
 		EnsembleAssignments assignments_;
+		std::unordered_map<uint64_t, Placement> placements_;
 		bool restoreUnconfirmed_{false};
 		uint64_t nextBindingGeneration_{1};
 	};

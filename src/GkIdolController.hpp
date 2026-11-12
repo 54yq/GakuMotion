@@ -2135,6 +2135,8 @@ namespace GakuMotion
 				curActorPos = Vector3(aPos[0], aPos[1], aPos[2]);
 				curActorRot = Quaternion(aRot[0], aRot[1], aRot[2], aRot[3]);
 			}
+			const Quaternion placementYaw = initialYawDegrees == 0.0f ? Quaternion::Identity() :
+				Quaternion::FromEulerDegreesXYZ(0.0f, initialYawDegrees, 0.0f);
 
 			// Anchor supported v2+ clips to the actor pivot using one clip-wide
 			// FK floor offset. Bind-time hips height never enters that path.
@@ -2160,6 +2162,10 @@ namespace GakuMotion
 					fnSetLocalPosition(b.rootTransform, localTarget.x, localTarget.y, localTarget.z);
 				}
 			}
+			// Turn the pose at the current root position. The actor transform and
+			// animation's translation are left untouched, so yaw does not orbit the
+			// character around the scene origin or accumulate across frames.
+			if (initialYawDegrees != 0.0f) curActorRot = placementYaw * curActorRot;
 
 			// 3. Bone World Rotations
 			bool hasDynamicArm = (armOffsetPitch != 0.0f || armOffsetYaw != 0.0f || armOffsetRoll != 0.0f);
@@ -2271,6 +2277,32 @@ namespace GakuMotion
 				{
 					// The delta IS the local rotation. See the proof above.
 					gkLocalOut = rVmd;
+					if (hid == 0 && initialYawDegrees != 0.0f && !fnSetLocalRotation)
+					{
+						// The degraded path writes world rotations, so apply yaw in world space.
+						gkLocalOut = placementYaw * gkLocalOut;
+					}
+					else if (hid == 0 && initialYawDegrees != 0.0f && fnGetTransformParent && fnGetWorldRotation)
+					{
+						// Convert the world-up turn to the actual Hips parent frame;
+						// descendants keep their authored locals and follow the root.
+						Quaternion parentRotation = Quaternion::Identity();
+						bool parentRotationValid = true;
+						if (void* parent = fnGetTransformParent(trans))
+						{
+							float q[4]{0, 0, 0, 1};
+							fnGetWorldRotation(parent, q);
+							const float length = std::sqrt(q[0]*q[0] + q[1]*q[1] + q[2]*q[2] + q[3]*q[3]);
+							parentRotationValid = std::isfinite(length) && length > 1e-6f;
+							if (parentRotationValid)
+								parentRotation = Quaternion(q[0]/length, q[1]/length, q[2]/length, q[3]/length);
+						}
+						if (parentRotationValid)
+						{
+							const Quaternion localYaw = parentRotation.Inverse() * placementYaw * parentRotation;
+							gkLocalOut = localYaw * gkLocalOut;
+						}
+					}
 					if (clip.bones[i].head_space_eye_delta)
 					{
 						if (!b.eyeFrameResolved)
@@ -3458,11 +3490,19 @@ namespace GakuMotion
 		// accumulate translation. RestoreMute still returns to the original scene.
 		// Zero this extra placement before measuring the unmodified motion stream.
 		Vector3 initialPositionOffset{0.0f, 0.0f, 0.0f};
+		float initialYawDegrees{0.0f};
 
 		bool SetInitialPositionOffset(const Vector3& offset)
 		{
 			if (!std::isfinite(offset.x) || !std::isfinite(offset.y) || !std::isfinite(offset.z)) return false;
 			initialPositionOffset = offset;
+			return true;
+		}
+
+		bool SetInitialYawDegrees(float degrees)
+		{
+			if (!std::isfinite(degrees)) return false;
+			initialYawDegrees = std::remainder(degrees, 360.0f);
 			return true;
 		}
 
