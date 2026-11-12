@@ -2234,20 +2234,27 @@ namespace GakuMotion
 					(rootHeightCalibrationEnabled ? b.calibratedRootHeight : 0.0f),
 					b.restRootPos.z + vmdRootPos.z
 				);
-				Vector3 worldTarget = curActorPos + curActorRot.Rotate(localTarget) + initialPositionOffset;
+				// Rotate the clip's travel around its first sampled root, not the scene
+				// origin: changing facing preserves the chosen starting placement.
+				Vector3 yawTravelAdjustment{};
+				if (initialYawDegrees != 0.0f && !clip.root_positions.empty())
+				{
+					const Vector3 worldTravel = curActorRot.Rotate(vmdRootPos - clip.root_positions.front());
+					yawTravelAdjustment = placementYaw.Rotate(worldTravel) - worldTravel;
+				}
+				Vector3 worldTarget = curActorPos + curActorRot.Rotate(localTarget) + initialPositionOffset + yawTravelAdjustment;
 				if (fnSetWorldPosition)
 				{
 					fnSetWorldPosition(b.rootTransform, worldTarget.x, worldTarget.y, worldTarget.z);
 				}
 				else if (fnSetLocalPosition)
 				{
-					localTarget = localTarget + curActorRot.Inverse().Rotate(initialPositionOffset);
+					localTarget = localTarget + curActorRot.Inverse().Rotate(initialPositionOffset + yawTravelAdjustment);
 					fnSetLocalPosition(b.rootTransform, localTarget.x, localTarget.y, localTarget.z);
 				}
 			}
-			// Turn the pose at the current root position. The actor transform and
-			// animation's translation are left untouched, so yaw does not orbit the
-			// character around the scene origin or accumulate across frames.
+			// Turn the pose and clip travel without changing the actor transform;
+			// yaw neither orbits the scene origin nor accumulates across frames.
 			if (initialYawDegrees != 0.0f) curActorRot = placementYaw * curActorRot;
 
 			// 3. Bone World Rotations

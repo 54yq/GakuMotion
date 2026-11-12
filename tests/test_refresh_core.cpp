@@ -2540,6 +2540,36 @@ static void TestInitialYaw()
 	fake::rotationCalls.clear(); controller.ApplyMotion(clip, 0);
 	Check(QuatNear(fake::rotationCalls[0].second, originalRoot), "reset restores the original root orientation");
 
+	// Motion translation follows the yaw around the clip's first root sample,
+	// including a rotated actor basis and a world-space placement offset.
+	clip.root_positions[1] = {1.4f, .5f, 2.8f};
+	controller.SetInitialPositionOffset({2, .1f, -3});
+	controller.SetInitialYawDegrees(0);
+	controller.ApplyMotion(clip, 0);
+	const Vector3 start = fake::worldPos[binding.rootTransform];
+	controller.ApplyMotion(clip, 1.0f / clip.fps);
+	const Vector3 unturnedEnd = fake::worldPos[binding.rootTransform];
+	controller.SetInitialYawDegrees(90);
+	controller.ApplyMotion(clip, 0);
+	const Vector3 turnedStart = fake::worldPos[binding.rootTransform];
+	controller.ApplyMotion(clip, 1.0f / clip.fps);
+	const Vector3 turnedEnd = fake::worldPos[binding.rootTransform];
+	const Vector3 expectedEnd = start + turn.Rotate(unturnedEnd - start);
+	auto nearPosition = [](const Vector3& a, const Vector3& b) {
+		return std::fabs(a.x-b.x) < 1e-5f && std::fabs(a.y-b.y) < 1e-5f && std::fabs(a.z-b.z) < 1e-5f;
+	};
+	Check(nearPosition(turnedStart, start), "yaw preserves the first-frame position including world placement offset");
+	Check(nearPosition(turnedEnd, expectedEnd), "yaw rotates animated travel around the first frame in world coordinates");
+	controller.ApplyMotion(clip, 1.0f / clip.fps);
+	Check(nearPosition(fake::worldPos[binding.rootTransform], expectedEnd), "yawed travel does not accumulate on repeated samples");
+	controller.fnSetWorldPosition = nullptr;
+	controller.fnSetLocalPosition = fake::SetWorldPos;
+	controller.ApplyMotion(clip, 1.0f / clip.fps);
+	const Vector3 fallbackWorld = binding.restActorPos + fake::worldRot[binding.actorTransform].Rotate(fake::worldPos[binding.rootTransform]);
+	Check(nearPosition(fallbackWorld, expectedEnd), "local-position fallback produces the same yawed world travel");
+	controller.fnSetLocalPosition = nullptr;
+	controller.fnSetWorldPosition = fake::SetWorldPos;
+	controller.SetInitialYawDegrees(0);
 	controller.fnSetLocalRotation = nullptr;
 	fake::rotationCalls.clear(); controller.ApplyMotion(clip, 0);
 	const auto gkWorldBefore = fake::rotationCalls[0].second;

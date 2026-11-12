@@ -138,7 +138,7 @@ namespace GakuMotion
 			ImGui::TextWrapped("%s", ctx.initialPositionNotice.c_str());
 			if (failed) ImGui::PopStyleColor();
 		}
-		ImGui::TextWrapped("位置与朝向即时生效，切换动作时保留；停止后恢复场景原位。保存后作为下次启动的默认站位。");
+		ImGui::TextWrapped("位置与朝向即时生效；朝向会同时旋转动作位移。切换动作时保留；停止后恢复场景原位。保存后作为下次启动的默认站位。");
 
 		ImGui::Spacing();
 		ImGui::Separator();
