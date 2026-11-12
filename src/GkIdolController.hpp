@@ -669,6 +669,45 @@ namespace GakuMotion
 		// 实机靶向对照组：辅助骨驱动模式（详见 AuxDriveMode 注释）
 		// 由 control.json (`aux.mode`) 声明式驱动，或由热键 F8 现场循环切换。
 		int auxDriveMode{kAuxNormal};
+		bool wristDiagnosticPending{false};
+
+		// One bounded snapshot, on the Unity thread after the motion and auxiliary
+		// writes. It observes transforms only; it does not modify the pose.
+		void CaptureWristDiagnostic(const IdolBoneBinding& b, float timeSeconds, int appliedOverrides)
+		{
+			if (!wristDiagnosticPending || !fnLogInfo) return;
+			wristDiagnosticPending = false;
+			fnLogInfo("[GakuMotion][WristDiag] actor=%p time=%.4f aux=%d overrides=%d getters(localRot=%d worldRot=%d localPos=%d worldPos=%d parent=%d)",
+			          b.actor, timeSeconds, auxDriveMode, appliedOverrides,
+			          fnGetLocalRotation != nullptr, fnGetWorldRotation != nullptr, fnGetLocalPosition != nullptr,
+			          fnGetWorldPosition != nullptr, fnGetTransformParent != nullptr);
+			auto capture = [&](const char* label, void* transform)
+			{
+				if (!transform) { fnLogInfo("[GakuMotion][WristDiag] %s missing", label); return; }
+				float lr[4]{0,0,0,1}, wr[4]{0,0,0,1}, lp[3]{}, wp[3]{};
+				if (fnGetLocalRotation) fnGetLocalRotation(transform, lr);
+				if (fnGetWorldRotation) fnGetWorldRotation(transform, wr);
+				if (fnGetLocalPosition) fnGetLocalPosition(transform, lp);
+				if (fnGetWorldPosition) fnGetWorldPosition(transform, wp);
+				void* parent = fnGetTransformParent ? fnGetTransformParent(transform) : nullptr;
+				const std::string parentName = parent && fnGetTransformName ? fnGetTransformName(parent) : "";
+				fnLogInfo("[GakuMotion][WristDiag] %s parent=%s localRot=(%.6f,%.6f,%.6f,%.6f) worldRot=(%.6f,%.6f,%.6f,%.6f) localPos=(%.6f,%.6f,%.6f) worldPos=(%.6f,%.6f,%.6f)",
+				          label, parentName.c_str(), lr[0],lr[1],lr[2],lr[3], wr[0],wr[1],wr[2],wr[3],
+				          lp[0],lp[1],lp[2],wp[0],wp[1],wp[2]);
+			};
+			capture("LeftUpperArm", b.leftArmAux.upperArm);
+			capture("LeftForeArm", b.leftArmAux.foreArm);
+			capture("LeftForeArm_Roll_H", b.leftArmAux.foreArmRollH);
+			capture("LeftForeArm_H", b.leftArmAux.foreArmH);
+			capture("LeftHand", b.leftArmAux.hand);
+			capture("LeftHand_H", b.leftArmAux.handH);
+			capture("RightUpperArm", b.rightArmAux.upperArm);
+			capture("RightForeArm", b.rightArmAux.foreArm);
+			capture("RightForeArm_Roll_H", b.rightArmAux.foreArmRollH);
+			capture("RightForeArm_H", b.rightArmAux.foreArmH);
+			capture("RightHand", b.rightArmAux.hand);
+			capture("RightHand_H", b.rightArmAux.handH);
+		}
 
 		// =====================================================================
 		// 真值标定模型驱动（模式 0 / Plan A）
@@ -3076,6 +3115,7 @@ namespace GakuMotion
 			// This opt-in geometric support sees the completed main pose and arm
 			// auxiliary postpass. It writes only exact Waist_H local transforms.
 			ApplyWaistSupport(b);
+			CaptureWristDiagnostic(b, currentTimeSeconds, appliedOverrides);
 
 			// ---- PROBE A9: WHO is this actor, and what are its real bone lengths? ----
 			// WHY THIS EXISTS. A8 measured thighLen 0.3496 m against 0.4558 m in

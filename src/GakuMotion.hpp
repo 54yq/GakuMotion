@@ -352,7 +352,7 @@ namespace GakuMotion
 			InitialPosition, InitialYaw, SaveInitialPosition, SaveFacialWeights, MusicVolume, SaveMusicVolume, PhysicsBackend,
 			CameraSettings, SaveCameraSettings, CameraImport, ReloadCamera,
 			SoleSettings, SaveSoleSettings, LoadSoleSettings, ExperimentalSolePitch, ExperimentalWaistSupport,
-			BeforeQuartzExperiment, AuxDriveMode,
+			BeforeQuartzExperiment, AuxDriveMode, WristDiagnostic,
 			StageSettings, StagePreset, ToggleStageCandidate, ScanStageCandidates,
 			MountCustomStage, UnloadCustomStage, RestoreCameraSkybox,
 			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, StageLoadReplacement, SelectTarget,
@@ -769,6 +769,9 @@ namespace GakuMotion
 				case GuiAction::AuxDriveMode:
 					if (cmd.value >= 0 && cmd.value < static_cast<float>(kAuxModeCount))
 						player.controller.SetAuxDriveMode(static_cast<int>(cmd.value));
+					break;
+				case GuiAction::WristDiagnostic:
+					if (player.state != PlaybackState::Stopped) player.controller.wristDiagnosticPending = true;
 					break;
 				case GuiAction::BeforeQuartzExperiment:
 					config.beforeQuartzExperiment = cmd.flag && config.secondaryPhysicsBackend == 2;
@@ -2982,6 +2985,10 @@ namespace GakuMotion
 			ctx.fnSetAuxDriveMode = [](void* self, int mode)
 			{
 				static_cast<Core*>(self)->QueueAuxDriveMode(mode);
+			};
+			ctx.fnCaptureWristDiagnostic = [](void* self)
+			{
+				static_cast<Core*>(self)->QueueGui({GuiAction::WristDiagnostic});
 			};
 			ctx.cameraSnapshot = camera.ReadSnapshot();
 			ctx.cameraImportBusy = cameraImportBusy;

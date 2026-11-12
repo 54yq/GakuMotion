@@ -288,6 +288,10 @@ namespace GakuMotion
 			}
 			ImGui::EndDisabled();
 			ImGui::TextWrapped("与 F8 切换相同，仅影响主角色，本次运行有效。对照可能导致手臂破面；正常模式可恢复默认。回放缺少录制数据时会退回静默。");
+			ImGui::BeginDisabled(!ctx.injectionAllowed || !ctx.fnCaptureWristDiagnostic || player.state == PlaybackState::Stopped);
+			if (ImGui::Button("记录手腕诊断") && ctx.fnCaptureWristDiagnostic) ctx.fnCaptureWristDiagnostic(ctx.self);
+			ImGui::EndDisabled();
+			ImGui::TextWrapped("记录当前主角色的手臂和手腕骨骼状态到日志，用于分析变形。");
 			ImGui::Spacing();
 			overlay.DrawBoneOverridesSection(ctx);
 			ImGui::Unindent(10.0f);

@@ -354,6 +354,8 @@ namespace fake
 	std::unordered_map<void*, Quaternion> worldRot;
 	std::unordered_map<void*, Vector3> worldPos;
 	std::vector<std::pair<void*, Quaternion>> rotationCalls;
+	int wristDiagnosticLines = 0;
+	void WristDiagnosticLog(const char*, ...) { ++wristDiagnosticLines; }
 
 	void SetWorldRot(void* t, float x, float y, float z, float w)
 	{
@@ -520,6 +522,30 @@ static void TestGkClipWristOverrideSpaces()
 	controller.ApplyMotionToBinding(binding, clip, 0);
 	Check(fake::rotationCalls.size() == 2 && QuatNear(parent * fake::rotationCalls[1].second, q * parent * hand),
 	      "gkclip wrist world override rotates the final world orientation");
+}
+
+static void TestWristDiagnosticIsOneShot()
+{
+	BeginTest("wrist_diagnostic_is_one_shot");
+	IdolController controller;
+	controller.fnLogInfo = fake::WristDiagnosticLog;
+	controller.fnGetLocalRotation = fake::GetWorldRot;
+	controller.fnGetWorldRotation = fake::GetWorldRot;
+	controller.fnGetLocalPosition = fake::GetWorldPos;
+	controller.fnGetWorldPosition = fake::GetWorldPos;
+	controller.fnSetLocalRotation = fake::SetWorldRot;
+	IdolBoneBinding binding;
+	binding.actor = reinterpret_cast<void*>(0x901);
+	binding.leftArmAux.hand = reinterpret_cast<void*>(0x917);
+	fake::rotationCalls.clear(); fake::wristDiagnosticLines = 0;
+	controller.CaptureWristDiagnostic(binding, 20.23f, 0);
+	Check(fake::wristDiagnosticLines == 0, "wrist diagnostics are silent until requested");
+	controller.wristDiagnosticPending = true;
+	controller.CaptureWristDiagnostic(binding, 20.23f, 0);
+	Check(!controller.wristDiagnosticPending && fake::wristDiagnosticLines == 13 && fake::rotationCalls.empty(),
+	      "wrist diagnostics capture a bounded read-only snapshot including missing bones");
+	controller.CaptureWristDiagnostic(binding, 20.23f, 0);
+	Check(fake::wristDiagnosticLines == 13, "wrist diagnostics do not repeat without another request");
 }
 
 static void TestAuxQuaternionSignInvariance()
@@ -2757,6 +2783,7 @@ int main(int argc, char** argv)
  TestInitialYaw();
  TestOverrideInjection();
  TestGkClipWristOverrideSpaces();
+ TestWristDiagnosticIsOneShot();
  TestAuxQuaternionSignInvariance();
  TestPlayerSeekSync();
  TestPlaybackSpeedAndClock();

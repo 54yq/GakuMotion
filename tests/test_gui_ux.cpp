@@ -519,6 +519,8 @@ namespace
 		app.Click("##aux_drive_mode"); app.Click(labels[1]); app.Settle();
 		app.Click("##aux_drive_mode"); app.Click(labels[0]); app.Settle();
 		Check(app.core.player.controller.auxDriveMode == kAuxNormal, "selector restores normal mode directly");
+		app.Click("记录手腕诊断"); app.Settle();
+		Check(app.core.player.controller.wristDiagnosticPending, "wrist diagnostic button queues a one-shot capture");
 	}
 
 	void TestEnsembleControls(const std::filesystem::path& root)
