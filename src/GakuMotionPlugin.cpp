@@ -1530,6 +1530,23 @@ namespace
 				reinterpret_cast<void*>(g_sceneOwner.presenterIdentity));
 		}
 		else core.liveObservation = {};
+		// Read-only diagnostic for Live entry and pause tests. Log only class and
+		// scene state; do not log account data, actor names or managed pointers.
+		if (name == "Live" || name.rfind("env_3d_live_", 0) == 0 ||
+			ownerObservation.rootClassName == "Campus.Live.LiveScenePresenter")
+		{
+			static std::string previous;
+			const std::string state = name + "|" + ownerObservation.rootClassName + "|" +
+				ownerObservation.reason + "|" + (core.liveObservation.confirmed ?
+					(core.liveObservation.paused ? "paused" : "playing") : "unconfirmed");
+			if (state != previous && g_hostContext.logInfo)
+			{
+				g_hostContext.logInfo("[GakuMotion][LiveProbe] scene=%s owner_class=%s owner_reason=%s playback=%s",
+					name.c_str(), ownerObservation.rootClassName.c_str(), ownerObservation.reason,
+					core.liveObservation.confirmed ? (core.liveObservation.paused ? "paused" : "playing") : "unconfirmed");
+				previous = state;
+			}
+		}
 		StageLoadOverride::ObserveActiveScene(g_verifiedActiveSceneHandle, name);
 		core.injectionPolicy.SetContext(g_activeSceneVerified ? ownerObservation.context :
 			GakuMotion::injection::Context::Unknown);
@@ -2496,6 +2513,22 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 		{
 			if (g_getSceneNative) g_getSceneNative(go, &sceneHandle, nullptr);
 			else if (g_getSceneValueNative) sceneHandle = g_getSceneValueNative(go, nullptr);
+		}
+	}
+	if (core.liveObservation.confirmed && activeActor)
+	{
+		static auto nextReport = std::chrono::steady_clock::time_point{};
+		static unsigned callbacks = 0, ownerMatches = 0;
+		++callbacks;
+		if (g_sceneOwner.Valid() && sceneHandle == g_sceneOwner.sceneHandle) ++ownerMatches;
+		const auto now = std::chrono::steady_clock::now();
+		if (now >= nextReport)
+		{
+			if (g_hostContext.logInfo) g_hostContext.logInfo(
+				"[GakuMotion][LiveProbe] actor_callbacks=%u owner_scene_matches=%u playback=%s",
+				callbacks, ownerMatches, core.liveObservation.paused ? "paused" : "playing");
+			callbacks = ownerMatches = 0;
+			nextReport = now + std::chrono::seconds(1);
 		}
 	}
 #ifdef GKMOTION_CAPTURE_DIAGNOSTICS
