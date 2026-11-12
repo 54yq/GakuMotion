@@ -12,3 +12,6 @@ obj/
 *.ilk
 *.iobj
 *.ipdb
+__pycache__/
+*.py[cod]
+
