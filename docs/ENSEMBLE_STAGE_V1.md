@@ -40,4 +40,4 @@ Loader ABI 与 Control v0 的结构大小不变。多人激活时，Play/Pause/S
 
 离线回归验证调度、身份隔离、站位层级数学、预设事务、GUI交互及桥上下文路由；不能替代三演员实际 stream 消费和最终画面验收。实机需依次覆盖1→2→3人、齐舞→独立动作、不同身高/服装、暂停定位/循环、换装/离场、截图恢复和完整退出，并分别录制全身及衣发特写、比较性能。
 
-GakuBurstBridge 是可选伴生组件，与 GakuMotion 插件位于同一个插件目录。可用 `tools/package_ensemble_candidate.ps1` 在构建目录中整理本地候选产物。
+GakuBurstBridge 是可选伴生组件，与 GakuMotion 插件位于同一个插件目录。可用 `tools/package_ensemble_candidate.ps1` 在构建目录中整理本地候选产物。伴生库源码另存时，用 `-BridgeRepo` 指定其构建所用的 Git 工作树，并用 `-BridgeDll` 指定产物。

@@ -1,13 +1,22 @@
 #Requires -Version 5.1
 # Offline-only packaging. This script never discovers or writes a game install.
 [CmdletBinding()]
-param([string]$MotionDll = '', [string]$BridgeDll = '', [string]$OutputDirectory = '', [string]$SourceTree = '')
+param([string]$MotionDll = '', [string]$BridgeDll = '', [string]$OutputDirectory = '', [string]$SourceTree = '',
+    [string]$BridgeRepo = '')
 $ErrorActionPreference = 'Stop'
 $ensembleRoot = Split-Path -Parent $PSScriptRoot
-$ensembleBridgeRoot = Join-Path (Split-Path -Parent $ensembleRoot) 'GakuBurstBridge'
-if (-not $BridgeDll) { $BridgeDll = Join-Path $ensembleBridgeRoot 'build\multi-stage-v3\GakuBurstBridge.dll' }
-if (-not $MotionDll) { $MotionDll = Join-Path $ensembleRoot 'build\GakuMotion.dll' }
-if (-not $OutputDirectory) { $OutputDirectory = Join-Path $ensembleRoot 'build\ensemble-20261106\candidate' }
+if (-not $BridgeRepo) { $BridgeRepo = Join-Path (Split-Path -Parent $ensembleRoot) 'GakuBurstBridge' }
+if (-not (Test-Path -LiteralPath (Join-Path $BridgeRepo '.git'))) {
+    throw 'Pass -BridgeRepo with the source checkout used to build GakuBurstBridge.'
+}
+$ensembleBridgeRoot = (Resolve-Path -LiteralPath $BridgeRepo).Path
+$bridgeRevision = & git -C $ensembleBridgeRoot rev-parse HEAD
+if ($LASTEXITCODE -ne 0) { throw 'Cannot read the GakuBurstBridge source revision.' }
+$bridgeStatus = @(& git -C $ensembleBridgeRoot status --short)
+if ($LASTEXITCODE -ne 0) { throw 'Cannot read the GakuBurstBridge source status.' }
+if (-not $BridgeDll) { $BridgeDll = Join-Path $ensembleBridgeRoot 'build\GakuBurstBridge.dll' }
+if (-not $MotionDll) { $MotionDll = Join-Path $ensembleRoot 'build\native\GakuMotion.dll' }
+if (-not $OutputDirectory) { $OutputDirectory = Join-Path $ensembleRoot 'build\ensemble-candidate' }
 $ensembleOutput = [IO.Path]::GetFullPath($OutputDirectory)
 $ensembleBuildRoot = [IO.Path]::GetFullPath((Join-Path $ensembleRoot 'build')) + [IO.Path]::DirectorySeparatorChar
 if (-not $ensembleOutput.StartsWith($ensembleBuildRoot, [StringComparison]::OrdinalIgnoreCase)) {
@@ -33,9 +42,9 @@ $ensembleManifest = [ordered]@{
     CreatedUtc = [DateTime]::UtcNow.ToString('o')
     MotionCommit = (& git -C $ensembleRoot rev-parse HEAD)
     BuildSourceTree = $SourceTree
-    BridgeCommit = (& git -C $ensembleBridgeRoot rev-parse HEAD)
+    BridgeCommit = $bridgeRevision
     MotionWorkingTree = @(& git -C $ensembleRoot status --short)
-    BridgeWorkingTree = @(& git -C $ensembleBridgeRoot status --short)
+    BridgeWorkingTree = $bridgeStatus
     Deployed = $false
     RuntimeLoaded = $false
     VisualAccepted = $false
@@ -43,7 +52,7 @@ $ensembleManifest = [ordered]@{
     Files = @($ensembleItems | ForEach-Object { [ordered]@{ Name=$_.Name; Sha256=$_.Sha256; Bytes=$_.Bytes } })
 }
 $ensembleManifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $ensembleOutput 'manifest.json') -Encoding UTF8
-$ensembleZip = Join-Path (Split-Path -Parent $ensembleOutput) 'GakuMotion-ensemble-v1-offline-20261106.zip'
+$ensembleZip = Join-Path (Split-Path -Parent $ensembleOutput) 'GakuMotion-ensemble-v1-offline.zip'
 Compress-Archive -LiteralPath @($ensembleItems | ForEach-Object { Join-Path $ensembleOutput $_.Name }) -DestinationPath $ensembleZip -Force
 # Include the manifest in the same archive after all file hashes are verified.
 Compress-Archive -LiteralPath (Join-Path $ensembleOutput 'manifest.json') -DestinationPath $ensembleZip -Update

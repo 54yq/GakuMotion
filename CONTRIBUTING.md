@@ -4,9 +4,10 @@ Thank you for contributing to GakuMotion! Please review the guidelines below bef
 
 ## Branch Workflow
 
-- **`main`**: Stable release branch. Direct commits and feature PRs should not target `main`.
-- **`dev`**: Active integration and development baseline. All new features, refactors, and non-critical bug fixes should branch off `dev` and submit PRs targeting `dev`.
+- **`main`** is the stable release branch. Target it with release fixes and small, validated changes. Create release tags from `main`.
+- **`dev`** is the integration branch for features and experiments. Keep experiments that await in-game acceptance disabled by default.
 - Feature branches should follow standard naming conventions (e.g., `feat/<name>`, `fix/<name>`).
+- Merge release fixes from `main` into `dev`. Promote mature changes individually from `dev` to `main`.
 
 ## Contribution Rules
 
