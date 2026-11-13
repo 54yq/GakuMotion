@@ -147,7 +147,7 @@ internal static class ImportPipeline
             VmdMotion effective = overrideEyes ? WithEyeTracks(motion, morphSource!) : motion;
             effective = DeformLegTracks.Prepare(effective, out string[] deformLegSides);
             if (deformLegSides.Length != 0)
-                log.Line("Detected baked D-leg tracks; adapted sides: " + string.Join(", ", deformLegSides));
+                log.Line("Detected baked leg tracks; adapted sides: " + string.Join(", ", deformLegSides));
 
             sw.Restart();
             var evaluator = new SourceEvaluator();
