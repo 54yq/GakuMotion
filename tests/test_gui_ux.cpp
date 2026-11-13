@@ -46,6 +46,32 @@ namespace
 		selectedActorToken = token;
 		selectedActorEpoch = epoch;
 	}
+	std::vector<studio::Settings> studioRequests;
+	int studioResets{0}, studioPickerStarts{0}, studioPickerKind{-1};
+	std::string studioPickedVideo;
+	void RecordStudioSettings(void* self, const studio::Settings& settings)
+	{
+		studioRequests.push_back(settings);
+		static_cast<Core*>(self)->QueueStudioSettings(settings);
+	}
+	void RecordStudioReset(void* self)
+	{
+		++studioResets;
+		static_cast<Core*>(self)->QueueStudioReset();
+	}
+	bool BeginStudioVideoPick(int kind, std::string& notice)
+	{
+		++studioPickerStarts;
+		studioPickerKind = kind;
+		notice.clear();
+		return true;
+	}
+	int PollStudioVideoPick(std::string& path, std::string& notice)
+	{
+		path = studioPickedVideo;
+		notice.clear();
+		return 1;
+	}
 
 	// A host extension boundary fake. The production library submits the whole
 	// client area as its target, performs both poll calls and opens the real modal.
@@ -490,6 +516,73 @@ namespace
 			app.Text().find("镜头: 游戏") != std::string::npos,
 			"page Game selection releases takeover, synchronizes the player and disables inactive camera parameters");
 	}
+
+	void TestStageStudioControls(const std::filesystem::path& root)
+	{
+		auto& io = ImGui::GetIO();
+		const auto display = io.DisplaySize;
+		io.DisplaySize = ImVec2(1120, 1800);
+		Harness app(root);
+		app.windowHeight = 1800;
+		app.core.configRoot = (app.fixture / "config").string();
+		app.core.enforceInjectionPolicy = true;
+		app.core.gui.developerMode = false;
+		studioRequests.clear(); studioResets = studioPickerStarts = 0; studioPickerKind = -1;
+		studioPickedVideo = MotionPathToUtf8(std::filesystem::absolute(app.fixture / MotionPathFromUtf8("视频 输入.mp4")));
+		app.contextPatch = [](GuiContext& context) {
+			context.fnSetStudioSettings = RecordStudioSettings;
+			context.fnResetStudioSettings = RecordStudioReset;
+			context.fnBeginPickFile = BeginStudioVideoPick;
+			context.fnPollPickFile = PollStudioVideoPick;
+		};
+		app.Settle();
+		Check(!app.ItemWithLabel("启用自定义布光") && !app.ItemWithLabel("启用视频输入"),
+			"studio controls remain hidden on the ordinary denied page");
+		if (!app.ItemWithLabel("开发者模式")) { app.Click("开发者选项"); app.Settle(); }
+		app.Click("开发者模式"); app.Settle();
+		app.Click("布光与视频（实验）"); app.Settle();
+		Check(app.ItemWithLabel("启用自定义布光") && app.ItemWithLabel("应用布光设置") &&
+			!app.core.studioSettings.lighting.enabled && !app.core.studioSettings.video.enabled && !app.core.InjectionAllowed(),
+			"denied developer page offers disabled-by-default studio presets without granting Photography admission");
+		app.Click("启用自定义布光"); app.Settle();
+		Check(studioRequests.empty() && !app.core.studioSettings.lighting.enabled && app.core.gui.studioDraft.lighting.enabled,
+			"editing the light enable checkbox remains a draft until Apply is clicked");
+		app.Click("应用布光设置"); app.Settle();
+		Check(studioRequests.size() == 1 && studioRequests.back().lighting.enabled &&
+			app.core.studioSettings.lighting.enabled && !app.core.studioSettings.video.enabled && !app.core.InjectionAllowed(),
+			"actual light Apply callback persists only the requested light preset through the denied Core consumer");
+		const auto lighting = app.core.studioSettings.lighting;
+		app.Click("视频输入/幕布实验"); app.Settle();
+		app.Click("浏览本地视频"); app.Settle();
+		Check(studioPickerStarts == 1 && studioPickerKind == 3 && app.core.gui.browsePendingKind == -1 &&
+			app.core.gui.studioDraft.video.path == studioPickedVideo && studioRequests.size() == 1,
+			"video Browse uses asynchronous kind three and returns its Unicode path to the video draft without applying it");
+		app.Click("启用视频输入");
+		app.Click("暂停视频");
+		app.Click("循环视频"); app.Settle();
+		app.Click("应用视频设置"); app.Settle();
+		Check(studioRequests.size() == 2 && studioRequests.back().video.enabled && studioRequests.back().video.paused &&
+			!studioRequests.back().video.loop && app.core.studioSettings.video.path == studioPickedVideo &&
+			app.core.studioSettings.lighting == lighting && app.core.player.state == PlaybackState::Paused,
+			"video Apply dispatches file, enable, pause and loop choices while preserving lights and transport");
+		app.Click("停用视频输入"); app.Settle();
+		Check(studioRequests.size() == 3 && !app.core.studioSettings.video.enabled &&
+			app.core.studioSettings.video.path == studioPickedVideo && app.core.studioSettings.lighting == lighting,
+			"actual video stop preserves the chosen input and independent light preset");
+		app.Click("布光"); app.Settle();
+		app.Click("停用自定义布光"); app.Settle();
+		Check(studioRequests.size() == 4 && !app.core.studioSettings.lighting.enabled &&
+			app.core.studioSettings.video.path == studioPickedVideo,
+			"actual light stop preserves the independent video input selection");
+		app.Click("恢复布光与视频默认值"); app.Settle();
+		Check(studioResets == 1 && app.core.studioSettings == studio::Settings{} && !app.core.InjectionAllowed(),
+			"real Restore button clears both experimental presets through Core without granting scene admission");
+		app.Click("开发者模式"); app.Settle();
+		Check(!app.ItemWithLabel("启用自定义布光") && !app.ItemWithLabel("启用视频输入") &&
+			studioRequests.size() == 4 && studioResets == 1,
+			"turning developer mode off hides studio controls without submitting another mutation");
+		io.DisplaySize = display;
+	}
 }
 
 void ImGuiTestEngineHook_ItemAdd(ImGuiContext* context, ImGuiID id, const ImRect& rect, const ImGuiLastItemData* data)
@@ -545,6 +638,7 @@ int main(int argc, char** argv)
 	TestCameraFollowTargetControls(root);
 	TestUnifiedCameraModeControls(root);
 	TestEnsembleGui(root);
+	TestStageStudioControls(root);
 	{
 		const ImGuiConfigFlags originalConfigFlags = io.ConfigFlags;
 		io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // Escape closes native combo popups.

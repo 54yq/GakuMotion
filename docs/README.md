@@ -14,6 +14,8 @@
 | 理解宿主、导入器、运行时与共享核心 | [架构](ARCHITECTURE.md) |
 | 读写动作与镜头文件 | [动作文件格式](formats/ACTION_FORMATS.md) |
 | 开发宿主插件 | [GakuLoader 插件指南](https://github.com/crested-ezios/GakuLoader/blob/main/docs/PLUGIN_DEVELOPMENT.md) |
+| 使用实验性多人舞台 | [摄影多人舞台](ENSEMBLE_STAGE_V1.md) |
+| 配置实验性布光与视频 | [Stage Studio](STAGE_STUDIO.md) |
 | 查看组件许可 | [第三方通知](../THIRD_PARTY_NOTICES.md) |
 
 ## 源码维护

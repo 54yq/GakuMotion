@@ -25,6 +25,7 @@
 #include "GkSoleMeasurement.hpp"
 #include "GkExperimentalSolePitch.hpp"
 #include "GkStageManager.hpp"
+#include "GkStageStudioSettings.hpp"
 #include "GkCamera.hpp"
 #include "GkSceneActors.hpp"
 #include "GkEnsembleSettings.hpp"
@@ -127,6 +128,11 @@ namespace GakuMotion
 		std::string stageMountedKey;
 		std::string stageStatusNotice;
 		std::string stageLoadNotice;
+		studio::Settings studioSettings;
+		uint64_t studioRevision{0};
+		std::string studioLightingNotice, studioVideoNotice;
+		void (*fnSetStudioSettings)(void*, const studio::Settings&){nullptr};
+		void (*fnResetStudioSettings)(void*){nullptr};
 		void (*fnSetStageLoadReplacement)(void*, const char*){nullptr};
 		void (*fnSetStageSettings)(void*, const StageSettings&){nullptr};
 		void (*fnSetStagePreset)(void*, int){nullptr};
@@ -192,6 +198,7 @@ namespace GakuMotion
 	void DrawLibraryPage(GuiOverlay& overlay, const GuiContext& ctx);
 	void DrawStagePage(GuiOverlay& overlay, const GuiContext& ctx);
 	void DrawStageLoadReplacementControl(const GuiContext& ctx);
+	void DrawStageStudio(GuiOverlay& overlay, const GuiContext& ctx);
 
 	class GuiOverlay
 	{
@@ -253,6 +260,11 @@ namespace GakuMotion
 		int browsePendingKind{-1};
 		std::string browseNotice;
 		char importCameraSource[4096]{};
+		studio::Settings studioDraft;
+		studio::Settings studioLastSnapshot;
+		uint64_t studioDraftRevision{0};
+		bool studioDraftReady{false};
+		char studioVideoPath[32768]{};
 		int importCameraFpsIndex{1}; // 60 fps
 		float importCameraScale{0.083f};
 		bool importCameraDetectCuts{true};
@@ -280,8 +292,8 @@ namespace GakuMotion
 		void DrawConfigForTest(const GuiContext& ctx) { DrawConfigTab(ctx); }
 		void BrowseForTest(const GuiContext& ctx, int kind)
 		{
-			char* target = kind == 0 ? importVmd : kind == 1 ? importAudio : importCameraSource;
-			Browse(ctx, kind, target, kind == 0 ? sizeof(importVmd) : kind == 1 ? sizeof(importAudio) : sizeof(importCameraSource));
+			char* target = kind == 0 ? importVmd : kind == 1 ? importAudio : kind == 3 ? studioVideoPath : importCameraSource;
+			Browse(ctx, kind, target, kind == 0 ? sizeof(importVmd) : kind == 1 ? sizeof(importAudio) : kind == 3 ? sizeof(studioVideoPath) : sizeof(importCameraSource));
 		}
 #endif
 #endif
@@ -368,7 +380,11 @@ namespace GakuMotion
 					if (ImGui::CollapsingHeader("开发者选项"))
 					{
 						ImGui::Checkbox("开发者模式", &developerMode);
-						if (developerMode) DrawStageLoadReplacementControl(ctx);
+						if (developerMode)
+						{
+							DrawStageLoadReplacementControl(ctx);
+							if (ImGui::CollapsingHeader("布光与视频（实验）")) DrawStageStudio(*this, ctx);
+						}
 						else ImGui::TextWrapped("开启开发者模式后可配置尚未完成的摄影舞台替换。");
 					}
 				}
@@ -493,6 +509,7 @@ namespace GakuMotion
 		void DrawConfigTab(const GuiContext& ctx);
 
 		void DrawImport(const GuiContext& ctx);
+		void BrowseStudioVideo(const GuiContext& ctx) { Browse(ctx, 3, studioVideoPath, sizeof(studioVideoPath)); }
 		void DrawSolePlot(const GuiContext& ctx, bool sideView, float width);
 
 	private:
@@ -518,8 +535,8 @@ namespace GakuMotion
 			if (state == 0) return;
 			if (state == 1)
 			{
-				char* target = browsePendingKind == 0 ? importVmd : browsePendingKind == 1 ? importAudio : importCameraSource;
-				const size_t capacity = browsePendingKind == 0 ? sizeof(importVmd) : browsePendingKind == 1 ? sizeof(importAudio) : sizeof(importCameraSource);
+				char* target = browsePendingKind == 0 ? importVmd : browsePendingKind == 1 ? importAudio : browsePendingKind == 3 ? studioVideoPath : importCameraSource;
+				const size_t capacity = browsePendingKind == 0 ? sizeof(importVmd) : browsePendingKind == 1 ? sizeof(importAudio) : browsePendingKind == 3 ? sizeof(studioVideoPath) : sizeof(importCameraSource);
 				if (path.size() >= capacity) browseNotice = "所选路径过长，未修改输入路径";
 				else std::memcpy(target, path.c_str(), path.size() + 1);
 			}
@@ -532,6 +549,7 @@ namespace GakuMotion
 // 机械拆分的 Tab 渲染实现包含
 #ifdef GKMOTION_GUI_ACTIVE
 #include "gui/GuiStageLoadReplacement.hpp"
+#include "gui/GuiStageStudio.hpp"
 #include "gui/GkGuiStatusBar.hpp"
 #include "gui/GkGuiTabMotion.hpp"
 #include "gui/GkGuiTabGaze.hpp"

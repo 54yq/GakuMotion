@@ -14,6 +14,7 @@
 #include "GkInjectionPolicy.hpp"
 #include "GkCaptureSafety.hpp"
 #include "GkStageLoadSettings.hpp"
+#include "GkStageStudioSettings.hpp"
 #include "GkDataLayout.hpp"
 #include "GkControlRequests.hpp"
 #include "GkEnsembleSettings.hpp"
@@ -121,6 +122,9 @@ namespace GakuMotion
 		}
 
 		std::string stageLoadNotice;
+		studio::Settings studioSettings;
+		uint64_t studioRevision{1};
+		std::string studioLightingNotice, studioVideoNotice;
 		injection::Policy injectionPolicy;
 		// The runtime enables enforcement before initialization. Offline consumers
 		// may exercise the playback core without a game or native hook service.
@@ -370,7 +374,7 @@ namespace GakuMotion
 			StageSettings, StagePreset, ToggleStageCandidate, ScanStageCandidates,
 			MountCustomStage, UnloadCustomStage, RestoreCameraSkybox,
 			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, StageLoadReplacement, SelectTarget,
-			Control, EnsembleSettings, EnsemblePreset, EnsembleProbe
+			Control, EnsembleSettings, EnsemblePreset, EnsembleProbe, StudioSettings, StudioReset
 		};
 
 		std::atomic<int> guiPhysicsBackend{2};
@@ -391,6 +395,7 @@ namespace GakuMotion
 			SoleMeasurementSettings soleSettings;
 			sole_pitch::Settings experimentalSolePitchSettings;
 			GakuMotion::StageSettings stageSettings;
+			studio::Settings studioSettings;
 			int stagePresetIndex{0};
 			int candidateIndex{-1};
 			int64_t frame{0};
@@ -548,6 +553,18 @@ namespace GakuMotion
 			QueueGui(std::move(cmd));
 		}
 
+		bool QueueStudioSettings(const studio::Settings& settings)
+		{
+			std::string error;
+			if (!settings.Validate(error)) return false;
+			GuiCommand command{GuiAction::StudioSettings};
+			command.studioSettings = settings;
+			QueueGui(std::move(command));
+			return true;
+		}
+
+		void QueueStudioReset() { QueueGui({GuiAction::StudioReset}); }
+
 		void QueueStagePreset(int presetIndex)
 		{
 			GuiCommand cmd{GuiAction::StagePreset};
@@ -592,12 +609,18 @@ namespace GakuMotion
 				std::lock_guard<std::mutex> lock(guiCommandMutex);
 				for (auto it = guiCommands.begin(); it != guiCommands.end();)
 				{
-					if (it->action != GuiAction::StageLoadReplacement) { ++it; continue; }
+					if (it->action != GuiAction::StageLoadReplacement && it->action != GuiAction::StudioSettings &&
+						it->action != GuiAction::StudioReset) { ++it; continue; }
 					commands.push_back(std::move(*it));
 					it = guiCommands.erase(it);
 				}
 			}
-			for (const auto& command : commands) SetStageLoadReplacement(command.key);
+			for (const auto& command : commands)
+			{
+				if (command.action == GuiAction::StudioSettings) SetStudioSettings(command.studioSettings);
+				else if (command.action == GuiAction::StudioReset) ResetStudioSettings();
+				else SetStageLoadReplacement(command.key);
+			}
 		}
 
 		bool HasPendingTargetSelection()
@@ -664,6 +687,12 @@ namespace GakuMotion
 				if (cmd.action == GuiAction::StageLoadReplacement)
 				{
 					SetStageLoadReplacement(cmd.key);
+					continue;
+				}
+				if (cmd.action == GuiAction::StudioSettings || cmd.action == GuiAction::StudioReset)
+				{
+					if (cmd.action == GuiAction::StudioSettings) SetStudioSettings(cmd.studioSettings);
+					else ResetStudioSettings();
 					continue;
 				}
 				// Never replay controls queued before a scene/capture boundary.
@@ -909,6 +938,7 @@ namespace GakuMotion
 			diagnosticsRoot = dataLayout.managed ? logsRoot + "/diagnostics" : configRoot;
 			transactionRoot = dataLayout.managed ? dataLayout.temp + "/transactions" : "";
 			LoadStageLoadSettings();
+			LoadStudioSettings();
 			playlistPath = dataLayout.Playlist();
 			initialPositionPath = configRoot + "/initial_position.json";
 			LoadInitialPosition();
@@ -1558,6 +1588,46 @@ namespace GakuMotion
 			LogInfo("[GakuMotion][StageLoad] saved next Photography key=" + (key.empty() ? std::string("native") : key));
 			return true;
 		}
+
+		bool LoadStudioSettings()
+		{
+			studio::Settings loaded;
+			std::string error;
+			const auto path = configRoot + "/stage_studio.json";
+			std::error_code ec;
+			const bool exists = std::filesystem::exists(MotionPathFromUtf8(path), ec);
+			const bool accepted = exists && !ec && loaded.Load(path, error);
+			studioSettings = accepted ? loaded : studio::Settings{};
+			++studioRevision;
+			if (ec || (exists && !accepted))
+			{
+				studioLightingNotice = studioVideoNotice = "布光与视频设置读取失败，实验保持关闭: " + (ec ? ec.message() : error);
+				LogWarn("[GakuMotion][Studio] saved settings rejected: " + (ec ? ec.message() : error));
+				return false;
+			}
+			studioLightingNotice = studioSettings.lighting.enabled ? "已载入布光预设；等待有效摄影场景应用" : "自定义布光已关闭";
+			studioVideoNotice = studioSettings.video.enabled ? "已载入视频设置；等待有效摄影场景应用" : "视频输入已关闭";
+			return accepted;
+		}
+
+		bool SetStudioSettings(const studio::Settings& settings)
+		{
+			std::string error;
+			if (configRoot.empty() || !settings.Save(configRoot + "/stage_studio.json", error))
+			{
+				studioLightingNotice = studioVideoNotice = "布光与视频设置保存失败，保留原设置: " +
+					(configRoot.empty() ? std::string("配置目录尚未就绪") : error);
+				LogWarn("[GakuMotion][Studio] cannot save settings: " + error);
+				return false;
+			}
+			studioSettings = settings;
+			++studioRevision;
+			studioLightingNotice = settings.lighting.enabled ? "布光预设已保存；将在有效摄影场景应用" : "已保存停用自定义布光；等待恢复结果";
+			studioVideoNotice = settings.video.enabled ? "视频设置已保存；将在有效摄影场景应用" : "已保存停用视频输入；等待恢复结果";
+			return true;
+		}
+
+		void ResetStudioSettings() { SetStudioSettings(studio::Settings{}); }
 
 		bool LoadCameraSettings()
 		{
@@ -3191,6 +3261,15 @@ namespace GakuMotion
 			ctx.stageMountedKey = stageManager.mountedStageKey;
 			ctx.stageStatusNotice = stageManager.statusNotice;
 			ctx.stageLoadNotice = stageLoadNotice;
+			ctx.studioSettings = studioSettings;
+			ctx.studioRevision = studioRevision;
+			ctx.studioLightingNotice = studioLightingNotice;
+			ctx.studioVideoNotice = studioVideoNotice;
+			ctx.fnSetStudioSettings = [](void* self, const studio::Settings& settings)
+			{
+				static_cast<Core*>(self)->QueueStudioSettings(settings);
+			};
+			ctx.fnResetStudioSettings = [](void* self) { static_cast<Core*>(self)->QueueStudioReset(); };
 			ctx.fnSetStageLoadReplacement = [](void* self, const char* key)
 			{
 				static_cast<Core*>(self)->QueueStageLoadReplacement(key ? key : "");
