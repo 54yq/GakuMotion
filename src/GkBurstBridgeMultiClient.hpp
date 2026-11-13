@@ -71,7 +71,7 @@ public:
     Slot& State(size_t index) { return slots_[index]; }
     const Slot& State(size_t index) const { return slots_[index]; }
     void Configure(const wchar_t* root,GbbLogFn log,void* context) {
-        if (root && *root) path_=std::wstring(root)+L"/GakuMotion/GakuBurstBridge.dll";
+        if (root && *root) path_=std::wstring(root)+L"/GakuBurstBridge.dll";
         config_={}; config_.size=sizeof(config_); config_.version=GBB_API_VERSION;
         config_.log=log; config_.log_context=context;
     }

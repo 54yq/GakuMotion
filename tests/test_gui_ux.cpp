@@ -507,6 +507,10 @@ const char* ImGuiTestEngine_FindItemDebugLabel(ImGuiContext*, ImGuiID id)
 	return found == items.end() ? nullptr : found->second.label.c_str();
 }
 
+namespace GakuMotion::Log { void Write(Level, const char*, ...) {} }
+
+#include "test_ensemble_gui.hpp"
+
 int main(int argc, char** argv)
 {
 	const auto root = argc > 1 ? std::filesystem::path(argv[1]) : std::filesystem::current_path();
@@ -524,6 +528,7 @@ int main(int argc, char** argv)
 	TestCameraPursuitControls(root);
 	TestCameraFollowTargetControls(root);
 	TestUnifiedCameraModeControls(root);
+	TestEnsembleGui(root);
 	{
 		const ImGuiConfigFlags originalConfigFlags = io.ConfigFlags;
 		io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // Escape closes native combo popups.

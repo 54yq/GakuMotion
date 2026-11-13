@@ -3568,10 +3568,11 @@ namespace GakuMotion
 			preserveAnimatorForSecondaryPhysics = source.preserveAnimatorForSecondaryPhysics;
 			captureCheckEnforced = source.captureCheckEnforced; useAnimatorRebind = source.useAnimatorRebind;
 			facialEnableBaseline = source.facialEnableBaseline; facialMikuMouthFit = source.facialMikuMouthFit;
+			facialMikuFitAllowUnverified = source.facialMikuFitAllowUnverified;
 			facialBaselineMultiplier = source.facialBaselineMultiplier; facialCharacterOverride = source.facialCharacterOverride;
 			SetExperimentalWaistSupportEnabled(source.experimentalWaistSupportEnabled);
 			auxDriveMode = source.auxDriveMode; rootHeightCalibrationEnabled = source.rootHeightCalibrationEnabled;
-			eyePoseRelativeGain = source.eyePoseRelativeGain; eyeMotionExperimentMode = source.eyeMotionExperimentMode;
+			eyePoseRelativeGain = source.eyePoseRelativeGain;
 		}
 
 		void ApplyMotion(const MotionClip& clip, float currentTimeSeconds, void* actor = nullptr,

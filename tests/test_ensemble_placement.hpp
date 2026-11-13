@@ -124,15 +124,15 @@ static void TestEnsemblePlacement()
 
     BeginTest("ensemble runtime configuration copy preserves per-clip and actor state");
     IdolController source,target; source.fnGetWorldPosition=WorldP; source.fnGetTransformParent=Parent;
-    source.armOffsetPitch=9;source.eyeMotionExperimentMode=2;source.facialMikuMouthFit=false;
+    source.armOffsetPitch=9;source.eyePoseRelativeGain=false;source.facialMikuMouthFit=false;
     source.rootHeightCalibration.offset=.1f;target.rootHeightCalibration.offset=.7f;
-    source.eyeMotionSourceStatus=EyeMotionExperimentStatus::Legacy;
-    target.eyeMotionSourceStatus=EyeMotionExperimentStatus::UnverifiedSource;
+    source.facialMikuFitAllowUnverified=true;
+    target.currentBinding.actor=&nodes[4];
     target.placementYawDegrees=23;target.targetActor=&nodes[5];target.initialPositionOffset={1,2,3};
     target.CopyRuntimeConfigurationFrom(source);
     Check(target.fnGetWorldPosition==WorldP&&target.fnGetTransformParent==Parent&&target.armOffsetPitch==9&&
-        target.eyeMotionExperimentMode==2&&!target.facialMikuMouthFit,"runtime adapters and common user policy propagate");
-    Check(target.rootHeightCalibration.offset==.7f&&target.eyeMotionSourceStatus==EyeMotionExperimentStatus::UnverifiedSource&&
+        !target.eyePoseRelativeGain&&target.facialMikuFitAllowUnverified&&!target.facialMikuMouthFit,"runtime adapters and common user policy propagate");
+    Check(target.rootHeightCalibration.offset==.7f&&target.currentBinding.actor==&nodes[4]&&
         target.targetActor==&nodes[5]&&target.placementYawDegrees==23&&NearP(target.initialPositionOffset,{1,2,3}),
         "configuration copy does not import another clip calibration, source evidence, actor or placement");
 }

@@ -986,6 +986,11 @@ namespace GakuMotion
 			// calling RestoreMute/Rebind on its destroyed Unity objects.
 			camera.Release(false);
 			player.AbandonScene();
+			RestoreEnsembleTracks(true); ensembleSnapshot.active = false; ensembleSnapshot.verified = false;
+			ensembleSnapshot.available = false; ++ensembleSnapshot.revision;
+			RetireEnsembleTracks(); player.additionalPerformanceDuration = 0;
+			player.controller.SetPlacementYawDegrees(0);
+			player.controller.SetInitialPositionOffset({}); LoadInitialPosition();
 			stageManager.AbandonScene();
 			ResetSoleObservation();
 			sceneActors.clear();
@@ -1240,6 +1245,7 @@ namespace GakuMotion
 
 		bool ReloadCurrentMotion()
 		{
+			if (EnsembleActive()) { ensembleSnapshot.notice = "请在多人槽位中重新应用组合"; return false; }
 			if (importBusy || cameraImportBusy) { libraryNotice = "正在导入，完成后可重新加载"; return false; }
 			const auto directory = player.currentMotionDir;
 			const auto file = FindMotionFile(directory);
@@ -1299,6 +1305,9 @@ namespace GakuMotion
 
 		bool DeleteMotionFiles(const std::string& key, bool confirmed = false)
 		{
+			if (EnsembleActive() && std::any_of(ensembleActiveSettings.slots.begin(), ensembleActiveSettings.slots.end(),
+				[&](const auto& slot) { return slot.enabled && slot.motionKey == key; }))
+			{ playlistNotice = "该动作正在多人舞台中使用，请先停用多人舞台"; return false; }
 			if (!confirmed) return false;
 			if (importBusy || cameraImportBusy) { playlistNotice = "正在导入，完成后可删除曲目"; return false; }
 			const int index = FindPlaylistIndex(motions, key);
@@ -2022,6 +2031,7 @@ namespace GakuMotion
 
 		bool SelectMotionByIndex(int index, bool autoPlay = false, bool forcePreview = false)
 		{
+			if (EnsembleActive()) { ensembleSnapshot.notice = "多人舞台运行中，请通过槽位分配动作或先关闭多人舞台"; return false; }
 			if (index < 0 || index >= static_cast<int>(motions.size()))
 			{
 				LogWarn(detail::FormatMsg("[GakuMotion][Config] motion index out of range: %d", index));
@@ -2351,11 +2361,14 @@ namespace GakuMotion
 		void ConsumeConfigCommands()
 		{
 			if (!config.HasPendingCommands()) return;
-			if (!InjectionAllowed() || ((config.cmdPlay || config.cmdSeek || config.cmdSolePitchCheck) &&
+			if (!InjectionAllowed() || ((config.cmdPlay || config.cmdSeek || (config.cmdSolePitchCheck && !EnsembleActive())) &&
 				!PrepareInjection())) { config.ClearCommands(); return; }
 			if (config.cmdBurstTrace) burstTraceRequestedSeq = config.appliedCommandSeq;
 
-			if (config.cmdSolePitchCheck)
+			if (config.cmdSolePitchCheck && EnsembleActive())
+				LogWarn("[GakuMotion][SolePitchCheck] unavailable during ensemble playback; configure placement through actor slots");
+
+			if (config.cmdSolePitchCheck && !EnsembleActive())
 			{
 				const auto& command = config.cmdSolePitchSettings;
 				auto offset = player.controller.initialPositionOffset;
@@ -2483,6 +2496,16 @@ namespace GakuMotion
 
 		void RebuildEffectiveOverrides()
 		{
+			if (EnsembleActive())
+			{
+				for (size_t i = 0; i < ensemble::MaxActors; ++i) if (auto* track = EnsemblePlayer(i))
+				{
+					BoneOverrideSet local; local.LoadFromFile(track->currentMotionDir + "/bone_overrides.json");
+					BoneOverrideSet::BuildEffective(globalOverrides, local, masterOverridesEnabled, ensembleOverrides[i]);
+					track->controller.SetBoneOverrides(&ensembleOverrides[i]);
+				}
+				return;
+			}
 			BoneOverrideSet::BuildEffective(globalOverrides, motionOverrides,
 			                                masterOverridesEnabled, effectiveOverrides);
 			player.controller.SetBoneOverrides(&effectiveOverrides);
@@ -2508,6 +2531,7 @@ namespace GakuMotion
 			const auto* old = sceneActorRegistry.Find(player.controller.targetActor);
 			const uint64_t oldToken = old ? old->token : 0;
 			sceneActorRegistry.Publish(observations);
+			if (EnsembleActive() && !EnsembleActorsValid()) LoseEnsembleActors();
 			sceneActors.clear();
 			for (const auto& item : sceneActorRegistry.Entries()) sceneActors.push_back(item.actor);
 			const auto* selected = sceneActorRegistry.Find(player.controller.targetActor);
@@ -2544,6 +2568,7 @@ namespace GakuMotion
 
 		void SetTargetActor(void* a)
 		{
+			if (EnsembleActive()) return;
 			if (!a || !sceneActorRegistry.Find(a) || player.controller.targetActor == a) return;
 			if (fnBeforeTargetChange && !fnBeforeTargetChange())
 			{
@@ -2853,6 +2878,14 @@ namespace GakuMotion
 			};
 			ctx.boundActorLabel = actorLabel(player.controller.currentBinding.actor);
 			ctx.targetActorLabel = actorLabel(player.controller.targetActor);
+			ensembleSnapshot.actorEpoch = sceneActorRegistry.Epoch();
+			ctx.ensembleSnapshot = ensembleSnapshot;
+			ctx.fnSetEnsemble = [](void* self, const ensemble::Settings& value, uint64_t revision, uint64_t epoch)
+			{ static_cast<Core*>(self)->QueueEnsemble(value, revision, epoch); };
+			ctx.fnEnsemblePreset = [](void* self, bool save, const char* name, const ensemble::Settings& value)
+			{ static_cast<Core*>(self)->QueueEnsemblePreset(save, name, value); };
+			ctx.fnEnsembleProbe = [](void* self, bool enabled)
+			{ GuiCommand cmd{GuiAction::EnsembleProbe}; cmd.flag = enabled; static_cast<Core*>(self)->QueueGui(std::move(cmd)); };
 			ctx.fnSelectTargetActor = [](void* self, uint64_t token, uint64_t epoch)
 			{
 				GuiCommand command{GuiAction::SelectTarget};
@@ -2871,7 +2904,7 @@ namespace GakuMotion
 			{
 				static_cast<Core*>(self)->QueueExperimentalWaistSupport(enabled);
 			};
-			ctx.playlistMode = static_cast<int>(playlist.mode);
+			ctx.playlistMode = EnsembleActive() ? (player.loop ? 1 : 0) : static_cast<int>(playlist.mode);
 			ctx.importBusy = importBusy;
 			guiImportProgressSnapshot = importProgress;
 			ctx.importProgress = &guiImportProgressSnapshot;
