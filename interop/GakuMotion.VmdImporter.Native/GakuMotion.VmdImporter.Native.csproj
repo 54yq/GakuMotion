@@ -52,6 +52,10 @@
                       LogicalName="GakuMotion.VmdImporter.Native.Resources.vmd_eye_profile.json" />
     <EmbeddedResource Include="..\..\tools\vmd2gkmotion\root_retarget_profiles.json"
                       LogicalName="GakuMotion.VmdImporter.Native.Resources.root_retarget_profiles.json" />
+    <!-- Projection of the published rinha.facial-fit table; produced by
+         RinhaReplacement tools/pack_facial_fit.py, never hand-edited. -->
+    <EmbeddedResource Include="..\..\tools\vmd2gkmotion\miku_raw_eye_keys.json"
+                      LogicalName="GakuMotion.VmdImporter.Native.Resources.miku_raw_eye_keys.json" />
   </ItemGroup>
 
 </Project>

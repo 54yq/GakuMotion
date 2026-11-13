@@ -143,7 +143,7 @@ Write-Host "  ensemble assignment and timing checks passed" -ForegroundColor Gre
 
 $mikuRunnerExe = Join-Path $buildDir 'miku_fit_runner.exe'
 $mikuRunnerArgs = @('-nologo', '/std:c++20', '/utf-8', '/O2', '/EHsc', '/MT', '/W4',
-    "/I$srcDir", (Join-Path $PSScriptRoot 'miku_fit_runner.cpp'),
+    "/I$srcDir", "/I$incDir", (Join-Path $PSScriptRoot 'miku_fit_runner.cpp'),
     "/Fe:$mikuRunnerExe", "/Fo:$(Join-Path $objDir 'miku_fit_runner.obj')")
 & $compiler @mikuRunnerArgs
 if ($LASTEXITCODE -ne 0) { throw "Miku fit JSONL runner build failed (exit=$LASTEXITCODE)" }

@@ -17,6 +17,7 @@
 #include "GkCaptureSafety.hpp"
 #include "GkStageLoadSettings.hpp"
 #include "GkDataLayout.hpp"
+#include "GkControlRequests.hpp"
 
 #include <cstdarg>
 #include <cstdio>
@@ -31,6 +32,7 @@
 
 namespace GakuMotion
 {
+	namespace control_v0 = control::v0;
 	// -----------------------------------------------------------------------------
 	// 日志格式化小工具（避免在 Core 各处重复写 snprintf 样板）
 	// -----------------------------------------------------------------------------
@@ -102,6 +104,42 @@ namespace GakuMotion
 		LookAtManager lookAt;
 		GuiOverlay gui;
 		StageManager stageManager;
+
+		// All scene-node identities and baselines remain provider-owned. Queries
+		// copy StageManager snapshots; only admitted Unity-thread callers mutate.
+		bool SceneNodesAllowed() const
+		{
+			return controlActive && initialized && currentActor && !captureSuspended &&
+				InjectionAllowed() && !stageStoppedByTransport && player.state != PlaybackState::Stopped;
+		}
+
+		void RefreshSceneNodes()
+		{
+			std::lock_guard<std::recursive_mutex> lock(stateMutex);
+			stageManager.RefreshSceneNodes(SceneNodesAllowed());
+		}
+
+		scene_nodes::v1::Status AcquireSceneNodes(uint64_t revision, uint64_t* lease)
+		{
+			if (lease) *lease = 0;
+			std::lock_guard<std::recursive_mutex> lock(stateMutex);
+			if (!controlActive) return scene_nodes::v1::Status::Unavailable;
+			if (captureSuspended || !InjectionAllowed()) return scene_nodes::v1::Status::Protected;
+			if (!SceneNodesAllowed()) return scene_nodes::v1::Status::NotReady;
+			if (!PrepareInjection()) return scene_nodes::v1::Status::Protected;
+			return stageManager.AcquireSceneNodes(revision, lease);
+		}
+
+		scene_nodes::v1::Status ApplySceneNodes(uint64_t lease, uint64_t revision,
+			uint32_t count, const scene_nodes::v1::Visibility* values)
+		{
+			std::lock_guard<std::recursive_mutex> lock(stateMutex);
+			if (!controlActive) return scene_nodes::v1::Status::Unavailable;
+			if (captureSuspended || !InjectionAllowed()) return scene_nodes::v1::Status::Protected;
+			if (!SceneNodesAllowed()) return scene_nodes::v1::Status::NotReady;
+			return stageManager.ApplySceneNodes(lease, revision, count, values);
+		}
+
 		std::string stageLoadNotice;
 		injection::Policy injectionPolicy;
 		// The runtime enables enforcement before initialization. Offline consumers
@@ -147,6 +185,7 @@ namespace GakuMotion
 		bool SuspendForCapture()
 		{
 			if (captureSuspended) return captureRestoreReport.AllConfirmed();
+			InvalidateControlSession();
 			if (ensembleRestoreUnconfirmed)
 			{
 				captureSuspended = true;
@@ -362,6 +401,8 @@ namespace GakuMotion
 			float playbackSpeed{-1.0f};
 			int facialEnableBaseline{-1};
 			int facialMikuMouthFit{-1};
+			int facialMikuEyeFit{-1};
+			int facialMikuFitAllowUnverified{-1};
 			float facialBaselineMultiplier{-1.0f};
 			std::string facialCharacterOverride;
 		} applied;
@@ -384,7 +425,8 @@ namespace GakuMotion
 			StageSettings, StagePreset, ToggleStageCandidate, ScanStageCandidates,
 			MountCustomStage, UnloadCustomStage, RestoreCameraSkybox,
 			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, StageLoadReplacement, SelectTarget,
-			SetEnsembleFollower, ClearEnsembleFollower, EnsemblePosition, EnsembleYaw, FollowerArm, SceneArm, AlignEnsemble, SaveEnsemblePreset, ApplyEnsemblePreset
+			SetEnsembleFollower, ClearEnsembleFollower, EnsemblePosition, EnsembleYaw, FollowerArm, SceneArm, AlignEnsemble, SaveEnsemblePreset, ApplyEnsemblePreset,
+			Control
 		};
 
 		std::atomic<int> guiPhysicsBackend{2};
@@ -411,11 +453,16 @@ namespace GakuMotion
 			uint64_t loadedGeneration{0}, sceneSession{0}, libraryRevision{0};
 			uint64_t actorToken{0}, actorEpoch{0};
 			std::array<uint64_t, 2> formationTokens{}, formationGenerations{};
+			control_v0::Command controlCommand{};
+			uint64_t controlTicket{0};
 		};
 
 		std::mutex guiCommandMutex;
 		std::recursive_mutex stateMutex; // Host LateUpdate and render share this guard.
 		std::deque<GuiCommand> guiCommands;
+		control_v0::Requests controlRequests;
+		bool controlActive{false};
+		uint64_t controlSession{1}, controlObservedInjectionSession{0};
 
 		void QueueGui(GuiCommand cmd)
 		{
@@ -451,6 +498,7 @@ namespace GakuMotion
 		}
 
 		void QueueAlignEnsemble() { QueueEnsemblePresetCommand(GuiAction::AlignEnsemble); }
+#include "GkControlCore.inl"
 
 		void QueueSelectMotion(int index, bool autoplay)
 		{
@@ -519,6 +567,21 @@ namespace GakuMotion
 			GuiCommand cmd{GuiAction::CameraSettings};
 			cmd.cameraSettings = settings;
 			QueueGui(std::move(cmd));
+		}
+
+		bool ApplyCameraSettings(const GakuMotion::CameraSettings& settings, bool persistMode = true)
+		{
+			if (!settings.IsValid()) return false;
+			const auto prevMode = camera.settings.mode;
+			const auto prevBehavior = camera.settings.followBehavior;
+			const bool prevEnabled = camera.settings.enabled;
+			camera.settings = settings;
+			if (!camera.settings.enabled) camera.Release();
+			camera.Publish();
+			if (persistMode && (prevEnabled != settings.enabled || prevMode != settings.mode || prevBehavior != settings.followBehavior) &&
+				!configRoot.empty() && std::filesystem::exists(MotionPathFromUtf8(configRoot + "/camera.json")))
+				SaveCameraSettings();
+			return true;
 		}
 
 		void QueueSoleSettings(const SoleMeasurementSettings& settings)
@@ -683,6 +746,11 @@ namespace GakuMotion
 			}
 			for (const auto& cmd : commands)
 			{
+				if (cmd.action == GuiAction::Control)
+				{
+					CompleteControlCommand(cmd);
+					continue;
+				}
 				// This command stores a future Photography-load preference only.
 				// It never touches Unity, playback or the current background.
 				if (cmd.action == GuiAction::StageLoadReplacement)
@@ -776,20 +844,7 @@ namespace GakuMotion
 				case GuiAction::Import: StartImport(cmd.import);
 					break;
 				case GuiAction::CameraSettings:
-					if (cmd.cameraSettings.IsValid())
-					{
-						const auto prevMode = camera.settings.mode;
-						const auto prevBehavior = camera.settings.followBehavior;
-						const bool prevEnabled = camera.settings.enabled;
-						camera.settings = cmd.cameraSettings;
-						if (!camera.settings.enabled) camera.Release();
-						camera.Publish();
-						if ((prevEnabled != cmd.cameraSettings.enabled || prevMode != cmd.cameraSettings.mode || prevBehavior != cmd.cameraSettings.followBehavior) &&
-							!configRoot.empty() && std::filesystem::exists(MotionPathFromUtf8(configRoot + "/camera.json")))
-						{
-							SaveCameraSettings();
-						}
-					}
+					ApplyCameraSettings(cmd.cameraSettings);
 					break;
 				case GuiAction::SaveCameraSettings: SaveCameraSettings();
 					break;
@@ -2624,6 +2679,23 @@ namespace GakuMotion
 				for (auto& pair : player.controller.bindings)
 					pair.second.face.enableMikuMouthFit = player.controller.facialMikuMouthFit;
 				player.controller.currentBinding.face.enableMikuMouthFit = player.controller.facialMikuMouthFit;
+			}
+			if (config.facialMikuEyeFit >= 0 && config.facialMikuEyeFit != applied.facialMikuEyeFit)
+			{
+				applied.facialMikuEyeFit = config.facialMikuEyeFit;
+				player.controller.facialMikuEyeFit = config.facialMikuEyeFit != 0;
+				for (auto& pair : player.controller.bindings)
+					pair.second.face.enableMikuEyeFit = player.controller.facialMikuEyeFit;
+				player.controller.currentBinding.face.enableMikuEyeFit = player.controller.facialMikuEyeFit;
+			}
+			if (config.facialMikuFitAllowUnverified >= 0 &&
+				config.facialMikuFitAllowUnverified != applied.facialMikuFitAllowUnverified)
+			{
+				applied.facialMikuFitAllowUnverified = config.facialMikuFitAllowUnverified;
+				player.controller.facialMikuFitAllowUnverified = config.facialMikuFitAllowUnverified != 0;
+				for (auto& pair : player.controller.bindings)
+					pair.second.face.facialFitAllowUnverified = player.controller.facialMikuFitAllowUnverified;
+				player.controller.currentBinding.face.facialFitAllowUnverified = player.controller.facialMikuFitAllowUnverified;
 			}
 			if (config.facialEnableBaseline >= 0 && config.facialEnableBaseline != applied.facialEnableBaseline)
 			{

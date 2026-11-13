@@ -43,9 +43,23 @@
 
 using namespace GakuMotion;
 
-// Offline tests have no host logger; preserve debug builds without linking the
-// live game plugin or silently changing the release compilation flags.
-namespace GakuMotion::Log { void Write(Level, const char*, ...) {} }
+// The offline binary links this translation unit alone, so the log sink that
+// normally lives in GakuMotionPlugin.cpp has no home here. Before v0.1.1 the
+// facade was header-inline; now every GM_LOG_* site in an inlined controller
+// path (test_playback_timing.hpp drives ApplyMotionToBinding) needs this symbol
+// or the whole suite stops linking. Keep it a silent sink: the tests assert on
+// behaviour, not on diagnostics text.
+namespace GakuMotion::Log
+{
+    unsigned g_testSinkCalls = 0;
+
+    void Write(Level level, const char* format, ...)
+    {
+        (void)level;
+        (void)format;
+        ++g_testSinkCalls;
+    }
+}
 
 // -----------------------------------------------------------------------------
 // 极简测试框架
@@ -149,7 +163,9 @@ static void TestConfigTemplate()
 	Check(cfg.EnsureFileExists(), "首次运行生成控制文件模板");
 	cfg.Poll(0.0f, true);
 	Check(cfg.fileFound && cfg.lastError.empty(), "模板文件可被解析（含 // 注释）: " + cfg.lastError);
-	Check(cfg.selectedMotion.empty(), "模板默认 selected_motion 为空");
+	// The shipped template leaves the track empty on purpose ("留空 = 启动时不选曲",
+	// GkRuntimeConfig.hpp); the assertion still expected the older hard-coded name.
+	Check(cfg.selectedMotion.empty(), "模板默认 selected_motion 为空（启动时不选曲）");
 	Check(std::fabs(cfg.playbackSpeedMultiplier - 1.0f) < 1e-4f, "模板默认 playback_speed_multiplier = 1.0");
 	Check(std::fabs(cfg.eyeWeight - 0.7f) < 1e-4f, "模板默认 eye_weight = 0.7");
 	Check(cfg.gazeMode == 0, "模板默认 gaze.mode = 0 (Auto)");
@@ -2780,10 +2796,12 @@ static void TestOrderedPlaybackCommands()
 #include "test_face_ownership.hpp"
 #include "test_facial_continuity.hpp"
 #include "test_miku_facial_fit.hpp"
+#include "test_rinha_facial_fit.hpp"
 #include "test_scene_actor_selection.hpp"
 #include "test_waist_support.hpp"
 #include "test_waist_support_core.hpp"
 #include "test_waist_support_integration.hpp"
+#include "test_scene_nodes.hpp"
 
 static void TestInjectionRuntimeBoundary()
 {
@@ -2843,6 +2861,7 @@ static void TestInjectionRuntimeBoundary()
 #include "test_playback_timing.hpp"
 #include "test_track_timing.hpp"
 #include "test_actorless_library.hpp"
+#include "test_control_api.hpp"
 
 int main(int argc, char** argv)
 {
@@ -2858,6 +2877,7 @@ int main(int argc, char** argv)
  TestFacialSemanticBindingV2();
  TestFacialDefaultContinuity();
  TestMikuMouthFit();
+ TestRinhaFacialFit();
  TestSceneActorSelection();
  TestEnsembleIntegration(repoRoot);
  TestFaceAnimatorCaptureLifecycle();
@@ -2888,6 +2908,8 @@ int main(int argc, char** argv)
  TestWaistSupport();
  TestWaistSupportCore();
  TestWaistSupportIntegration();
+ TestSceneNodes();
+ TestControlApi();
  TestClipGroundAnchor();
  TestClipSwitchKeepsActorRest();
  TestPreviewWaitsForHumanoid();

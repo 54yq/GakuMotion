@@ -441,6 +441,10 @@ namespace GakuMotion
 		bool captureRestoreUnconfirmed{false};
 		bool facialEnableBaseline{true};
 		bool facialMikuMouthFit{true};
+		// Published-profile components default to their accepted grade only: the
+		// eye map applies, the inverse-distance mouth map stays opt-in.
+		bool facialMikuEyeFit{true};
+		bool facialMikuFitAllowUnverified{false};
 		struct FacialUiSnapshot
 		{
 			std::atomic<unsigned> value{0};
@@ -1002,6 +1006,8 @@ namespace GakuMotion
 				existing.face.baselineMultiplier = facialBaselineMultiplier;
 				existing.face.characterOverride = facialCharacterOverride;
 				existing.face.enableMikuMouthFit = facialMikuMouthFit;
+				existing.face.enableMikuEyeFit = facialMikuEyeFit;
+				existing.face.facialFitAllowUnverified = facialMikuFitAllowUnverified;
 				existing.face.Prepare(actor, clip, faceApi);
 				currentBinding = it->second;
 				return;
@@ -1023,6 +1029,8 @@ namespace GakuMotion
 			b.face.facialWeights = facialWeights;
 			b.face.characterOverride = facialCharacterOverride;
 			b.face.enableMikuMouthFit = facialMikuMouthFit;
+			b.face.enableMikuEyeFit = facialMikuEyeFit;
+			b.face.facialFitAllowUnverified = facialMikuFitAllowUnverified;
 			b.face.Prepare(actor, clip, faceApi);
 			if (animator) b.cachedAnimator = animator;
 			cachedAnimator = b.cachedAnimator;
@@ -2200,11 +2208,15 @@ namespace GakuMotion
 			b.face.facialWeights = facialWeights;
 			b.face.characterOverride = facialCharacterOverride;
 			b.face.enableMikuMouthFit = facialMikuMouthFit;
+			b.face.enableMikuEyeFit = facialMikuEyeFit;
+			b.face.facialFitAllowUnverified = facialMikuFitAllowUnverified;
 			b.face.Apply(b.actor, clip, facialTimeSeconds, faceApi);
-			unsigned fittedRole = 0;
-			if (const auto* profile = FindMikuMouthFace(b.face.boundFaceName))
-				fittedRole = static_cast<unsigned>(profile-kMikuMouthFits.data())+1;
-			guiMikuFitSnapshot.store(static_cast<unsigned>(b.face.mikuFitDecision) | (fittedRole << 8), std::memory_order_relaxed);
+			// Roles come from the binding, never from pointer arithmetic on the
+			// compiled table: an external profile has no home there.
+			const unsigned fittedRole = b.face.fitRole;
+			const unsigned eyeDecision = static_cast<unsigned>(b.face.mikuEyeDecision);
+			guiMikuFitSnapshot.store(static_cast<unsigned>(b.face.mikuFitDecision) | (fittedRole << 8) |
+				(eyeDecision << 16), std::memory_order_relaxed);
 
 			// 1. Current Actor World Transform
 			Vector3 curActorPos = b.restActorPos;

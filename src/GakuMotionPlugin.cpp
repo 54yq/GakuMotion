@@ -5,6 +5,7 @@
 #include "GkCaptureSafety.hpp"
 #include "GkGmlClient.hpp"
 #include "GakuMotion.hpp"
+#include "GakuMotionControl.h"
 #include "GkLog.hpp"
 #include "GkCsharpImport.hpp"
 #include "GkHotkey.hpp"
@@ -2161,10 +2162,10 @@ void MotionRuntimeReady(void*)
 			HelperBeginFaceBinding, HelperGetActorName
 		};
 		ctrl.faceApi.getModelName = HelperGetFaceModelName;
-		ctrl.faceApi.reportMikuMouthFit = [](const char* decision, const char* faceName)
+		ctrl.faceApi.reportFacialFit = [](const char* component, const char* decision, const char* faceName)
 		{
-			GM_DEBUG("[GakuMotion][MikuMouthFit] decision=%s actual_face=%s (prefab identity; asset bytes not runtime-verified)",
-				decision, faceName);
+			GM_DEBUG("[GakuMotion][FacialFit] component=%s decision=%s actual_face=%s (prefab identity; asset bytes not runtime-verified)",
+				component, decision, faceName);
 		};
 		if (g_hostContext.logInfo)
 			g_hostContext.logInfo(
@@ -2953,6 +2954,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 		core.stageManager.OnLateUpdate(activeActor, dtToPass, g_currentSceneName, mainCam);
 		if (core.InjectionAllowed() && !core.stageManager.candidatesDiscovered)
 			core.stageManager.RescanCandidates(activeActor); // Read-only discovery while GM stage controls are inactive.
+		core.RefreshSceneNodes();
 	}
 	if (core.IsTargetActor(activeActor))
 	{
@@ -3207,6 +3209,7 @@ void MotionShutdown(void*)
 	auto& core = GakuMotion::Core::Instance();
 	std::lock_guard<std::recursive_mutex> stateLock(core.stateMutex);
 	core.WaitForLibraryRefresh();
+	core.SetControlActive(false);
 	core.injectionPolicy.SetSceneAllowed(false);
 	core.injectionPolicy.SetCaptureHooksReady(false);
 	if (GakuMotion::host::mainThread.isMainThread &&
@@ -3250,6 +3253,61 @@ void MotionShutdown(void*)
 }
 
 namespace {
+// The loader copies this domain service table. No new loader ABI or DLL export
+// is needed, and the resident functions reject mutations after shutdown.
+template<class Function>
+GakuMotion::control::v0::Error ControlCall(Function&& function) noexcept
+{
+	try { return function(GakuMotion::Core::Instance()); }
+	catch (...) { return GakuMotion::control::v0::Error::Failed; }
+}
+
+GakuStatus PublishControlApi()
+{
+	using namespace GakuMotion::control::v0;
+	const Api service{Version, sizeof(Api),
+		[](uint32_t size, State* output) { return ControlCall([&](auto& core) { return core.ReadControlState(size, output); }); },
+		[](uint32_t size, Capabilities* output) { return ControlCall([&](auto& core) { return core.ReadControlCapabilities(size, output); }); },
+		[](uint64_t revision, uint32_t index, uint32_t size, Motion* output) {
+			return ControlCall([&](auto& core) { return core.ReadControlMotion(revision, index, size, output); }); },
+		[](const Command* command, uint64_t* ticket) {
+			if (ticket) *ticket = 0;
+			return ControlCall([&](auto& core) { return core.SubmitControl(command, ticket); }); },
+		[](uint64_t ticket, uint32_t size, Result* output) { return ControlCall([&](auto& core) { return core.PollControl(ticket, size, output); }); },
+		[](uint64_t ticket) { return ControlCall([&](auto& core) { return core.ReleaseControl(ticket); }); }};
+	return GakuMotion::host::api.registerService(GakuMotion::host::api.hostContext, ServiceName, sizeof(service), &service);
+}
+
+template<class Function>
+GakuMotion::scene_nodes::v1::Status SceneNodesCall(bool mutation, Function&& function) noexcept
+{
+	using GakuMotion::scene_nodes::v1::Status;
+	if (mutation && (!GakuMotion::host::mainThread.isMainThread ||
+		!GakuMotion::host::mainThread.isMainThread(GakuMotion::host::mainThread.context)))
+		return Status::WrongThread;
+	try { return function(GakuMotion::Core::Instance()); }
+	catch (...) { return Status::Failed; }
+}
+
+GakuStatus PublishSceneNodesApi()
+{
+	using namespace GakuMotion::scene_nodes::v1;
+	const Api service{Version, sizeof(Api),
+		[](uint32_t size, State* output) {
+			return SceneNodesCall(false, [&](auto& core) { return core.stageManager.ReadSceneNodesState(size, output); }); },
+		[](uint64_t revision, uint32_t index, uint32_t size, Node* output) {
+			return SceneNodesCall(false, [&](auto& core) { return core.stageManager.ReadSceneNode(revision, index, size, output); }); },
+		[](uint64_t revision, uint64_t* lease) {
+			if (lease) *lease = 0;
+			return SceneNodesCall(true, [&](auto& core) { return core.AcquireSceneNodes(revision, lease); }); },
+		[](uint64_t lease, uint64_t revision, uint32_t count, const Visibility* values) {
+			return SceneNodesCall(true, [&](auto& core) { return core.ApplySceneNodes(lease, revision, count, values); }); },
+		[](uint64_t lease) {
+			return SceneNodesCall(true, [&](auto& core) { return core.stageManager.ReleaseSceneNodes(lease); }); }};
+	return GakuMotion::host::api.registerService(GakuMotion::host::api.hostContext,
+		ServiceName, sizeof(service), &service);
+}
+
 // Native activation: connect the loader services, publish the playback contract,
 // fill the host adapter and initialize config/audio/import. Runs before Unity
 // exists, so it must not call managed code.
@@ -3261,6 +3319,10 @@ GakuStatus MotionActivate(const GakuHostApi* host, void** pluginState)
 	if (status != GAKU_OK) return status;
 	const auto published = GakuMotion::host::PublishPlayback();
 	if (published != GAKU_OK) return published;
+	const auto controlPublished = PublishControlApi();
+	if (controlPublished != GAKU_OK) return controlPublished;
+	const auto sceneNodesPublished = PublishSceneNodesApi();
+	if (sceneNodesPublished != GAKU_OK) return sceneNodesPublished;
 
 	g_hostContext = MotionHostContext{};
 	g_hostContext.apiVersion = GAKU_ABI_VERSION;
@@ -3279,6 +3341,7 @@ GakuStatus MotionActivate(const GakuHostApi* host, void** pluginState)
 	g_hostContext.isMotionPlaying = MotionIsMotionPlaying;
 
 	if (!InitializeMotion()) return GAKU_E_INTERNAL;
+	GakuMotion::Core::Instance().SetControlActive(true);
 	*pluginState = &GakuMotion::Core::Instance();
 
 	const auto hotkey = GakuMotion::host::RegisterHotkey(kShowGuiActionId, "Show Motion controls",
@@ -3423,6 +3486,7 @@ void MotionTick(void*, float)
 			RefreshProtectedContext(true);
 		}
 		RefreshSceneActors(core);
+		core.RejectObsoleteControlCommands();
 	}
 }
 

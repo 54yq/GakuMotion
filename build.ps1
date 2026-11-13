@@ -23,7 +23,8 @@ $importInputs = @('interop/GakuMotion.VmdImporter.Native/GakuMotion.VmdImporter.
     'candidate/csharp/src/GakuMotion.VmdImporter/Resources/gakumas_bone_profile.json',
     'candidate/csharp/src/GakuMotion.VmdImporter/Resources/mmd_source_skeleton.json',
     'tools/vmd2gkmotion/gakumas_morph_map.json', 'tools/vmd2gkmotion/vmd_eye_profile.json',
-    'tools/vmd2gkmotion/tooth_appearance_lut.json', 'tools/vmd2gkmotion/root_retarget_profiles.json')
+    'tools/vmd2gkmotion/tooth_appearance_lut.json', 'tools/vmd2gkmotion/root_retarget_profiles.json',
+    'tools/vmd2gkmotion/miku_raw_eye_keys.json')
 $inputs = if ($Target -eq 'Runtime') { $runtimeInputs } elseif ($Target -eq 'NativeAOT') { $importInputs } elseif ($Target -eq 'Contracts') { @('tests/test_stage_load_runtime.cpp') } else { $runtimeInputs + $importInputs }
 foreach ($inputPath in $inputs) {
     if (-not (Test-Path -LiteralPath (Join-Path $repo $inputPath) -PathType Leaf)) { throw ('Missing build input: ' + $inputPath) }

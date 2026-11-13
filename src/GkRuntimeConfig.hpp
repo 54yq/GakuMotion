@@ -458,6 +458,8 @@ namespace GakuMotion
 		// ---- 面部表情默认基线与动态让位 ----
 		int facialEnableBaseline{-1}; // 三态：-1 未设置(默认开启), 0 关, 1 开
 		int facialMikuMouthFit{-1}; // Missing preserves session; fresh controller/config default is on.
+		int facialMikuEyeFit{-1}; // Published eye/brow profile; missing preserves session, fresh default is on.
+		int facialMikuFitAllowUnverified{-1}; // 0 refuses every component the bundle did not accept.
 		float facialBaselineMultiplier{-1.0f}; // 默认 1.0f (基线强度倍率)
 		std::string facialCharacterOverride{"auto"}; // Legacy field: identity always comes from the bound actor.
 
@@ -558,7 +560,9 @@ namespace GakuMotion
 				"  \"facial\": {\n"
 				"    \"enable_baseline\": true,\n"
 				"    \"baseline_multiplier\": 1.0,\n"
-				"    \"miku_mouth_fit\": true\n"
+				"    \"miku_mouth_fit\": true,\n"
+				"    \"miku_eye_fit\": true,\n"
+				"    \"miku_fit_allow_unverified\": false\n"
 				"  },\n"
 				"\n"
 				"  // 辅助骨（_Roll_H / _H）驱动模式 —— 实机靶向对照实验\n"
@@ -905,6 +909,10 @@ namespace GakuMotion
 			{
 				if (const jsonlite::Value* fitted = facial->Find("miku_mouth_fit"))
 					facialMikuMouthFit = fitted->AsBool(false) ? 1 : 0;
+				if (const jsonlite::Value* fitted = facial->Find("miku_eye_fit"))
+					facialMikuEyeFit = fitted->AsBool(false) ? 1 : 0;
+				if (const jsonlite::Value* allow = facial->Find("miku_fit_allow_unverified"))
+					facialMikuFitAllowUnverified = allow->AsBool(false) ? 1 : 0;
 				if (const jsonlite::Value* e = facial->Find("enable_baseline"))
 				{
 					facialEnableBaseline = e->AsBool(true) ? 1 : 0;
