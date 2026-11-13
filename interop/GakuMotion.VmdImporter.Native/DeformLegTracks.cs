@@ -4,10 +4,10 @@ using System.Numerics;
 using GakuMotion.VmdImporter.Vmd;
 
 /// <summary>
-/// Adapt baked MMD D-leg tracks without changing the frozen source evaluator.
-/// A side is adapted only when all three D tracks exist, at least one contains
-/// rotation, the corresponding ordinary and IK tracks are neutral, and the VMD
-/// does not explicitly control that side's IK. Ambiguous motions stay unchanged.
+/// Adapt unambiguous baked MMD leg tracks without changing the frozen evaluator.
+/// In addition to D-leg tracks, a dense FK bake with fully neutral, per-frame
+/// foot and toe IK tracks must not be re-solved as though its IK were active.
+/// Ambiguous motions and explicit IK switches remain unchanged.
 /// </summary>
 internal static class DeformLegTracks
 {
@@ -19,31 +19,44 @@ internal static class DeformLegTracks
 
     internal static VmdMotion Prepare(VmdMotion motion, out string[] adaptedSides)
     {
-        var selected = new List<string>();
+        var selected = new List<(string Side, bool UseDeform)>();
         foreach (string side in Sides)
         {
             if (motion.PropertyKeyframes.Any(p =>
                 p.IkSwitches.ContainsKey(side + "足ＩＫ") || p.IkSwitches.ContainsKey(side + "つま先ＩＫ")))
                 continue;
 
-            if (Parts.Any(part => !motion.BoneKeyframes.TryGetValue(side + part + "D", out var keys) ||
-                keys.Count == 0 || keys.Any(k => !Finite(k.Position) || RotationSinSquared(k.Rotation) is null)))
+            bool completeDeform = Parts.All(part =>
+                motion.BoneKeyframes.TryGetValue(side + part + "D", out var keys) && ValidTrack(keys));
+            bool neutralOrdinary = Parts.All(part => NeutralTrack(motion, side + part));
+            bool neutralIk = NeutralTrack(motion, side + "足ＩＫ") && NeutralTrack(motion, side + "つま先ＩＫ");
+            if (completeDeform && neutralOrdinary && neutralIk &&
+                Parts.Any(part => AnimatedRotation(motion.BoneKeyframes[side + part + "D"])))
+            {
+                selected.Add((side, true));
                 continue;
-            if (Parts.Any(part => !NeutralTrack(motion, side + part)) ||
-                !NeutralTrack(motion, side + "足ＩＫ") || !NeutralTrack(motion, side + "つま先ＩＫ"))
-                continue;
-            if (!Parts.Any(part => AnimatedRotation(motion.BoneKeyframes[side + part + "D"])))
-                continue;
-            selected.Add(side);
+            }
+
+            // Fully sampled neutral IK tracks plus fully sampled moving FK legs
+            // indicate a baked FK clip. Sparse stationary IK can instead be a
+            // deliberate planted foot, so it must never use this fallback.
+            bool hasAnyDeform = Parts.Any(part => motion.BoneKeyframes.ContainsKey(side + part + "D"));
+            if (!hasAnyDeform && motion.MaxFrame > 0 &&
+                Parts.All(part => DenseTrack(motion, side + part, false)) &&
+                DenseTrack(motion, side + "足ＩＫ", true) && DenseTrack(motion, side + "つま先ＩＫ", true) &&
+                AnimatedRotation(motion.BoneKeyframes[side + "ひざ"]) &&
+                (AnimatedRotation(motion.BoneKeyframes[side + "足"]) || AnimatedRotation(motion.BoneKeyframes[side + "足首"])))
+                selected.Add((side, false));
         }
 
-        adaptedSides = selected.ToArray();
+        adaptedSides = selected.Select(item => item.Side + (item.UseDeform ? ":D" : ":FK")).ToArray();
         if (selected.Count == 0) return motion;
 
         var bones = new Dictionary<string, IReadOnlyList<BoneKeyframe>>(motion.BoneKeyframes, StringComparer.Ordinal);
-        foreach (string side in selected)
+        foreach (var (side, useDeform) in selected)
         foreach (string part in Parts)
         {
+            if (!useDeform) continue;
             string name = side + part;
             bones[name] = motion.BoneKeyframes[name + "D"]
                 .Select(k => k with { Name = name }).ToArray();
@@ -52,7 +65,7 @@ internal static class DeformLegTracks
         Dictionary<string, bool> DisableSelected(IReadOnlyDictionary<string, bool> original)
         {
             var switches = original.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
-            foreach (string side in selected)
+            foreach (var (side, _) in selected)
             {
                 switches[side + "足ＩＫ"] = false;
                 switches[side + "つま先ＩＫ"] = false;
@@ -76,6 +89,18 @@ internal static class DeformLegTracks
 
     private static bool NeutralTrack(VmdMotion motion, string name) =>
         !motion.BoneKeyframes.TryGetValue(name, out var keys) || keys.All(IsNeutral);
+
+    private static bool ValidTrack(IReadOnlyList<BoneKeyframe> keys) =>
+        keys.Count != 0 && keys.All(k => Finite(k.Position) && RotationSinSquared(k.Rotation) is not null);
+
+    private static bool DenseTrack(VmdMotion motion, string name, bool requireNeutral)
+    {
+        if (!motion.BoneKeyframes.TryGetValue(name, out var keys) ||
+            (ulong)keys.Count != (ulong)motion.MaxFrame + 1 || !ValidTrack(keys)) return false;
+        for (int i = 0; i < keys.Count; i++)
+            if (keys[i].Frame != (uint)i || (requireNeutral && !IsNeutral(keys[i]))) return false;
+        return true;
+    }
 
     private static bool IsNeutral(BoneKeyframe key) =>
         Finite(key.Position) && key.Position.LengthSquared() <= MaxNeutralPositionSquared &&

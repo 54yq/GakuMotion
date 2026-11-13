@@ -66,7 +66,7 @@ bool Same(Quaternion a, Quaternion b) => MathF.Abs(Quaternion.Dot(Quaternion.Nor
 
 var input = Motion(BakedLeft(), new PropertyKeyframe(1, false, new Dictionary<string, bool> { ["右足ＩＫ"] = true }));
 var adapted = DeformLegTracks.Prepare(input, out var sides);
-Check(sides.SequenceEqual(new[] { "左" }), "baked D tracks select only the matching side");
+Check(sides.SequenceEqual(new[] { "左:D" }), "baked D tracks select only the matching side");
 Check(!ReferenceEquals(input, adapted) && input.BoneKeyframes["左ひざ"][1].Rotation == Quaternion.Identity,
     "adaptation does not mutate the input motion");
 Check(adapted.BoneKeyframes["左ひざ"][1].Rotation == input.BoneKeyframes["左ひざD"][1].Rotation,
@@ -110,4 +110,36 @@ var invalid = BakedLeft(); invalid["左ひざD"] = [Key("左ひざD", 0), Key("�
 var invalidMotion = Motion(invalid);
 Check(ReferenceEquals(invalidMotion, DeformLegTracks.Prepare(invalidMotion, out sides)) && sides.Length == 0,
     "invalid D rotations are rejected rather than copied");
+
+IReadOnlyList<BoneKeyframe> Dense(string name, float middle = 0, float last = 0) =>
+    [Key(name, 0), Key(name, 1, middle), Key(name, 2, last)];
+var bakedFk = new Dictionary<string, IReadOnlyList<BoneKeyframe>>
+{
+    ["左足"] = Dense("左足", 15, 25), ["左ひざ"] = Dense("左ひざ", 30, 60),
+    ["左足首"] = Dense("左足首", 5, 10), ["左足ＩＫ"] = Dense("左足ＩＫ"),
+    ["左つま先ＩＫ"] = Dense("左つま先ＩＫ"), ["上半身"] = Dense("上半身", 3, 6)
+};
+var fkMotion = Motion(bakedFk);
+var fkEffective = DeformLegTracks.Prepare(fkMotion, out sides);
+Check(sides.SequenceEqual(new[] { "左:FK" }) &&
+      ReferenceEquals(fkEffective.BoneKeyframes["左ひざ"], fkMotion.BoneKeyframes["左ひざ"]),
+    "dense baked FK uses authored knee keys without replacing them");
+Check(!fkEffective.PropertyKeyframes[0].IkSwitches["左足ＩＫ"] && !fkEffective.PropertyKeyframes[0].IkSwitches["左つま先ＩＫ"],
+    "only neutral baked foot and toe IK are disabled");
+var fkClip = Convert(fkMotion);
+leftKnee = fkClip.Bones.FindIndex(b => b.Name == "LeftLowerLeg");
+Check(leftKnee >= 0 && !Same(fkClip.BoneDeltas[0, leftKnee], fkClip.BoneDeltas[2, leftKnee]),
+    "end-to-end baked FK preserves knee motion");
+var sparseIk = new Dictionary<string, IReadOnlyList<BoneKeyframe>>(bakedFk) { ["左足ＩＫ"] = Track("左足ＩＫ") };
+var sparseMotion = Motion(sparseIk);
+Check(ReferenceEquals(sparseMotion, DeformLegTracks.Prepare(sparseMotion, out sides)) && sides.Length == 0,
+    "sparse stationary IK is left alone as a possible planted foot");
+var movingDenseIk = new Dictionary<string, IReadOnlyList<BoneKeyframe>>(bakedFk)
+    { ["左足ＩＫ"] = [Key("左足ＩＫ", 0), Key("左足ＩＫ", 1, 0, new Vector3(0, 1, 0)), Key("左足ＩＫ", 2)] };
+var movingDenseMotion = Motion(movingDenseIk);
+Check(ReferenceEquals(movingDenseMotion, DeformLegTracks.Prepare(movingDenseMotion, out sides)) && sides.Length == 0,
+    "dense but moving IK is not reinterpreted as baked FK");
+var explicitFk = Motion(bakedFk, new PropertyKeyframe(0, true, new Dictionary<string, bool> { ["左足ＩＫ"] = true }));
+Check(ReferenceEquals(explicitFk, DeformLegTracks.Prepare(explicitFk, out sides)) && sides.Length == 0,
+    "explicit IK control prevents FK auto-detection");
 Console.WriteLine($"D-leg importer: {checks} checks passed");
