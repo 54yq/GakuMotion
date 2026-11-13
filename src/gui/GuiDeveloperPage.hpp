@@ -116,6 +116,12 @@ namespace GakuMotion
 				ImGui::EndTabItem();
 			}
 
+			if (ImGui::BeginTabItem("布光与视频"))
+			{
+				DrawStageStudio(overlay, ctx);
+				ImGui::EndTabItem();
+			}
+
 			ImGui::EndTabBar();
 		}
 	}

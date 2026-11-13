@@ -2624,6 +2624,7 @@ static void TestInjectionRuntimeBoundary()
 #include "test_actorless_library.hpp"
 #include "test_control_api.hpp"
 #include "test_ensemble_settings.hpp"
+#include "test_stage_studio_settings.hpp"
 #include "test_ensemble_runtime.hpp"
 #ifdef _WIN32
 #include "test_burst_bridge_multi_client.hpp"
@@ -2674,6 +2675,7 @@ int main(int argc, char** argv)
  TestSceneNodes();
  TestControlApi();
  TestEnsembleSettings(repoRoot);
+ TestStageStudioSettings(repoRoot);
  TestEnsembleRuntime(repoRoot);
 #ifdef _WIN32
  TestBurstBridgeMultiClient();

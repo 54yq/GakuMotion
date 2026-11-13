@@ -910,9 +910,10 @@ namespace
 		}
 		const GakuFileFilter filter = kind == 0 ? GakuFileFilter{L"VMD motion", L"*.vmd"}
 			: kind == 2 ? GakuFileFilter{L"Camera VMD / GKCAM", L"*.vmd;*.gkcamera"}
+			: kind == 3 ? GakuFileFilter{L"Video file", L"*.mp4;*.m4v;*.mov;*.webm;*.avi;*.wmv"}
 			: GakuFileFilter{L"WAV audio", L"*.wav"};
 		const GakuFileDialogRequest request{GAKU_SERVICE_VERSION, sizeof(GakuFileDialogRequest),
-			kind == 0 ? L"选择 VMD 动作" : kind == 2 ? L"选择镜头文件" : L"选择 WAV 音频", 1, &filter};
+			kind == 0 ? L"选择 VMD 动作" : kind == 2 ? L"选择镜头文件" : kind == 3 ? L"选择本地视频" : L"选择 WAV 音频", 1, &filter};
 		uint64_t ticket = 0;
 		const auto status = service.beginOpen(service.context, &request, &ticket);
 		if (status != GAKU_OK || !ticket)
@@ -996,6 +997,8 @@ namespace
 			                     ? L"VMD motion\0*.vmd\0\0"
 			                     : kind == 2
 			                     ? L"Camera VMD / GKCAM\0*.vmd;*.gkcamera\0\0"
+			                     : kind == 3
+			                     ? L"Video file\0*.mp4;*.m4v;*.mov;*.webm;*.avi;*.wmv\0\0"
 			                     : L"WAV audio\0*.wav\0\0";
 		dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
 		if (!GetOpenFileNameW(&dialog))
@@ -1378,7 +1381,49 @@ namespace
 #include "GkSceneOwnerRuntime.hpp"
 #include "GkPhotographyEnsembleProbeRuntime.inl"
 #include "GkStageLoadOverride.hpp"
+#include "GkStudioRuntime.hpp"
+#include "GkStudioLightingRuntime.hpp"
+#include "GkStudioVideoRuntime.hpp"
+#include "GkStudioDiagnostics.hpp"
 #include "GkPageObservation.hpp"
+
+	bool RevokeStudio()
+	{
+		auto& core = GakuMotion::Core::Instance();
+		const bool lights = StudioLighting::Revoke(core.studioLightingNotice);
+		const bool video = StudioVideo::Revoke(core.studioVideoNotice);
+		return lights && video;
+	}
+
+	void TickStudio(GakuMotion::Core& core)
+	{
+		const bool hadObjects = StudioLighting::HasObjects() || StudioVideo::HasObjects();
+		const auto context = StudioRuntime::Current();
+		StudioLighting::Tick(core.studioSettings.lighting, context, core.studioLightingNotice);
+		StudioVideo::Tick(core.studioSettings.video, context, core.studioVideoNotice);
+		const bool hasObjects = StudioLighting::HasObjects() || StudioVideo::HasObjects();
+		if (hasObjects && context.allowed) core.customWasActivated = true;
+		static auto lastStatus = std::chrono::steady_clock::time_point{};
+		const auto now = std::chrono::steady_clock::now();
+		if (!hadObjects && !hasObjects && !core.studioSettings.lighting.enabled && !core.studioSettings.video.enabled) return;
+		if (now - lastStatus < std::chrono::seconds(1) && !(hadObjects && !hasObjects)) return;
+		lastStatus = now;
+		const auto quote = [](const std::string& value) { return "\"" + GakuMotion::jsonlite::EscapeString(value) + "\""; };
+		const std::string bytes = "{\"schema\":\"gakumotion-stage-studio-status-v1\",\"process_id\":" +
+			std::to_string(GetCurrentProcessId()) + ",\"frame\":" + std::to_string(g_faceUnityFrame ? g_faceUnityFrame() : -1) +
+			",\"allowed\":" + (context.allowed ? "true" : "false") + ",\"active_scene\":" + quote(context.activeName) +
+			",\"lighting_owned\":" + (StudioLighting::HasObjects() ? "true" : "false") +
+			",\"lighting_notice\":" + quote(core.studioLightingNotice) +
+			",\"video_owned\":" + (StudioVideo::HasObjects() ? "true" : "false") +
+			",\"video_decoded_frame\":" + (StudioVideo::runtime.DecodedFrameObserved() ? "true" : "false") +
+			",\"video_notice\":" + quote(core.studioVideoNotice) +
+			",\"video_diagnostics\":" + quote(StudioVideo::Diagnostics()) +
+			",\"photography_diagnostics\":" + StudioDiagnostics::Snapshot(context) + "}\n";
+		const auto target = GakuMotion::MotionPathFromUtf8(core.logsRoot) / "stage_studio_status.json";
+		auto temporary = target; temporary += ".tmp";
+		std::ofstream out(temporary, std::ios::binary | std::ios::trunc); out << bytes; out.close();
+		if (out) MoveFileExW(temporary.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+	}
 
 	GakuMotion::injection::OwnerSnapshot g_captureOriginOwner;
 	void LogCaptureRestore(const char* phase, const char* reason, bool allowed)
@@ -1444,7 +1489,8 @@ namespace
 		auto& core = GakuMotion::Core::Instance();
 		std::lock_guard<std::recursive_mutex> lock(core.stateMutex);
 		return core.player.state != GakuMotion::PlaybackState::Stopped ||
-			core.camera.owned || core.stageManager.injectionEnabled;
+			core.camera.owned || core.stageManager.injectionEnabled ||
+			StudioLighting::HasObjects() || StudioVideo::HasObjects();
 	}
 
 	void ManualCaptureFault(const char* reason)
@@ -1464,6 +1510,7 @@ namespace
 		const bool physicsClean = RestoreSecondaryPhysics();
 		g_capturePhysicsUnconfirmed |= !physicsClean;
 		ClearSecondaryPhysics();
+		RevokeStudio();
 		core.RevokeInjection();
 		NativeAudio::Release(GakuMotion::bgm::ReleaseReason::PolicyInactive);
 		g_restoringNative = false;
@@ -1500,12 +1547,16 @@ namespace
 		if (physicsClean) ClearSecondaryPhysics();
 		const bool bgmModified = g_bgmLease.GetSnapshot().ownsMutation || g_bgmLease.GetSnapshot().recoveryPending ||
 			g_voiceLease.GetSnapshot().ownsMutation || g_voiceLease.GetSnapshot().recoveryPending;
+		const bool studioModified = StudioLighting::HasObjects() || StudioVideo::HasObjects();
+		const bool studioClean = RevokeStudio();
 		core.SuspendForCapture();
 		auto& report = core.captureRestoreReport;
 		using GakuMotion::capture::RestoreState;
 		report.physics = g_capturePhysicsUnconfirmed ? RestoreState::Unconfirmed :
 			physicsModified ? RestoreState::Confirmed : RestoreState::NotModified;
 		if (!orphansClean) report.stage = RestoreState::Unconfirmed;
+		if (!studioClean) report.stage = RestoreState::Unconfirmed;
+		else if (studioModified && report.stage == RestoreState::NotModified) report.stage = RestoreState::Confirmed;
 		if (!g_sceneOwner.Valid() && core.customWasActivated) report.body = RestoreState::Unconfirmed;
 		if (!NativeAudio::ReleaseForCapture()) report.nativeAudio = RestoreState::Unconfirmed;
 		else if (bgmModified && report.nativeAudio != RestoreState::Unconfirmed) report.nativeAudio = RestoreState::Confirmed;
@@ -1546,7 +1597,10 @@ namespace
 			LogCaptureRestore("continuation_gate", "scene_or_session_changed", false);
 			return false;
 		}
-		if (!core.stageManager.SetInjectionEnabled(false) || !StageLoader::EnsureNoOrphanedStages())
+		const bool stageDisabled = core.stageManager.SetInjectionEnabled(false);
+		const bool orphanStagesClean = StageLoader::EnsureNoOrphanedStages();
+		const bool studioClean = RevokeStudio();
+		if (!stageDisabled || !orphanStagesClean || !studioClean)
 			core.captureRestoreReport.stage = GakuMotion::capture::RestoreState::Unconfirmed;
 		ApplyCaptureFailureInjection(core.captureRestoreReport);
 		const bool clean = core.captureRestoreReport.AllConfirmed();
@@ -3436,6 +3490,7 @@ void MotionTick(void*, float)
 		std::lock_guard<std::recursive_mutex> lock(core.stateMutex);
 		RefreshSceneActors(core);
 		TickPhotographyEnsemble(core, g_faceUnityFrame ? g_faceUnityFrame() : -1);
+		TickStudio(core);
 		core.RejectObsoleteControlCommands();
 	}
 }
