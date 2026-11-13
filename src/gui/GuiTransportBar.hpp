@@ -39,6 +39,7 @@ namespace GakuMotion
 
 	inline float TransportTimeInputWidth() { return TransportTextButtonWidth("00:00.000", 126.0f); }
 	inline float TransportFrameInputWidth() { return TransportTextButtonWidth("0000000", 92.0f); }
+	inline float TransportMusicVolumeWidth() { return 130.0f + ImGui::CalcTextSize("音乐音量").x + ImGui::GetStyle().ItemInnerSpacing.x; }
 	inline float TransportPrecisionGroupWidth(const char* label, float inputWidth)
 	{
 		return ImGui::CalcTextSize(label).x + inputWidth + TransportTextButtonWidth("定位") + 2.0f * ImGui::GetStyle().ItemSpacing.x;
@@ -69,6 +70,7 @@ namespace GakuMotion
 		return std::ceil(2.0f * (fontSize + style.ItemSpacing.y) + frameHeight + style.ItemSpacing.y +
 			flow({4.0f * (std::max)(34.0f, frameHeight) + 3.0f * style.ItemSpacing.x,
 				TransportComboWidth(kTransportPlayModes), TransportComboWidth(kTransportPlaybackSpeedLabels),
+				TransportMusicVolumeWidth(),
 				TransportComboWidth(kTransportCameraModes)}, 18.0f,
 				(std::max)(24.0f, frameHeight)) +
 			flow({2.0f * TransportTextButtonWidth("上一帧", 68.0f) + style.ItemSpacing.x,
@@ -343,6 +345,16 @@ namespace GakuMotion
 			ImGui::EndDisabled();
 			if (ImGui::IsItemHovered()) ImGui::SetTooltip("与各文件播放速度相乘；音频无法拉伸时自动静音。");
 
+			TransportSameLineIfRoom(TransportMusicVolumeWidth(), 18.0f);
+			int musicVolume = ctx.player ? static_cast<int>(std::lround(ctx.player->musicVolume * 100.0f)) : 100;
+			ImGui::BeginDisabled(!ctx.player || !ctx.fnSetMusicVolume);
+			ImGui::SetNextItemWidth(130.0f);
+			if (ImGui::SliderInt("音乐音量", &musicVolume, 0, 100, "%d%%") && ctx.fnSetMusicVolume)
+				ctx.fnSetMusicVolume(ctx.self, static_cast<float>(musicVolume) / 100.0f);
+			if (ImGui::IsItemDeactivatedAfterEdit() && ctx.fnSaveMusicVolume) ctx.fnSaveMusicVolume(ctx.self);
+			if (ImGui::IsItemHovered()) ImGui::SetTooltip("只调整 GakuMotion 音乐；松开后自动保存。");
+			ImGui::EndDisabled();
+
 			const float cameraModeWidth = TransportComboWidth(kTransportCameraModes);
 			TransportSameLineIfRoom(cameraModeWidth, 18.0f);
 
@@ -476,6 +488,13 @@ namespace GakuMotion
 				ImGui::TextWrapped("%s", ctx.loadedSourceMissing
 					? "曲目源文件已移除：请先恢复文件，再到曲库重新加载当前曲目。"
 					: "曲目文件已更新：请到曲库重新加载当前曲目；音乐更新后需要重新加载才能开播。");
+				ImGui::PopStyleColor();
+			}
+			if (ctx.musicVolumeSupport < 0 || !ctx.musicVolumeNotice.empty())
+			{
+				ImGui::PushStyleColor(ImGuiCol_Text, GuiTheme::WarningColor());
+				ImGui::TextWrapped("%s", ctx.musicVolumeSupport < 0
+					? "当前音乐后端不支持独立音量，音乐仍以原音量播放。" : ctx.musicVolumeNotice.c_str());
 				ImGui::PopStyleColor();
 			}
 			if (!navigation.error.empty())

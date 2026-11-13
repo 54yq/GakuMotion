@@ -9,7 +9,7 @@
 		MotionPlayer* PlayerForActor(void* actor)
 		{
 			if (!actor) return nullptr;
-			if (!EnsembleActive()) return player.controller.IsTargetActor(actor) ? &player : nullptr;
+			if (!EnsembleActive()) return IsTargetActor(actor) ? &player : nullptr;
 			for (size_t slot = 0; slot < ensemble::MaxActors; ++slot)
 				if (auto* track = EnsemblePlayer(slot); track && track->controller.IsTargetActor(actor)) return track;
 			return nullptr;
@@ -31,12 +31,9 @@
 			GuiCommand cmd{GuiAction::EnsemblePreset}; cmd.flag = save; cmd.key = name ? name : ""; cmd.ensembleSettings = draft;
 			QueueGui(std::move(cmd));
 		}
-		void RestoreEnsembleTracks(bool abandon = false)
+		void RestoreEnsembleTracks()
 		{
-			for (auto& track : ensembleTracks) if (track)
-			{
-				if (abandon) track->AbandonScene(); else track->Stop();
-			}
+			for (auto& track : ensembleTracks) if (track) track->Stop();
 		}
 		void RetireEnsembleTracks()
 		{

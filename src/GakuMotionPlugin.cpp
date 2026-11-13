@@ -1131,6 +1131,9 @@ namespace
 	std::string g_lastAudioPath{};
 	GakuMotion::audio::Observation g_audioObservation{};
 	MCIERROR g_audioCommandError{0}; // A successful status query cannot erase a failed transport.
+	float g_musicVolume{1.0f};
+	int g_musicVolumeSupport{0}; // 0=no open source, 1=available, -1=unavailable
+	bool g_audioUsesDigitalVideo{false};
 	decltype(&mciSendStringA) g_sendMciAudio = &GakuMotion::windows_path::SendMciUtf8;
 	GakuMotion::bgm::Lease g_bgmLease;
 	GakuMotion::bgm::Lease g_voiceLease;
@@ -1139,6 +1142,22 @@ namespace
 	{
 		return error == MCIERR_INVALID_DEVICE_ID || error == MCIERR_INVALID_DEVICE_NAME;
 	}
+
+	bool HelperAudioSetVolume(float volume)
+	{
+		if (!std::isfinite(volume)) return false;
+		g_musicVolume = std::clamp(volume, 0.0f, 1.0f);
+		if (!g_audioObservation.sourceOpen) { g_musicVolumeSupport = 0; return true; }
+		if (!g_audioUsesDigitalVideo) { g_musicVolumeSupport = -1; return false; }
+		char cmd[80]{};
+		std::snprintf(cmd, sizeof(cmd), "setaudio mmd_song volume to %d",
+		              static_cast<int>(std::lround(g_musicVolume * 1000.0f)));
+		const MCIERROR result = g_sendMciAudio(cmd, NULL, 0, NULL);
+		g_musicVolumeSupport = result ? -1 : 1;
+		// A volume failure must not poison transport observation or synchronization.
+		return result == 0;
+	}
+	int HelperAudioVolumeSupport() { return g_musicVolumeSupport; }
 
 	GakuMotion::audio::Observation HelperAudioObserve()
 	{
@@ -1202,17 +1221,27 @@ namespace
 		}
 		const uint64_t previousEpoch = g_audioObservation.sourceEpoch;
 		g_audioObservation = {};
+		g_musicVolumeSupport = 0;
+		g_audioUsesDigitalVideo = false;
 		g_audioObservation.sourceEpoch = previousEpoch;
 		g_audioObservation.state = GakuMotion::audio::PlaybackState::Starting;
 		g_audioCommandError = 0;
-		std::string cmdOpen = "open \"" + path + "\" type waveaudio alias mmd_song";
+		std::string cmdOpen = "open \"" + path + "\" type mpegvideo alias mmd_song";
 		MCIERROR rc = g_sendMciAudio(cmdOpen.c_str(), NULL, 0, NULL);
+		if (!rc) g_audioUsesDigitalVideo = true;
+		else
+		{
+			// Preserve the original playback backend if DirectShow cannot open this WAV.
+			cmdOpen = "open \"" + path + "\" type waveaudio alias mmd_song";
+			rc = g_sendMciAudio(cmdOpen.c_str(), NULL, 0, NULL);
+		}
 		if (!rc)
 		{
 			g_audioObservation.sourceOpen = true;
 			g_audioObservation.sourceEpoch = previousEpoch + 1;
 			if (!g_audioObservation.sourceEpoch) g_audioObservation.sourceEpoch = 1;
 			rc = g_sendMciAudio("set mmd_song time format milliseconds", NULL, 0, NULL);
+			if (!rc) HelperAudioSetVolume(g_musicVolume);
 		}
 		char cmd[128]{};
 		std::snprintf(cmd, sizeof(cmd), "play mmd_song from %d", (startMs > 0) ? startMs : 0);
@@ -1222,7 +1251,8 @@ namespace
 			if (g_audioObservation.sourceOpen)
 			{
 				const MCIERROR cleanup = g_sendMciAudio("close mmd_song", NULL, 0, NULL);
-				if (!cleanup || HelperAudioMissingAlias(cleanup)) g_audioObservation.sourceOpen = false;
+				if (!cleanup || HelperAudioMissingAlias(cleanup))
+				{ g_audioObservation.sourceOpen = false; g_musicVolumeSupport = 0; g_audioUsesDigitalVideo = false; }
 			}
 			HelperAudioRecordCommand(rc);
 			return;
@@ -1284,6 +1314,7 @@ namespace
 		g_audioObservation = {};
 		g_audioObservation.sourceEpoch = epoch;
 		g_audioObservation.sourceOpen = !closed;
+		if (closed) { g_musicVolumeSupport = 0; g_audioUsesDigitalVideo = false; }
 		HelperAudioRecordCommand(stopError ? stopError : closed ? 0 : closeError);
 		if (closed && !g_audioCommandError) g_audioObservation.confirmed = true;
 	}
@@ -1882,9 +1913,12 @@ bool InitializeMotion()
 	player.fnSeekAudio = HelperAudioSeek;
 	player.fnSeekPausedAudio = HelperAudioSeekPaused;
 	player.fnObserveAudio = HelperAudioObserve;
+	player.fnSetAudioVolume = HelperAudioSetVolume;
+	player.fnAudioVolumeSupport = HelperAudioVolumeSupport;
 	player.fnCanPlay = HelperCanPlay;
 
 	core.Initialize(localRoot, &selected);
+	HelperAudioSetVolume(player.musicVolume);
 	if (g_hostContext.logInfo) g_hostContext.logInfo("[GakuMotion][Paths] layout=%s configs=%s motions=%s",
 		selected.managed ? "gakuloader-v1" : "legacy-unmigrated", core.configRoot.c_str(), core.motionsRoot.c_str());
 	if (g_hostContext.pluginsRoot)
