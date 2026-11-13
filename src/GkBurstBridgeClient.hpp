@@ -301,10 +301,10 @@ namespace GakuMotion
 
 		void RetryUnavailable() { if (!stopped_ && !api_.publish) attempted_ = false; }
 
-		void Shutdown()
+		void Shutdown(bool invokeModuleShutdown = true)
 		{
 			stopped_ = true;
-			if (api_.shutdown) ShutdownGuarded(api_);
+			if (invokeModuleShutdown && api_.shutdown) ShutdownGuarded(api_);
 			api_ = {};
 			// Keep the module reference until process exit: a worker may still be
 			// returning through the companion's pinned native trampoline.

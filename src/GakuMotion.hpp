@@ -16,6 +16,7 @@
 #include "GkStageLoadSettings.hpp"
 #include "GkDataLayout.hpp"
 #include "GkControlRequests.hpp"
+#include "GkEnsembleSettings.hpp"
 
 #include <cstdarg>
 #include <cstdio>
@@ -72,6 +73,13 @@ namespace GakuMotion
 		}
 
 		MotionPlayer player;
+		ensemble::Snapshot ensembleSnapshot;
+		ensemble::Settings ensembleActiveSettings;
+		std::array<std::unique_ptr<MotionPlayer>, ensemble::MaxActors> ensembleTracks;
+		std::array<BoneOverrideSet, ensemble::MaxActors> ensembleOverrides;
+		std::array<int, ensemble::MaxActors> ensembleInstanceIds{};
+		uint64_t ensembleLastFrame{0};
+		bool (*fnEnsembleActorEligible)(void*){nullptr};
 		CameraController camera;
 		LookAtManager lookAt;
 		GuiOverlay gui;
@@ -163,13 +171,21 @@ namespace GakuMotion
 			player.audioStarted = false;
 			player.state = PlaybackState::Stopped;
 			const auto actorRestore = player.controller.RestoreForCapture();
+			bool ensembleBody = true, ensembleFace = true, ensembleGaze = true;
+			bool ensembleBodyModified = false, ensembleFaceModified = false, ensembleGazeModified = false;
+			for (auto& track : ensembleTracks) if (track && EnsembleActive())
+			{
+				const auto r = track->controller.RestoreForCapture(); track->state = PlaybackState::Stopped;
+				ensembleBody &= r.bodyConfirmed; ensembleFace &= r.faceConfirmed; ensembleGaze &= r.gazeConfirmed;
+				ensembleBodyModified |= r.bodyModified; ensembleFaceModified |= r.faceModified; ensembleGazeModified |= r.gazeModified;
+			}
 			auto status = [](bool modified, bool confirmed) {
 				return !confirmed ? capture::RestoreState::Unconfirmed :
 					modified ? capture::RestoreState::Confirmed : capture::RestoreState::NotModified;
 			};
-			captureRestoreReport.body = status(actorRestore.bodyModified, actorRestore.bodyConfirmed);
-			captureRestoreReport.face = status(actorRestore.faceModified, actorRestore.faceConfirmed);
-			captureRestoreReport.gaze = status(actorRestore.gazeModified, actorRestore.gazeConfirmed);
+			captureRestoreReport.body = status(actorRestore.bodyModified || ensembleBodyModified, actorRestore.bodyConfirmed && ensembleBody);
+			captureRestoreReport.face = status(actorRestore.faceModified || ensembleFaceModified, actorRestore.faceConfirmed && ensembleFace);
+			captureRestoreReport.gaze = status(actorRestore.gazeModified || ensembleGazeModified, actorRestore.gazeConfirmed && ensembleGaze);
 			const auto cameraRestore = camera.ReleaseForCapture();
 			captureRestoreReport.camera = status(cameraRestore.modified, cameraRestore.confirmed);
 			const bool stageModified = stageManager.HasCustomizations();
@@ -210,6 +226,7 @@ namespace GakuMotion
 			++injectionSession;
 			captureSuspended = false;
 			if (player.state != PlaybackState::Stopped) player.Stop();
+			RestoreEnsembleTracks();
 			camera.Release();
 			stageManager.SetInjectionEnabled(false);
 			NotifyMotionPlaying(false);
@@ -221,6 +238,7 @@ namespace GakuMotion
 			captureResumeReason = "gm_stopped";
 			stageStoppedByTransport = true;
 			player.Stop();
+			RestoreEnsembleTracks();
 			camera.Release();
 			stageManager.SetInjectionEnabled(false);
 			NotifyMotionPlaying(false);
@@ -352,7 +370,7 @@ namespace GakuMotion
 			StageSettings, StagePreset, ToggleStageCandidate, ScanStageCandidates,
 			MountCustomStage, UnloadCustomStage, RestoreCameraSkybox,
 			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, StageLoadReplacement, SelectTarget,
-			Control
+			Control, EnsembleSettings, EnsemblePreset, EnsembleProbe
 		};
 
 		std::atomic<int> guiPhysicsBackend{2};
@@ -380,6 +398,7 @@ namespace GakuMotion
 			uint64_t actorToken{0}, actorEpoch{0};
 			control_v0::Command controlCommand{};
 			uint64_t controlTicket{0};
+			ensemble::Settings ensembleSettings{};
 		};
 
 		std::mutex guiCommandMutex;
@@ -402,6 +421,7 @@ namespace GakuMotion
 		}
 
 #include "GkControlCore.inl"
+#include "GkEnsembleCore.inl"
 
 		void QueueSelectMotion(int index, bool autoplay)
 		{
@@ -624,6 +644,16 @@ namespace GakuMotion
 			}
 			for (const auto& cmd : commands)
 			{
+				if (cmd.action == GuiAction::EnsembleProbe)
+				{ ensembleSnapshot.probeEnabled = cmd.flag; ensembleSnapshot.verified = false; continue; }
+				if (cmd.action == GuiAction::EnsemblePreset)
+				{ EnsemblePreset(cmd.flag, cmd.key, cmd.ensembleSettings); continue; }
+				if (cmd.action == GuiAction::EnsembleSettings)
+				{
+					if (cmd.sceneSession == injectionSession) ApplyEnsemble(cmd.ensembleSettings, cmd.loadedGeneration, cmd.actorEpoch);
+					else ensembleSnapshot.notice = "场景会话已变化，请重新应用";
+					continue;
+				}
 				if (cmd.action == GuiAction::Control)
 				{
 					CompleteControlCommand(cmd);
@@ -697,12 +727,13 @@ namespace GakuMotion
 				case GuiAction::LoadList:
 					if (playlist.Load(cmd.key.empty() ? playlistPath : cmd.key, playlistNotice))
 					{
-						player.loop = playlist.mode == PlaylistMode::SingleLoop;
+						if (!EnsembleActive()) player.loop = playlist.mode == PlaylistMode::SingleLoop;
 						RefreshMotionLibrary();
 						SavePlaylist();
 					}
 					break;
 				case GuiAction::Mode:
+					if (EnsembleActive()) { player.loop = static_cast<int>(cmd.value) == 1; break; }
 					playlist.mode = static_cast<PlaylistMode>(std::clamp(static_cast<int>(cmd.value), 0, 3));
 					player.loop = playlist.mode == PlaylistMode::SingleLoop;
 					playlist.shuffleRemaining.clear();
@@ -758,9 +789,11 @@ namespace GakuMotion
 					break;
 				case GuiAction::PickTarget: PickBoundActorAsTarget();
 					break;
-				case GuiAction::InitialPosition: player.controller.SetInitialPositionOffset(cmd.position);
+				case GuiAction::InitialPosition:
+					if (!EnsembleActive()) player.controller.SetInitialPositionOffset(cmd.position);
 					break;
-				case GuiAction::SaveInitialPosition: SaveInitialPosition();
+				case GuiAction::SaveInitialPosition:
+					if (!EnsembleActive()) SaveInitialPosition();
 					break;
 				case GuiAction::SaveFacialWeights: SaveFacialWeights();
 					break;
@@ -965,6 +998,18 @@ namespace GakuMotion
 			// calling RestoreMute/Rebind on its destroyed Unity objects.
 			camera.Release(false);
 			player.AbandonScene();
+			ensembleSnapshot.verified = ensembleSnapshot.available = false;
+			if (EnsembleActive())
+			{
+				RetireEnsembleTracks();
+				ensembleSnapshot.active = ensembleSnapshot.settings.enabled = false;
+				++ensembleSnapshot.revision;
+				player.additionalPerformanceDuration = 0;
+				player.controller.SetPlacementYawDegrees(0);
+				player.controller.SetInitialPositionOffset({});
+				LoadInitialPosition();
+				RebuildEffectiveOverrides();
+			}
 			stageManager.AbandonScene();
 			ResetSoleObservation();
 			sceneActors.clear();
@@ -1034,22 +1079,39 @@ namespace GakuMotion
 			if (player.state != PlaybackState::Stopped && !PrepareInjection()) return;
 
 			// 2. 骨骼覆盖集合始终指向最新合成结果
-			player.controller.SetBoneOverrides(&effectiveOverrides);
+			if (!EnsembleActive()) player.controller.SetBoneOverrides(&effectiveOverrides);
 
 			// 3. 姿态灌入（仅新物理帧首个 Actor 推进全局时钟，同帧其余 Actor 仅应用姿态）
 			// Marker proves that this callback wrote each Foot's original motion.
 			// No historical delta/cache is retained, so pause/seek cannot integrate it.
-			player.controller.footPoseWriteStamp.actor = nullptr;
-			player.controller.footPoseWriteStamp.mask = 0;
-			player.controller.footPoseWriteStamp.transforms = {};
-			player.controller.eyePoseWriteStamp.actor = nullptr;
-			player.controller.eyePoseWriteStamp.mask = 0;
-			player.controller.eyePoseWriteStamp.transforms = {};
-			player.Tick(deltaTime, actor, animator, playableDirector, advanceClock);
+			auto* actorPlayer = PlayerForActor(actor);
+			auto& actorController = actorPlayer ? actorPlayer->controller : player.controller;
+			actorController.footPoseWriteStamp.actor = nullptr;
+			actorController.footPoseWriteStamp.mask = 0;
+			actorController.footPoseWriteStamp.transforms = {};
+			actorController.eyePoseWriteStamp.actor = nullptr;
+			actorController.eyePoseWriteStamp.mask = 0;
+			actorController.eyePoseWriteStamp.transforms = {};
+			if (EnsembleActive())
+			{
+				if (!EnsembleActorsValid()) { LoseEnsembleActors(); return; }
+				if (advanceClock && (!physicalFrame || ensembleLastFrame != physicalFrame))
+				{
+					ensembleLastFrame = physicalFrame;
+					player.AdvancePerformance(deltaTime);
+					if (player.finished) { StopPerformance(); return; }
+				}
+				if (actorPlayer)
+				{
+					if (actorPlayer != &player) actorController.CopyRuntimeConfigurationFrom(player.controller);
+					actorPlayer->SampleAtPerformanceTime(player.currentTime, player.state, player.scrubbing, actor, animator, playableDirector);
+				}
+			}
+			else player.Tick(deltaTime, actor, animator, playableDirector, advanceClock);
 			ObserveSoles(actor); // Read-only Unity queries, on the same main-thread frame.
-			ApplyExperimentalSolePitch(actor); // Opt-in demo, separate from #078 evidence.
+			if (!EnsembleActive()) ApplyExperimentalSolePitch(actor); // Opt-in demo, separate from #078 evidence.
 			WriteRequestedSolePitchSnapshot(actor);
-			if (advanceClock && player.finished)
+			if (!EnsembleActive() && advanceClock && player.finished)
 			{
 				player.finished = false;
 				const int next = playlist.Next(motions, currentMotionIndex);
@@ -1058,7 +1120,7 @@ namespace GakuMotion
 			}
 
 			// A stable target prevents multiple actors from fighting over one camera.
-			void* cameraActor = player.controller.targetActor;
+			void* cameraActor = EnsembleActive() && camera.settings.mode == CameraMode::Follow ? EnsembleCameraActor() : player.controller.targetActor;
 			if (cameraActor && camera.fnAlive && !camera.fnAlive(cameraActor)) cameraActor = nullptr;
 			if (!cameraActor)
 			{
@@ -1202,6 +1264,7 @@ namespace GakuMotion
 
 		bool ReloadCurrentMotion()
 		{
+			if (EnsembleActive()) { ensembleSnapshot.notice = "请在多人槽位中重新应用组合"; return false; }
 			if (importBusy || cameraImportBusy) { libraryNotice = "正在导入，完成后可重新加载"; return false; }
 			const auto directory = player.currentMotionDir;
 			const auto file = FindMotionFile(directory);
@@ -1261,6 +1324,9 @@ namespace GakuMotion
 
 		bool DeleteMotionFiles(const std::string& key, bool confirmed = false)
 		{
+			if (EnsembleActive() && std::any_of(ensembleActiveSettings.slots.begin(), ensembleActiveSettings.slots.end(),
+				[&](const auto& slot) { return slot.enabled && slot.motionKey == key; }))
+			{ playlistNotice = "该动作正在多人舞台中使用，请先停用多人舞台"; return false; }
 			if (!confirmed) return false;
 			if (importBusy || cameraImportBusy) { playlistNotice = "正在导入，完成后可删除曲目"; return false; }
 			const int index = FindPlaylistIndex(motions, key);
@@ -2077,6 +2143,7 @@ namespace GakuMotion
 
 		bool SelectMotionByIndex(int index, bool autoPlay = false, bool forcePreview = false)
 		{
+			if (EnsembleActive()) { ensembleSnapshot.notice = "多人舞台运行中，请通过槽位分配动作或先关闭多人舞台"; return false; }
 			if (index < 0 || index >= static_cast<int>(motions.size()))
 			{
 				LogWarn(detail::FormatMsg("[GakuMotion][Config] motion index out of range: %d", index));
@@ -2406,11 +2473,14 @@ namespace GakuMotion
 		void ConsumeConfigCommands()
 		{
 			if (!config.HasPendingCommands()) return;
-			if (!InjectionAllowed() || ((config.cmdPlay || config.cmdSeek || config.cmdSolePitchCheck) &&
+			if (!InjectionAllowed() || ((config.cmdPlay || config.cmdSeek || (config.cmdSolePitchCheck && !EnsembleActive())) &&
 				!PrepareInjection())) { config.ClearCommands(); return; }
 			if (config.cmdBurstTrace) burstTraceRequestedSeq = config.appliedCommandSeq;
 
-			if (config.cmdSolePitchCheck)
+			if (config.cmdSolePitchCheck && EnsembleActive())
+				LogWarn("[GakuMotion][SolePitchCheck] unavailable during ensemble playback; configure placement through actor slots");
+
+			if (config.cmdSolePitchCheck && !EnsembleActive())
 			{
 				const auto& command = config.cmdSolePitchSettings;
 				auto offset = player.controller.initialPositionOffset;
@@ -2538,6 +2608,16 @@ namespace GakuMotion
 
 		void RebuildEffectiveOverrides()
 		{
+			if (EnsembleActive())
+			{
+				for (size_t i = 0; i < ensemble::MaxActors; ++i) if (auto* track = EnsemblePlayer(i))
+				{
+					BoneOverrideSet local; local.LoadFromFile(track->currentMotionDir + "/bone_overrides.json");
+					BoneOverrideSet::BuildEffective(globalOverrides, local, masterOverridesEnabled, ensembleOverrides[i]);
+					track->controller.SetBoneOverrides(&ensembleOverrides[i]);
+				}
+				return;
+			}
 			BoneOverrideSet::BuildEffective(globalOverrides, motionOverrides,
 			                                masterOverridesEnabled, effectiveOverrides);
 			player.controller.SetBoneOverrides(&effectiveOverrides);
@@ -2563,6 +2643,7 @@ namespace GakuMotion
 			const auto* old = sceneActorRegistry.Find(player.controller.targetActor);
 			const uint64_t oldToken = old ? old->token : 0;
 			sceneActorRegistry.Publish(observations);
+			if (EnsembleActive() && !EnsembleActorsValid()) LoseEnsembleActors();
 			sceneActors.clear();
 			for (const auto& item : sceneActorRegistry.Entries()) sceneActors.push_back(item.actor);
 			const auto* selected = sceneActorRegistry.Find(player.controller.targetActor);
@@ -2599,6 +2680,7 @@ namespace GakuMotion
 
 		void SetTargetActor(void* a)
 		{
+			if (EnsembleActive()) return;
 			if (!a || !sceneActorRegistry.Find(a) || player.controller.targetActor == a) return;
 			if (fnBeforeTargetChange && !fnBeforeTargetChange())
 			{
@@ -2908,6 +2990,14 @@ namespace GakuMotion
 			};
 			ctx.boundActorLabel = actorLabel(player.controller.currentBinding.actor);
 			ctx.targetActorLabel = actorLabel(player.controller.targetActor);
+			ensembleSnapshot.actorEpoch = sceneActorRegistry.Epoch();
+			ctx.ensembleSnapshot = ensembleSnapshot;
+			ctx.fnSetEnsemble = [](void* self, const ensemble::Settings& value, uint64_t revision, uint64_t epoch)
+			{ static_cast<Core*>(self)->QueueEnsemble(value, revision, epoch); };
+			ctx.fnEnsemblePreset = [](void* self, bool save, const char* name, const ensemble::Settings& value)
+			{ static_cast<Core*>(self)->QueueEnsemblePreset(save, name, value); };
+			ctx.fnEnsembleProbe = [](void* self, bool enabled)
+			{ GuiCommand cmd{GuiAction::EnsembleProbe}; cmd.flag = enabled; static_cast<Core*>(self)->QueueGui(std::move(cmd)); };
 			ctx.fnSelectTargetActor = [](void* self, uint64_t token, uint64_t epoch)
 			{
 				GuiCommand command{GuiAction::SelectTarget};
@@ -2926,7 +3016,7 @@ namespace GakuMotion
 			{
 				static_cast<Core*>(self)->QueueExperimentalWaistSupport(enabled);
 			};
-			ctx.playlistMode = static_cast<int>(playlist.mode);
+			ctx.playlistMode = EnsembleActive() ? (player.loop ? 1 : 0) : static_cast<int>(playlist.mode);
 			ctx.importBusy = importBusy;
 			guiImportProgressSnapshot = importProgress;
 			ctx.importProgress = &guiImportProgressSnapshot;

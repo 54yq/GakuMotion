@@ -12,9 +12,11 @@
 #include "GakuSafeBoneLookup.h"
 #include "GkExactMethod.hpp"
 #include "GkBgmSuppression.hpp"
+#include "GkPhotographyEnsembleProbe.hpp"
 #include <cstddef>
 #include "GkFaceRuntime.hpp"
 #include "GkBurstBridgeClient.hpp"
+#include "GkBurstBridgeMultiClient.hpp"
 #include "GkFallbackPhysics.hpp"
 #include "GakuPhysicsDiagnostics.h"
 #include <windows.h>
@@ -138,14 +140,73 @@ namespace
 	std::string g_physicsReason;
 	std::chrono::steady_clock::time_point g_physicsLastTick{};
 	bool g_capturePhysicsUnconfirmed = false;
+	GakuMotion::BurstBridgeMultiClient g_multiBurstBridge;
+	struct EnsemblePhysicsState
+	{
+		GakuMotion::FallbackPhysics fallback;
+		GakuPhysicsDiagnosticSnapshot diagnostic{};
+		void* actor{};
+		int backend{-1}, actual{}, frame{-1}, seeks{-1};
+		uint64_t session{};
+		float time{-1};
+		bool beforeQuartz{}, sleeveDiagnostics{}, legacyOwner{};
+		std::string motionFile, reason;
+		std::chrono::steady_clock::time_point lastTick{};
+	};
+	std::array<EnsemblePhysicsState, GBB_MAX_CONTEXTS> g_ensemblePhysics;
+
+	bool HasEnsemblePhysics()
+	{
+		for (const auto& slot : g_ensemblePhysics) if (slot.actor || slot.fallback.HasCaptureWrites()) return true;
+		return g_multiBurstBridge.HasCaptureInput();
+	}
+	bool HasSecondaryPhysicsWrites()
+	{
+		if (g_fallbackPhysics.HasCaptureWrites() || g_burstBridge.HasCaptureInput() || g_multiBurstBridge.HasCaptureInput()) return true;
+		for (const auto& slot : g_ensemblePhysics) if (slot.fallback.HasCaptureWrites()) return true;
+		return false;
+	}
+	bool ClearEnsemblePhysicsSlot(size_t index, bool abandoned = false)
+	{
+		auto& slot = g_ensemblePhysics[index];
+		if (!abandoned && (slot.fallback.HasCaptureWrites() || g_multiBurstBridge.State(index).outstanding))
+			g_capturePhysicsUnconfirmed = true;
+		if (slot.legacyOwner) g_burstBridge.Clear();
+		if (!g_multiBurstBridge.Clear(index))
+		{
+			g_capturePhysicsUnconfirmed = true;
+			if (abandoned) slot.fallback.Clear();
+			return false;
+		}
+		slot = EnsemblePhysicsState{};
+		return true;
+	}
+	bool RestoreSecondaryPhysics()
+	{
+		auto& core = GakuMotion::Core::Instance();
+		bool clean = g_fallbackPhysics.RestoreForCapture(core.player.controller);
+		clean = g_burstBridge.ClearForCapture() && clean;
+		for (size_t i = 0; i < g_ensemblePhysics.size(); ++i)
+		{
+			auto& slot = g_ensemblePhysics[i];
+			if (slot.fallback.HasCaptureWrites())
+			{
+				auto* track = core.EnsemblePlayer(i);
+				clean = track && track->controller.targetActor == slot.actor
+					? slot.fallback.RestoreForCapture(track->controller) && clean : false;
+			}
+		}
+		return g_multiBurstBridge.ClearForCapture() && clean;
+	}
 
 	void ClearSecondaryPhysics(bool abandonedScene = false)
 	{
 		if (abandonedScene) g_capturePhysicsUnconfirmed = false;
-		else if (g_fallbackPhysics.HasCaptureWrites() || g_burstBridge.HasCaptureInput())
+		else if (HasSecondaryPhysicsWrites())
 			g_capturePhysicsUnconfirmed = true;
 		g_burstBridge.Clear();
 		g_fallbackPhysics.Clear();
+		for (size_t i = 0; i < g_ensemblePhysics.size(); ++i) ClearEnsemblePhysicsSlot(i, abandonedScene);
 		g_physicsDiagnostic = {};
 		g_physicsActual = 0;
 		g_physicsFrame = -1;
@@ -155,6 +216,98 @@ namespace
 		g_physicsBeforeQuartz = g_physicsSleeveDiagnostics = false;
 		g_physicsTime = -1.0f;
 		g_physicsLastTick = {};
+	}
+	void DispatchEnsemblePhysics(GakuMotion::Core& core, void* actor, int frame,
+		std::chrono::steady_clock::time_point bodyBegin)
+	{
+		auto* track = core.PlayerForActor(actor);
+		if (!track) return;
+		size_t index = GBB_MAX_CONTEXTS;
+		for (size_t i = 0; i < GBB_MAX_CONTEXTS; ++i) if (core.EnsemblePlayer(i) == track) { index = i; break; }
+		if (index == GBB_MAX_CONTEXTS) return;
+		auto& slot = g_ensemblePhysics[index];
+		auto& ctrl = track->controller;
+		auto binding = ctrl.bindings.find(actor);
+		const bool canDrive = binding != ctrl.bindings.end() && binding->second.bindPoseCaptured && ctrl.CanDriveActor(actor);
+		if (!canDrive || core.player.state == GakuMotion::PlaybackState::Stopped)
+		{
+			if (slot.actor && canDrive)
+			{
+				const bool fallbackClean = slot.fallback.RestoreForCapture(ctrl);
+				const bool bridgeClean = slot.legacyOwner ? g_burstBridge.ClearForCapture() : g_multiBurstBridge.ClearForCapture(index);
+				g_capturePhysicsUnconfirmed |= !fallbackClean || !bridgeClean;
+			}
+			if (!ClearEnsemblePhysicsSlot(index, !canDrive))
+			{ core.ensembleSnapshot.physics[index] = "capture_destroy_unconfirmed"; return; }
+			core.ensembleSnapshot.physics[index] = "off";
+			return;
+		}
+		if (slot.frame == frame && slot.actor == actor) return;
+		const int requested = core.config.secondaryPhysicsBackend;
+		const bool useV3 = requested == 2 && g_multiBurstBridge.Ensure();
+		const bool legacyOwner = requested == 2 && !useV3 && index == core.ensembleActiveSettings.masterSlot;
+		if (slot.actor != actor || slot.session != core.injectionSession || slot.backend != requested ||
+			slot.beforeQuartz != core.config.beforeQuartzExperiment || slot.sleeveDiagnostics != core.config.sleeveMuscleDiagnostics ||
+			slot.motionFile != track->loadedMotionFile || slot.seeks != core.player.SeekCount() || core.player.scrubbing ||
+			core.player.currentTime + .001f < slot.time)
+		{
+			if (slot.actor == actor)
+			{
+				const bool fallbackClean = slot.fallback.RestoreForCapture(ctrl);
+				const bool bridgeClean = slot.legacyOwner ? g_burstBridge.ClearForCapture() : g_multiBurstBridge.ClearForCapture(index);
+				g_capturePhysicsUnconfirmed |= !fallbackClean || !bridgeClean;
+			}
+			if (!ClearEnsemblePhysicsSlot(index, slot.actor != actor))
+			{ core.ensembleSnapshot.physics[index] = "capture_destroy_unconfirmed"; return; }
+			slot.actor = actor; slot.session = core.injectionSession; slot.backend = requested;
+			slot.beforeQuartz = core.config.beforeQuartzExperiment; slot.sleeveDiagnostics = core.config.sleeveMuscleDiagnostics;
+			slot.motionFile = track->loadedMotionFile; slot.legacyOwner = legacyOwner;
+			if (legacyOwner) g_burstBridge.RetryUnavailable();
+		}
+		slot.seeks = core.player.SeekCount(); slot.time = core.player.currentTime; slot.frame = frame;
+		const auto dispatchBegin = std::chrono::steady_clock::now();
+		const float dt = slot.lastTick.time_since_epoch().count() == 0 ? 0.f :
+			std::chrono::duration<float>(dispatchBegin - slot.lastTick).count();
+		slot.lastTick = dispatchBegin;
+		bool native = false;
+		if (useV3) native = g_multiBurstBridge.Publish(index, binding->second, ctrl, slot.time, frame,
+			slot.beforeQuartz, slot.sleeveDiagnostics);
+		else if (legacyOwner) native = g_burstBridge.Publish(binding->second, ctrl, slot.time, frame,
+			slot.beforeQuartz, slot.sleeveDiagnostics);
+		if (native && slot.actual == 1) { slot.fallback.Restore(ctrl); slot.fallback.Clear(); }
+		slot.actual = requested == 0 ? 0 : native ? 2 : 1;
+		if (slot.actual == 1) slot.fallback.Publish(binding->second, ctrl, dt, frame);
+		const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - dispatchBegin).count();
+		auto& d = slot.diagnostic;
+		++d.body_calls; d.body_total_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(dispatchBegin - bodyBegin).count();
+		++d.dispatch_calls; d.dispatch_last_ns = elapsed; d.dispatch_total_ns += elapsed;
+		d.dispatch_max_ns = (std::max)(d.dispatch_max_ns, static_cast<uint64_t>(elapsed));
+		d.version = GAKU_PHYSICS_DIAGNOSTICS_VERSION; d.size = sizeof(d);
+		d.actor = reinterpret_cast<uintptr_t>(actor); ++d.sequence; d.unity_frame = frame;
+		d.playback_state = static_cast<int>(core.player.state); d.clip_time = slot.time;
+		d.requested_backend = requested; d.actual_backend = slot.actual;
+		GbbStatus bridgeStatus{}; GbbPerf bridgePerf{};
+		if (useV3) { bridgeStatus = g_multiBurstBridge.State(index).status; bridgePerf = g_multiBurstBridge.State(index).perf; }
+		else if (legacyOwner) { bridgeStatus = g_burstBridge.status; bridgePerf = g_burstBridge.perf; }
+		d.bridge_state = bridgeStatus.state; d.bridge_fault = bridgeStatus.injection_fault;
+		const auto stats = slot.fallback.GetStats();
+		d.bound_bones = static_cast<uint32_t>(stats.boundBones); d.solved_bones = static_cast<uint32_t>(stats.solvedBones);
+		d.fallback_calls = stats.publishCalls; d.fallback_total_ns = stats.totalCpuNs;
+		d.fallback_clamps = stats.clamps; d.fallback_resets = stats.resets;
+		d.bridge_publish_calls = bridgePerf.publish_calls; d.bridge_publish_total_ns = bridgePerf.publish_total_ns;
+		d.bridge_native_calls = bridgePerf.native_passes; d.bridge_native_total_ns = bridgePerf.native_total_ns;
+		d.native_solver_calls = bridgePerf.solver_calls; d.native_solver_total_ns = bridgePerf.solver_total_ns;
+		d.bridge_failures = bridgePerf.failed_passes; d.bridge_expired_skips = bridgePerf.expired_skips;
+		d.bridge_identity_skips = bridgePerf.identity_skips;
+		const std::string reason = requested == 0 ? "off" : requested == 1 ? "fallback" :
+			useV3 ? g_multiBurstBridge.State(index).reason : legacyOwner ? g_burstBridge.reason : "fallback_legacy_bridge_master_only";
+		core.ensembleSnapshot.physics[index] = native ? "native" : slot.actual == 0 ? "off" : "fallback: " + reason;
+		if (slot.reason != reason)
+		{
+			slot.reason = reason;
+			if (g_hostContext.logInfo) g_hostContext.logInfo("[GakuMotion][Physics] slot=%zu requested=%d actual=%d reason=%s",
+				index, requested, slot.actual, reason.c_str());
+		}
 	}
 
 	HMODULE g_gameAssembly{nullptr};
@@ -1223,6 +1376,7 @@ namespace
 	}
 
 #include "GkSceneOwnerRuntime.hpp"
+#include "GkPhotographyEnsembleProbeRuntime.inl"
 #include "GkStageLoadOverride.hpp"
 #include "GkPageObservation.hpp"
 
@@ -1307,9 +1461,8 @@ namespace
 		auto& core = GakuMotion::Core::Instance();
 		std::lock_guard<std::recursive_mutex> lock(core.stateMutex);
 		g_restoringNative = true;
-		const bool fallbackClean = g_fallbackPhysics.RestoreForCapture(core.player.controller);
-		const bool bridgeClean = g_burstBridge.ClearForCapture();
-		g_capturePhysicsUnconfirmed |= !fallbackClean || !bridgeClean;
+		const bool physicsClean = RestoreSecondaryPhysics();
+		g_capturePhysicsUnconfirmed |= !physicsClean;
 		ClearSecondaryPhysics();
 		core.RevokeInjection();
 		NativeAudio::Release(GakuMotion::bgm::ReleaseReason::PolicyInactive);
@@ -1339,13 +1492,12 @@ namespace
 		const bool orphansClean = StageLoader::EnsureNoOrphanedStages();
 		g_motionSceneAllowed = false;
 		g_restoringNative = true;
-		const bool physicsModified = g_fallbackPhysics.HasCaptureWrites() || g_burstBridge.HasCaptureInput();
-		const bool fallbackClean = g_fallbackPhysics.RestoreForCapture(core.player.controller);
-		const bool bridgeClean = g_burstBridge.ClearForCapture();
-		g_capturePhysicsUnconfirmed |= !fallbackClean || !bridgeClean;
+		const bool physicsModified = HasSecondaryPhysicsWrites();
+		const bool physicsClean = RestoreSecondaryPhysics();
+		g_capturePhysicsUnconfirmed |= !physicsClean;
 		// Preserve failed ownership in each checked provider; do not call the
 		// old blind Clear path and erase the evidence before the capture gate.
-		if (fallbackClean && bridgeClean) ClearSecondaryPhysics();
+		if (physicsClean) ClearSecondaryPhysics();
 		const bool bgmModified = g_bgmLease.GetSnapshot().ownsMutation || g_bgmLease.GetSnapshot().recoveryPending ||
 			g_voiceLease.GetSnapshot().ownsMutation || g_voiceLease.GetSnapshot().recoveryPending;
 		core.SuspendForCapture();
@@ -1361,14 +1513,19 @@ namespace
 		// synchronously cannot consume the previous custom skeleton/rest pose.
 		if (report.body != RestoreState::NotModified || report.gaze != RestoreState::NotModified)
 		{
-			for (const auto& entry : core.player.controller.bindings)
+			for (size_t slot = 0; slot < GakuMotion::ensemble::MaxActors; ++slot)
 			{
+				auto* track = core.EnsembleActive() ? core.EnsemblePlayer(slot) : slot == 0 ? &core.player : nullptr;
+				if (!track) continue;
+				for (const auto& entry : track->controller.bindings)
+				{
 				void* animator = HelperGetActorAnimator(entry.first);
 				if (!animator || !g_captureAnimatorUpdateMethod) { report.body = RestoreState::Unconfirmed; continue; }
 				float zero = 0.0f;
 				void* args[]{&zero}; void* exception = nullptr;
 				g_faceRuntime.invoke(g_captureAnimatorUpdateMethod, animator, args, &exception);
 				if (exception) report.body = RestoreState::Unconfirmed;
+				}
 			}
 		}
 		g_restoringNative = false;
@@ -1670,6 +1827,11 @@ bool InitializeMotion()
 	std::lock_guard<std::mutex> lifecycleLock(g_lifecycleMutex);
 	if (g_pluginInitialized) return true;
 	g_burstBridge.Configure(g_hostContext.pluginsRoot, [](void*, int32_t level, const char* message)
+	{
+		auto log = level > 0 ? g_hostContext.logWarn : g_hostContext.logInfo;
+		if (log) log("[GakuMotion][BurstBridge] %s", message);
+	}, nullptr);
+	g_multiBurstBridge.Configure(g_hostContext.pluginsRoot, [](void*, int32_t level, const char* message)
 	{
 		auto log = level > 0 ? g_hostContext.logWarn : g_hostContext.logInfo;
 		if (log) log("[GakuMotion][BurstBridge] %s", message);
@@ -2097,10 +2259,8 @@ void MotionRuntimeReady(void*)
 	ctrl.fnGetTransformName = HelperGetTransformName;
 	GakuMotion::Core::Instance().fnBeforeTargetChange = []
 	{
-		auto& controller = GakuMotion::Core::Instance().player.controller;
-		const bool fallbackClean = g_fallbackPhysics.RestoreForCapture(controller);
-		const bool bridgeClean = g_burstBridge.ClearForCapture();
-		if (g_capturePhysicsUnconfirmed || !fallbackClean || !bridgeClean)
+		const bool physicsClean = RestoreSecondaryPhysics();
+		if (g_capturePhysicsUnconfirmed || !physicsClean)
 		{
 			g_capturePhysicsUnconfirmed = true;
 			return false; // Preserve failed ownership snapshots for the capture gate.
@@ -2110,6 +2270,7 @@ void MotionRuntimeReady(void*)
 	};
 	ctrl.fnLogInfo = g_hostContext.logInfo;
 	ctrl.fnLogWarn = g_hostContext.logWarn;
+	GakuMotion::Core::Instance().fnEnsembleActorEligible = PhotographyEnsembleProbe::ActorEligible;
 
 	auto& stageApi = GakuMotion::Core::Instance().stageManager.api;
 	stageApi.fnSetActive = HelperGameObjectSetActive;
@@ -2382,6 +2543,42 @@ static bool RefreshSceneActors(GakuMotion::Core& core, bool force = false)
 	return true;
 }
 
+static void TickPhotographyEnsemble(GakuMotion::Core& core, int nativeFrame, void* callbackActor = nullptr)
+{
+	PhotographyEnsembleProbe::SetEnabled(core.ensembleSnapshot.probeEnabled);
+	if (nativeFrame > 0) PhotographyEnsembleProbe::Tick(static_cast<uint64_t>(nativeFrame), callbackActor);
+	else if (!core.ensembleSnapshot.probeEnabled) PhotographyEnsembleProbe::Tick(0);
+	const bool wasAvailable = core.ensembleSnapshot.available, wasVerified = core.ensembleSnapshot.verified;
+	const auto& observed = PhotographyEnsembleProbe::CurrentFrame();
+	core.ensembleSnapshot.available = nativeFrame > 0 && PhotographyEnsembleProbe::Eligible() &&
+		PhotographyEnsembleProbe::resolved && observed.available && observed.number == static_cast<uint64_t>(nativeFrame);
+	core.ensembleSnapshot.verified = core.ensembleSnapshot.available && PhotographyEnsembleProbe::ReadyForInjection();
+	if (core.EnsembleActive() && (!core.ensembleSnapshot.verified || !core.EnsembleActorsValid()))
+	{
+		// A destroyed/rebuilt rig invalidates cached secondary transforms. In that
+		// case discard them without touching Unity; Core restores surviving rigs.
+		// A deliberate observer shutdown with fresh rigs can restore normally.
+		if (!core.ensembleSnapshot.probeEnabled && core.EnsembleActorsValid())
+		{
+			if (!RestoreSecondaryPhysics())
+			{
+				g_capturePhysicsUnconfirmed = true;
+				ProtectedCaptureFault("secondary physics restoration failed while disabling ensemble observation");
+				return;
+			}
+			ClearSecondaryPhysics();
+		}
+		else ClearSecondaryPhysics(true);
+		core.LoseEnsembleActors();
+	}
+	else if (!core.EnsembleActive() && (wasAvailable != core.ensembleSnapshot.available || wasVerified != core.ensembleSnapshot.verified))
+	{
+		core.ensembleSnapshot.notice = core.ensembleSnapshot.verified ?
+			"官方摄影槽位与跨帧角色根检查已通过；多人画面仍待实机验收" :
+			core.ensembleSnapshot.probeEnabled ? "摄影槽位观察未就绪，请保持演员与布局稳定" : "请先开启摄影槽位只读观察";
+	}
+}
+
 void MotionActorTick(void*, void* activeActor, float deltaTime)
 {
 	if (!EnsureRuntimeReadyForActor(activeActor, MotionRuntimeReady)) return;
@@ -2527,7 +2724,10 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	// callback remains. Never retain an accumulating list of seen scene actors.
 	RefreshSceneActors(core, sceneChanged);
 	StageLoader::BindContext(sceneHandle, activeActor);
+	// Refresh native identities before admitting a queued ensemble transaction.
+	TickPhotographyEnsemble(core, unityFrame);
 	if (isNewPhysicalFrame) core.ProcessPendingGuiCommands();
+	TickPhotographyEnsemble(core, unityFrame, activeActor);
 	void* anim = g_motionSceneAllowed && player.state != GakuMotion::PlaybackState::Stopped
 		             ? HelperGetActorAnimator(activeActor)
 		             : nullptr;
@@ -2769,6 +2969,8 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	float dtToPass = realDeltaTime;
 	const auto bodyBegin = std::chrono::steady_clock::now();
 	const uint64_t poseSerialBefore = player.controller.footPoseWriteStamp.serial;
+	const auto* ensembleProbeTrack = core.PlayerForActor(activeActor);
+	const uint64_t ensembleProbePoseBefore = ensembleProbeTrack ? ensembleProbeTrack->controller.footPoseWriteStamp.serial : 0;
 	EyeGazeProbe::Before(activeActor);
 	if (player.controller.targetActor)
 		GakuMotion::OnLateUpdate(activeActor, anim, nullptr, dtToPass, isNewPhysicalFrame,
@@ -2786,7 +2988,11 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 			core.stageManager.RescanCandidates(activeActor); // Read-only discovery while GM stage controls are inactive.
 		core.RefreshSceneNodes();
 	}
-	if (core.IsTargetActor(activeActor))
+	if (!core.EnsembleActive() && HasEnsemblePhysics())
+		for (size_t i = 0; i < g_ensemblePhysics.size(); ++i) ClearEnsemblePhysicsSlot(i, true);
+	if (core.EnsembleActive())
+		DispatchEnsemblePhysics(core, activeActor, unityFrame >= 0 ? unityFrame : s_fallbackFrame, bodyBegin);
+	else if (core.IsTargetActor(activeActor))
 	{
 		auto binding = player.controller.bindings.find(activeActor);
 		const int frame = unityFrame >= 0 ? unityFrame : s_fallbackFrame;
@@ -2903,7 +3109,9 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 		const auto seq = core.burstTraceRequestedSeq;
 		core.burstTraceRequestedSeq = 0;
 		const std::filesystem::path directory(core.diagnosticsRoot);
-		const int result = g_burstBridge.DumpTraces((directory / "before_quartz_trace.json").wstring().c_str());
+		const auto tracePath = (directory / "before_quartz_trace.json").wstring();
+		int result = core.EnsembleActive() ? g_multiBurstBridge.DumpTraces(tracePath.c_str()) : GBB_E_UNAVAILABLE;
+		if (result == GBB_E_UNAVAILABLE) result = g_burstBridge.DumpTraces(tracePath.c_str());
 		LARGE_INTEGER qpc{}; QueryPerformanceCounter(&qpc);
 		char json[1024]{};
 		std::snprintf(json, sizeof(json),
@@ -2922,6 +3130,13 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	// Consume the completed body + secondary pose in the same tick.
 	ActorGroundShadow::RefreshAfterPose(activeActor, poseSerialBefore);
 	GroundShadowProbe::AfterPose(activeActor, poseSerialBefore);
+	if (unityFrame > 0)
+		if (auto* appliedTrack = core.PlayerForActor(activeActor))
+		{
+			const auto& stamp = appliedTrack->controller.footPoseWriteStamp;
+			if (stamp.actor == activeActor && stamp.serial != ensembleProbePoseBefore && stamp.mask)
+				PhotographyEnsembleProbe::NoteApplied(static_cast<uint64_t>(unityFrame), activeActor);
+		}
 #ifdef GKMOTION_ENABLE_SHOE_MESH_PROBE
 	// Independent one-shot geometry evidence. Keep #054's observer and playback
 	// untouched; only the explicit request file enables this detached snapshot.
@@ -2966,6 +3181,8 @@ extern "C" GAKU_PLUGIN_EXPORT int GakuMotion_GetPhysicsDiagnostics(
 	void* actor, GakuPhysicsDiagnosticSnapshot* out, uint32_t size)
 {
 	if (!actor || !out || size != sizeof(*out)) return -1;
+	for (const auto& slot : g_ensemblePhysics)
+		if (slot.diagnostic.actor == reinterpret_cast<uintptr_t>(actor)) { *out = slot.diagnostic; return 1; }
 	if (g_physicsDiagnostic.actor != reinterpret_cast<uintptr_t>(actor)) return 0;
 	*out = g_physicsDiagnostic;
 	return 1;
@@ -3063,7 +3280,8 @@ void MotionShutdown(void*)
 	// for the process lifetime; unloading its runtime is unsupported.
 	GakuMotion::csharp_import::Shutdown();
 	ClearSecondaryPhysics();
-	g_burstBridge.Shutdown();
+	const bool multiShutdown = g_multiBurstBridge.Shutdown();
+	g_burstBridge.Shutdown(!multiShutdown);
 	EyeGazeProbe::Shutdown();
 	BodyShadowProbe::Shutdown();
 	g_bodyShadowProbeAttempted = false;
@@ -3217,6 +3435,7 @@ void MotionTick(void*, float)
 		auto& core = GakuMotion::Core::Instance();
 		std::lock_guard<std::recursive_mutex> lock(core.stateMutex);
 		RefreshSceneActors(core);
+		TickPhotographyEnsemble(core, g_faceUnityFrame ? g_faceUnityFrame() : -1);
 		core.RejectObsoleteControlCommands();
 	}
 }

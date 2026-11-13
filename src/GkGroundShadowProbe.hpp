@@ -25,6 +25,24 @@ namespace GroundShadowProbe
 	inline uint64_t poseSerial = 0;
 	inline int poseFrame = -1;
 	inline UnityVector3 poseMin{}, poseMax{};
+	struct ActorPose { void* actor{}; uint64_t serial{}; int frame{-1}; UnityVector3 low{}, high{}; };
+	inline std::array<ActorPose, 3> actorPoses{};
+	inline uint64_t poseRosterEpoch = 0;
+	inline ActorPose* ActorPoseFor(void* actor)
+	{
+		auto& core = GakuMotion::Core::Instance();
+		if (poseRosterEpoch != core.sceneActorRegistry.Epoch())
+		{ actorPoses = {}; poseRosterEpoch = core.sceneActorRegistry.Epoch(); }
+		for (auto& entry : actorPoses) if (entry.actor == actor) return &entry;
+		for (auto& entry : actorPoses) if (!entry.actor) { entry.actor = actor; return &entry; }
+		return nullptr;
+	}
+	inline void SelectActorPose(void* actor)
+	{
+		if (auto* pose = ActorPoseFor(actor))
+		{ poseActor = pose->actor; poseSerial = pose->serial; poseFrame = pose->frame; poseMin = pose->low; poseMax = pose->high; }
+		else { poseActor = nullptr; poseSerial = 0; poseFrame = -1; }
+	}
 	inline thread_local void* boundsScopeActor = nullptr;
 	inline thread_local bool boundsConsumed = false;
 	inline thread_local Bounds consumedNative{}, consumedDraw{};
@@ -82,7 +100,10 @@ namespace GroundShadowProbe
 	inline bool Eligible(void* actor)
 	{
 		if (!enabled.load(std::memory_order_acquire) || !OnThread() || !actor || !g_motionSceneAllowed) return false;
-		auto& player = GakuMotion::Core::Instance().player;
+		auto* selected = GakuMotion::Core::Instance().PlayerForActor(actor);
+		if (!selected) return false;
+		auto& player = *selected;
+		SelectActorPose(actor);
 		const auto& controller = player.controller;
 		void* target = controller.targetActor ? controller.targetActor : controller.currentBinding.actor;
 		const auto binding = controller.bindings.find(actor);
@@ -118,7 +139,9 @@ namespace GroundShadowProbe
 	}
 	inline bool PoseCurrent(void* actor)
 	{
-		const auto& stamp = GakuMotion::Core::Instance().player.controller.footPoseWriteStamp;
+		auto* selected = GakuMotion::Core::Instance().PlayerForActor(actor);
+		if (!selected || !Eligible(actor)) return false;
+		const auto& stamp = selected->controller.footPoseWriteStamp;
 		// Core clears the shared stamp's actor/feet before every actor callback,
 		// including unrelated actors that never write a new pose. CapturePose has
 		// already verified this actor's complete write. Keep that same-frame
@@ -155,9 +178,12 @@ namespace GroundShadowProbe
 	}
 	inline void CapturePose(void* actor, uint64_t serialBefore)
 	{
+		if (auto* pose = ActorPoseFor(actor)) { pose->serial = 0; pose->frame = -1; }
 		poseActor = nullptr; poseSerial = 0; poseFrame = -1;
 		if (!boundsFixReady || !Eligible(actor) || !g_faceUnityFrame) return;
-		const auto& controller = GakuMotion::Core::Instance().player.controller;
+		auto* selected = GakuMotion::Core::Instance().PlayerForActor(actor);
+		if (!selected) return;
+		const auto& controller = selected->controller;
 		const auto& stamp = controller.footPoseWriteStamp;
 		if (!controller.fnGetWorldPosition || stamp.actor != actor || stamp.serial == serialBefore ||
 			stamp.mask != 3 || !stamp.transforms[0] || !stamp.transforms[1]) return;
@@ -181,6 +207,7 @@ namespace GroundShadowProbe
 		for (void* transform : binding->second.boneTransforms) if (transform && !include(transform)) return;
 		if (count < 3) return;
 		poseMin = low; poseMax = high; poseActor = actor; poseSerial = stamp.serial; poseFrame = g_faceUnityFrame();
+		if (auto* pose = ActorPoseFor(actor)) *pose = {actor, poseSerial, poseFrame, low, high};
 	}
 	inline std::string Vector(void* transform, bool rotation = false)
 	{
@@ -383,7 +410,9 @@ namespace GroundShadowProbe
 		try { PollRequest(Clock::now()); CapturePose(actor, serialBefore); }
 		catch (...) { poseActor = nullptr; ++ioFailures; }
 		if (drawHooksReady) return;
-		const auto& stamp = GakuMotion::Core::Instance().player.controller.footPoseWriteStamp;
+		auto* selected = GakuMotion::Core::Instance().PlayerForActor(actor);
+		if (!selected) return;
+		const auto& stamp = selected->controller.footPoseWriteStamp;
 		if (stamp.actor != actor || stamp.serial == serialBefore || stamp.serial == lastPostPoseSerial) return;
 		lastPostPoseSerial = stamp.serial;
 		void* previous = scopedCamera;
@@ -436,6 +465,7 @@ namespace GroundShadowProbe
 		observationReady = drawHooksReady = false;
 		boundsFixReady = false; boundsFixEnabled = true;
 		poseActor = boundsScopeActor = nullptr; poseSerial = 0; poseFrame = -1; boundsConsumed = false;
+		actorPoses = {}; poseRosterEpoch = 0;
 		lastPostPoseSerial = 0;
 		std::vector<void*> retained;
 		for (void* target : hooks)

@@ -95,6 +95,9 @@ namespace GakuMotion
 		float cameraSourceDuration{0.0f};
 		float audioSourceDuration{0.0f};
 		bool audioWaitingForTiming{false};
+		// Session-owned tail supplied by additional actor tracks. Zero preserves
+		// the single-actor duration contract; actor samplers never advance it.
+		float additionalPerformanceDuration{0.0f};
 
 		float MotionSourceTime() const { return TrackSourceTime(currentTime, timing.motion); }
 		float FacialSourceTime() const { return TrackSourceTime(currentTime, timing.facial); }
@@ -110,7 +113,7 @@ namespace GakuMotion
 				duration = (std::max)(duration, TrackTimelineDuration(cameraSourceDuration, timing.camera));
 			if (audioSourceDuration > 0.0f)
 				duration = (std::max)(duration, TrackTimelineDuration(audioSourceDuration, timing.audio));
-			return duration;
+			return (std::max)(duration, additionalPerformanceDuration);
 		}
 		bool AudioRateSupported() const
 		{
@@ -262,6 +265,7 @@ namespace GakuMotion
 			// snapshot; recapturing immediately after Rebind samples old animation.
 			if (state != PlaybackState::Stopped) Stop();
 			currentMotionDir = motionDirectory;
+			additionalPerformanceDuration = 0.0f;
 			clip = std::move(nextClip);
 			loadedMotionFile = motionFile;
 			// Reload even when absent/invalid: another song's trim must not leak.
@@ -579,36 +583,51 @@ namespace GakuMotion
 				controller.DefensiveMute(actor, animator, playableDirector);
 			}
 
-			if (state == PlaybackState::Playing && !scrubbing)
-			{
-				if (advanceClock)
-				{
-					AdvanceClock(deltaTime);
-
-					// Loop handling
-					if (currentTime >= TimelineDuration())
-					{
-						if (loop)
-						{
-							currentTime = 0.0f;
-							audioSeekOffset = 0.0f;
-							audioSyncSettleFrames = (fnGetAudioTime != nullptr) ? kAudioSettleFrames : 0;
-							if (fnStopAudio) fnStopAudio();
-							audioStarted = false;
-							if (!StartAudioAtCurrentTime()) { Pause(); return; }
-						}
-						else
-						{
-							Stop();
-							finished = true;
-							return;
-						}
-					}
-				}
-			}
+			if (advanceClock) AdvancePerformance(deltaTime);
+			if (state == PlaybackState::Stopped) return;
 
 			// Apply pose
 			if (actorBound) controller.ApplyMotion(clip, MotionSourceTime(), actor, FacialSourceTime());
+		}
+
+		// A session calls this once before ANY actor sampling. It intentionally
+		// does not depend on which (possibly non-participating) actor ticks first.
+		void AdvancePerformance(float deltaTime)
+		{
+			if (state == PlaybackState::Playing && !scrubbing)
+			{
+				AdvanceClock(deltaTime);
+
+				// Loop handling
+				if (currentTime >= TimelineDuration())
+				{
+					if (loop)
+					{
+						currentTime = 0.0f;
+						audioSeekOffset = 0.0f;
+						audioSyncSettleFrames = (fnGetAudioTime != nullptr) ? kAudioSettleFrames : 0;
+						if (fnStopAudio) fnStopAudio();
+						audioStarted = false;
+						if (!StartAudioAtCurrentTime()) { Pause(); return; }
+					}
+					else
+					{
+						Stop();
+						finished = true;
+						return;
+					}
+				}
+			}
+		}
+
+		// No audio callbacks, local clock advancement, loop or playlist ownership.
+		void SampleAtPerformanceTime(float time, PlaybackState sessionState, bool sessionScrubbing,
+			void* actor, void* animator = nullptr, void* director = nullptr)
+		{
+			currentTime = time;
+			state = sessionState;
+			scrubbing = sessionScrubbing;
+			Tick(0.0f, actor, animator, director, false);
 		}
 
 		// 主时钟推进：音频可用时以音频为基准，并处理跳转后的 settle 校正。

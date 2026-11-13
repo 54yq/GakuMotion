@@ -13,6 +13,8 @@ namespace ActorGroundShadow
 	inline void *actorClass = nullptr, *aoClass = nullptr, *aoField = nullptr;
 	inline const void *lateUpdate = nullptr, *aliveMethod = nullptr;
 	inline uint64_t lastPoseSerial = 0;
+	inline std::map<void*, uint64_t> actorPoseSerials;
+	inline uint64_t actorRosterEpoch = 0;
 
 	inline void Reset()
 	{
@@ -21,6 +23,7 @@ namespace ActorGroundShadow
 		actorClass = aoClass = aoField = nullptr;
 		lateUpdate = aliveMethod = nullptr;
 		lastPoseSerial = 0;
+		actorPoseSerials.clear(); actorRosterEpoch = 0;
 	}
 
 	inline void BindUnityThread()
@@ -95,12 +98,17 @@ namespace ActorGroundShadow
 		// and paused preview. No refresh from UI, cameras, or an idle/stopped tick.
 		if (!actor || GetCurrentThreadId() != unityThreadId.load(std::memory_order_acquire) ||
 			faulted || refreshing || !g_motionSceneAllowed) return false;
-		auto& player = GakuMotion::Core::Instance().player;
+		auto& core = GakuMotion::Core::Instance();
+		auto* selected = core.PlayerForActor(actor);
+		if (!selected) return false;
+		auto& player = *selected;
+		if (actorRosterEpoch != core.sceneActorRegistry.Epoch())
+		{ actorPoseSerials.clear(); actorRosterEpoch = core.sceneActorRegistry.Epoch(); }
 		const auto& controller = player.controller;
 		const auto& stamp = controller.footPoseWriteStamp;
 		if (player.state == GakuMotion::PlaybackState::Stopped || !controller.IsTargetActor(actor) ||
 			!controller.CanDriveActor(actor) || stamp.actor != actor || stamp.serial == serialBefore ||
-			stamp.serial == lastPoseSerial) return false;
+			stamp.serial == actorPoseSerials[actor]) return false;
 		auto binding = controller.bindings.find(actor);
 		if (binding == controller.bindings.end() || !binding->second.bindPoseCaptured || !Resolve() ||
 			!IsClass(actor, actorClass) || !IsAlive(actor)) return false;
@@ -111,6 +119,7 @@ namespace ActorGroundShadow
 		if (!IsClass(ao, aoClass) || !IsAlive(ao)) return false;
 		refreshing = true;
 		lastPoseSerial = stamp.serial;
+		actorPoseSerials[actor] = stamp.serial;
 		void* exception = nullptr;
 		g_faceRuntime.invoke(lateUpdate, ao, nullptr, &exception);
 		refreshing = false;

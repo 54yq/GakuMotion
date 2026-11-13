@@ -2623,6 +2623,13 @@ static void TestInjectionRuntimeBoundary()
 #include "test_track_timing.hpp"
 #include "test_actorless_library.hpp"
 #include "test_control_api.hpp"
+#include "test_ensemble_settings.hpp"
+#include "test_ensemble_runtime.hpp"
+#ifdef _WIN32
+#include "test_burst_bridge_multi_client.hpp"
+#endif
+#include "test_ensemble_placement.hpp"
+#include "test_photography_ensemble_probe.hpp"
 
 int main(int argc, char** argv)
 {
@@ -2666,6 +2673,13 @@ int main(int argc, char** argv)
  TestWaistSupportIntegration();
  TestSceneNodes();
  TestControlApi();
+ TestEnsembleSettings(repoRoot);
+ TestEnsembleRuntime(repoRoot);
+#ifdef _WIN32
+ TestBurstBridgeMultiClient();
+#endif
+ TestEnsemblePlacement();
+ TestPhotographyEnsembleProbe();
  TestClipGroundAnchor();
  TestClipSwitchKeepsActorRest();
  TestPreviewWaitsForHumanoid();

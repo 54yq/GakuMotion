@@ -1385,10 +1385,14 @@ namespace CameraBridge
 			auto q = g_getWorldRotNative(root);
 			// Main playback applies XYZ to the hips world target rather than the
 			// actor component. Include it in the camera's logical scene anchor.
-			const auto placement = GakuMotion::Core::Instance().player.controller.initialPositionOffset;
+			auto* selected = GakuMotion::Core::Instance().PlayerForActor(actor);
+			const auto& controller = selected ? selected->controller : GakuMotion::Core::Instance().player.controller;
+			const auto placement = controller.initialPositionOffset;
 			origin = GakuMotion::Vector3{p.x, p.y, p.z} + placement;
 			hips = {h.x, h.y, h.z};
 			rotation = {q.x, q.y, q.z, q.w};
+			if (controller.placementYawDegrees != 0)
+				rotation = GakuMotion::Quaternion::FromEulerDegreesXYZ(0, controller.placementYawDegrees, 0) * rotation;
 			float norm = GakuMotion::Quaternion::Dot(rotation, rotation);
 			if (!std::isfinite(norm) || norm < 1e-8f) return false;
 			rotation = rotation.Normalized();

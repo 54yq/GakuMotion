@@ -149,7 +149,9 @@ namespace BodyShadowProbe
 	{
 		if (!OnThread() || !ready || !inUpdate || !GroundShadowProbe::Eligible(actor) ||
 			!GroundShadowProbe::boundsFixReady || !GroundShadowProbe::Valid(input)) return false;
-		const auto& stamp = GakuMotion::Core::Instance().player.controller.footPoseWriteStamp;
+		auto* selected = GakuMotion::Core::Instance().PlayerForActor(actor);
+		if (!selected) return false;
+		const auto& stamp = selected->controller.footPoseWriteStamp;
 		if (GroundShadowProbe::poseActor != actor || GroundShadowProbe::poseSerial != stamp.serial ||
 			GroundShadowProbe::poseFrame < 0 || !g_faceUnityFrame || GroundShadowProbe::poseFrame != g_faceUnityFrame()) return false;
 		updateConsumed = true; updateNative = input; updateDraw = input;

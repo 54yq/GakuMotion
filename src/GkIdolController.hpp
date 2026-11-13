@@ -243,6 +243,8 @@ namespace GakuMotion
 		Vector3 restRootPos{0.0f, 0.0f, 0.0f}; // relative to actor
 		Vector3 restActorPos{0.0f, 0.0f, 0.0f};
 		Quaternion restActorRot{0.0f, 0.0f, 0.0f, 1.0f};
+		Quaternion placementRestRootLocal;
+		bool placementRestRootCaptured{false}, placementYawApplied{false};
 
 		// Clip-wide floor offset when clipGroundAnchored; legacy bind-pose lift
 		// otherwise. bindGroundLift preserves the original fallback across songs.
@@ -301,6 +303,8 @@ namespace GakuMotion
 			restRootPos = {0.0f, 0.0f, 0.0f};
 			restActorPos = {0.0f, 0.0f, 0.0f};
 			restActorRot = {0.0f, 0.0f, 0.0f, 1.0f};
+			placementRestRootLocal = Quaternion::Identity();
+			placementRestRootCaptured = placementYawApplied = false;
 			groundLift = 0.0f;
 			bindGroundLift = 0.0f;
 			calibratedRootHeight = 0.0f;
@@ -1059,6 +1063,13 @@ namespace GakuMotion
 			// Capture Hips rest position relative to actor
 			if (b.rootTransform)
 			{
+				if (fnGetLocalRotation)
+				{
+					float q[4]{0, 0, 0, 1};
+					fnGetLocalRotation(b.rootTransform, q);
+					b.placementRestRootLocal = Quaternion(q[0], q[1], q[2], q[3]);
+					b.placementRestRootCaptured = true;
+				}
 				float hPos[3]{0.0f, 0.0f, 0.0f};
 				if (fnGetWorldPosition)
 				{
@@ -1645,6 +1656,12 @@ namespace GakuMotion
 		void ResetToRestPose(IdolBoneBinding& b)
 		{
 			if (!b.actor || !b.bindPoseCaptured) return;
+			if (b.placementYawApplied && b.placementRestRootCaptured && b.rootTransform && fnSetLocalRotation)
+			{
+				const auto& q = b.placementRestRootLocal;
+				fnSetLocalRotation(b.rootTransform, q.x, q.y, q.z, q.w);
+				b.placementYawApplied = false;
+			}
 
 			// 1. 物理回写根骨骼站姿标高，防止停顿残留导致下蹲过深
 			if (b.rootTransform)
@@ -2108,6 +2125,27 @@ namespace GakuMotion
 			Vector3 vmdRootPos;
 			std::vector<Quaternion> vmdRotations;
 			clip.Sample(currentTimeSeconds, vmdRootPos, vmdRotations);
+			// A partial clip may omit Hips. Start that unkeyed root from its original
+			// local pose, never from the preceding frame's placed rotation.
+			const bool clipWritesRoot = [&]
+			{
+				for (size_t i = 0; i < clip.bones.size() && i < b.boneTransforms.size(); ++i)
+					if (clip.bones[i].humanoid_id == 0 && b.boneTransforms[i] == b.rootTransform) return true;
+				return false;
+			}();
+			if ((placementYawDegrees != 0.0f || b.placementYawApplied) && !clipWritesRoot &&
+				b.rootTransform && fnGetLocalRotation && fnSetLocalRotation)
+			{
+				if (!b.placementRestRootCaptured)
+				{
+					float q[4]{0, 0, 0, 1}; fnGetLocalRotation(b.rootTransform, q);
+					b.placementRestRootLocal = Quaternion(q[0], q[1], q[2], q[3]);
+					b.placementRestRootCaptured = true;
+				}
+				const auto& q = b.placementRestRootLocal;
+				fnSetLocalRotation(b.rootTransform, q.x, q.y, q.z, q.w);
+				b.placementYawApplied = false;
+			}
 			if (facialTimeSeconds < 0.0f) facialTimeSeconds = currentTimeSeconds;
 			if (facialTimeSeconds != currentTimeSeconds && std::any_of(clip.bones.begin(), clip.bones.end(),
 				[](const auto& bone) { return bone.head_space_eye_delta; }))
@@ -3056,6 +3094,36 @@ namespace GakuMotion
 			// This opt-in geometric support sees the completed main pose and arm
 			// auxiliary postpass. It writes only exact Waist_H local transforms.
 			ApplyWaistSupport(b);
+			// Placement is one rigid world-Y rotation of the completed Hips subtree.
+			// Child locals, auxiliary output and face pose remain mutually coherent.
+			// Rotate around the original actor pivot, then retain the world-axis XYZ
+			// translation. Never rotate the official actor/layout transform itself.
+			if (placementYawDegrees != 0.0f && b.rootTransform && fnGetWorldRotation &&
+				fnGetWorldPosition && fnSetWorldPosition &&
+				(fnSetWorldRotation || (fnSetLocalRotation && fnGetTransformParent)) &&
+				(clipWritesRoot || b.placementRestRootCaptured))
+			{
+				float p[3]{}, r[4]{0, 0, 0, 1};
+				fnGetWorldPosition(b.rootTransform, p); fnGetWorldRotation(b.rootTransform, r);
+				const auto yaw = Quaternion::FromEulerDegreesXYZ(0, placementYawDegrees, 0);
+				const auto pivot = curActorPos + initialPositionOffset;
+				const auto target = pivot + yaw.Rotate(Vector3(p[0], p[1], p[2]) - pivot);
+				const auto rotation = (yaw * Quaternion(r[0], r[1], r[2], r[3])).Normalized();
+				if (fnSetLocalRotation && fnGetTransformParent)
+				{
+					Quaternion parentRotation = Quaternion::Identity();
+					if (void* parent = fnGetTransformParent(b.rootTransform))
+					{
+						float q[4]{0, 0, 0, 1}; fnGetWorldRotation(parent, q);
+						parentRotation = Quaternion(q[0], q[1], q[2], q[3]);
+					}
+					const auto local = (parentRotation.Inverse() * rotation).Normalized();
+					fnSetLocalRotation(b.rootTransform, local.x, local.y, local.z, local.w);
+				}
+				else fnSetWorldRotation(b.rootTransform, rotation.x, rotation.y, rotation.z, rotation.w);
+				fnSetWorldPosition(b.rootTransform, target.x, target.y, target.z);
+				b.placementYawApplied = true;
+			}
 
 			// ---- PROBE A9: WHO is this actor, and what are its real bone lengths? ----
 			// WHY THIS EXISTS. A8 measured thighLen 0.3496 m against 0.4558 m in
@@ -3476,6 +3544,49 @@ namespace GakuMotion
 			if (!std::isfinite(offset.x) || !std::isfinite(offset.y) || !std::isfinite(offset.z)) return false;
 			initialPositionOffset = offset;
 			return true;
+		}
+
+		float placementYawDegrees{0.0f};
+
+		bool SetPlacementYawDegrees(float degrees) noexcept
+		{
+			if (!std::isfinite(degrees)) return false;
+			placementYawDegrees = std::remainder(degrees, 360.0f);
+			return true;
+		}
+
+		// Share runtime adapters and user policy, never another actor's bindings,
+		// placement, per-clip calibration/source evidence or override/replay data.
+		void CopyRuntimeConfigurationFrom(const IdolController& source)
+		{
+			fnGetBoneTransform = source.fnGetBoneTransform;
+			fnGetComponentTransform = source.fnGetComponentTransform;
+			fnGetTransformParent = source.fnGetTransformParent;
+			fnSetWorldPosition = source.fnSetWorldPosition; fnSetWorldRotation = source.fnSetWorldRotation;
+			fnGetWorldPosition = source.fnGetWorldPosition; fnGetWorldRotation = source.fnGetWorldRotation;
+			fnSetLocalPosition = source.fnSetLocalPosition; fnSetLocalRotation = source.fnSetLocalRotation;
+			fnGetLocalPosition = source.fnGetLocalPosition; fnGetLocalRotation = source.fnGetLocalRotation;
+			fnGetLossyScale = source.fnGetLossyScale;
+			fnSetAnimatorEnabled = source.fnSetAnimatorEnabled; fnGetAnimatorEnabled = source.fnGetAnimatorEnabled;
+			fnAnimatorRebind = source.fnAnimatorRebind;
+			fnGetAnimatorController = source.fnGetAnimatorController; fnSetAnimatorController = source.fnSetAnimatorController;
+			fnPausePlayableDirector = source.fnPausePlayableDirector;
+			fnGetChildCount = source.fnGetChildCount; fnGetChild = source.fnGetChild;
+			fnGetTransformName = source.fnGetTransformName;
+			faceApi = source.faceApi; fnCanDriveActor = source.fnCanDriveActor;
+			fnLogInfo = source.fnLogInfo; fnLogWarn = source.fnLogWarn;
+			armOffsetPitch = source.armOffsetPitch; armOffsetYaw = source.armOffsetYaw; armOffsetRoll = source.armOffsetRoll;
+			useRestRotations = source.useRestRotations; legRestBasis = source.legRestBasis;
+			preserveAnimatorForSecondaryPhysics = source.preserveAnimatorForSecondaryPhysics;
+			captureCheckEnforced = source.captureCheckEnforced; useAnimatorRebind = source.useAnimatorRebind;
+			facialEnableBaseline = source.facialEnableBaseline; facialMikuMouthFit = source.facialMikuMouthFit;
+			facialMikuEyeFit = source.facialMikuEyeFit;
+			facialMikuFitAllowUnverified = source.facialMikuFitAllowUnverified;
+			facialWeights = source.facialWeights;
+			facialBaselineMultiplier = source.facialBaselineMultiplier; facialCharacterOverride = source.facialCharacterOverride;
+			SetExperimentalWaistSupportEnabled(source.experimentalWaistSupportEnabled);
+			auxDriveMode = source.auxDriveMode; rootHeightCalibrationEnabled = source.rootHeightCalibrationEnabled;
+			eyePoseRelativeGain = source.eyePoseRelativeGain;
 		}
 
 		void ApplyMotion(const MotionClip& clip, float currentTimeSeconds, void* actor = nullptr,
