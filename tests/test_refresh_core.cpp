@@ -1179,6 +1179,15 @@ static void TestCoreIntegration(const std::string& repoRoot)
 static void TestHotkeyEdgeGate()
 {
 	BeginTest("hotkey_edge_gate");
+	{
+		IdolController ctrl;
+		const int modes[] = {kAuxSilence, kAuxIdentity, kAuxReplay, kAuxLegacy, kAuxNormal};
+		for (int mode : modes)
+		{
+			ctrl.CycleAuxDriveMode();
+			Check(ctrl.auxDriveMode == mode, "auxiliary diagnostic hotkey cycles each mode and returns to normal");
+		}
+	}
 
 	constexpr int kComma = 0xBC; // VK_OEM_COMMA
 	constexpr int kPeriod = 0xBE; // VK_OEM_PERIOD
