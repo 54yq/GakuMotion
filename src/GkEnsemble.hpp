@@ -1,6 +1,6 @@
 #pragma once
 
-#include <array>
+#include <vector>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -21,24 +21,24 @@ namespace GakuMotion
 	class EnsembleAssignments
 	{
 	public:
-		static constexpr std::size_t kMaxParts = 3;
-		using Parts = std::array<EnsemblePart, kMaxParts>;
+		using Parts = std::vector<EnsemblePart>;
 
 		bool Set(std::size_t index, uint64_t actorToken, uint64_t actorEpoch,
 		         std::string motionKey, float offsetSeconds)
 		{
-			if (index >= kMaxParts || !actorToken || !actorEpoch || motionKey.empty() ||
+			if (!actorToken || !actorEpoch || motionKey.empty() ||
 			    !std::isfinite(offsetSeconds) || (epoch_ && epoch_ != actorEpoch)) return false;
 			for (std::size_t i = 0; i < parts_.size(); ++i)
 				if (i != index && parts_[i].actorToken == actorToken) return false;
 			epoch_ = actorEpoch;
+			if (parts_.size() <= index) parts_.resize(index + 1);
 			parts_[index] = {actorToken, std::move(motionKey), offsetSeconds};
 			return true;
 		}
 
 		void Clear(std::size_t index)
 		{
-			if (index >= kMaxParts) return;
+			if (index >= parts_.size()) return;
 			parts_[index] = {};
 			bool any = false;
 			for (const auto& part : parts_) any |= part.actorToken != 0;

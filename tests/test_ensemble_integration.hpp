@@ -11,6 +11,9 @@ namespace EnsembleFixture
 	inline unsigned writes = 0;
 	inline std::vector<void*> writtenTransforms;
 	inline bool rejectRotations = false;
+	inline bool rejectPhysicsRestore = false;
+	inline unsigned physicsRestores = 0;
+	inline bool RestorePhysics(size_t, MotionPlayer&) { ++physicsRestores; return !rejectPhysicsRestore; }
 	inline void* Bone(void* actor, int hid)
 	{ return reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(actor) + 0x100 + static_cast<unsigned>(hid)); }
 	inline void* Transform(void* actor)
@@ -279,6 +282,25 @@ static void TestEnsembleIntegration(const std::string& repoRoot)
 	      failing.ensembleRestoreUnconfirmed && !failing.PrepareInjection(),
 	      "failed follower restore rejects capture and blocks further injection");
 
+	Core physicsFail;
+	EnsembleFixture::enabled[animB] = true;
+	EnsembleFixture::controllers[animB] = reinterpret_cast<void*>(0x123);
+	EnsembleFixture::Wire(physicsFail.player.controller);
+	physicsFail.PublishSceneActors({{a, 1, ""}, {b, 2, ""}});
+	physicsFail.motions = {trackB}; physicsFail.libraryRevision = 19;
+	physicsFail.player.clip = MakeSmallClip(); physicsFail.player.state = PlaybackState::Preview;
+	const auto physicsView = physicsFail.BuildGuiContext();
+	physicsView.fnSetEnsembleFollower(physicsView.self, 0, physicsView.sceneActors[1].token,
+	                                  physicsView.actorRosterEpoch, "B", 0, physicsView.libraryRevision);
+	physicsFail.ProcessPendingGuiCommands();
+	physicsFail.OnLateUpdate(b, animB, nullptr, .016f, false);
+	physicsFail.ensemble.fnBeforeRestore = EnsembleFixture::RestorePhysics;
+	EnsembleFixture::physicsRestores = 0; EnsembleFixture::rejectPhysicsRestore = true;
+	Check(!physicsFail.SuspendForCapture() && physicsFail.ensemble.Followers()[0].active &&
+	      physicsFail.ensembleRestoreUnconfirmed && EnsembleFixture::physicsRestores == 1,
+	      "unconfirmed follower physics release blocks capture and retains actor ownership");
+	EnsembleFixture::rejectPhysicsRestore = false;
+
 	Core missingAnimator;
 	EnsembleFixture::enabled[animB] = true;
 	EnsembleFixture::controllers[animB] = reinterpret_cast<void*>(0x123);
@@ -349,4 +371,27 @@ static void TestEnsembleIntegration(const std::string& repoRoot)
 	crossRole.ProcessPendingGuiCommands();
 	Check(crossRole.player.controller.targetActor == a && crossRole.player.controller.initialYawDegrees == 25,
 	      "queued yaw for the previous main actor is not applied to a newly selected actor");
+    Core many;
+    EnsembleFixture::Wire(many.player.controller);
+    void* d = reinterpret_cast<void*>(0x700000);
+    void* animD = reinterpret_cast<void*>(0x800000);
+    many.PublishSceneActors({{a,1,""},{b,2,""},{c,3,""},{d,4,""}});
+    many.motions={trackB,trackC}; many.libraryRevision=21;
+    many.player.clip=MakeSmallClip(); many.player.state=PlaybackState::Preview;
+    auto manyView=many.BuildGuiContext();
+    manyView.fnSetEnsembleFollower(manyView.self,0,manyView.sceneActors[1].token,manyView.actorRosterEpoch,"B",0,21);
+    manyView.fnSetEnsembleFollower(manyView.self,2,manyView.sceneActors[2].token,manyView.actorRosterEpoch,"C",0,21);
+    manyView.fnSetEnsembleFollower(manyView.self,4,manyView.sceneActors[3].token,manyView.actorRosterEpoch,"B",0,21);
+    many.ProcessPendingGuiCommands();
+    Check(many.ensemble.Followers().size()==5 && !many.ensemble.Followers()[1].player && !many.ensemble.Followers()[3].player && many.ensemble.Followers()[4].player,
+          "dynamic follower slots support more than three actors and leave holes unbound");
+    many.player.state=PlaybackState::Paused; many.player.currentTime=.04f;
+    many.OnLateUpdate(b,animB,nullptr,.016f,false); many.OnLateUpdate(c,animC,nullptr,.016f,false); many.OnLateUpdate(d,animD,nullptr,.016f,false);
+    Check(many.ensemble.Followers()[0].active && many.ensemble.Followers()[2].active && many.ensemble.Followers()[4].active && !many.ensemble.Followers()[1].active,
+          "only bound actors are sampled at the primary transport time");
+    auto expanded=many.BuildGuiContext();
+    expanded.fnSetEnsemblePosition(expanded.self,4,expanded.ensembleFollowers[4].actorToken,expanded.actorRosterEpoch,expanded.ensembleFollowers[4].bindingGeneration,{3,0,0});
+    many.ProcessPendingGuiCommands();
+    Check(many.ensemble.Followers()[4].player->controller.initialPositionOffset.x==3, "later follower has independent placement");
+
 }

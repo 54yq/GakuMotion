@@ -246,7 +246,7 @@ namespace GakuMotion::csharp_import
 					reinterpret_cast<LPCWSTR>(module), &pinned);
 				auto run = reinterpret_cast<RunFn>(GetProcAddress(module, "GkVmdImport_Run"));
 				auto abi = reinterpret_cast<AbiFn>(GetProcAddress(module, "GkVmdImporter_AbiVersion"));
-				if (!run || !abi || abi() < 3)
+				if (!run || !abi || abi() < 4)
 				{
 					Detail() = "GakuMotion.VmdImporter.Native.dll 缺少 ABI v3 导出（旧 DLL 会丢播放速度/初始偏移量请求）";
 					RejectedModules().push_back({candidate, module, Detail()});
@@ -459,6 +459,11 @@ namespace GakuMotion::csharp_import
 		char fpsBuffer[64]{};
 		std::snprintf(fpsBuffer, sizeof(fpsBuffer), "%.6f", request.fps > 0.0f ? request.fps : 0.0f);
 		json += ",\"fps\":";
+		json += fpsBuffer;
+		json += ",\"rebake_output\":";
+		json += request.rebakeOutput ? "true" : "false";
+		std::snprintf(fpsBuffer, sizeof(fpsBuffer), "%.6f", request.sourceFps > 0.0f ? request.sourceFps : 0.0f);
+		json += ",\"source_fps\":";
 		json += fpsBuffer;
 		json += ",\"audio\":";
 		detail::AppendJsonString(json, request.audio);

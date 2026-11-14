@@ -75,6 +75,7 @@ namespace GakuMotion
 		EnsembleRuntime ensemble;
 		bool ensembleRestoreUnconfirmed{false};
 		std::string ensembleNotice;
+		std::vector<std::string> followerPhysicsStatus = std::vector<std::string>(2);
 		struct EnsemblePresetRole { bool enabled{false}; Vector3 world{}; float heading{0}; };
 		struct EnsemblePreset { std::string name; std::array<EnsemblePresetRole, 3> roles{}; };
 		std::vector<EnsemblePreset> ensemblePresets;
@@ -113,12 +114,37 @@ namespace GakuMotion
 		live_takeover::Observation liveObservation;
 		bool liveViewingConfirmed{false};
 		bool liveTakeoverActive{false}, liveTakeoverAvailable{false};
+		PhysicsMonitor physicsMonitor;
+		std::chrono::steady_clock::time_point physicsMonitorAt{};
+		bool liveDofDisabled{false};
+		int liveDofDisableStatus{0};
 		bool liveTakeoverFault{false};
 		uint64_t liveAlignmentLoggedSession{~uint64_t{0}}, liveAlignmentLoggedMotion{~uint64_t{0}};
 		void* liveAlignmentLoggedActor{nullptr}; // identity only
 		uintptr_t liveOwnerToken{0}, livePauseRequestOwner{0}, liveFaultOwner{0};
 		int liveOwnerScene{0}, livePauseRequestScene{0}, liveTakeoverRequestScene{0};
 		int livePauseRequest{0}; // 0 none, 1 pause, 2 resume; stateMutex guarded.
+		bool liveSeekPending{false};
+		float liveSeekTime{0};
+		uintptr_t liveSeekOwner{0};
+		int liveSeekScene{0};
+		bool liveLoopEnabled{false}, liveLoopWaiting{false};
+		float liveLoopLead{1.0f};
+		uint64_t liveLoopCycles{};
+		bool liveActorClockAvailable{},liveActorClockActive{},liveActorClockFault{};
+		int liveActorClockRequest{};
+		uintptr_t liveActorClockRequestOwner{};
+		int liveActorClockRequestScene{};
+		float liveActorClockOrigin{};
+		std::string liveActorClockNotice;
+		uintptr_t liveLoopOwner{0};
+		int liveLoopScene{0};
+		bool liveRecordPending{false};
+		bool liveContinuousArmDiagnostics{false};
+		bool swingReportLoadPending{false};
+		uintptr_t liveRecordOwner{0};
+		int liveRecordScene{0};
+		uint64_t liveRecordSequence{0};
 		int liveTakeoverRequest{0};
 		uintptr_t liveTakeoverRequestOwner{0};
 		std::string liveControlNotice;
@@ -128,7 +154,8 @@ namespace GakuMotion
 		{
 			const auto& binding = player.controller.currentBinding;
 			if (!liveTakeoverActive || !actor || binding.actor != actor || !binding.bindPoseCaptured) return {};
-			return {binding.restRootPos.x, 0.0f, binding.restRootPos.z};
+			const auto first = player.clip.root_positions.empty() ? Vector3{} : player.clip.root_positions.front();
+			return {binding.restRootPos.x - first.x, 0.0f, binding.restRootPos.z - first.z};
 		}
 		bool PrepareInjection()
 		{
@@ -194,6 +221,16 @@ namespace GakuMotion
 			captureRestoreReport.stage = status(stageModified, stageManager.SetInjectionEnabled(false));
 			NotifyMotionPlaying(false);
 			return captureRestoreReport.AllConfirmed();
+		}
+
+		// A restored Live session must sample a fresh actor pose on the next takeover.
+		// Retain snapshots whenever restoration or session ownership is uncertain.
+		bool ReleaseRestoredLiveBinding()
+		{
+			if (!captureSuspended || captureSession != injectionSession || ensembleRestoreUnconfirmed ||
+				!captureRestoreReport.AllConfirmed()) return false;
+			player.controller.DiscardBindings();
+			return true;
 		}
 
 		bool ResumeAfterCapture()
@@ -307,6 +344,10 @@ namespace GakuMotion
 		// Fresh active actors in the admitted owner scene; managed reads stay on Unity thread.
 		std::vector<void*> sceneActors;
 		SceneActorRegistry sceneActorRegistry;
+		std::unordered_map<std::string, bool> actorPropHidden;
+		std::unordered_map<uint64_t, bool> actorModelHidden;
+		bool (*fnApplyActorModelHidden)(uint64_t, uint64_t, bool){nullptr};
+		std::vector<GuiActorProp> actorProps;
 		bool (*fnBeforeTargetChange)(){nullptr};
 
 		BoneOverrideSet globalOverrides; // <localRoot>/GakuMotion/bone_overrides.json
@@ -377,13 +418,13 @@ namespace GakuMotion
 			Select, Cycle, Play, Pause, Resume, Stop, Seek,
 			ScrubBegin, ScrubUpdate, ScrubEnd, Refresh, Move,
 			SaveList, LoadList, Mode, Mute, Speed, Import, ClearTarget, NextTarget, PickTarget,
-			InitialPosition, InitialYaw, SaveInitialPosition, SaveFacialWeights, MusicVolume, SaveMusicVolume, PhysicsBackend,
+			InitialPosition, InitialYaw, LiveDofDisabled, SaveInitialPosition, SaveFacialWeights, MusicVolume, SaveMusicVolume, PhysicsBackend,
 			CameraSettings, SaveCameraSettings, CameraImport, ReloadCamera,
 			SoleSettings, SaveSoleSettings, LoadSoleSettings, ExperimentalSolePitch, ExperimentalWaistSupport,
 			BeforeQuartzExperiment, AuxDriveMode, WristDiagnostic, WristTwistShare, ForearmAxisAdjustment, ForearmAxisLock,
 			StageSettings, StagePreset, ToggleStageCandidate, ScanStageCandidates,
 			MountCustomStage, UnloadCustomStage, RestoreCameraSkybox,
-			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, StageLoadReplacement, SelectTarget,
+			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, StageLoadReplacement, SelectTarget, SetMicrophoneHidden, SetActorPropHidden, SetActorModelHidden, InitializeBeforeMotion,
 			SetEnsembleFollower, ClearEnsembleFollower, EnsemblePosition, EnsembleYaw, FollowerArm, SceneArm, AlignEnsemble, SaveEnsemblePreset, ApplyEnsemblePreset
 		};
 
@@ -410,7 +451,7 @@ namespace GakuMotion
 			int64_t frame{0};
 			uint64_t loadedGeneration{0}, sceneSession{0}, libraryRevision{0};
 			uint64_t actorToken{0}, actorEpoch{0};
-			std::array<uint64_t, 2> formationTokens{}, formationGenerations{};
+			std::vector<uint64_t> formationTokens, formationGenerations;
 		};
 
 		std::mutex guiCommandMutex;
@@ -444,8 +485,8 @@ namespace GakuMotion
 			cmd.sceneSession = injectionSession;
 			for (size_t i = 0; i < ensemble.Followers().size(); ++i)
 			{
-				cmd.formationTokens[i] = ensemble.Followers()[i].actorToken;
-				cmd.formationGenerations[i] = ensemble.Followers()[i].bindingGeneration;
+				cmd.formationTokens.push_back(ensemble.Followers()[i].actorToken);
+				cmd.formationGenerations.push_back(ensemble.Followers()[i].bindingGeneration);
 			}
 			QueueGui(std::move(cmd));
 		}
@@ -714,6 +755,7 @@ namespace GakuMotion
 				{
 				case GuiAction::Select: SelectMotionByIndex(FindPlaylistIndex(motions, cmd.key), cmd.flag, !cmd.flag);
 					break;
+				case GuiAction::InitializeBeforeMotion: player.initializeBeforeMotion = cmd.flag; break;
 				case GuiAction::Cycle: CycleMotion(static_cast<int>(cmd.value), "gui");
 					break;
 				case GuiAction::Play: player.Play();
@@ -841,13 +883,32 @@ namespace GakuMotion
 				case GuiAction::SelectTarget:
 					if (void* actor = sceneActorRegistry.Resolve(cmd.actorToken, cmd.actorEpoch)) SetTargetActor(actor);
 					break;
+				case GuiAction::SetMicrophoneHidden:
+					if (liveTakeoverActive && sceneActorRegistry.Resolve(cmd.actorToken, cmd.actorEpoch))
+						actorPropHidden[ActorPropKey(cmd.actorToken,"Root_Microphone","Prop_Microphone")] = cmd.flag;
+					break;
+                case GuiAction::SetActorModelHidden:
+                    if (InjectionAllowed() && injectionPolicy.Read().captureDepth == 0 &&
+                        sceneActorRegistry.Resolve(cmd.actorToken, cmd.actorEpoch) && fnApplyActorModelHidden &&
+                        fnApplyActorModelHidden(cmd.actorToken, cmd.actorEpoch, cmd.flag)) {
+                        if (cmd.flag) actorModelHidden[cmd.actorToken] = true;
+                        else actorModelHidden.erase(cmd.actorToken);
+                        ensembleNotice = cmd.flag ? "角色模型已隐藏" : "角色模型已恢复";
+                    } else ensembleNotice = "模型显隐未完成：角色、场景或原生渲染接口不可用";
+                    break;
+				case GuiAction::SetActorPropHidden:
+					if (liveTakeoverActive && sceneActorRegistry.Resolve(cmd.actorToken, cmd.actorEpoch))
+						for (const auto& prop : actorProps)
+							if (prop.actorToken == cmd.actorToken && ActorPropKey(prop.actorToken, prop.rootName, prop.propName) == cmd.key)
+								{ actorPropHidden[cmd.key]=cmd.flag; break; }
+					break;
 				case GuiAction::SetEnsembleFollower:
 				{
 					if (ensemble.HasActiveFollowers() && !PrepareInjection())
 					{ ensembleNotice = "当前场景无法安全调整多角色绑定"; break; }
 					const int motionIndex = FindPlaylistIndex(motions, cmd.key);
 					if (cmd.libraryRevision != libraryRevision || motionIndex < 0 ||
-					    cmd.candidateIndex < 0 || cmd.candidateIndex >= 2 || ensembleRestoreUnconfirmed ||
+					    cmd.candidateIndex < 0 || ensembleRestoreUnconfirmed ||
 					    player.state == PlaybackState::Playing || player.state == PlaybackState::Paused)
 					{ ensembleNotice = "绑定失败：请停止播放并确认角色和曲库未变化"; break; }
 					const bool ok = ensemble.Set(static_cast<size_t>(cmd.candidateIndex), cmd.actorToken,
@@ -862,7 +923,7 @@ namespace GakuMotion
 				case GuiAction::ClearEnsembleFollower:
 					if (ensemble.HasActiveFollowers() && !PrepareInjection())
 					{ ensembleNotice = "当前场景无法安全解除多角色绑定"; break; }
-					if (cmd.actorEpoch != sceneActorRegistry.Epoch() || cmd.candidateIndex < 0 || cmd.candidateIndex >= 2 ||
+					if (cmd.actorEpoch != sceneActorRegistry.Epoch() || cmd.candidateIndex < 0 || static_cast<size_t>(cmd.candidateIndex) >= ensemble.Followers().size() ||
 					    player.state == PlaybackState::Playing || player.state == PlaybackState::Paused)
 					{ ensembleNotice = "请停止播放后解除绑定"; break; }
 					if (ensemble.Clear(static_cast<size_t>(cmd.candidateIndex), sceneActorRegistry))
@@ -898,17 +959,17 @@ namespace GakuMotion
 					ApplyEnsemblePreset(cmd);
 					break;
 				case GuiAction::FollowerArm:
-					if (!ensembleRestoreUnconfirmed && cmd.candidateIndex >= 0 && cmd.candidateIndex < 2)
+					if (!ensembleRestoreUnconfirmed && cmd.candidateIndex >= 0 && static_cast<size_t>(cmd.candidateIndex) < ensemble.Followers().size())
 						ensemble.SetArmCalibration(static_cast<size_t>(cmd.candidateIndex), cmd.actorToken, cmd.actorEpoch,
 						                           cmd.loadedGeneration, cmd.stagePresetIndex, cmd.value, sceneActorRegistry);
 					break;
 				case GuiAction::EnsemblePosition:
-					if (!ensembleRestoreUnconfirmed && cmd.candidateIndex >= 0 && cmd.candidateIndex < 2)
+					if (!ensembleRestoreUnconfirmed && cmd.candidateIndex >= 0 && static_cast<size_t>(cmd.candidateIndex) < ensemble.Followers().size())
 						ensemble.SetPosition(static_cast<size_t>(cmd.candidateIndex), cmd.actorToken, cmd.actorEpoch,
 						                     cmd.loadedGeneration, cmd.position, sceneActorRegistry);
 					break;
 				case GuiAction::EnsembleYaw:
-					if (!ensembleRestoreUnconfirmed && cmd.candidateIndex >= 0 && cmd.candidateIndex < 2)
+					if (!ensembleRestoreUnconfirmed && cmd.candidateIndex >= 0 && static_cast<size_t>(cmd.candidateIndex) < ensemble.Followers().size())
 						ensemble.SetYaw(static_cast<size_t>(cmd.candidateIndex), cmd.actorToken, cmd.actorEpoch,
 						                cmd.loadedGeneration, cmd.value, sceneActorRegistry);
 					break;
@@ -920,6 +981,10 @@ namespace GakuMotion
 					break;
 				case GuiAction::InitialPosition:
 					if (IsCurrentPlacementTarget(cmd) && player.controller.SetInitialPositionOffset(cmd.position)) RememberCurrentPlacement();
+					break;
+				case GuiAction::LiveDofDisabled:
+					if (liveTakeoverActive && cmd.actorToken == liveOwnerToken && cmd.sceneSession == injectionSession)
+						liveDofDisabled = cmd.flag;
 					break;
 				case GuiAction::InitialYaw:
 					if (IsCurrentPlacementTarget(cmd) && player.controller.SetInitialYawDegrees(cmd.value)) RememberCurrentPlacement();
@@ -1138,6 +1203,7 @@ namespace GakuMotion
 			ResetSoleObservation();
 			sceneActors.clear();
 			sceneActorRegistry.Clear();
+			actorPropHidden.clear(); actorProps.clear(); actorModelHidden.clear();
 			currentActor = nullptr;
 			currentActorBoundBones = currentActorTotalBones = 0;
 			NotifyMotionPlaying(false);
@@ -1160,6 +1226,7 @@ namespace GakuMotion
 			ResetSoleObservation();
 			sceneActors.clear();
 			sceneActorRegistry.Clear();
+			actorPropHidden.clear(); actorProps.clear(); actorModelHidden.clear();
 			currentActor = nullptr;
 			currentActorBoundBones = currentActorTotalBones = 0;
 			NotifyMotionPlaying(false);
@@ -1216,6 +1283,7 @@ namespace GakuMotion
 			player.controller.eyePoseWriteStamp.actor = nullptr;
 			player.controller.eyePoseWriteStamp.mask = 0;
 			player.controller.eyePoseWriteStamp.transforms = {};
+			player.controller.rebaseLiveMotionStart = liveTakeoverActive;
 			player.Tick(deltaTime, actor, animator, playableDirector, advanceClock);
 			if (player.state == PlaybackState::Stopped) RestoreEnsemble();
 			else ensemble.Tick(actor, animator, playableDirector, player, sceneActorRegistry);
@@ -2861,9 +2929,9 @@ namespace GakuMotion
 				if (!std::isfinite(forward.x) || !std::isfinite(forward.z) || forward.x*forward.x + forward.z*forward.z < 1e-8f) return false;
 				out.heading = std::atan2(forward.x, forward.z) * (180.0f / 3.14159265358979323846f);
 				const Vector3 r = p.clip.root_positions.front();
-				const Vector3 local{b.restRootPos.x + r.x,
+				const Vector3 local{b.restRootPos.x + (c.rebaseLiveMotionStart ? 0.0f : r.x),
 					(b.clipGroundAnchored ? 0.0f : b.restRootPos.y) + r.y + b.groundLift +
-					(c.rootHeightCalibrationEnabled ? b.calibratedRootHeight : 0.0f), b.restRootPos.z + r.z};
+					(c.rootHeightCalibrationEnabled ? b.calibratedRootHeight : 0.0f), b.restRootPos.z + (c.rebaseLiveMotionStart ? 0.0f : r.z)};
 				out.world = Vector3{pos[0],pos[1],pos[2]} + out.rotation.Rotate(local) + c.initialPositionOffset;
 				return std::isfinite(out.world.x) && std::isfinite(out.world.y) && std::isfinite(out.world.z);
 		}
@@ -2956,7 +3024,7 @@ namespace GakuMotion
 			    sceneActorRegistry.Resolve(cmd.actorToken, cmd.actorEpoch) != player.controller.targetActor)
 			{ ensemblePresetNotice = "站位预设失败：主角色或场景已变化"; return false; }
 			for (size_t i = 0; i < ensemble.Followers().size(); ++i)
-				if (ensemble.Followers()[i].actorToken != cmd.formationTokens[i] ||
+				if (i >= cmd.formationTokens.size() || ensemble.Followers()[i].actorToken != cmd.formationTokens[i] ||
 				    ensemble.Followers()[i].bindingGeneration != cmd.formationGenerations[i])
 				{ ensemblePresetNotice = "站位预设失败：角色绑定已变化，请重试"; return false; }
 			return true;
@@ -3038,7 +3106,7 @@ namespace GakuMotion
 			for (size_t i = 0; i < ensemble.Followers().size(); ++i)
 			{
 				const auto& follower = ensemble.Followers()[i];
-				if (cmd.formationTokens[i] != follower.actorToken || cmd.formationGenerations[i] != follower.bindingGeneration)
+				if (i >= cmd.formationTokens.size() || cmd.formationTokens[i] != follower.actorToken || cmd.formationGenerations[i] != follower.bindingGeneration)
 				{ ensembleNotice = "对齐失败：角色绑定已变化，请重试"; return; }
 			}
 			ActorStart main;
@@ -3048,7 +3116,7 @@ namespace GakuMotion
 			{ ensembleNotice = "对齐失败：主角色曲目缺少可验证的原始 VMD 或导入器不兼容"; return; }
 			const Quaternion basis = Quaternion::FromEulerDegreesXYZ(0, player.controller.initialYawDegrees, 0) * main.rotation;
 			struct Update { bool active{false}; Vector3 position; float yaw{0}; };
-			std::array<Update, 2> updates{};
+			std::vector<Update> updates(ensemble.Followers().size());
 			int count = 0;
 			for (size_t i = 0; i < ensemble.Followers().size(); ++i)
 			{
@@ -3087,6 +3155,7 @@ namespace GakuMotion
 			const auto* old = sceneActorRegistry.Find(player.controller.targetActor);
 			const uint64_t oldToken = old ? old->token : 0;
 			sceneActorRegistry.Publish(observations);
+			if (previousEpoch != sceneActorRegistry.Epoch()) { actorPropHidden.clear(); actorProps.clear(); actorModelHidden.clear(); }
 			if (previousEpoch != sceneActorRegistry.Epoch() && ensemble.HasFollowers() && !ensembleRestoreUnconfirmed)
 			{
 				if (!ensemble.ClearAll(sceneActorRegistry))
@@ -3430,21 +3499,76 @@ namespace GakuMotion
 			ctx.liveDuration = liveObservation.duration;
 			ctx.liveViewingConfirmed = liveViewingConfirmed && !liveTakeoverFault;
 			ctx.liveTakeoverActive = liveTakeoverActive;
+			ctx.liveContinuousArmDiagnostics = liveContinuousArmDiagnostics;
+            ctx.fnSetContinuousArmDiagnostics = [](void* self, bool enabled) { static_cast<Core*>(self)->liveContinuousArmDiagnostics = enabled; };
+			ctx.fnLoadSwingReport = [](void* self) { static_cast<Core*>(self)->swingReportLoadPending=true; };
+			ctx.fnRecordLiveState = [](void* self)
+			{
+				auto* core = static_cast<Core*>(self);
+				if (!core->liveViewingConfirmed || !core->liveObservation.confirmed || !core->liveOwnerToken ||
+					core->liveTakeoverFault || core->injectionPolicy.Read().captureDepth != 0) return;
+				core->liveRecordPending = true; core->liveRecordOwner = core->liveOwnerToken;
+				core->liveRecordScene = core->liveOwnerScene;
+				core->liveControlNotice = "等待记录当前 Live 状态…";
+			};
+			ctx.liveLoopEnabled = liveLoopEnabled && liveLoopOwner == liveOwnerToken && liveLoopScene == liveOwnerScene;
+			ctx.liveLoopLead = liveLoopLead; ctx.liveLoopCycles=liveLoopCycles;
+			ctx.liveActorClockAvailable=liveActorClockAvailable;
+			ctx.liveActorClockActive=liveActorClockActive;
+			ctx.liveActorClockNotice=liveActorClockNotice;
+			ctx.fnActorClockTrial=[](void* self,bool start) {
+				auto* c=static_cast<Core*>(self);
+				if(!c->liveViewingConfirmed||!c->liveObservation.confirmed||!c->liveOwnerToken)return;
+				if(start&&(c->liveActorClockFault||!c->liveActorClockAvailable||c->liveActorClockActive||!c->liveObservation.paused||c->liveTakeoverActive||
+					c->liveTakeoverFault||c->liveSeekPending||c->livePauseRequest||c->liveTakeoverRequest||c->injectionPolicy.Read().captureDepth!=0))return;
+				c->liveActorClockRequest=start?1:2;c->liveActorClockRequestOwner=c->liveOwnerToken;c->liveActorClockRequestScene=c->liveOwnerScene;
+			};
+			ctx.fnSetLiveLoopLead = [](void* self,float value) {
+				if(std::isfinite(value)&&value>=0.5f&&value<=3.0f) static_cast<Core*>(self)->liveLoopLead=value;
+			};
+			ctx.fnSetLiveLoop = [](void* self, bool enabled)
+			{
+				auto* core = static_cast<Core*>(self);
+				if (enabled && (!core->liveViewingConfirmed || !core->liveObservation.confirmed || !core->liveOwnerToken ||
+					core->liveTakeoverActive || core->liveTakeoverFault || core->injectionPolicy.Read().captureDepth!=0)) return;
+				core->liveLoopEnabled = enabled; core->liveLoopWaiting = false;
+				core->liveLoopCycles=0;
+				core->liveLoopOwner = enabled ? core->liveOwnerToken : 0;
+				core->liveLoopScene = enabled ? core->liveOwnerScene : 0;
+			};
+			ctx.liveDofDisabled = liveDofDisabled;
+			ctx.liveDofDisableStatus = liveDofDisableStatus;
+			ctx.fnSetLiveDofDisabled = [](void* self, bool disabled)
+			{
+				auto* core = static_cast<Core*>(self);
+				GuiCommand cmd{GuiAction::LiveDofDisabled, 0, disabled};
+				cmd.actorToken = core->liveOwnerToken; cmd.sceneSession = core->injectionSession;
+				core->QueueGui(std::move(cmd));
+			};
 			ctx.liveTakeoverAvailable = liveTakeoverAvailable;
 			ctx.liveControlNotice = liveControlNotice;
 			ctx.fnSetLivePaused = [](void* self, bool paused)
 			{
 				auto* core = static_cast<Core*>(self);
-				if (core->liveTakeoverActive || core->liveTakeoverFault || !core->liveViewingConfirmed ||
+				if (core->liveActorClockFault || core->liveActorClockActive || core->liveTakeoverActive || core->liveTakeoverFault || !core->liveViewingConfirmed ||
 					!core->liveObservation.confirmed || !core->liveOwnerToken) return;
 				core->livePauseRequest = paused ? 1 : 2;
 				core->livePauseRequestOwner = core->liveOwnerToken;
 				core->livePauseRequestScene = core->liveOwnerScene;
 			};
+			ctx.fnSeekLive = [](void* self, float seconds)
+			{
+				auto* core = static_cast<Core*>(self);
+				if (core->liveActorClockFault || core->liveActorClockActive || core->liveTakeoverActive || core->liveTakeoverFault || !core->liveViewingConfirmed ||
+					!core->liveObservation.confirmed || !core->liveOwnerToken || !std::isfinite(seconds) ||
+					seconds < 0 || seconds >= core->liveObservation.duration || core->injectionPolicy.Read().captureDepth != 0) return;
+				core->liveSeekPending = true; core->liveSeekTime = seconds;
+				core->liveSeekOwner = core->liveOwnerToken; core->liveSeekScene = core->liveOwnerScene;
+			};
 			ctx.fnSetLiveTakeover = [](void* self, bool enabled)
 			{
 				auto* core = static_cast<Core*>(self);
-				if (!core->liveOwnerToken || (!enabled && !core->liveTakeoverActive) ||
+				if ((enabled&&(core->liveActorClockFault||core->liveActorClockActive)) || !core->liveOwnerToken || (!enabled && !core->liveTakeoverActive) ||
 					(enabled && (!core->liveTakeoverAvailable || core->liveTakeoverActive))) return;
 				core->liveTakeoverRequest = enabled ? 1 : 2;
 				core->liveTakeoverRequestOwner = core->liveOwnerToken;
@@ -3506,11 +3630,16 @@ namespace GakuMotion
 			ctx.loadedMotionGeneration = loadedMotionGeneration;
 			ctx.injectionSession = injectionSession;
 			ctx.libraryNotice = libraryNotice;
+			ctx.initializeBeforeMotion = player.initializeBeforeMotion;
+			ctx.fnSetInitializeBeforeMotion = [](void* self, bool value) {
+				static_cast<Core*>(self)->QueueGui({GuiAction::InitializeBeforeMotion, 0, value});
+			};
 			ctx.libraryRefreshing = libraryScan.valid();
 			ctx.loadedMotionKey = loadedMotionKey;
 			ctx.loadedSourceMissing = loadedSourceMissing;
 			ctx.loadedSourceChanged = loadedSourceChanged;
 			ctx.actorRosterEpoch = sceneActorRegistry.Epoch();
+			ctx.ensembleFollowers.resize(ensemble.Followers().size());
 			for (size_t i = 0; i < ensemble.Followers().size(); ++i)
 			{
 				const auto& follower = ensemble.Followers()[i];
@@ -3521,6 +3650,7 @@ namespace GakuMotion
 				                            follower.player ? follower.player->controller.wristTwistShare : 0.0f,
 				                            follower.player ? follower.player->controller.forearmAxisAdjustmentDeg : 45.0f,
 				                            follower.armLocked};
+				if (i < followerPhysicsStatus.size()) ctx.ensembleFollowers[i].physicsStatus = followerPhysicsStatus[i];
 			}
 			ctx.fnSetFollowerArm = [](void* self, int slot, uint64_t token, uint64_t epoch,
 			                              uint64_t generation, int operation, float value)
@@ -3582,9 +3712,11 @@ namespace GakuMotion
 				for (const auto& follower : ensemble.Followers())
 					if (follower.player && follower.actorToken == item.token) bound = true;
 				ctx.sceneArmCalibrations.push_back({item.token, arm.share, arm.degrees, arm.locked, bound, primary});
-				const std::string name = item.character.empty() ? "未识别角色" : FormatIdolDisplayName(item.character.c_str());
+				const std::string name = !item.displayName.empty() ? item.displayName : item.character.empty() ? "未识别角色" : FormatIdolDisplayName(item.character.c_str());
+				const auto mic = actorPropHidden.find(ActorPropKey(item.token,"Root_Microphone","Prop_Microphone"));
 				ctx.sceneActors.push_back({item.token, name + " · " + std::to_string(ctx.sceneActors.size() + 1),
-					item.actor == player.controller.targetActor});
+					item.actor == player.controller.targetActor, mic != actorPropHidden.end() && mic->second,
+                    actorModelHidden.find(item.token) != actorModelHidden.end()});
 			}
 			auto actorLabel = [&](void* actor)
 			{
@@ -3600,8 +3732,40 @@ namespace GakuMotion
 				command.actorToken = token; command.actorEpoch = epoch;
 				static_cast<Core*>(self)->QueueGui(std::move(command));
 			};
+            ctx.fnSetActorModelHidden = [](void* self, uint64_t token, uint64_t epoch, bool hidden)
+            {
+                GuiCommand command{GuiAction::SetActorModelHidden};
+                command.actorToken=token; command.actorEpoch=epoch; command.flag=hidden;
+                static_cast<Core*>(self)->QueueGui(std::move(command));
+            };
+			ctx.fnSetMicrophoneHidden = [](void* self, uint64_t token, uint64_t epoch, bool hidden)
+			{
+				GuiCommand command{GuiAction::SetMicrophoneHidden};
+				command.actorToken=token; command.actorEpoch=epoch; command.flag=hidden;
+				static_cast<Core*>(self)->QueueGui(std::move(command));
+			};
+			ctx.actorProps = actorProps;
+			for (auto& prop : ctx.actorProps) {
+				const auto found=actorPropHidden.find(ActorPropKey(prop.actorToken,prop.rootName,prop.propName));
+				prop.hidden=found!=actorPropHidden.end() && found->second;
+			}
+			ctx.fnSetActorPropHidden = [](void* self, uint64_t token, uint64_t epoch, const char* key, bool hidden)
+			{
+				GuiCommand command{GuiAction::SetActorPropHidden}; command.actorToken=token; command.actorEpoch=epoch;
+				command.key=key?key:""; command.flag=hidden; static_cast<Core*>(self)->QueueGui(std::move(command));
+			};
 			ctx.statusLine = StatusSummary();
 			ctx.physicsBackend = guiPhysicsBackend.load();
+			ctx.physicsMonitor = physicsMonitor;
+			ctx.physicsLiveObservationCurrent = liveViewingConfirmed && liveOwnerToken && physicsMonitor.liveObserveOwner == liveOwnerToken;
+			ctx.physicsMonitorFresh = physicsMonitor.observed && player.state == PlaybackState::Playing &&
+				player.controller.targetActor && physicsMonitor.actor == reinterpret_cast<uintptr_t>(player.controller.targetActor) &&
+				physicsMonitor.session == injectionSession &&
+				physicsMonitor.requested == ctx.physicsBackend && physicsMonitor.live == liveTakeoverActive &&
+				std::chrono::steady_clock::now() - physicsMonitorAt < std::chrono::seconds(3);
+			ctx.physicsGraphCurrent = liveViewingConfirmed && liveObservation.confirmed && physicsMonitor.graphSampled &&
+				physicsMonitor.graphOwner == liveOwnerToken && physicsMonitor.graphSession == injectionSession &&
+				physicsMonitor.graphPhase == ((liveObservation.paused ? 1 : 0) | (liveTakeoverActive ? 2 : 0));
 			ctx.beforeQuartzExperiment = guiBeforeQuartzExperiment.load();
 			ctx.fnSetBeforeQuartzExperiment = [](void* self, bool enabled)
 			{

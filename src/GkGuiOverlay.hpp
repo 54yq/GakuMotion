@@ -27,6 +27,8 @@
 #include "GkStageManager.hpp"
 #include "GkCamera.hpp"
 #include "GkSceneActors.hpp"
+#include "GkPhysicsMonitor.hpp"
+#include "GkLiveEndLoopContract.hpp"
 #include "gui/GuiOverlayCommon.hpp"
 
 #include <string>
@@ -42,6 +44,7 @@
 #include <imgui.h>
 #define GKMOTION_GUI_ACTIVE 1
 #endif
+#include "gui/GuiSwingCheckpoint.hpp"
 
 namespace GakuMotion
 {
@@ -65,6 +68,7 @@ namespace GakuMotion
 		float yawDegrees{0};
 		float wristTwistShare{0}, forearmAxisDegrees{45};
 		bool armLocked{false};
+		std::string physicsStatus;
 	};
 
 	struct GuiArmCalibration
@@ -82,9 +86,25 @@ namespace GakuMotion
 		bool liveObserved{false}, livePaused{false};
 		bool liveViewingConfirmed{false};
 		bool liveTakeoverActive{false}, liveTakeoverAvailable{false};
+		bool liveLoopEnabled{false};
+		float liveLoopLead{1.0f};
+		uint64_t liveLoopCycles{};
+		bool liveActorClockAvailable{},liveActorClockActive{};
+		std::string liveActorClockNotice;
+		void (*fnActorClockTrial)(void*,bool){nullptr};
+		void (*fnSetLiveLoopLead)(void*,float){nullptr};
+		void (*fnSetLiveLoop)(void*, bool){nullptr};
+		bool liveDofDisabled{false};
+		int liveDofDisableStatus{0};
+		void (*fnSetLiveDofDisabled)(void*, bool){nullptr};
 		float liveTime{0}, liveDuration{0};
 		std::string liveControlNotice;
 		void (*fnSetLivePaused)(void*, bool){nullptr};
+		void (*fnSeekLive)(void*, float){nullptr};
+		void (*fnRecordLiveState)(void*){nullptr};
+        bool liveContinuousArmDiagnostics{false};
+        void (*fnSetContinuousArmDiagnostics)(void*, bool){nullptr};
+		void (*fnLoadSwingReport)(void*){nullptr};
 		void (*fnSetLiveTakeover)(void*, bool){nullptr};
 		MotionPlayer* player{nullptr};
 		CameraController::Snapshot cameraSnapshot;
@@ -104,6 +124,10 @@ namespace GakuMotion
 		const int* selectedMotionIndex{nullptr};
 		std::string statusLine;
 		int physicsBackend{2}; // Published selection, not the render thread's config.
+		PhysicsMonitor physicsMonitor{};
+		bool physicsMonitorFresh{false};
+		bool physicsGraphCurrent{false};
+		bool physicsLiveObservationCurrent{false};
 		bool beforeQuartzExperiment{true};
 		void (*fnSetBeforeQuartzExperiment)(void*, bool){nullptr};
 		bool experimentalWaistSupport{true};
@@ -114,6 +138,8 @@ namespace GakuMotion
 		std::string playlistNotice;
 		uint64_t libraryRevision{0}, loadedMotionGeneration{0}, injectionSession{0};
 		std::string libraryNotice, loadedMotionKey;
+		bool initializeBeforeMotion{false};
+		void (*fnSetInitializeBeforeMotion)(void*, bool){nullptr};
 		bool libraryRefreshing{false}, loadedSourceMissing{false}, loadedSourceChanged{false};
 		std::string boundActorLabel, targetActorLabel;
 		std::string initialPositionNotice;
@@ -171,10 +197,14 @@ namespace GakuMotion
 		void (*fnSetSceneArm)(void*, uint64_t, uint64_t, int, float){nullptr};
 		uint64_t actorRosterEpoch{0};
 		void (*fnSelectTargetActor)(void*, uint64_t token, uint64_t epoch){nullptr};
+		void (*fnSetMicrophoneHidden)(void*, uint64_t token, uint64_t epoch, bool hidden){nullptr};
+		void (*fnSetActorModelHidden)(void*, uint64_t token, uint64_t epoch, bool hidden){nullptr};
+		std::vector<GuiActorProp> actorProps;
+		void (*fnSetActorPropHidden)(void*, uint64_t, uint64_t, const char*, bool){nullptr};
 		void (*fnClearTargetActor)(void* self){nullptr}; // Legacy developer callback: reselect bound/first actor
 		void (*fnNextTargetActor)(void* self){nullptr}; // Legacy developer callback: cycle current actors
 		void (*fnPickFocusedActor)(void* self){nullptr}; // Legacy developer callback: select bound actor
-		std::array<GuiEnsembleFollower, 2> ensembleFollowers{};
+		std::vector<GuiEnsembleFollower> ensembleFollowers;
 		std::string ensembleNotice;
 		void (*fnAlignEnsemble)(void*){nullptr};
 		std::vector<std::string> ensemblePresetNames;
@@ -235,6 +265,7 @@ namespace GakuMotion
 	void DrawLibraryPage(GuiOverlay& overlay, const GuiContext& ctx);
 	void DrawStagePage(GuiOverlay& overlay, const GuiContext& ctx);
 	void DrawStageLoadReplacementControl(const GuiContext& ctx);
+	void DrawPhysicsDiagnostics(const GuiContext& ctx);
 
 	class GuiOverlay
 	{
@@ -285,11 +316,15 @@ namespace GakuMotion
 		} scrub;
 
 		float s_scrubValue{0.0f};
+		float liveSeekValue{0.0f};
+		bool livePageOpen{false}, livePageAwaitingTakeover{false}, liveDiagnosticsOpen{false};
+		bool liveSeekEditing{false};
 		std::string scrubMotion;
 		char importVmd[2048]{};
 		char importAudio[2048]{};
 		char importTitle[256]{};
 		int importMotionFpsIndex{0}; // 0 = 自动检测, 1 = 30 fps, 2 = 60 fps
+		int importSourceFpsIndex{0};
 		char playlistFile[2048]{};
 		float seekInput{0};
 		bool importOpen{false};
@@ -314,12 +349,13 @@ namespace GakuMotion
 		uint64_t armCalibrationEpoch{0};
 		char ensemblePresetName[128] = "默认队形";
 		uint64_t ensembleDraftEpoch{0};
-		std::array<uint64_t, 2> ensembleDraftActor{};
-		std::array<std::string, 2> ensembleDraftMotion{};
-		std::array<float, 2> ensembleDraftOffset{};
-		std::array<uint64_t, 2> ensemblePositionGeneration{};
-		std::array<Vector3, 2> ensemblePositionDraft{};
-		std::array<float, 2> ensembleYawDraft{};
+		size_t ensembleVisibleSlots{0};
+		std::vector<uint64_t> ensembleDraftActor;
+		std::vector<std::string> ensembleDraftMotion;
+		std::vector<float> ensembleDraftOffset;
+		std::vector<uint64_t> ensemblePositionGeneration;
+		std::vector<Vector3> ensemblePositionDraft;
+		std::vector<float> ensembleYawDraft;
 #ifdef GKMOTION_GUI_ACTIVE
 		ImGuiTextFilter motionFilter;
 #ifdef GKMOTION_GUI_TEST
@@ -399,7 +435,11 @@ namespace GakuMotion
 		void Draw(const GuiContext& ctx, bool hostedPanel = false)
 		{
 			PollBrowse(ctx);
-			if (!ctx.injectionAllowed)
+            if (!ctx.liveObserved) { livePageOpen=false; livePageAwaitingTakeover=false; liveDiagnosticsOpen=false; }
+            if (livePageAwaitingTakeover && ctx.liveTakeoverActive && ctx.injectionAllowed) {
+                livePageAwaitingTakeover=false; livePageOpen=false; liveDiagnosticsOpen=false; activePage=GuiPage::Library;
+            }
+			if (!ctx.injectionAllowed || livePageOpen)
 			{
 				transportNavigation = {};
 				// Drop a drag crossing a scene/capture boundary. Committing its last
@@ -408,30 +448,85 @@ namespace GakuMotion
 				const bool visible = hostedPanel || ImGui::Begin("GakuMotion 控制面板", &showWindow);
 				if (visible)
 				{
-					DrawStatusBar(ctx);
-					ImGui::TextWrapped("%s", ctx.injectionNotice.empty()
-						? "GakuMotion 当前已禁用。仅在偶像摄影或更衣室且截图保护就绪时可用；已保存的设置保持不变。"
-						: ctx.injectionNotice.c_str());
-					ImGui::Spacing();
-					ImGui::Separator();
-					ImGui::Spacing();
-					if (ctx.liveObserved)
-					{
-						ImGui::Text("Live: %.1f / %.1f 秒 (%s)", ctx.liveTime, ctx.liveDuration,
-						            ctx.livePaused ? "已暂停" : "播放中");
-						ImGui::BeginDisabled(!ctx.liveViewingConfirmed || ctx.liveTakeoverActive || !ctx.fnSetLivePaused);
-						if (ImGui::Button(ctx.livePaused ? "继续 Live" : "暂停 Live") && ctx.fnSetLivePaused)
-							ctx.fnSetLivePaused(ctx.self, !ctx.livePaused);
-						ImGui::EndDisabled();
-						if (!ctx.liveControlNotice.empty()) ImGui::TextWrapped("%s", ctx.liveControlNotice.c_str());
-						if (!ctx.liveViewingConfirmed) ImGui::TextWrapped("尚未确认 Live 观看模式，暂停控制不可用。");
-						ImGui::BeginDisabled(!ctx.liveTakeoverAvailable || !ctx.fnSetLiveTakeover);
-						if (ImGui::Button(ctx.liveTakeoverActive ? "退出 Live 动作接管" : "启用 Live 动作接管") && ctx.fnSetLiveTakeover)
-							ctx.fnSetLiveTakeover(ctx.self, !ctx.liveTakeoverActive);
-						ImGui::EndDisabled();
-						if (!ctx.liveTakeoverAvailable) ImGui::TextWrapped("等待角色、拍照保护和 Live 状态就绪。");
-						ImGui::Spacing();
-					}
+                    if (!livePageOpen) {
+                        DrawStatusBar(ctx);
+                        ImGui::TextWrapped("%s", ctx.injectionNotice.empty() ? "当前场景未启用动作控制。" : ctx.injectionNotice.c_str());
+                        if (ctx.liveObserved && ImGui::Button("进入 Live 接管")) livePageOpen=true;
+                    }
+                    if (livePageOpen) {
+                        if (liveDiagnosticsOpen) {
+                            if (ImGui::Button("返回 Live 接管")) liveDiagnosticsOpen=false;
+                            ImGui::SameLine(); ImGui::TextUnformatted("诊断与测试");
+                            ImGui::Separator();
+                            if (ctx.fnLoadSwingReport && ImGui::Button("读取上次 Swing 报告")) ctx.fnLoadSwingReport(ctx.self);
+                            DrawSwingCheckpointPanel(ctx.physicsMonitor,ctx.physicsLiveObservationCurrent && ctx.physicsMonitor.checkpointReportOwner!=0 && ctx.physicsMonitor.checkpointReportOwner==ctx.physicsMonitor.liveObserveOwner);
+                            ImGui::BeginDisabled(!ctx.liveViewingConfirmed || !ctx.fnRecordLiveState);
+                            if (ImGui::Button("记录当前 Live 状态（只读）") && ctx.fnRecordLiveState) ctx.fnRecordLiveState(ctx.self);
+                            ImGui::EndDisabled();
+                            bool continuousArmDiagnostics = ctx.liveContinuousArmDiagnostics;
+                            ImGui::BeginDisabled(!ctx.fnSetContinuousArmDiagnostics);
+                            if (ImGui::Checkbox("连续记录手臂诊断（影响性能）", &continuousArmDiagnostics) && ctx.fnSetContinuousArmDiagnostics)
+                                ctx.fnSetContinuousArmDiagnostics(ctx.self, continuousArmDiagnostics);
+                            ImGui::EndDisabled();
+                            ImGui::BeginDisabled(!ctx.fnActorClockTrial||ctx.liveTakeoverActive||(!ctx.liveActorClockActive&&(!ctx.liveActorClockAvailable||!ctx.livePaused)));
+                            if(ImGui::Button(ctx.liveActorClockActive?"停止角色图实验并恢复":"角色图运行 3 秒（MVP）")&&ctx.fnActorClockTrial)ctx.fnActorClockTrial(ctx.self,!ctx.liveActorClockActive);
+                            ImGui::EndDisabled();
+                            if(!ctx.liveActorClockNotice.empty()) ImGui::TextWrapped("%s",ctx.liveActorClockNotice.c_str());
+                            if(ImGui::CollapsingHeader("详细物理运行监控")) DrawPhysicsDiagnostics(ctx);
+                        } else {
+                            if (ImGui::Button("返回上一步")) { livePageOpen=false; livePageAwaitingTakeover=false; liveDiagnosticsOpen=false; }
+                            ImGui::SameLine(); ImGui::TextUnformatted("Live 接管");
+                            ImGui::SameLine(); ImGui::TextDisabled(ctx.liveViewingConfirmed?"[已识别 Live]":"[等待识别]");
+                            ImGui::Spacing();
+                            const float h=ImGui::GetFrameHeight();
+                            const auto& style=ImGui::GetStyle();
+                            const float cardHeight=5*h+5*style.ItemSpacing.y+2*style.WindowPadding.y+ImGui::GetTextLineHeight();
+                            if(ImGui::BeginChild("##live_progress_card",ImVec2(0,cardHeight),true,ImGuiWindowFlags_NoScrollbar)) {
+                                ImGui::TextUnformatted("Live 进度");
+                                char cur[24],total[24]; FormatTimeMmSs(liveSeekEditing?liveSeekValue:ctx.liveTime,cur,sizeof(cur)); FormatTimeMmSs(ctx.liveDuration,total,sizeof(total));
+                                ImGui::Text("%s    %s / %s",ctx.livePaused?"已暂停":"播放中",cur,total);
+                                const bool canSeek=ctx.liveViewingConfirmed&&!ctx.liveTakeoverActive&&ctx.fnSeekLive&&ctx.liveDuration>0.1f;
+                                if(!canSeek)liveSeekEditing=false;
+                                if(!liveSeekEditing)liveSeekValue=ctx.liveTime;
+                                ImGui::BeginDisabled(!canSeek);
+                                const bool pressed=ImGui::Button("##live_play_pause",ImVec2(h,h));
+                                const ImVec2 mn=ImGui::GetItemRectMin(),mx=ImGui::GetItemRectMax(); const float x=(mn.x+mx.x)*0.5f,y=(mn.y+mx.y)*0.5f;
+                                const ImU32 color=ImGui::GetColorU32(ImGuiCol_Text);
+                                if(ctx.livePaused)ImGui::GetWindowDrawList()->AddTriangleFilled(ImVec2(x-4,y-6),ImVec2(x-4,y+6),ImVec2(x+6,y),color);
+                                else { ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(x-5,y-6),ImVec2(x-2,y+6),color); ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(x+2,y-6),ImVec2(x+5,y+6),color); }
+                                if(ImGui::IsItemHovered())ImGui::SetTooltip("%s",ctx.livePaused?"播放 Live":"暂停 Live");
+                                if(pressed&&ctx.fnSetLivePaused)ctx.fnSetLivePaused(ctx.self,!ctx.livePaused);
+                                ImGui::SameLine(); ImGui::SetNextItemWidth(-1.0f);
+                                if(ImGui::SliderFloat("##live_seek",&liveSeekValue,0.0f,(std::max)(0.0f,ctx.liveDuration-0.05f),""))liveSeekEditing=true;
+                                if(liveSeekEditing&&ImGui::IsItemDeactivatedAfterEdit()){ctx.fnSeekLive(ctx.self,liveSeekValue);liveSeekEditing=false;}
+                                bool loop=ctx.liveLoopEnabled;
+                                if(ImGui::Checkbox("结束前自动循环 Live",&loop)&&ctx.fnSetLiveLoop)ctx.fnSetLiveLoop(ctx.self,loop);
+                                ImGui::EndDisabled();
+                                float lead=ctx.liveLoopLead; ImGui::SetNextItemWidth((std::min)(220.0f,ImGui::GetContentRegionAvail().x*0.48f));
+                                if(ImGui::SliderFloat("循环提前量（秒）",&lead,0.5f,3.0f,"%.2f")&&ctx.fnSetLiveLoopLead)ctx.fnSetLiveLoopLead(ctx.self,lead);
+                                ImGui::TextDisabled("暂停或接管期间不循环；提前量过小可能错过跳转。");
+                            }
+                            ImGui::EndChild();
+                            ImGui::Spacing();
+                            const char* physics=!ctx.physicsMonitorFresh?"待播放":ctx.physicsMonitor.actual==2?"原生运行中":ctx.physicsMonitor.actual==1?"内建物理":"未运行";
+                            ImGui::TextWrapped("接管：%s    Live：%s    物理：%s",ctx.liveTakeoverAvailable?"可用":"等待确认",ctx.liveViewingConfirmed?"已识别":"等待确认",physics);
+                            ImGui::Spacing();
+                            ImGui::BeginDisabled(!ctx.liveTakeoverAvailable||!ctx.fnSetLiveTakeover);
+                            if(ImGui::Button(ctx.liveTakeoverActive?"退出 Live 动作接管":"启动 Live 接管",ImVec2((std::min)(260.0f,ImGui::GetContentRegionAvail().x),h*1.35f))&&ctx.fnSetLiveTakeover){
+                                livePageAwaitingTakeover=!ctx.liveTakeoverActive;ctx.fnSetLiveTakeover(ctx.self,!ctx.liveTakeoverActive);
+                            }
+                            ImGui::EndDisabled();
+                            if(!ctx.liveTakeoverActive){ ImGui::SameLine(); ImGui::BeginDisabled(); ImGui::Button("恢复 Live"); ImGui::EndDisabled(); }
+                            if(ctx.liveTakeoverActive&&ImGui::Button("进入 MMD 页面")){livePageOpen=false;activePage=GuiPage::Library;}
+                            ImGui::TextDisabled(ctx.liveTakeoverActive?"退出后恢复原先 Live 状态。":"启动后暂停舞台并进入 MMD 曲库。");
+                            if(!ctx.liveControlNotice.empty())ImGui::TextWrapped("%s",ctx.liveControlNotice.c_str());
+                            if(!ctx.liveTakeoverAvailable)ImGui::TextWrapped("等待角色、拍照保护和 Live 状态就绪。");
+                            ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing();
+                            if(ImGui::Button("诊断与测试"))liveDiagnosticsOpen=true;
+                            ImGui::SameLine(); ImGui::TextDisabled("Swing 监控、角色图实验、历史报告");
+                        }
+                    } // livePageOpen
+                    if (!livePageOpen) {
 					if (!ctx.stageSettings.loadReplacementKey.empty())
 						ImGui::TextWrapped("已保留实验舞台选择；可在下方开发者选项中修改或恢复原生背景。");
 					if (ImGui::CollapsingHeader("开发者选项"))
@@ -440,6 +535,7 @@ namespace GakuMotion
 						if (developerMode) DrawStageLoadReplacementControl(ctx);
 						else ImGui::TextWrapped("开启开发者模式后可配置尚未完成的摄影舞台替换。");
 					}
+                    }
 				}
 				if (!hostedPanel) ImGui::End();
 				return;

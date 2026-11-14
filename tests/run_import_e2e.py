@@ -26,7 +26,7 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     repo = Path(__file__).resolve().parents[1]
     source = (repo / "src/GkCsharpImport.hpp").read_text("utf-8")
-    assert re.search(r"abi\(\)\s*<\s*3", source), "Runtime bridge must require body ABI 3"
+    assert re.search(r"abi\(\)\s*<\s*4", source), "Runtime bridge must require body ABI 4"
     module = ctypes.CDLL(str(args.native_dll.resolve()))
     versions = {}
     for name in ("GkVmdImporter_AbiVersion", "GkCameraImporter_AbiVersion"):
@@ -34,7 +34,7 @@ def main():
         fn.restype = ctypes.c_int32
         fn.argtypes = []
         versions[name] = fn()
-    assert list(versions.values()) == [3, 1], versions
+    assert list(versions.values()) == [4, 1], versions
     cases = [
         ("native-bridge-e2e", [str(args.bridge_exe.resolve()), str(args.native_dll.resolve().parent),
                                str(args.old_abi_dir.resolve()), str(output / "bridge-work")]),
@@ -58,12 +58,12 @@ def main():
                       "bones": bones, "track_timing": metadata["track_timing"], "sha256": digest(path)})
     assert clips, "No imported synthetic clip was produced"
     head = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
-    result = {"status": "PASS", "source_commit": head, "runtime_required_body_abi": 3,
+    result = {"status": "PASS", "source_commit": head, "runtime_required_body_abi": 4,
               "exports": versions, "runtime_sha256": digest(args.runtime_dll),
               "nativeaot_sha256": digest(args.native_dll), "synthetic_clips": clips,
               "game_started": False, "user_assets_accessed": False}
     (output / "synthetic-import-e2e.json").write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(json.dumps({"status": "PASS", "body_abi": 3, "camera_abi": 1,
+    print(json.dumps({"status": "PASS", "body_abi": 4, "camera_abi": 1,
                       "synthetic_clips": len(clips), "source_commit": head}))
 
 if __name__ == "__main__":

@@ -67,6 +67,19 @@ namespace GakuMotion
 		PlaybackState state{PlaybackState::Stopped};
 		MotionClip clip;
 		IdolController controller;
+		// Session-only experiment. The graph is deliberately rebound once per
+		// successful load, after saving the old pose and before the first write.
+		bool initializeBeforeMotion{false};
+		bool initializationPending{false};
+		bool RunPendingInitialization(void* actor, void* animator)
+		{
+			if (!initializationPending) return true;
+			if (!actor || !animator || !controller.fnAnimatorRebind) return false;
+			controller.fnAnimatorRebind(animator);
+			initializationPending = false;
+			if (controller.fnLogInfo) controller.fnLogInfo("[GakuMotion][MotionInit] actor=%p animator=%p applied=1", actor, animator);
+			return true;
+		}
 
 		float currentTime{0.0f};
 		// Keep consecutive frame commands exact even when n/fps is rounded to a
@@ -263,6 +276,7 @@ namespace GakuMotion
 			if (state != PlaybackState::Stopped) Stop();
 			currentMotionDir = motionDirectory;
 			clip = std::move(nextClip);
+			initializationPending = initializeBeforeMotion;
 			loadedMotionFile = motionFile;
 			// Reload even when absent/invalid: another song's trim must not leak.
 			controller.LoadRootHeightCalibration(motionDirectory + "/root_height_calibration.json", clip);
@@ -569,6 +583,7 @@ namespace GakuMotion
 			auto binding = controller.bindings.find(actor);
 			const bool actorBound = binding != controller.bindings.end() &&
 				binding->second.bindPoseCaptured && binding->second.boundBoneCount > 0;
+			if (actorBound && !RunPendingInitialization(actor, animator ? animator : binding->second.cachedAnimator)) return;
 			if (actorBound)
 				for (int slot = 0; slot < 2; ++slot)
 					binding->second.talks[slot].Suppress(actor, slot, controller.faceApi);

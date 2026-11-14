@@ -149,9 +149,10 @@ static void TestCameraController(const std::string& repoRoot)
 		auto zero = core.LiveCameraTrackAnchor(actor);
 		Check(zero.x == 0 && zero.y == 0 && zero.z == 0, "ordinary scenes retain original camera anchor");
 		core.liveTakeoverActive = true;
+		core.player.clip.root_positions = {{.4f, .2f, -.2f}};
 		const auto anchor = core.LiveCameraTrackAnchor(actor);
-		Check(anchor.x == 2 && anchor.y == 0 && anchor.z == -3,
-		      "Live anchor includes only captured horizontal root baseline");
+		Check(std::fabs(anchor.x - 1.6f) < 1e-5f && anchor.y == 0 && std::fabs(anchor.z + 2.8f) < 1e-5f,
+		      "Live camera anchor shares the motion start translation");
 		Check(core.LiveCameraTrackAnchor(reinterpret_cast<void*>(0x31)).x == 0,
 		      "another actor cannot inherit the selected actor baseline");
 		actual = before;

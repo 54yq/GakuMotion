@@ -19,6 +19,7 @@
 #define GKMOTION_CAPTURE_DIAGNOSTICS 1
 #define GKMOTION_SCRUB_TRACE 1
 #include "GkMotionData.hpp"
+#include "GkDofRenderGate.hpp"
 #include "GkJsonLite.hpp"
 #include "GkBoneOverride.hpp"
 #include "GkRuntimeConfig.hpp"
@@ -27,6 +28,7 @@
 #include "GkHotkey.hpp"
 #include "GkFaceRuntime.hpp"
 #include "GakuMotion.hpp"
+#include "GkLiveActorPropPolicy.hpp"
 #ifdef _WIN32
 #endif
 
@@ -2398,6 +2400,9 @@ static void TestSecondaryPhysicsConfig()
 
 #include "test_library_safety.hpp"
 #include "test_ensemble_integration.hpp"
+#ifdef _WIN32
+#include "test_burst_bridge_multi_client.hpp"
+#endif
 
 static void TestPlaylistLifecycle(const std::string& repoRoot)
 {
@@ -2588,6 +2593,107 @@ static void TestInitialYaw()
 	      "world-rotation streams turn in world coordinates too");
 }
 
+static int dofRenderCalls = 0;
+static bool FakeDofRender(int value) { ++dofRenderCalls; return value == 7; }
+static void TestLiveDofControl()
+{
+	BeginTest("Live depth of field disable and restore");
+	Core core;
+	core.liveTakeoverActive = true; core.liveOwnerToken = 9; core.injectionSession = 12;
+	dofRenderCalls = 0;
+	Check(InvokeDofRender(false, &FakeDofRender, 7) && dofRenderCalls == 1, "normal rendering calls native pass once");
+	Check(!InvokeDofRender(true, &FakeDofRender, 7) && dofRenderCalls == 1, "experimental disable skips native pass");
+	Check(InvokeDofRender(false, &FakeDofRender, 7) && dofRenderCalls == 2, "release returns to native rendering");
+	Core::GuiCommand disable{Core::GuiAction::LiveDofDisabled, 0, true};
+	disable.actorToken = 9; disable.sceneSession = 12;
+	core.QueueGui(disable); core.ProcessPendingGuiCommands();
+	Check(core.liveDofDisabled, "current Live session can request depth of field disable");
+	disable.actorToken = 10; disable.flag = false;
+	core.QueueGui(disable); core.ProcessPendingGuiCommands();
+	Check(core.liveDofDisabled, "stale owner cannot alter depth of field request");
+}
+
+static void TestLiveSeekCommand()
+{
+	BeginTest("Live seek command ownership and gating");
+	Core core;
+	core.liveViewingConfirmed = true; core.liveOwnerToken = 42; core.liveOwnerScene = 7;
+	core.liveObservation = {true, false, 12.0f, 150.0f};
+	auto ctx = core.BuildGuiContext();
+	ctx.fnSeekLive(ctx.self, 60.0f);
+	Check(core.liveSeekPending && core.liveSeekOwner == 42 && core.liveSeekScene == 7 && core.liveSeekTime == 60,
+		"valid Live seek queues target with owner and scene");
+	core.liveSeekPending = false;
+	core.liveTakeoverActive = true;
+	ctx.fnSeekLive(ctx.self, 30.0f);
+	Check(!core.liveSeekPending, "takeover blocks Live seek");
+	core.liveTakeoverActive = false;
+	ctx.fnSeekLive(ctx.self, 150.0f);
+	Check(!core.liveSeekPending, "end-of-Live target is rejected");
+	ctx.fnSetLiveLoop(ctx.self, true);
+	Check(core.liveLoopEnabled && core.liveLoopOwner==42 && core.liveLoopScene==7,
+		"pre-end seek loop is scoped to current Live without callback suppression");
+	ctx.fnSetLiveLoopLead(ctx.self,0.5f);
+	Check(core.liveLoopLead==0.5f,"loop lead accepts half a second");
+	ctx.fnSetLiveLoopLead(ctx.self,0.1f);
+	Check(core.liveLoopLead==0.5f,"loop lead rejects unsafe narrow values");
+	ctx.fnSetLiveLoop(ctx.self, false);
+	Check(!core.liveLoopEnabled && !core.liveLoopWaiting, "disabling Live loop clears the active loop");
+	ctx.fnRecordLiveState(ctx.self);
+	Check(core.liveRecordPending && core.liveRecordOwner == 42 && core.liveRecordScene == 7,
+		"read-only Live snapshot is queued for the current scene and owner");
+	core.liveRecordPending = false; core.liveViewingConfirmed = false;
+	ctx.fnRecordLiveState(ctx.self);
+	Check(!core.liveRecordPending, "read-only snapshot rejects unconfirmed viewing context");
+	core.liveViewingConfirmed=true;core.liveObservation.paused=true;core.liveActorClockAvailable=true;
+	ctx.fnActorClockTrial(ctx.self,true);
+	Check(core.liveActorClockRequest==1&&core.liveActorClockRequestOwner==42&&core.liveActorClockRequestScene==7,
+		"actor clock trial request is scoped to current paused Live");
+	core.liveActorClockRequest=0;core.liveActorClockActive=true;
+	ctx.fnSeekLive(ctx.self,10);
+	ctx.fnSetLivePaused(ctx.self,false);
+	Check(!core.liveSeekPending&&!core.livePauseRequest,"active clock trial blocks competing seek and resume");
+	ctx.fnActorClockTrial(ctx.self,false);
+	Check(core.liveActorClockRequest==2,"clock trial can always request a scoped stop");
+	core.liveActorClockActive=false;core.liveActorClockRequest=0;core.liveActorClockFault=true;
+	ctx.fnActorClockTrial(ctx.self,true);ctx.fnSeekLive(ctx.self,10);
+	Check(!core.liveActorClockRequest&&!core.liveSeekPending,"unconfirmed recovery blocks new trials and seek");
+}
+
+static void TestLivePositionRecapture()
+{
+	BeginTest("live_position_recapture_after_confirmed_restore");
+	Core core;
+	auto& controller = core.player.controller;
+	WireControllerCallbacks(controller);
+	auto* actor = reinterpret_cast<void*>(0x451);
+	auto* actorTransform = fake::GetComponentTransform(actor);
+	auto* root = fake::GetBone(actor, 0);
+	fake::worldPos[actorTransform] = {1, 0, 2};
+	fake::worldPos[root] = {1, 1, 2};
+	fake::worldRot[actorTransform] = Quaternion::Identity();
+	const auto clip = MakeSmallClip();
+	controller.SetInitialPositionOffset({.5f, 0, -.5f});
+	controller.SetInitialYawDegrees(30);
+	controller.BindActor(actor, clip, nullptr);
+	Check(controller.currentBinding.restActorPos.x == 1, "first takeover captures first Live position");
+	core.captureSuspended = true;
+	core.captureSession = core.injectionSession;
+	core.captureRestoreReport.body = capture::RestoreState::Unconfirmed;
+	Check(!core.ReleaseRestoredLiveBinding() && !controller.bindings.empty(),
+		"unconfirmed restore retains the original binding");
+	core.captureRestoreReport.body = capture::RestoreState::Confirmed;
+	Check(core.ReleaseRestoredLiveBinding() && controller.bindings.empty(),
+		"confirmed restore releases the old binding");
+	fake::worldPos[actorTransform] = {8, 0, 9};
+	fake::worldPos[root] = {8, 1, 9};
+	controller.BindActor(actor, clip, nullptr);
+	Check(controller.currentBinding.restActorPos.x == 8 && controller.currentBinding.restActorPos.z == 9,
+		"next takeover captures the later Live position");
+	Check(controller.initialPositionOffset.x == .5f && controller.initialPositionOffset.z == -.5f &&
+		controller.initialYawDegrees == 30, "manual placement and rotation survive recapture");
+}
+
 static void TestInitialPosition()
 {
 	BeginTest("initial_position_world_translation");
@@ -2666,6 +2772,20 @@ static void TestInitialPosition()
 	controller.ApplyMotion(clip, 0);
 	Check(near(fake::worldPos[binding.rootTransform], groundBefore),
 	      "all-axis reset restores default playback placement");
+	clip.root_positions[0] = {2.0f, .3f, -4.0f};
+	clip.root_positions[1] = {2.4f, .5f, -3.2f};
+	controller.rebaseLiveMotionStart = true;
+	controller.ApplyMotion(clip, 0);
+	const auto liveStart = fake::worldPos[binding.rootTransform];
+	Check(near(liveStart - groundBefore, binding.restActorRot.Rotate({0, .3f, 0})),
+	      "Live rebases horizontal start without changing vertical motion");
+	controller.ApplyMotion(clip, 1.0f / clip.fps);
+	Check(near(fake::worldPos[binding.rootTransform] - liveStart,
+	           binding.restActorRot.Rotate({.4f, .2f, .8f})), "Live retains authored motion travel");
+	controller.rebaseLiveMotionStart = false;
+	controller.ApplyMotion(clip, 0);
+	Check(near(fake::worldPos[binding.rootTransform] - liveStart, binding.restActorRot.Rotate({2,0,-4})),
+	      "leaving Live disables the rebasing without mutating the clip");
 
 	BeginTest("initial_position_commands_and_persistence");
 	namespace fs = std::filesystem;
@@ -2687,6 +2807,11 @@ static void TestInitialPosition()
 	restarted.Initialize(root.string());
 	Check(near(restarted.player.controller.initialPositionOffset, offset) && restarted.player.controller.initialYawDegrees == 45,
 	      "saved initial position and yaw load on next startup");
+    core.QueueInitialPosition({256, -256, 128});
+    core.QueueGui({Core::GuiAction::SaveInitialPosition}); core.ProcessPendingGuiCommands();
+    Check(restarted.LoadInitialPosition() && near(restarted.player.controller.initialPositionOffset, {256,-256,128}),
+          "positions beyond ten metres persist at the expanded limits");
+    core.QueueInitialPosition(offset); core.QueueGui({Core::GuiAction::SaveInitialPosition}); core.ProcessPendingGuiCommands();
 	WriteTextFile(core.initialPositionPath, R"({"version":1,"space":"world","offset_m":[1,"bad",2]})");
 	Check(!core.LoadInitialPosition() && near(core.player.controller.initialPositionOffset, offset),
 	      "invalid saved XYZ leaves valid runtime placement intact");
@@ -2840,15 +2965,108 @@ static void TestInjectionRuntimeBoundary()
 		"leaving the allowed page restores native ownership and drops commands");
 }
 
+#include "../src/GkLiveGraphExperiment.hpp"
+#include "../src/GkLiveProbeSummary.hpp"
+namespace graph_contract_test
+{
+ struct Mock { int snapshots{}, evaluations{}, restores{}; bool evalOk{true}, restoreOk{true}; };
+ static bool Snapshot(void* p, const live_graph_experiment::Evidence&) { ++static_cast<Mock*>(p)->snapshots; return true; }
+ static bool Evaluate(void* p, const live_graph_experiment::Evidence&, float) { auto& m=*static_cast<Mock*>(p); ++m.evaluations; return m.evalOk; }
+ static bool Restore(void* p, const live_graph_experiment::Evidence&) { auto& m=*static_cast<Mock*>(p); ++m.restores; return m.restoreOk; }
+}
+static void TestLiveGraphExperimentContract()
+{
+ using namespace live_graph_experiment;
+ using namespace graph_contract_test;
+ BeginTest("live_graph_experiment_lifecycle_contract");
+ Mock mock;
+ Session session({&mock, Snapshot, Evaluate, Restore});
+ Evidence e{1,2,3,4,true,true,true,false};
+ Check(!session.Start(e) && mock.snapshots == 0, "unrestorable physics prevents graph mutation");
+ Check(!session.Step(e, 1, .016f) && session.Stop(e) && mock.evaluations == 0 && mock.restores == 0,
+     "incomplete evidence invokes no evaluate or restore adapter");
+ e.physicsRestorable = true;
+ e.graphExclusive = false;
+ Check(!session.Start(e) && mock.snapshots == 0, "nonexclusive graph cannot capture a snapshot");
+ e.graphExclusive = true;
+ Check(session.Start(e) && mock.snapshots == 1, "verified exclusive graph is snapshotted before activation");
+ Check(session.Step(e, 1, .016f) && mock.evaluations == 1, "one controlled graph evaluation");
+ Check(!session.Step(e, 1, .016f) && !session.Step(e, 2, .1f) && mock.evaluations == 1,
+     "duplicate frame and unsafe delta cannot evaluate");
+ Evidence other = e; other.actor = 42;
+ Check(!session.Step(other, 2, .016f) && session.Current() == State::RestorePending,
+     "owner mismatch stops new evaluations");
+ Check(!session.Stop(other) && mock.restores == 0, "foreign identity cannot be restored");
+ Evidence otherGraph = e; otherGraph.graph = 99;
+ Check(!session.Stop(otherGraph) && mock.restores == 0, "another graph cannot receive the snapshot");
+ mock.restoreOk = false;
+ Check(!session.Stop(e) && session.Current() == State::RestorePending, "failed restore retains recovery state");
+ mock.restoreOk = true;
+ Check(session.Stop(e) && session.Current() == State::Off, "confirmed restore releases the session");
+ Check(session.Start(e), "a restored session can restart");
+ mock.evalOk = false;
+ Check(!session.Step(e, 3, .016f) && session.Current() == State::RestorePending,
+     "evaluation failure blocks future steps until restoration");
+ Check(session.Stop(e), "restore after evaluation failure");
+}
+static void TestPhysicsMonitorState()
+{
+ BeginTest("physics_monitor_truthful_status");
+ PhysicsMonitor m;
+ Check(ClassifyPhysicsMonitor(m, false) == PhysicsMonitorState::NoSample, "no sample is not success");
+ m.observed = true; m.requested = 2; m.actual = 1;
+ Check(ClassifyPhysicsMonitor(m, false) == PhysicsMonitorState::Stale, "old data is not shown as live");
+ Check(ClassifyPhysicsMonitor(m, true) == PhysicsMonitorState::Waiting, "native request with fallback is waiting");
+ m.actual = 2;
+ Check(ClassifyPhysicsMonitor(m, true) == PhysicsMonitorState::Native, "confirmed native backend is shown as native");
+ m.fault = true;
+ Check(ClassifyPhysicsMonitor(m, true) == PhysicsMonitorState::Fault, "fault takes priority over old success");
+ m.fault = false; m.publishResult = -4;
+ Check(ClassifyPhysicsMonitor(m, true) == PhysicsMonitorState::Fault, "rejected publish is a fault");
+ m.requested = 1; m.actual = 1;
+ Check(ClassifyPhysicsMonitor(m, true) == PhysicsMonitorState::Builtin, "old native error does not label builtin as fault");
+}
+static void TestLiveProbeSummary()
+{
+ BeginTest("native_live_probe_summary");
+ jsonlite::Value root; std::string error;
+ Check(jsonlite::ParseText(R"({"profile":"gakumas-burst-20261008-windows-x64","traces":[{"caller_rva":"0xcc9c8","calls":42,"delta_min":0,"delta_max":0.02},{"caller_rva":"0xce36b","calls":88,"delta_min":0,"delta_max":1}]})", root, error), "valid synthetic trace parses");
+ auto summary = ParseLiveProbeSummary(root);
+ Check(summary.valid && summary.swingCalls == 42 && std::fabs(summary.maxDt - .02f) < .00001f,
+     "only known Swing caller contributes to summary");
+ Check(jsonlite::ParseText(R"({"profile":"unknown","traces":[{"caller_rva":"0xcc9c8","calls":42,"delta_min":0,"delta_max":1}]})", root, error) && !ParseLiveProbeSummary(root).valid,
+     "unknown profile cannot be claimed as Swing");
+ Check(jsonlite::ParseText(R"({"profile":"gakumas-burst-20261008-windows-x64","traces":[{"caller_rva":"0xcc9c8","calls":-1,"delta_min":0,"delta_max":1}]})", root, error) && !ParseLiveProbeSummary(root).valid,
+     "invalid counts are rejected");
+}
+
 #include "test_playback_timing.hpp"
 #include "test_track_timing.hpp"
 #include "test_actorless_library.hpp"
+
+static int g_motionInitCalls = 0;
+static void TestMotionInitialization()
+{
+ BeginTest("motion load optional initialization once per player");
+ MotionPlayer p, follower;
+ p.controller.fnAnimatorRebind = [](void*) { ++g_motionInitCalls; };
+ follower.controller.fnAnimatorRebind = p.controller.fnAnimatorRebind;
+ g_motionInitCalls = 0;
+ Check(p.RunPendingInitialization((void*)1, (void*)2) && g_motionInitCalls == 0, "default off");
+ p.initializationPending = true;
+ Check(!p.RunPendingInitialization((void*)1, nullptr) && p.initializationPending && g_motionInitCalls == 0, "wait for animator");
+ Check(p.RunPendingInitialization((void*)1, (void*)2) && !p.initializationPending && g_motionInitCalls == 1, "run once");
+ Check(p.RunPendingInitialization((void*)1, (void*)2) && g_motionInitCalls == 1, "no repeated reset");
+ follower.initializationPending = true;
+ Check(follower.RunPendingInitialization((void*)3, (void*)4) && g_motionInitCalls == 2, "follower independent");
+}
 
 int main(int argc, char** argv)
 {
  std::setvbuf(stdout, nullptr, _IONBF, 0);
  const std::string repoRoot = argc > 1 ? argv[1] : ".";
  TestJsonLite();
+ TestMotionInitialization();
  TestConfigTemplate();
  TestCommandSeq();
  TestBoneOverride();
@@ -2860,6 +3078,9 @@ int main(int argc, char** argv)
  TestMikuMouthFit();
  TestSceneActorSelection();
  TestEnsembleIntegration(repoRoot);
+#ifdef _WIN32
+ TestBurstBridgeMultiClient();
+#endif
  TestFaceAnimatorCaptureLifecycle();
  TestFaceRuntimeMetadata();
  TestNativeTalkOwnership();
@@ -2867,6 +3088,12 @@ int main(int argc, char** argv)
  TestSecondaryPhysicsMultiActorRestore();
  TestSecondaryPhysicsConfig();
  TestOrderedPlaybackCommands();
+ TestLiveDofControl();
+ TestLiveSeekCommand();
+ TestLiveGraphExperimentContract();
+ TestPhysicsMonitorState();
+ TestLiveProbeSummary();
+ TestLivePositionRecapture();
  TestInitialPosition();
  TestInitialYaw();
  TestOverrideInjection();

@@ -3,7 +3,7 @@
 #include "GkEnsemble.hpp"
 #include "GkMotionPlayer.hpp"
 #include "GkSceneActors.hpp"
-#include <array>
+#include <deque>
 #include <memory>
 #include <unordered_map>
 
@@ -14,7 +14,7 @@ namespace GakuMotion
 	class EnsembleRuntime
 	{
 	public:
-		static constexpr size_t kFollowerCount = EnsembleAssignments::kMaxParts - 1;
+
 		struct Placement { Vector3 position{}; float yawDegrees{0}; };
 		struct ArmCalibration { float share{0.0f}; float degrees{45.0f}; bool locked{false}; };
 		struct Follower
@@ -30,7 +30,10 @@ namespace GakuMotion
 			BoneOverrideSet overrides;
 		};
 
-		const std::array<Follower, kFollowerCount>& Followers() const { return followers_; }
+		const std::deque<Follower>& Followers() const { return followers_; }
+		// The runtime releases secondary-physics ownership before a controller
+		// can be restored or destroyed. A failed release retains the follower.
+		bool (*fnBeforeRestore)(size_t, MotionPlayer&){nullptr};
 		bool RestoreUnconfirmed() const { return restoreUnconfirmed_; }
 		bool HasFollowers() const
 		{
@@ -94,12 +97,14 @@ namespace GakuMotion
 		// active, retain its snapshot and fail closed until the scene is discarded.
 		bool Clear(size_t index, const SceneActorRegistry& registry)
 		{
-			if (index >= kFollowerCount) return false;
+			if (index >= followers_.size()) return false;
 			auto& follower = followers_[index];
 			if (follower.player)
 			{
 				void* actor = registry.Resolve(follower.actorToken, registry.Epoch());
 				if (follower.active && (!actor || actor != follower.player->controller.targetActor))
+				{ restoreUnconfirmed_ = true; return false; }
+				if (fnBeforeRestore && !fnBeforeRestore(index, *follower.player))
 				{ restoreUnconfirmed_ = true; return false; }
 				if (follower.active && actor && actor == follower.player->controller.targetActor)
 				{
@@ -117,7 +122,7 @@ namespace GakuMotion
 		bool ClearAll(const SceneActorRegistry& registry)
 		{
 			bool ok = true;
-			for (size_t i = 0; i < kFollowerCount; ++i) ok = Clear(i, registry) && ok;
+			for (size_t i = 0; i < followers_.size(); ++i) ok = Clear(i, registry) && ok;
 			return ok;
 		}
 
@@ -135,16 +140,17 @@ namespace GakuMotion
 		         float offset, const SceneActorRegistry& registry, const MotionPlayer& primary,
 		         const BoneOverrideSet& global, bool overridesEnabled)
 		{
-			if (index >= kFollowerCount || !primary.controller.targetActor || !std::isfinite(offset) || motion.name.empty() ||
+			if (!primary.controller.targetActor || !std::isfinite(offset) || motion.name.empty() ||
 			    primary.state == PlaybackState::Playing || primary.state == PlaybackState::Paused) return false;
 			void* actor = registry.Resolve(actorToken, epoch);
 			if (!actor || actor == primary.controller.targetActor) return false;
-			for (size_t i = 0; i < kFollowerCount; ++i)
+			for (size_t i = 0; i < followers_.size(); ++i)
 				if (i != index && followers_[i].actorToken == actorToken) return false;
 			auto nextAssignments = assignments_;
 			if (!nextAssignments.Set(index + 1, actorToken, epoch, motion.name, offset)) return false;
 
 			auto next = std::make_unique<MotionPlayer>();
+			next->initializeBeforeMotion = primary.initializeBeforeMotion;
 			// Copy service callbacks and settings, then discard copied ownership.
 			next->controller = primary.controller;
 			next->controller.DiscardBindings();
@@ -174,6 +180,7 @@ namespace GakuMotion
 			const bool hasOverrides = std::filesystem::exists(MotionPathFromUtf8(file), error);
 			if (error || (hasOverrides && !motionOverrides.LoadFromFile(file))) return false;
 			BoneOverrideSet::BuildEffective(global, motionOverrides, overridesEnabled, effective);
+			if (followers_.size() <= index) followers_.resize(index + 1);
 			if (!Clear(index, registry)) return false;
 			auto& follower = followers_[index];
 			follower.actorToken = actorToken;
@@ -193,7 +200,7 @@ namespace GakuMotion
 		bool SetPosition(size_t index, uint64_t actorToken, uint64_t epoch, uint64_t generation,
 		                 const Vector3& position, const SceneActorRegistry& registry)
 		{
-			if (index >= kFollowerCount || restoreUnconfirmed_) return false;
+			if (index >= followers_.size() || restoreUnconfirmed_) return false;
 			auto& follower = followers_[index];
 			if (!follower.player || !generation || follower.bindingGeneration != generation ||
 			    follower.actorToken != actorToken || registry.Resolve(actorToken, epoch) != follower.player->controller.targetActor)
@@ -205,7 +212,7 @@ namespace GakuMotion
 		bool SetYaw(size_t index, uint64_t actorToken, uint64_t epoch, uint64_t generation,
 		            float yawDegrees, const SceneActorRegistry& registry)
 		{
-			if (index >= kFollowerCount || restoreUnconfirmed_) return false;
+			if (index >= followers_.size() || restoreUnconfirmed_) return false;
 			auto& follower = followers_[index];
 			if (!follower.player || !generation || follower.bindingGeneration != generation ||
 			    follower.actorToken != actorToken || registry.Resolve(actorToken, epoch) != follower.player->controller.targetActor ||
@@ -219,7 +226,7 @@ namespace GakuMotion
 		bool SetArmCalibration(size_t index, uint64_t token, uint64_t epoch, uint64_t generation,
 		                       int operation, float value, const SceneActorRegistry& registry)
 		{
-			if (index >= kFollowerCount || restoreUnconfirmed_) return false;
+			if (index >= followers_.size() || restoreUnconfirmed_) return false;
 			auto& follower = followers_[index];
 			if (!follower.player || !generation || follower.bindingGeneration != generation ||
 			    follower.actorToken != token || registry.Resolve(token, epoch) != follower.player->controller.targetActor)
@@ -239,11 +246,14 @@ namespace GakuMotion
 		bool RestoreLive(const SceneActorRegistry& registry)
 		{
 			bool ok = true;
-			for (auto& follower : followers_)
+			for (size_t index = 0; index < followers_.size(); ++index)
 			{
+				auto& follower = followers_[index];
 				if (!follower.player || !follower.active) continue;
 				void* actor = registry.Resolve(follower.actorToken, registry.Epoch());
 				if (!actor || actor != follower.player->controller.targetActor)
+				{ restoreUnconfirmed_ = true; ok = false; continue; }
+				if (fnBeforeRestore && !fnBeforeRestore(index, *follower.player))
 				{ restoreUnconfirmed_ = true; ok = false; continue; }
 				const auto result = follower.player->controller.RestoreForCapture();
 				const bool restored = result.bodyConfirmed && result.faceConfirmed && result.gazeConfirmed;
@@ -272,6 +282,7 @@ namespace GakuMotion
 				}
 				player.state = primary.state;
 				player.controller.facialWeights = primary.controller.facialWeights;
+				player.controller.rebaseLiveMotionStart = primary.controller.rebaseLiveMotionStart;
 				player.controller.auxDriveMode = primary.controller.auxDriveMode;
 				player.currentTime = (std::max)(0.0f, primary.currentTime - follower.offsetSeconds);
 				player.Tick(0.0f, actor, animator, director, false);
@@ -280,7 +291,7 @@ namespace GakuMotion
 		}
 
 	private:
-		std::array<Follower, kFollowerCount> followers_{};
+		std::deque<Follower> followers_{2};
 		EnsembleAssignments assignments_;
 		std::unordered_map<uint64_t, Placement> placements_;
 		std::unordered_map<uint64_t, ArmCalibration> armCalibrations_;

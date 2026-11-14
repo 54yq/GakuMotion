@@ -30,7 +30,7 @@ internal static unsafe class NativeExports
     /// silently drop those fields, so the plugin refuses to pair with them.
     /// </summary>
     [UnmanagedCallersOnly(EntryPoint = "GkVmdImporter_AbiVersion")]
-    public static int AbiVersion() => 3;
+    public static int AbiVersion() => 4;
 
     // A separate read-only ABI; it neither rewrites nor reimports the song.
     [UnmanagedCallersOnly(EntryPoint = "GkVmdFormation_ReadOrigin")]

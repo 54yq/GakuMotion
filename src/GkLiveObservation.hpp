@@ -25,6 +25,11 @@ namespace GakuMotion::live_takeover
         float time{};
         float duration{};
     };
+    struct EndInspection
+    {
+        bool identity{}, execution{}, pauseKnown{}, timeKnown{}, durationKnown{}, paused{};
+        float time{}, duration{};
+    };
 
     inline void* SceneField(const Api& api, const RuntimeAccess& a, void* scene,
                             const char* name, void* expected)
@@ -39,6 +44,38 @@ namespace GakuMotion::live_takeover
         void* value = nullptr;
         a.readField(scene, field, &value);
         return value && a.objectClass(value) == expected ? value : nullptr;
+    }
+
+    // End callbacks can run after ordinary timeline validity has expired.
+    // Preserve each getter result independently so a reset/overshoot is visible.
+    inline EndInspection InspectEnd(const Api& api, const RuntimeAccess& a, void* scene, void* presenter)
+    {
+        EndInspection out;
+        if (!api.Ready() || !a.invoke || !a.unbox || !a.objectClass || !presenter) return out;
+        void* live = SceneField(api, a, scene, "_live", api.presenterClass);
+        void* player = SceneField(api, a, scene, "_livePlayer", api.playerClass);
+        out.identity = live == presenter && player;
+        if (!out.identity) return out;
+        void* ex = nullptr; void* execution = a.invoke(api.execution, player, nullptr, &ex);
+        out.execution = execution && !ex && a.objectClass(execution) == api.executionClass;
+        auto raw = [&](const void* method, void* instance) -> void* {
+            void* error = nullptr; void* boxed = a.invoke(method, instance, nullptr, &error);
+            return boxed && !error ? a.unbox(boxed) : nullptr;
+        };
+        if (out.execution) if (void* p = raw(api.isPaused, execution)) { out.pauseKnown = true; out.paused = *static_cast<uint8_t*>(p) != 0; }
+        if (void* p = raw(api.currentTime, player)) { out.timeKnown = true; out.time = *static_cast<float*>(p); }
+        if (void* p = raw(api.duration, player)) { out.durationKnown = true; out.duration = *static_cast<float*>(p); }
+        return out;
+    }
+    // Only from a verified, armed end callback. No ordinary timeline-time
+    // precondition is imposed; identity, execution and pause remain required.
+    inline bool SeekAtEnd(const Api& api, const RuntimeAccess& a, void* scene, void* presenter)
+    {
+        const auto s = InspectEnd(api, a, scene, presenter);
+        if (!s.identity || !s.execution || !s.pauseKnown || s.paused || !s.durationKnown ||
+            !std::isfinite(s.duration) || s.duration <= 0) return false;
+        float zero = 0; void* args[]{&zero}; void* exception = nullptr;
+        a.invoke(api.seek, presenter, args, &exception); return !exception;
     }
 
     // Runs on the Unity thread with a freshly confirmed Live scene presenter.
@@ -90,5 +127,19 @@ namespace GakuMotion::live_takeover
         if (exception) return false;
         const auto after = Observe(api, a, scene);
         return after.confirmed && after.paused == desired;
+    }
+
+    // Reports dispatch only: the game may update asynchronously. The caller
+    // must confirm ownership and observe the resulting time independently.
+    inline bool Seek(const Api& api, const RuntimeAccess& a, void* scene, float seconds)
+    {
+        if (!std::isfinite(seconds) || !api.seek || !a.invoke) return false;
+        const auto before = Observe(api, a, scene);
+        if (!before.confirmed || seconds < 0.0f || seconds >= before.duration) return false;
+        void* presenter = SceneField(api, a, scene, "_live", api.presenterClass);
+        if (!presenter) return false;
+        void* args[]{&seconds}; void* exception = nullptr;
+        a.invoke(api.seek, presenter, args, &exception);
+        return !exception;
     }
 }

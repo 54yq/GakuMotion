@@ -66,6 +66,24 @@ namespace GakuMotion
 			__try { return api.dump_traces(path); }
 			__except (EXCEPTION_EXECUTE_HANDLER) { return GBB_E_FAULT; }
 		}
+		using ProbeFn = int (GBB_CALL*)();
+		using ActorProbeFn = int (GBB_CALL*)(void*, void*);
+		using ActorProbeReadFn = int (GBB_CALL*)(void**, uint64_t*, uint64_t*, uint64_t*);
+		static int ActorProbeGuarded(ActorProbeFn fn, void* actor, void* animator)
+		{
+			__try { return fn ? fn(actor, animator) : GBB_E_UNAVAILABLE; }
+			__except (EXCEPTION_EXECUTE_HANDLER) { return GBB_E_FAULT; }
+		}
+		static int ActorProbeReadGuarded(ActorProbeReadFn fn, void** actor, uint64_t* matched, uint64_t* other, uint64_t* bad)
+		{
+			__try { return fn ? fn(actor, matched, other, bad) : GBB_E_UNAVAILABLE; }
+			__except (EXCEPTION_EXECUTE_HANDLER) { return GBB_E_FAULT; }
+		}
+		static int ProbeGuarded(ProbeFn fn)
+		{
+			__try { return fn ? fn() : GBB_E_UNAVAILABLE; }
+			__except (EXCEPTION_EXECUTE_HANDLER) { return GBB_E_FAULT; }
+		}
 
 		static int ClearGuarded(const GbbApi& api, uint32_t flags)
 		{
@@ -88,6 +106,7 @@ namespace GakuMotion
 		std::string reason{"not_requested"};
 		GbbStatus status{};
 		GbbPerf perf{};
+		int lastPublishResult{GBB_PENDING};
 		bool HasCaptureInput() const noexcept { return captureInputOutstanding_; }
 
 		// Uses only the already negotiated ABI. The companion's Clear cancels
@@ -243,6 +262,7 @@ namespace GakuMotion
 			}
 			captureInputOutstanding_ = true;
 			const int result = PublishGuarded(api_, &packet);
+			lastPublishResult = result;
 			status = {};
 			status.size = sizeof(status);
 			status.version = GBB_API_VERSION;
@@ -286,6 +306,35 @@ namespace GakuMotion
 		int DumpTraces(const wchar_t* path) const
 		{
 			return api_.dump_traces ? DumpGuarded(api_, path) : GBB_E_UNAVAILABLE;
+		}
+		int BeginReadOnlyProbe()
+		{
+			if (!Ensure() || faulted_ || !module_) return GBB_E_UNAVAILABLE;
+			return ProbeGuarded(reinterpret_cast<ProbeFn>(GetProcAddress(module_, "GakuBurstBridge_BeginReadOnlyProbe")));
+		}
+		int EndReadOnlyProbe()
+		{
+			return module_ ? ProbeGuarded(reinterpret_cast<ProbeFn>(GetProcAddress(module_, "GakuBurstBridge_EndReadOnlyProbe"))) : GBB_E_UNAVAILABLE;
+		}
+		int ObserveActor(void* actor, void* animator)
+		{
+			return module_ ? ActorProbeGuarded(reinterpret_cast<ActorProbeFn>(GetProcAddress(module_, "GakuBurstBridge_ObserveActor")), actor, animator) : GBB_E_UNAVAILABLE;
+		}
+		int ReadActorObservation(void** actor, uint64_t* matched, uint64_t* other, uint64_t* bad) const
+		{
+			return module_ ? ActorProbeReadGuarded(reinterpret_cast<ActorProbeReadFn>(GetProcAddress(module_, "GakuBurstBridge_ReadActorObservation")), actor, matched, other, bad) : GBB_E_UNAVAILABLE;
+		}
+		bool ReadObservationPerf(GbbPerf& out) const
+		{
+			if (!api_.get_perf) return false;
+			out = {}; out.size = sizeof(out); out.version = GBB_API_VERSION;
+			return PerfGuarded(api_, &out) == GBB_OK && out.size == sizeof(out) && out.version == GBB_API_VERSION;
+		}
+		bool ReadObservationStatus(GbbStatus& out) const {
+			if(!api_.get_status)return false;
+			out={};out.size=sizeof(out);out.version=GBB_API_VERSION;
+			return StatusGuarded(api_,&out)==GBB_OK&&out.size==sizeof(out)&&out.version==GBB_API_VERSION&&
+				!out.injection_fault&&out.state>=GBB_STATE_DISCOVERING&&out.state<=GBB_STATE_INJECTING;
 		}
 
 		void Clear()

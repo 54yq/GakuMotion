@@ -2234,6 +2234,11 @@ namespace GakuMotion
 					(rootHeightCalibrationEnabled ? b.calibratedRootHeight : 0.0f),
 					b.restRootPos.z + vmdRootPos.z
 				);
+				if (rebaseLiveMotionStart && !clip.root_positions.empty())
+				{
+					localTarget.x -= clip.root_positions.front().x;
+					localTarget.z -= clip.root_positions.front().z;
+				}
 				// Rotate the clip's travel around its first sampled root, not the scene
 				// origin: changing facing preserves the chosen starting placement.
 				Vector3 yawTravelAdjustment{};
@@ -3601,6 +3606,8 @@ namespace GakuMotion
 		// accumulate translation. RestoreMute still returns to the original scene.
 		// Zero this extra placement before measuring the unmodified motion stream.
 		Vector3 initialPositionOffset{0.0f, 0.0f, 0.0f};
+		// Only the Live adapter enables this; captured rest remains untouched for restoration.
+		bool rebaseLiveMotionStart{false};
 		float initialYawDegrees{0.0f};
 
 		bool SetInitialPositionOffset(const Vector3& offset)

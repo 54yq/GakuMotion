@@ -25,6 +25,19 @@ namespace GroundShadowProbe
 	inline uint64_t poseSerial = 0;
 	inline int poseFrame = -1;
 	inline UnityVector3 poseMin{}, poseMax{};
+	inline std::vector<ShadowPoseSnapshot<UnityVector3>> poses;
+	inline std::vector<void*> loggedBoundsActors;
+	inline size_t PoseSlot(void* actor)
+	{
+		auto& core = GakuMotion::Core::Instance();
+		void* target = core.player.controller.targetActor ? core.player.controller.targetActor : core.player.controller.currentBinding.actor;
+		if (target == actor) return 0;
+		const auto& followers = core.ensemble.Followers();
+		for (size_t i = 0; i < followers.size(); ++i)
+			if (followers[i].player && followers[i].player->controller.targetActor == actor &&
+				core.sceneActorRegistry.Resolve(followers[i].actorToken, core.sceneActorRegistry.Epoch()) == actor) return i + 1;
+		return (std::numeric_limits<size_t>::max)();
+	}
 	inline thread_local void* boundsScopeActor = nullptr;
 	inline thread_local bool boundsConsumed = false;
 	inline thread_local Bounds consumedNative{}, consumedDraw{};
@@ -82,7 +95,9 @@ namespace GroundShadowProbe
 	inline bool Eligible(void* actor)
 	{
 		if (!enabled.load(std::memory_order_acquire) || !OnThread() || !actor || !g_motionSceneAllowed) return false;
-		auto& player = GakuMotion::Core::Instance().player;
+		auto* selected = ActorGroundShadow::PlayerForActor(actor);
+		if (!selected) return false;
+		auto& player = *selected;
 		const auto& controller = player.controller;
 		void* target = controller.targetActor ? controller.targetActor : controller.currentBinding.actor;
 		const auto binding = controller.bindings.find(actor);
@@ -116,17 +131,23 @@ namespace GroundShadowProbe
 			{high.x * .5f - low.x * .5f, high.y * .5f - low.y * .5f, high.z * .5f - low.z * .5f}};
 		return Valid(result) ? result : native;
 	}
-	inline bool PoseCurrent(void* actor)
+	inline bool PoseCurrent(void* actor, bool requireAoEnabled = true)
 	{
-		const auto& stamp = GakuMotion::Core::Instance().player.controller.footPoseWriteStamp;
+		auto* player = ActorGroundShadow::PlayerForActor(actor);
+		const auto slot = PoseSlot(actor);
+		if (!player || slot >= poses.size()) return false;
+		const auto& snapshot = poses[slot];
+		const auto& stamp = player->controller.footPoseWriteStamp;
 		// Core clears the shared stamp's actor/feet before every actor callback,
 		// including unrelated actors that never write a new pose. CapturePose has
 		// already verified this actor's complete write. Keep that same-frame
 		// snapshot while its serial is unchanged; a later failed target callback
 		// clears it through AfterPose/CapturePose before the AO draw.
-		return boundsFixReady && boundsFixEnabled && Eligible(actor) && poseActor == actor &&
-			poseSerial == stamp.serial && poseFrame >= 0 &&
-			g_faceUnityFrame && poseFrame == g_faceUnityFrame();
+		if (!(boundsFixReady && (!requireAoEnabled || boundsFixEnabled) && Eligible(actor) &&
+			g_faceUnityFrame && snapshot.Matches(actor, stamp.serial, g_faceUnityFrame()))) return false;
+		poseActor = snapshot.actor; poseSerial = snapshot.serial; poseFrame = snapshot.frame;
+		poseMin = snapshot.min; poseMax = snapshot.max;
+		return true;
 	}
 	inline Bounds GetBounds(void* actor, void* method)
 	{
@@ -143,6 +164,11 @@ namespace GroundShadowProbe
 		if (boundsScopeActor != actor || !PoseCurrent(actor)) return native;
 		const Bounds draw = ExpandForPose(native);
 		boundsConsumed = true; consumedNative = native; consumedDraw = draw;
+		const auto slot = PoseSlot(actor);
+		if (slot > 0 && slot < loggedBoundsActors.size() && loggedBoundsActors[slot] != actor) {
+			loggedBoundsActors[slot] = actor;
+			if (g_hostContext.logInfo) g_hostContext.logInfo("[GakuMotion][FollowerShadow] slot=%u ao_bounds_adapted=1", static_cast<unsigned>(slot + 1));
+		}
 		return draw;
 	}
 	inline std::string BoundsJson(const Bounds& value)
@@ -155,9 +181,15 @@ namespace GroundShadowProbe
 	}
 	inline void CapturePose(void* actor, uint64_t serialBefore)
 	{
-		poseActor = nullptr; poseSerial = 0; poseFrame = -1;
+		const auto slot = PoseSlot(actor);
+		if (slot == (std::numeric_limits<size_t>::max)()) return;
+        if (poses.size() <= slot) poses.resize(slot + 1);
+        if (loggedBoundsActors.size() <= slot) loggedBoundsActors.resize(slot + 1);
+		poses[slot] = {};
 		if (!boundsFixReady || !Eligible(actor) || !g_faceUnityFrame) return;
-		const auto& controller = GakuMotion::Core::Instance().player.controller;
+		auto* player = ActorGroundShadow::PlayerForActor(actor);
+		if (!player) return;
+		const auto& controller = player->controller;
 		const auto& stamp = controller.footPoseWriteStamp;
 		if (!controller.fnGetWorldPosition || stamp.actor != actor || stamp.serial == serialBefore ||
 			stamp.mask != 3 || !stamp.transforms[0] || !stamp.transforms[1]) return;
@@ -181,6 +213,7 @@ namespace GroundShadowProbe
 		for (void* transform : binding->second.boneTransforms) if (transform && !include(transform)) return;
 		if (count < 3) return;
 		poseMin = low; poseMax = high; poseActor = actor; poseSerial = stamp.serial; poseFrame = g_faceUnityFrame();
+		poses[slot] = {actor, stamp.serial, poseFrame, low, high};
 	}
 	inline std::string Vector(void* transform, bool rotation = false)
 	{
@@ -383,7 +416,9 @@ namespace GroundShadowProbe
 		try { PollRequest(Clock::now()); CapturePose(actor, serialBefore); }
 		catch (...) { poseActor = nullptr; ++ioFailures; }
 		if (drawHooksReady) return;
-		const auto& stamp = GakuMotion::Core::Instance().player.controller.footPoseWriteStamp;
+		auto* selected = ActorGroundShadow::PlayerForActor(actor);
+		if (!selected) return;
+		const auto& stamp = selected->controller.footPoseWriteStamp;
 		if (stamp.actor != actor || stamp.serial == serialBefore || stamp.serial == lastPostPoseSerial) return;
 		lastPostPoseSerial = stamp.serial;
 		void* previous = scopedCamera;
@@ -436,6 +471,8 @@ namespace GroundShadowProbe
 		observationReady = drawHooksReady = false;
 		boundsFixReady = false; boundsFixEnabled = true;
 		poseActor = boundsScopeActor = nullptr; poseSerial = 0; poseFrame = -1; boundsConsumed = false;
+		poses = {};
+		loggedBoundsActors = {};
 		lastPostPoseSerial = 0;
 		std::vector<void*> retained;
 		for (void* target : hooks)

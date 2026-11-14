@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 # SPDX-License-Identifier: MIT
 # Build local binaries and synthetic tests. There is no deployment path.
 [CmdletBinding()]
@@ -73,7 +73,7 @@ if ($Target -eq 'Runtime' -or $Target -eq 'All') {
             '/DWIN32', '/DNDEBUG', '/D_WINDOWS', '/D_USRDLL', '/DGKMOTION_ENABLE_IMGUI',
             "/I$(Join-Path $repo 'include')", "/I$(Join-Path $repo 'src')",
             "/I$(Join-Path $repo 'deps/KineTexture/src')", "/I$(Join-Path $repo 'deps/imgui')",
-            "/Fo$nativeObjects/") + $sources + @('winmm.lib', 'user32.lib', 'comdlg32.lib',
+            "/Fo$nativeObjects\") + $sources + @('winmm.lib', 'user32.lib', 'comdlg32.lib',
             '/link', "/OUT:$(Join-Path $nativeOutput 'GakuMotion.dll')", '/SUBSYSTEM:WINDOWS', '/OPT:REF', '/OPT:ICF')
         & $compiler @args
         if ($LASTEXITCODE -ne 0) { throw ('Portable runtime build failed: ' + $LASTEXITCODE) }
@@ -101,6 +101,15 @@ if ($Target -eq 'Runtime' -or $Target -eq 'All') {
     }
 }
 if ($Target -eq 'NativeAOT' -or $Target -eq 'All') {
+    # Portable NativeAOT invokes link.exe directly and needs the same SDK
+    # library search paths as the portable runtime build.
+    if ($PortableVisualStudio) {
+        $env:INCLUDE = @((Join-Path $msvc.FullName 'include'), (Join-Path $sdk "Include\$($sdkVersion.Name)\ucrt"),
+            (Join-Path $sdk "Include\$($sdkVersion.Name)\um"), (Join-Path $sdk "Include\$($sdkVersion.Name)\shared")) -join ';'
+        $env:LIB = @((Join-Path $msvc.FullName 'lib\x64'), (Join-Path $sdk "Lib\$($sdkVersion.Name)\ucrt\x64"),
+            (Join-Path $sdk "Lib\$($sdkVersion.Name)\um\x64")) -join ';'
+        $env:PATH = (Join-Path $msvc.FullName 'bin\Hostx64\x64') + ';' + (Join-Path $sdk "bin\$($sdkVersion.Name)\x64") + ';' + $env:PATH
+    }
     $aotOutput = Join-Path $OutputRoot 'nativeaot'
     $aotObjects = Join-Path $OutputRoot 'obj\nativeaot'
     New-Item -ItemType Directory -Path $aotOutput,$aotObjects -Force | Out-Null
@@ -136,6 +145,15 @@ try {
     if ($LASTEXITCODE -ne 0) { throw ('Synthetic contract build failed: ' + $LASTEXITCODE) }
     & $exe
     if ($LASTEXITCODE -ne 0) { throw ('Synthetic contract tests failed: ' + $LASTEXITCODE) }
+    $scheduleExe = Join-Path $OutputRoot 'live_scheduling_probe_tests.exe'
+    $scheduleObj = Join-Path $OutputRoot 'live_scheduling_probe_tests.obj'
+    $scheduleArgs = @('/nologo', '/std:c++20', '/utf-8', '/EHsc', '/MT', '/W4',
+        "/I$(Join-Path $repo 'src')", "/I$(Join-Path $repo 'include')",
+        (Join-Path $repo 'tests\test_live_scheduling_probe.cpp'), "/Fe:$scheduleExe", "/Fo:$scheduleObj")
+    & $compiler @scheduleArgs
+    if ($LASTEXITCODE -ne 0) { throw ('Live scheduling probe build failed: ' + $LASTEXITCODE) }
+    & $scheduleExe
+    if ($LASTEXITCODE -ne 0) { throw ('Live scheduling probe tests failed: ' + $LASTEXITCODE) }
     $captureExe = Join-Path $OutputRoot 'live_capture_contracts.exe'
     $captureObj = Join-Path $OutputRoot 'live_capture_contracts.obj'
     $captureArgs = @('/nologo', '/std:c++20', '/utf-8', '/EHsc', '/MT', '/W4',
@@ -145,6 +163,33 @@ try {
     if ($LASTEXITCODE -ne 0) { throw ('Live capture contract build failed: ' + $LASTEXITCODE) }
     & $captureExe
     if ($LASTEXITCODE -ne 0) { throw ('Live capture contract tests failed: ' + $LASTEXITCODE) }
+    $clockExe = Join-Path $OutputRoot 'actor_clock_contracts.exe'
+    $clockArgs = @('/nologo', '/std:c++20', '/utf-8', '/EHsc', '/MT', '/W4',
+        "/I$(Join-Path $repo 'src')", (Join-Path $repo 'tests\test_actor_clock_mvp.cpp'),
+        "/Fe:$clockExe", "/Fo:$(Join-Path $OutputRoot 'actor_clock_contracts.obj')")
+    & $compiler @clockArgs
+    if ($LASTEXITCODE -ne 0) { throw ('Actor clock contract build failed: ' + $LASTEXITCODE) }
+    & $clockExe
+    if ($LASTEXITCODE -ne 0) { throw ('Actor clock contract tests failed: ' + $LASTEXITCODE) }
+    $maskExe = Join-Path $OutputRoot 'model_renderer_mask_contracts.exe'
+    & $compiler /nologo /std:c++20 /utf-8 /EHsc /MT /W4 "/I$(Join-Path $repo 'src')" (Join-Path $repo 'tests/test_model_renderer_mask.cpp') "/Fe:$maskExe" "/Fo:$(Join-Path $OutputRoot 'model_renderer_mask_contracts.obj')"
+    if ($LASTEXITCODE -ne 0) { throw 'Model renderer mask contract build failed.' }
+    & $maskExe
+    if ($LASTEXITCODE -ne 0) { throw 'Model renderer mask contract tests failed.' }
+    foreach ($fallback in @('force','array','force-array')) {
+        & $maskExe $fallback
+        if ($LASTEXITCODE -ne 0) { throw ('Model renderer fallback contract tests failed: ' + $fallback) }
+    }
+    $visibilityExe = Join-Path $OutputRoot 'actor_visibility_contracts.exe'
+    & $compiler /nologo /std:c++20 /utf-8 /EHsc /MT /W4 "/I$(Join-Path $repo 'src')" (Join-Path $repo 'tests/test_actor_model_visibility.cpp') "/Fe:$visibilityExe" "/Fo:$(Join-Path $OutputRoot 'actor_visibility_contracts.obj')"
+    if ($LASTEXITCODE -ne 0) { throw 'Actor visibility contract build failed.' }
+    & $visibilityExe
+    if ($LASTEXITCODE -ne 0) { throw 'Actor visibility contract tests failed.' }
+    $shadowExe = Join-Path $OutputRoot 'shadow_pose_contracts.exe'
+    & $compiler /nologo /std:c++20 /utf-8 /EHsc /MT /W4 "/I$(Join-Path $repo 'src')" (Join-Path $repo 'tests\test_shadow_pose_snapshot.cpp') "/Fe:$shadowExe" "/Fo:$(Join-Path $OutputRoot 'shadow_pose_contracts.obj')"
+    if ($LASTEXITCODE -ne 0) { throw ('Shadow pose contract build failed: ' + $LASTEXITCODE) }
+    & $shadowExe
+    if ($LASTEXITCODE -ne 0) { throw ('Shadow pose contract tests failed: ' + $LASTEXITCODE) }
     $coreExe = Join-Path $OutputRoot 'synthetic_core.exe'
     $coreObj = Join-Path $OutputRoot 'synthetic_core.obj'
     $coreArgs = @('/nologo', '/std:c++20', '/utf-8', '/EHsc', '/MT', '/W3',

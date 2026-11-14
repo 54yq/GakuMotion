@@ -170,6 +170,7 @@ namespace GakuMotion
 
 		char titleInput[256]{};
 		PerformanceTiming timing;
+		int sourceFpsIndex{0}, outputFpsIndex{0};
 		std::vector<std::string> motionCandidates;
 		std::vector<std::string> facialCandidates;
 		std::vector<std::string> cameraCandidates;
@@ -205,6 +206,7 @@ namespace GakuMotion
 			isEditMode = false;
 			editTargetKey.clear();
 			timing = {};
+			sourceFpsIndex = outputFpsIndex = 0;
 			titleInput[0] = '\0';
 			motionCandidates.clear();
 			facialCandidates.clear();
@@ -831,6 +833,12 @@ namespace GakuMotion
 				ImGui::EndTable();
 			}
 			ImGui::TextDisabled("速度与播放栏倍速相乘；偏移正数后移，负数前移。");
+			ImGui::SetNextItemWidth(160.0f);
+			ImGui::Combo("源动作帧率", &g_libraryModal.sourceFpsIndex, "自动检测\0 30 fps\0 60 fps\0");
+			if (ImGui::IsItemHovered()) ImGui::SetTooltip("素材的时间基准；动作过快或过慢时可指定。修改已有曲目的源帧率会重新烘焙动作。");
+			ImGui::SetNextItemWidth(160.0f);
+			ImGui::Combo("输出采样帧率", &g_libraryModal.outputFpsIndex, "自动（保持原有）\0 30 fps\0 60 fps\0");
+			ImGui::TextDisabled("自动检测依据身体骨骼与音频，素材长度不一致时请检查结果。");
 
 			if (g_libraryModal.unsupportedAudio > 0)
 			{
@@ -867,6 +875,12 @@ namespace GakuMotion
 			std::string pickedMotion = (g_libraryModal.motionSelection >= 0 &&
 				g_libraryModal.motionSelection < static_cast<int>(g_libraryModal.motionCandidates.size()))
 				? g_libraryModal.motionCandidates[g_libraryModal.motionSelection] : "";
+			if (IsDiskFile(pickedMotion))
+			{
+				const auto& probe = g_libraryModal.GetOrProbe(pickedMotion);
+				if (probe.bodyEndFrame && static_cast<double>(probe.morphEndFrame) > 1.25 * probe.bodyEndFrame)
+					ImGui::TextColored(GuiTheme::WarningColor(), "表情末帧 %u 明显晚于身体末帧 %u；请检查源帧率和同步。", probe.morphEndFrame, probe.bodyEndFrame);
+			}
 
 			std::string pickedFacial = (g_libraryModal.facialSelection >= 0 &&
 				g_libraryModal.facialSelection < static_cast<int>(g_libraryModal.facialCandidates.size()))
@@ -994,7 +1008,9 @@ namespace GakuMotion
 			{
 				MotionImportRequest req{};
 				req.title = g_libraryModal.titleInput[0] ? g_libraryModal.titleInput : "未命名演出";
-				req.fps = 0.0f;
+				req.fps = g_libraryModal.outputFpsIndex == 1 ? 30.f : g_libraryModal.outputFpsIndex == 2 ? 60.f : 0.f;
+				req.rebakeOutput = g_libraryModal.isEditMode && req.fps > 0;
+				req.sourceFps = g_libraryModal.sourceFpsIndex == 1 ? 30.f : g_libraryModal.sourceFpsIndex == 2 ? 60.f : 0.f;
 				req.timing = g_libraryModal.timing;
 
 				if (g_libraryModal.isEditMode)
@@ -1233,6 +1249,12 @@ namespace GakuMotion
 			ImGui::EndDisabled();
 			if (ImGui::IsItemHovered()) ImGui::SetTooltip("载入当前曲目的磁盘更新；保留时间并暂停，点击继续后播放");
 		}
+		bool initBefore = ctx.initializeBeforeMotion;
+		ImGui::BeginDisabled(!ctx.fnSetInitializeBeforeMotion);
+		if (ImGui::Checkbox("载入动作前初始化骨骼（实验）", &initBefore) && ctx.fnSetInitializeBeforeMotion)
+			ctx.fnSetInitializeBeforeMotion(ctx.self, initBefore);
+		ImGui::EndDisabled();
+		if (ImGui::IsItemHovered()) ImGui::SetTooltip("下一次载入时对各角色重置动画器一次；可能改变站位或物理，仅用于对照。");
 		if (!ctx.libraryNotice.empty()) ImGui::TextWrapped("%s", ctx.libraryNotice.c_str());
 		if (!ctx.playlistNotice.empty() && ctx.playlistNotice != ctx.libraryNotice)
 		{

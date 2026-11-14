@@ -1,6 +1,7 @@
 #pragma once
 #include "GkLiveObservation.hpp"
 #include "GkLiveViewingGate.hpp"
+#include "GkLivePlaybackProbeGate.hpp"
 #include <limits>
 #include <string_view>
 
@@ -21,6 +22,7 @@ namespace LiveObservationHarness
     inline const void* throwMethod{};
     inline int invocationCount{};
     inline int pauseCalls{}, resumeCalls{};
+    inline int seekCalls{};
     inline void* Class(void* obj) { return static_cast<Object*>(obj)->klass; }
     inline void* FindField(void* klass, const char* name)
     {
@@ -39,12 +41,13 @@ namespace LiveObservationHarness
         auto* s = static_cast<Object*>(obj);
         *static_cast<void**>(result) = field == &liveField ? s->live : field == &playerField ? s->player : s->model;
     }
-    inline void* Invoke(const void* method, void*, void**, void** exception)
+    inline void* Invoke(const void* method, void*, void** args, void** exception)
     {
         ++invocationCount;
         if (method == throwMethod) { *exception = &sceneClass; return nullptr; }
         if (method == &pauseMethod) { ++pauseCalls; paused = 1; return nullptr; }
         if (method == &resumeMethod) { ++resumeCalls; paused = 0; return nullptr; }
+        if (method == &seekMethod) { ++seekCalls; time = *static_cast<float*>(args[0]); return nullptr; }
         if (method == &fixedMethod) return &fixed;
         if (method == &typeMethod) return &fromType;
         if (method == &executionMethod) return &execution;
@@ -57,6 +60,16 @@ namespace LiveObservationHarness
     inline void Test()
     {
         auto check = [](bool ok, const char* what) { StageRuntimeHarness::Check(ok, what); };
+        PlaybackProbeGate probeGate;
+        check(!probeGate.Observe(1, 2, true, 0, 10.0) && !probeGate.Observe(1, 2, true, 0, 10.6),
+            "read-only probe waits while unpaused Live time is stalled");
+        check(!probeGate.Observe(1, 2, true, 10, 10.7) && !probeGate.Observe(1, 2, true, 10.2f, 11.0) &&
+              probeGate.Observe(1, 2, true, 10.6f, 11.3),
+            "read-only probe waits after a seek and starts only with sustained advancement");
+        check(!probeGate.Observe(1, 2, false, 10.6f, 11.4) && !probeGate.Observe(1, 2, true, 11, 12),
+            "pause resets the advancement evidence");
+        check(probeGate.Observe(1, 2, true, 11.6f, 12.6) && !probeGate.Observe(1, 2, true, 11.6f, 13.2),
+            "sampling stops if an apparently unpaused timeline stalls");
         Api api{&sceneClass, &presenterClass, &playerClass, &executionClass,
             &pauseMethod, &resumeMethod, &executionMethod, &isPausedMethod,
             &timeMethod, &durationMethod, &seekMethod};
@@ -87,6 +100,30 @@ namespace LiveObservationHarness
         check(!SetPaused(api, access, &scene, true) && !paused && pauseCalls == 1,
             "failed native pause does not report success");
         throwMethod = nullptr;
+        seekCalls = 0; paused = 1; time = 12; duration = 150;
+        check(Seek(api, access, &scene, 80) && time == 80 && paused && seekCalls == 1,
+            "forward seek dispatches without changing pause state");
+        check(Seek(api, access, &scene, 4) && time == 4 && paused && seekCalls == 2,
+            "backward seek dispatches without changing pause state");
+        check(!Seek(api, access, &scene, -1) && !Seek(api, access, &scene, 150) &&
+            !Seek(api, access, &scene, std::numeric_limits<float>::quiet_NaN()) && seekCalls == 2,
+            "out of range and nonfinite seek targets are rejected");
+        throwMethod = &seekMethod;
+        check(!Seek(api, access, &scene, 20) && seekCalls == 2, "native seek exception is not reported as success");
+        throwMethod = nullptr;
+        time = 155; duration = 150; paused = 0;
+        check(!Observe(api, access, &scene).confirmed, "ordinary playback still rejects a terminal overshoot");
+        const auto terminal = InspectEnd(api, access, &scene, &live);
+        check(terminal.identity && terminal.execution && terminal.timeKnown && terminal.time == 155 && terminal.duration == 150,
+            "end inspection preserves terminal getter values independently");
+        check(SeekAtEnd(api, access, &scene, &live) && time == 0, "verified end seek handles overshoot without ordinary time gating");
+        time = 155; paused = 1;
+        check(!SeekAtEnd(api, access, &scene, &live) && time == 155, "end seek never overrides an explicit pause");
+        paused = 0; throwMethod = &timeMethod;
+        const auto missingTime = InspectEnd(api, access, &scene, &live);
+        check(!missingTime.timeKnown && missingTime.durationKnown && missingTime.pauseKnown,
+            "one failed getter does not hide other end diagnostics");
+        throwMethod = nullptr; time = 12;
         ViewingGate gate{&modelClass, &fixedClass, &enumClass, &fixedMethod, &typeMethod, 2, 3, true};
         fromType = 2;
         check(gate.Allows(api, access, &scene), "confirmed PictureBook playback is admitted as a viewing mode");

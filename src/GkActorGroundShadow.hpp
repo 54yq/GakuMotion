@@ -12,7 +12,19 @@ namespace ActorGroundShadow
 	inline bool attempted = false, faulted = false, refreshing = false, logged = false;
 	inline void *actorClass = nullptr, *aoClass = nullptr, *aoField = nullptr;
 	inline const void *lateUpdate = nullptr, *aliveMethod = nullptr;
-	inline uint64_t lastPoseSerial = 0;
+	inline std::vector<void*> loggedActors;
+	inline GakuMotion::MotionPlayer* PlayerForActor(void* actor)
+	{
+		auto& core = GakuMotion::Core::Instance();
+		if (!actor) return nullptr;
+		void* target = core.player.controller.targetActor ? core.player.controller.targetActor : core.player.controller.currentBinding.actor;
+		if (target == actor) return &core.player;
+		for (const auto& follower : core.ensemble.Followers())
+			if (follower.player && follower.player->controller.targetActor == actor &&
+				core.sceneActorRegistry.Resolve(follower.actorToken, core.sceneActorRegistry.Epoch()) == actor)
+				return follower.player.get();
+		return nullptr;
+	}
 
 	inline void Reset()
 	{
@@ -20,7 +32,7 @@ namespace ActorGroundShadow
 		attempted = faulted = refreshing = logged = false;
 		actorClass = aoClass = aoField = nullptr;
 		lateUpdate = aliveMethod = nullptr;
-		lastPoseSerial = 0;
+		loggedActors = {};
 	}
 
 	inline void BindUnityThread()
@@ -95,12 +107,13 @@ namespace ActorGroundShadow
 		// and paused preview. No refresh from UI, cameras, or an idle/stopped tick.
 		if (!actor || GetCurrentThreadId() != unityThreadId.load(std::memory_order_acquire) ||
 			faulted || refreshing || !g_motionSceneAllowed) return false;
-		auto& player = GakuMotion::Core::Instance().player;
+		auto* selected = PlayerForActor(actor);
+		if (!selected) return false;
+		auto& player = *selected;
 		const auto& controller = player.controller;
 		const auto& stamp = controller.footPoseWriteStamp;
 		if (player.state == GakuMotion::PlaybackState::Stopped || !controller.IsTargetActor(actor) ||
-			!controller.CanDriveActor(actor) || stamp.actor != actor || stamp.serial == serialBefore ||
-			stamp.serial == lastPoseSerial) return false;
+			!controller.CanDriveActor(actor) || stamp.actor != actor || stamp.serial == serialBefore) return false;
 		auto binding = controller.bindings.find(actor);
 		if (binding == controller.bindings.end() || !binding->second.bindPoseCaptured || !Resolve() ||
 			!IsClass(actor, actorClass) || !IsAlive(actor)) return false;
@@ -110,7 +123,6 @@ namespace ActorGroundShadow
 		g_faceRuntime.readField(actor, aoField, &ao);
 		if (!IsClass(ao, aoClass) || !IsAlive(ao)) return false;
 		refreshing = true;
-		lastPoseSerial = stamp.serial;
 		void* exception = nullptr;
 		g_faceRuntime.invoke(lateUpdate, ao, nullptr, &exception);
 		refreshing = false;
@@ -125,6 +137,16 @@ namespace ActorGroundShadow
 		{
 			logged = true;
 			GM_DEBUG("[GakuMotion][FootAO] native left/right foot AO refreshed after final MMD pose");
+		}
+		auto& core = GakuMotion::Core::Instance();
+		for (size_t i = 0; i < core.ensemble.Followers().size(); ++i) {
+			const auto& follower = core.ensemble.Followers()[i];
+			if (follower.player.get() == selected) {
+                if (loggedActors.size() <= i + 1) loggedActors.resize(i + 2);
+                if (loggedActors[i + 1] == actor) continue;
+				loggedActors[i + 1] = actor;
+				if (g_hostContext.logInfo) g_hostContext.logInfo("[GakuMotion][FollowerShadow] slot=%u foot_ao_refreshed=1", static_cast<unsigned>(i + 2));
+			}
 		}
 		return true;
 	}

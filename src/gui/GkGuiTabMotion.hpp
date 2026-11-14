@@ -15,7 +15,8 @@ namespace GakuMotion
 		ImGui::SameLine();
 		if (ImGui::Button("浏览##wav")) Browse(ctx, 1, importAudio, sizeof(importAudio));
 		ImGui::InputText("曲名（可选）", importTitle, sizeof(importTitle));
-		ImGui::Combo("动作帧率##motion", &importMotionFpsIndex, "自动检测 (推荐)\0 30 fps\0 60 fps\0");
+		ImGui::Combo("源动作帧率##source", &importSourceFpsIndex, "自动检测\0 30 fps\0 60 fps\0");
+		ImGui::Combo("输出采样帧率##motion", &importMotionFpsIndex, "与源一致\0 30 fps\0 60 fps\0");
 		ImGui::TextWrapped("音频留空会寻找同名 WAV 或 song.wav；未找到则导入为无声动作。");
 		ImGui::BeginDisabled(importVmd[0] == '\0');
 		if (ImGui::Button("转换并加入列表") && ctx.fnImportMotion)
@@ -24,6 +25,7 @@ namespace GakuMotion
 			request.vmd = importVmd;
 			request.audio = importAudio;
 			request.title = importTitle;
+			request.sourceFps = importSourceFpsIndex == 1 ? 30.f : importSourceFpsIndex == 2 ? 60.f : 0.f;
 			if (importMotionFpsIndex == 1) request.fps = 30.0f;
 			else if (importMotionFpsIndex == 2) request.fps = 60.0f;
 			else request.fps = 0.0f;

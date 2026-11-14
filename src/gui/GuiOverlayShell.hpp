@@ -79,10 +79,7 @@ namespace GakuMotion
 		ImGui::TextColored(readyColor, "%s", readyText);
 		if (ctx.liveTakeoverActive)
 		{
-			ImGui::BeginDisabled(!ctx.liveTakeoverAvailable || !ctx.fnSetLiveTakeover);
-			if (ImGui::Button("退出 Live 动作接管") && ctx.fnSetLiveTakeover)
-				ctx.fnSetLiveTakeover(ctx.self, false);
-			ImGui::EndDisabled();
+            if (ImGui::Button("Live 接管页面")) overlay.livePageOpen=true;
 			if (!ctx.liveControlNotice.empty()) ImGui::TextWrapped("%s", ctx.liveControlNotice.c_str());
 		}
 

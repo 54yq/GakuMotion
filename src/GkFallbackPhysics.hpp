@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cctype>
 #include <unordered_set>
+#include <sstream>
 
 namespace GakuMotion
 {
@@ -28,6 +29,10 @@ namespace GakuMotion
 			double cpuUs{}, meanCpuUs{}, maxCpuUs{};
 			uint64_t frames{}, publishCalls{}, totalCpuNs{}, clamps{}, resets{}, rebinds{}, invalidSamples{};
 			size_t boundBones{}, solvedBones{}, skippedCandidates{};
+			// Observed before our write: a mismatch means another writer or a
+			// changed transform state, not necessarily wind or game physics.
+			size_t inputCompared{}, inputChanged{};
+			float inputMaxDeltaDegrees{}, inputMeanDeltaDegrees{};
 		};
 
 		FallbackPhysics() = default;
@@ -37,6 +42,20 @@ namespace GakuMotion
 		}
 
 		const Stats& GetStats() const noexcept { return stats_; }
+		// Bounded local-rotation snapshots permit same-rig cross-scene comparison;
+		// these samples are the captured base, not proof of a neutral bind pose.
+		std::string RestSamples() const
+		{
+			std::ostringstream out;
+			const size_t count = (std::min)(bones_.size(), size_t{24});
+			for (size_t i = 0; i < count; ++i)
+			{
+				const auto& b = bones_[i];
+				if (i) out << ';';
+				out << b.name << ':' << b.rest.x << ',' << b.rest.y << ',' << b.rest.z << ',' << b.rest.w;
+			}
+			return out.str();
+		}
 		void* Actor() const noexcept { return actor_; }
 		bool HasCaptureWrites() const noexcept
 		{
@@ -93,6 +112,8 @@ namespace GakuMotion
 			const auto start = std::chrono::steady_clock::now();
 			++stats_.frames;
 			stats_.solvedBones = 0;
+			stats_.inputCompared = stats_.inputChanged = 0;
+			stats_.inputMaxDeltaDegrees = stats_.inputMeanDeltaDegrees = 0;
 			if (!binding.bindPoseCaptured || !binding.actor || !binding.actorTransform ||
 				!controller.CanDriveActor(binding.actor) || !HasApi(controller))
 			{
@@ -116,6 +137,18 @@ namespace GakuMotion
 			bool resetFrame = reset;
 			for (Bone& b : bones_)
 			{
+				Quaternion observed;
+				if (stats_.inputCompared < 32 && b.written && Rotation(controller.fnGetLocalRotation, b.transform, observed))
+				{
+					const float delta = RotationAngle(observed, b.lastWritten) / kRadians;
+					if (std::isfinite(delta))
+					{
+						++stats_.inputCompared;
+						if (delta > .1f) ++stats_.inputChanged;
+						stats_.inputMeanDeltaDegrees += delta;
+						stats_.inputMaxDeltaDegrees = (std::max)(stats_.inputMaxDeltaDegrees, delta);
+					}
+				}
 				Vector3 anchor;
 				Quaternion parent;
 				if (!Position(controller.fnGetWorldPosition, b.transform, anchor) ||
@@ -174,6 +207,7 @@ namespace GakuMotion
 				const Quaternion local = (parent.Inverse() * world).Normalized();
 				if (Finite(local) && Write(controller, b.transform, local))
 				{
+					b.lastWritten = local;
 					b.written = true;
 					++stats_.solvedBones;
 				}
@@ -183,6 +217,7 @@ namespace GakuMotion
 					b.initialized = false;
 				}
 			}
+			if (stats_.inputCompared) stats_.inputMeanDeltaDegrees /= static_cast<float>(stats_.inputCompared);
 			if (resetFrame) ++stats_.resets; // frames containing any particle reset
 			return Finish(start);
 		}
@@ -192,9 +227,10 @@ namespace GakuMotion
 
 		struct Bone
 		{
+			std::string name;
 			void* transform{};
 			void* parent{};
-			Quaternion rest{}, base{};
+			Quaternion rest{}, base{}, lastWritten{};
 			Vector3 axis{}, tip{}, velocity{}, anchor{};
 			float length{};
 			bool initialized{}, written{};
@@ -391,6 +427,7 @@ namespace GakuMotion
 						tip = child;
 					}
 					Bone b;
+					b.name = name;
 					b.transform = e.t;
 					b.parent = e.parent;
 					Quaternion world;

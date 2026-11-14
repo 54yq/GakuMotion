@@ -54,6 +54,8 @@ namespace
 		out = directory.ends_with("B") ? Vector3{1,0,0} : Vector3{};
 		return true;
 	}
+    std::map<uint64_t,bool> modelVisibility;
+    bool ApplyModelVisibility(uint64_t token, uint64_t, bool hidden) { modelVisibility[token]=hidden; return true; }
 	int actorSelections = 0;
 	uint64_t selectedActorToken = 0, selectedActorEpoch = 0;
 	void SelectSceneActor(void*, uint64_t token, uint64_t epoch)
@@ -590,17 +592,41 @@ namespace
 		app.core.player.state = PlaybackState::Preview;
 		void* a = reinterpret_cast<void*>(0xa1000), *b = reinterpret_cast<void*>(0xb1000), *c = reinterpret_cast<void*>(0xc1000);
 		app.core.PublishSceneActors({{a, 1, ""}, {b, 2, ""}, {c, 3, ""}});
+        modelVisibility.clear(); app.core.fnApplyActorModelHidden = ApplyModelVisibility;
 		app.Settle();
+        const auto primaryToken=app.core.BuildGuiContext().sceneActors[0].token;
+        app.Click("隐藏角色模型##primary_model"); app.Settle();
+        Check(modelVisibility[primaryToken] && app.core.actorModelHidden.count(primaryToken), "primary model visibility control hides the selected actor");
+        app.Click("隐藏角色模型##primary_model"); app.Settle();
+        Check(!modelVisibility[primaryToken] && !app.core.actorModelHidden.count(primaryToken), "primary model visibility control restores the actor");
+        const auto setPositionText = [&](const char* label, const char* text) {
+            auto& io=ImGui::GetIO(); io.AddKeyEvent(ImGuiMod_Ctrl,true);
+            if (!app.Click(label)) { io.AddKeyEvent(ImGuiMod_Ctrl,false); app.Frame(); return; }
+            io.AddKeyEvent(ImGuiKey_A,true); app.Frame(); io.AddKeyEvent(ImGuiKey_A,false);
+            io.AddKeyEvent(ImGuiMod_Ctrl,false); app.Frame(); io.AddInputCharactersUTF8(text); app.Frame(); app.Key(ImGuiKey_Enter); app.Settle();
+        };
+        setPositionText("##pos_x", "300");
+        Check(app.core.player.controller.initialPositionOffset.x==256.0f, "main position clamps numeric input at positive 256");
+        setPositionText("##pos_x", "0");
 		ImRect mainPositionRect, ensembleHeaderRect;
-		if (app.Find("##pos_x", mainPositionRect) && app.Find("多人同步播放（最多三人）", ensembleHeaderRect))
+		if (app.Find("##pos_x", mainPositionRect) && app.Find("多人同步播放", ensembleHeaderRect))
 			Check(mainPositionRect.Min.y < ensembleHeaderRect.Min.y, "main placement is above multiplayer controls");
-		app.Click("多人同步播放（最多三人）");
+		app.Click("多人同步播放");
 		app.Settle();
+        Check(!app.ItemWithLabel("##ensemble_actor"), "new ensemble starts with no follower slots");
+        app.Click("新增角色"); app.Settle();
+        app.Click("新增角色"); app.Settle();
+        app.Click("新增角色"); app.Settle();
+        app.Click("新增角色"); app.Settle();
+        Check(app.core.gui.ensembleVisibleSlots == 4, "each click adds a follower slot beyond the former limit");
+        app.core.gui.ensembleVisibleSlots = 2; app.Settle();
 		Check(app.ItemWithLabel("##ensemble_actor") && app.ItemWithLabel("##ensemble_motion"),
 		      "ensemble panel exposes actor and motion selectors");
+		Check(app.Text().find("物理：未绑定动作") != std::string::npos,
+		      "unbound follower displays its physics status");
 		const auto roster = app.core.BuildGuiContext().sceneActors;
 		// Calibrate an actor before it has an ensemble binding.
-		app.Click("多人同步播放（最多三人）"); app.Settle();
+		app.Click("多人同步播放"); app.Settle();
 		if (auto* page = FindResponsiveWindow("/##gkmotion_main_content_")) page->Scroll.y = 0.0f;
 		app.Settle();
 		if (!app.ItemWithLabel("校正角色")) app.Click("高级动作设置");
@@ -618,7 +644,7 @@ namespace
 		Check(app.core.ensemble.GetArmCalibration(roster[2].token, preset) && std::fabs(preset.degrees - 45.1f) < .01f,
 		      "unbound actor accepts an independent calibration before binding");
 		app.Click("高级动作设置"); app.Settle();
-		app.Click("多人同步播放（最多三人）"); app.Settle();
+		app.Click("多人同步播放"); app.Settle();
 		const std::string actorB = roster[1].label + "##ensemble_" + std::to_string(roster[1].token);
 		const std::string actorC = roster[2].label + "##ensemble_" + std::to_string(roster[2].token);
 		app.Click("##ensemble_actor", 0); app.Click(actorB.c_str());
@@ -633,6 +659,20 @@ namespace
 		Check(app.core.ensemble.Followers()[1].actorToken == roster[2].token &&
 		      app.core.ensemble.Followers()[1].motionKey == "A",
 		      "second follower controls bind a different actor and clip");
+        app.Click("隐藏角色模型##follower_model",0); app.Settle();
+        Check(modelVisibility[roster[1].token] && app.core.actorModelHidden.count(roster[1].token) && !app.core.actorModelHidden.count(primaryToken),
+              "follower model visibility affects only the bound actor");
+        app.Click("隐藏角色模型##follower_model",0); app.Settle();
+        Check(!modelVisibility[roster[1].token] && !app.core.actorModelHidden.count(roster[1].token), "follower model visibility restores independently");
+        setPositionText("##ensemble_pos_z", "-300");
+        Check(app.core.ensemble.Followers()[0].player->controller.initialPositionOffset.z==-256.0f, "follower position clamps numeric input at negative 256");
+        setPositionText("##ensemble_pos_z", "0");
+		app.core.followerPhysicsStatus[0] = "原生运行中";
+		app.core.followerPhysicsStatus[1] = "内建（等待原生任务）";
+		app.Settle();
+		Check(app.Text().find("物理：原生运行中") != std::string::npos &&
+		      app.Text().find("物理：内建（等待原生任务）") != std::string::npos,
+		      "both follower rows show their independent actual physics status");
 		const auto& f0 = app.core.ensemble.Followers()[0];
 		const auto& f1 = app.core.ensemble.Followers()[1];
 		const auto epoch = app.core.sceneActorRegistry.Epoch();
@@ -656,7 +696,7 @@ namespace
 		      !app.core.ensemble.SetArmCalibration(0, f0.actorToken, epoch, f0.bindingGeneration, 1, 20, app.core.sceneActorRegistry) &&
 		      app.core.ensemble.SetArmCalibration(0, f0.actorToken, epoch, f0.bindingGeneration, 3, 0, app.core.sceneActorRegistry),
 		      "follower lock prevents axis edits and can be released");
-		app.Click("多人同步播放（最多三人）"); app.Settle();
+		app.Click("多人同步播放"); app.Settle();
 		if (auto* page = FindResponsiveWindow("/##gkmotion_main_content_")) page->Scroll.y = 0.0f;
 		app.Settle();
 		if (!app.ItemWithLabel("校正角色")) app.Click("高级动作设置");
@@ -679,7 +719,7 @@ namespace
 		Check(f0.player->controller.wristTwistShare == 0.0f && f0.player->controller.forearmAxisAdjustmentDeg == 45.0f,
 		      "actual reset button restores both follower settings");
 		app.Click("高级动作设置"); app.Settle();
-		app.Click("多人同步播放（最多三人）"); app.Settle();
+		app.Click("多人同步播放"); app.Settle();
 		app.core.player.state = PlaybackState::Playing; app.Settle();
 		const auto* actorCombo = app.ItemWithLabel("##ensemble_actor");
 		Check(actorCombo && (actorCombo->flags & ImGuiItemFlags_Disabled),
@@ -786,7 +826,7 @@ namespace
 		auto& f1 = *app.core.ensemble.Followers()[1].player;
 		bind(f0, b); bind(f1, c);
 		app.Settle();
-		if (!app.ItemWithLabel("以主角色对齐原曲队形")) app.Click("多人同步播放（最多三人）");
+		if (!app.ItemWithLabel("以主角色对齐原曲队形")) app.Click("多人同步播放");
 		app.Settle();
 		app.Click("以主角色对齐原曲队形"); app.Settle();
 		const Quaternion basis = Quaternion::FromEulerDegreesXYZ(0,50,0);
@@ -811,9 +851,10 @@ namespace
 		      app.core.ensembleNotice.find("原始 VMD") != std::string::npos,
 		      "missing source fails visibly without changing actor placement");
 		formationSourceUnavailable = false;
-		app.Click("保存当前多人站位"); app.Settle();
+		Check(!app.ItemWithLabel("保存当前多人站位"), "position preset controls are hidden");
+		app.core.QueueEnsemblePresetCommand(Core::GuiAction::SaveEnsemblePreset, "默认队形"); app.Settle();
 		Check(app.core.ensemblePresets.size() == 1 && app.core.ensemblePresetNotice.find("已保存") != std::string::npos,
-		      "actual save button writes the selected three-role position preset");
+		      "preset command writes the selected three-role position preset");
 		Core reloaded;
 		reloaded.configRoot = app.core.configRoot;
 		reloaded.ensemblePresetPath = app.core.ensemblePresetPath;
@@ -829,7 +870,7 @@ namespace
 		app.core.player.controller.SetInitialPositionOffset({}); app.core.player.controller.SetInitialYawDegrees(0);
 		f0.controller.SetInitialPositionOffset({}); f0.controller.SetInitialYawDegrees(0);
 		f1.controller.SetInitialPositionOffset({}); f1.controller.SetInitialYawDegrees(0);
-		app.Click("应用多人站位预设"); app.Settle();
+		app.core.QueueEnsemblePresetCommand(Core::GuiAction::ApplyEnsemblePreset, "默认队形"); app.Settle();
 		auto near = [](const Vector3& x, const Vector3& y) { return std::fabs(x.x-y.x)<1e-4f && std::fabs(x.y-y.y)<1e-4f && std::fabs(x.z-y.z)<1e-4f; };
 		Check(near(formationPositions[a] + app.core.player.controller.initialPositionOffset, desiredA) &&
 		      near(formationPositions[b] + f0.controller.initialPositionOffset, desiredB) &&
@@ -1491,35 +1532,136 @@ int main(int argc, char** argv)
     }
 	{
 		Harness app(root);
+		app.windowHeight=1800;
+		app.core.liveTakeoverActive=true; app.core.liveViewingConfirmed=true;
+		app.core.gui.activePage=GuiPage::Motion;
+		void* actor=reinterpret_cast<void*>(0xa1000);
+		app.core.PublishSceneActors({{actor,101,"hmsz"}});
+		app.Settle();
+		const auto roster=app.core.BuildGuiContext().sceneActors;
+		Check(app.ItemWithLabel("隐藏麦克风##primary_mic")!=nullptr,"Live motion page exposes the main actor microphone switch");
+		app.Click("隐藏麦克风##primary_mic");
+		Check(app.core.BuildGuiContext().sceneActors[0].microphoneHidden,"microphone switch submits the selected actor token");
+		app.core.actorProps.push_back({roster[0].token,"Root_Microphone","Prop_Microphone","秦谷美铃",false});
+		app.core.gui.activePage=GuiPage::Stage; app.Settle();
+		if (auto* page=FindResponsiveWindow("/##gkmotion_main_content_")) page->StateStorage.Clear();
+		app.Settle();
+		app.Click("高级场景编辑"); app.Settle();
+		const auto propLabel=std::string("秦谷美铃 / 麦克风##")+ActorPropKey(roster[0].token,"Root_Microphone","Prop_Microphone");
+		Check(app.ItemWithLabel(propLabel.c_str())!=nullptr,
+			"advanced scene editor lists the actor microphone as a prop");
+	}
+	{
+		Harness app(root);
+		app.core.gui.activePage=GuiPage::Motion;
+		app.core.player.controller.targetActor=reinterpret_cast<void*>(0x1234);
+		app.core.player.state=PlaybackState::Playing;
+		app.core.guiPhysicsBackend.store(2);
+		auto& m=app.core.physicsMonitor;
+		m.observed=true; m.requested=2; m.actual=2; m.actor=0x1234; m.session=app.core.injectionSession;
+		app.core.physicsMonitorAt=std::chrono::steady_clock::now();
+		Check(app.Text().find("原生物理运行中")!=std::string::npos, "current actor shows its confirmed native physics");
+		m.actor=0x5678;
+		Check(app.Text().find("暂无当前数据")!=std::string::npos, "another actor's recent native status is not shown as current");
+		m.actor=0x1234; m.session=app.core.injectionSession+1;
+		Check(app.Text().find("暂无当前数据")!=std::string::npos, "previous session physics status is not shown as current");
+		m.session=app.core.injectionSession; m.actual=1;
+		Check(app.Text().find("原生待确认，当前内建")!=std::string::npos, "native fallback is shown distinctly");
+		app.core.gui.activePage=GuiPage::Settings;
+		Check(app.Text().find("物理运行监控")==std::string::npos, "settings omit detailed diagnostics");
+		app.core.player.controller.targetActor=nullptr;
+	}
+	{
+		Harness app(root);
 		app.core.enforceInjectionPolicy = true;
 		app.core.liveObservation = {true, false, 12.0f, 150.0f};
 		app.core.liveOwnerToken = 55;
 		app.core.liveOwnerScene = 73;
 		app.core.liveViewingConfirmed = true;
 		app.Settle();
-		app.Click("暂停 Live");
+		app.Click("进入 Live 接管"); app.Settle();
+		Check(app.core.gui.livePageOpen, "Live controls open on a separate page");
+		const auto* seek=app.ItemWithLabel("##live_seek"); const auto* play=app.ItemWithLabel("##live_play_pause");
+		const auto* start=app.ItemWithLabel("启动 Live 接管"); const auto* restore=app.ItemWithLabel("恢复 Live");
+		Check(seek&&play&&std::abs(seek->rect.GetCenter().y-play->rect.GetCenter().y)<2.0f&&seek->rect.Min.x>play->rect.Max.x,
+			"Live play control and seek share a transport row");
+		Check(start&&restore&&(restore->flags&ImGuiItemFlags_Disabled), "restore is visible but disabled before takeover");
+		Check(!app.ItemWithLabel("读取上次 Swing 报告"), "diagnostics are initially collapsed");
+		app.Click("返回上一步"); app.Settle();
+		Check(!app.core.gui.livePageOpen && app.core.liveTakeoverRequest==0, "back returns without changing the Live state");
+		app.Click("进入 Live 接管"); app.Settle();
+		app.Click("诊断与测试"); app.Settle();
+		Check(app.ItemWithLabel("返回 Live 接管")&&!app.ItemWithLabel("##live_seek"), "diagnostics use a separate page");
+		app.Click("读取上次 Swing 报告");
+		Check(app.core.swingReportLoadPending, "checkpoint panel queues read-only historical report loading");
+		app.Click("Swing 检查点");
+		Check(!app.ItemWithLabel("角色独立更新（恢复条件未满足）"), "checkpoint report does not expose an obsolete disabled experiment button");
+		Check(!app.core.liveActorClockActive, "opening a fixed report never starts the live graph trial");
+		app.Click("Swing 检查点");
+		app.Click("返回 Live 接管");
+		app.Settle();
+		app.Click("结束前自动循环 Live");
+		Check(app.core.liveLoopEnabled, "pre-end seek loop does not require an end callback hook");
+		app.core.physicsMonitor.scheduleEndHook = true;
+		app.Settle();
+		app.Click("诊断与测试"); app.Settle();
+        Check(!app.core.liveContinuousArmDiagnostics, "continuous arm diagnostics default off");
+        app.Click("连续记录手臂诊断（影响性能）"); app.Settle();
+        Check(app.core.liveContinuousArmDiagnostics, "continuous arm diagnostics can be enabled explicitly");
+        app.Click("连续记录手臂诊断（影响性能）"); app.Settle();
+        Check(!app.core.liveContinuousArmDiagnostics, "continuous arm diagnostics can be disabled again");
+        app.Click("记录当前 Live 状态（只读）");
+		Check(app.core.liveRecordPending && app.core.liveRecordOwner == 55 && app.core.liveRecordScene == 73,
+			"read-only snapshot button scopes the request to the Live owner");
+		app.Click("详细物理运行监控");
+		Check(app.Text().find("Live 调度监控")!=std::string::npos, "detailed monitor remains available in Live diagnostics");
+		app.Click("详细物理运行监控");
+		app.core.liveRecordPending = false; app.Click("返回 Live 接管"); app.Settle();
+		app.Click("结束前自动循环 Live");
+		Check(!app.core.liveLoopEnabled,
+			"pre-end loop can be disabled");
+		app.Settle(); app.Click("结束前自动循环 Live");
+		Check(app.core.liveLoopEnabled, "pre-end loop can be re-enabled");
+		app.Settle(); app.Click("结束前自动循环 Live");
+		Check(!app.core.liveLoopEnabled, "Live loop checkbox can be disabled");
+		app.Settle();
+		Check(!app.ItemWithLabel("+5 秒") && !app.ItemWithLabel("-5 秒"), "Live transport omits five-second buttons");
+		app.Click("##live_play_pause");
 		Check(app.core.livePauseRequest == 1 && app.core.livePauseRequestOwner == 55 && app.core.livePauseRequestScene == 73,
 			"Live pause button queues an owner-scoped pause while injection remains disabled");
 		app.core.liveObservation.paused = true;
+		app.core.livePauseRequest = 0; // model the main-thread completion of pause
+		app.Click("诊断与测试");
 		app.Settle();
-		app.Click("继续 Live");
+		const auto* clockButton=app.ItemWithLabel("角色图运行 3 秒（MVP）");
+		Check(clockButton&&(clockButton->flags&ImGuiItemFlags_Disabled),"clock trial remains disabled without exclusive graph evidence");
+		app.core.liveActorClockAvailable=true;app.Settle();app.Click("角色图运行 3 秒（MVP）");
+		Check(app.core.liveActorClockRequest==1&&app.core.liveActorClockRequestOwner==55,"clock trial button queues owner-scoped start");
+		app.core.liveActorClockRequest=0;app.core.liveActorClockActive=true;app.Settle();app.Click("停止角色图实验并恢复");
+		Check(app.core.liveActorClockRequest==2,"active trial exposes immediate stop and restore");
+		app.core.liveActorClockRequest=0;app.core.liveActorClockActive=false;app.Settle();
+		app.Click("返回 Live 接管"); app.Settle();
+		app.Click("##live_play_pause");
 		Check(app.core.livePauseRequest == 2 && app.core.livePauseRequestOwner == 55,
 			"Live resume button queues an owner-scoped resume");
 		app.core.livePauseRequest = 0;
 		app.core.liveViewingConfirmed = false;
 		app.Settle();
-		app.Click("继续 Live");
+		app.Click("##live_play_pause");
 		Check(app.core.livePauseRequest == 0, "unconfirmed viewing mode cannot queue Live control");
 		app.core.liveViewingConfirmed = true;
 		app.core.liveTakeoverAvailable = true;
-		app.Settle(); app.Click("启用 Live 动作接管");
+		app.Settle(); app.Click("启动 Live 接管");
 		Check(app.core.liveTakeoverRequest == 1 && app.core.liveTakeoverRequestOwner == 55 && app.core.liveTakeoverRequestScene == 73,
 			"Live takeover enable is scoped to the observed owner");
 		app.core.liveTakeoverActive = true;
+		app.core.liveActorClockActive = true;
 		app.core.enforceInjectionPolicy = false;
-		app.Settle(); app.Click("退出 Live 动作接管");
+		app.Settle(); Check(!app.core.gui.livePageOpen && app.core.gui.activePage == GuiPage::Library, "confirmed takeover opens the MMD library");
+		app.Settle(); Check(!app.ItemWithLabel("退出 Live 动作接管"), "MMD header omits the exit takeover button");
+		app.Click("Live 接管页面"); app.Settle(); app.Click("退出 Live 动作接管");
 		Check(app.core.liveTakeoverRequest == 2 && app.core.liveTakeoverRequestOwner == 55,
-			"active Live takeover exposes an owner-scoped restore button");
+			"Live page retains the owner-scoped takeover restore button");
 	}
 	ImGui::DestroyContext();
 	std::printf("GUI UX interaction checks: %d passed, %d failed\n", passed, failed);

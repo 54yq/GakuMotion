@@ -107,6 +107,76 @@ namespace CameraBridge
 	inline bool originalFocalPointSaved = false, focalPointModified = false;
 	inline bool OnUnityThread();
 	inline bool liveDofMetadataReported = false;
+	// Enumerate metadata only; a candidate class does not imply an active wind
+	// or physics instance. Limit output and never invoke candidate methods.
+	inline void ReportLivePhysicsMetadata()
+	{
+		using Assemblies = const void** (*)(void*, size_t*);
+		using ImageCount = size_t (*)(void*);
+		using ImageClass = void* (*)(void*, size_t);
+		using ClassText = const char* (*)(void*);
+		using ImageName = const char* (*)(void*);
+		if (!OnUnityThread() || !g_gameAssembly || !g_hostContext.logInfo) return;
+		auto assemblies = reinterpret_cast<Assemblies>(GetProcAddress(g_gameAssembly, "il2cpp_domain_get_assemblies"));
+		auto countClasses = reinterpret_cast<ImageCount>(GetProcAddress(g_gameAssembly, "il2cpp_image_get_class_count"));
+		auto getClass = reinterpret_cast<ImageClass>(GetProcAddress(g_gameAssembly, "il2cpp_image_get_class"));
+		auto className = reinterpret_cast<ClassText>(GetProcAddress(g_gameAssembly, "il2cpp_class_get_name"));
+		auto classNamespace = reinterpret_cast<ClassText>(GetProcAddress(g_gameAssembly, "il2cpp_class_get_namespace"));
+		auto imageName = reinterpret_cast<ImageName>(GetProcAddress(g_gameAssembly, "il2cpp_image_get_name"));
+		if (!assemblies || !countClasses || !getClass || !className || !classNamespace || !il2cpp_domain_get || !il2cpp_assembly_get_image)
+		{ g_hostContext.logInfo("[GakuMotion][LivePhysicsMetadata] exports unavailable"); return; }
+		size_t count = 0, scanned = 0, matched = 0;
+		const void** list = assemblies(il2cpp_domain_get(), &count);
+		if (!list || count > 2048) return;
+		const auto api = GroundShadowProbeBootstrap::Resolve(g_gameAssembly);
+		for (size_t i = 0; i < count && scanned < 300000 && matched < 40; ++i)
+		{
+			void* image = list[i] ? il2cpp_assembly_get_image(const_cast<void*>(list[i])) : nullptr;
+			if (!image) continue;
+			const size_t classes = (std::min)(countClasses(image), size_t{300000} - scanned);
+			for (size_t j = 0; j < classes && matched < 40; ++j, ++scanned)
+			{
+				void* klass = getClass(image, j);
+				const char* name = klass ? className(klass) : nullptr;
+				if (!name) continue;
+				std::string lower(name);
+				std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+				// "window" contains "wind" but is unrelated to wind fields.
+				if (lower.find("window") != std::string::npos) continue;
+				if (lower.find("wind") == std::string::npos && lower.find("swing") == std::string::npos &&
+				    lower.find("springbone") == std::string::npos && lower.find("dynamicbone") == std::string::npos &&
+				    lower.find("externalforce") == std::string::npos && lower.find("cloth") == std::string::npos) continue;
+				const char* ns = classNamespace(klass);
+				const char* img = imageName ? imageName(image) : nullptr;
+				g_hostContext.logInfo("[GakuMotion][LivePhysicsMetadata] type=%s.%s image=%s fields=%s",
+				                     ns ? ns : "", name, img ? img : "unknown", BodyShadowBootstrap::AllFields(g_gameAssembly, api, klass).c_str());
+				++matched;
+			}
+		}
+		g_hostContext.logInfo("[GakuMotion][LivePhysicsMetadata] metadata_only=1 scanned=%zu matches=%zu limit=40", scanned, matched);
+	}
+	inline void* FindLoadedDofClass(const char* namespaze, const char* name, std::string& imageName)
+	{
+		using Assemblies = const void** (*)(void*, size_t*);
+		using ImageName = const char* (*)(void*);
+		const auto assemblies = reinterpret_cast<Assemblies>(GetProcAddress(g_gameAssembly, "il2cpp_domain_get_assemblies"));
+		const auto getImageName = reinterpret_cast<ImageName>(GetProcAddress(g_gameAssembly, "il2cpp_image_get_name"));
+		if (!assemblies || !il2cpp_domain_get || !il2cpp_assembly_get_image || !il2cpp_class_from_name) return nullptr;
+		void* domain = il2cpp_domain_get();
+		size_t count = 0;
+		const void** list = domain ? assemblies(domain, &count) : nullptr;
+		if (!list || count > 2048) return nullptr;
+		for (size_t i = 0; i < count; ++i)
+		{
+			void* image = list[i] ? il2cpp_assembly_get_image(const_cast<void*>(list[i])) : nullptr;
+			void* klass = image ? il2cpp_class_from_name(image, namespaze, name) : nullptr;
+			if (!klass) continue;
+			const char* value = getImageName ? getImageName(image) : nullptr;
+			imageName = value ? value : "unknown";
+			return klass;
+		}
+		return nullptr;
+	}
 
 	// Read-only metadata probe: identify the Live volume API before attempting
 	// any focus mutation. The logged classes are candidates, not proof that a
@@ -120,6 +190,8 @@ namespace CameraBridge
 		const Candidate candidates[] = {
 			{"vl-unity.Runtime.dll", "VL.Rendering", "VLDOF"},
 			{"vl-unity.Runtime.dll", "VL.Rendering", "DepthOfFieldData"},
+			{"Unity.RenderPipelines.Universal.Runtime.dll", "UnityEngine.Rendering.Universal", "UniversalAdditionalCameraData"},
+			{"Unity.RenderPipelines.Universal.Runtime.dll", "VL.Rendering.Internal", "VLPostProcessPass"},
 			{"Unity.RenderPipelines.Core.Runtime.dll", "UnityEngine.Rendering", "VolumeManager"},
 			{"Unity.RenderPipelines.Core.Runtime.dll", "UnityEngine.Rendering", "VolumeStack"},
 			{"Unity.RenderPipelines.Core.Runtime.dll", "UnityEngine.Rendering", "FloatParameter"},
@@ -127,9 +199,35 @@ namespace CameraBridge
 		};
 		for (const auto& candidate : candidates)
 		{
+			std::string imageName = candidate.assembly;
 			void* klass = FindClass(candidate.assembly, candidate.nameSpace, candidate.name);
+			if (!klass) klass = FindLoadedDofClass(candidate.nameSpace, candidate.name, imageName);
 			const std::string fields = BodyShadowBootstrap::AllFields(g_gameAssembly, api, klass);
-			g_hostContext.logInfo("[GakuMotion][LiveDoFProbe] type=%s.%s fields=%s", candidate.nameSpace, candidate.name, fields.c_str());
+			g_hostContext.logInfo("[GakuMotion][LiveDoFProbe] type=%s.%s image=%s fields=%s", candidate.nameSpace, candidate.name, imageName.c_str(), fields.c_str());
+			if (klass && std::strcmp(candidate.name, "VLPostProcessPass") == 0)
+			{
+				using NextField = void* (*)(void*, void**);
+				using FieldName = const char* (*)(void*);
+				auto next = reinterpret_cast<NextField>(GetProcAddress(g_gameAssembly, "il2cpp_class_get_fields"));
+				auto nameOf = reinterpret_cast<FieldName>(GetProcAddress(g_gameAssembly, "il2cpp_field_get_name"));
+				void* owner = klass;
+				for (unsigned depth = 0; owner && next && nameOf && depth < 6; ++depth)
+				{
+					void* iter = nullptr;
+					for (unsigned i = 0; i < 128; ++i)
+					{
+						void* field = next(owner, &iter); if (!field) break;
+						const char* fieldName = nameOf(field); if (!fieldName) continue;
+						std::string lower(fieldName);
+						std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+						if (lower.find("dof") == std::string::npos && lower.find("focus") == std::string::npos &&
+						    lower.find("volume") == std::string::npos && lower.find("depth") == std::string::npos) continue;
+						const auto fieldInfo = GroundShadowProbeBootstrap::Field(api, owner, fieldName);
+						g_hostContext.logInfo("[GakuMotion][LiveDoFRenderField] depth=%u field=%s", depth, fieldInfo.c_str());
+					}
+					owner = g_faceRuntime.parentClass ? g_faceRuntime.parentClass(owner) : nullptr;
+				}
+			}
 			if (!klass || !api.method.methods || !api.method.name || !api.method.count) continue;
 			void* iterator = nullptr;
 			for (unsigned i = 0; i < 96; ++i)
@@ -141,6 +239,132 @@ namespace CameraBridge
 					candidate.nameSpace, candidate.name, name, api.method.count(method));
 			}
 		}
+	}
+
+	// Observe only the currently blended volume; never write focus from this probe.
+	inline void ReportLiveDofValue()
+	{
+		if (!OnUnityThread() || !g_hostContext.logInfo || !g_faceRuntime.invoke || !g_faceRuntime.readField ||
+		    !il2cpp_class_get_type || !il2cpp_type_get_object || !g_safeBones.unbox) return;
+		const auto api = GroundShadowProbeBootstrap::Resolve(g_gameAssembly);
+		void* managerClass = FindClass("Unity.RenderPipelines.Core.Runtime.dll", "UnityEngine.Rendering", "VolumeManager");
+		void* stackClass = FindClass("Unity.RenderPipelines.Core.Runtime.dll", "UnityEngine.Rendering", "VolumeStack");
+		void* componentClass = FindClass("Unity.RenderPipelines.Core.Runtime.dll", "UnityEngine.Rendering", "VolumeComponent");
+		void* typeClass = FindClass("mscorlib.dll", "System", "Type");
+		std::string image;
+		void* dofClass = FindLoadedDofClass("VL.Rendering", "VLDOF", image);
+		void* minFloatClass = FindClass("Unity.RenderPipelines.Core.Runtime.dll", "UnityEngine.Rendering", "MinFloatParameter");
+		const auto instance = api.method.Find(managerClass, "get_instance", true, {0x12, managerClass}, {});
+		const auto stack = api.method.Find(managerClass, "get_stack", false, {0x12, stackClass}, {});
+		const auto component = api.method.Find(stackClass, "GetComponent", false, {0x12, componentClass}, {{0x12, typeClass}});
+		const auto getter = api.method.Find(minFloatClass, "get_value", false, {0x0c}, {});
+		void* focalField = dofClass && api.field ? api.field(dofClass, "focalPoint") : nullptr;
+		if (!instance || !stack || !component || !getter || !focalField || !api.fieldType || !api.method.classFromType ||
+		    api.method.classFromType(api.fieldType(focalField)) != minFloatClass)
+		{ g_hostContext.logInfo("[GakuMotion][LiveDoFValue] metadata unavailable; no focus changed"); return; }
+		void* ex = nullptr;
+		void* manager = g_faceRuntime.invoke(instance, nullptr, nullptr, &ex);
+		void* stackObject = manager && !ex ? g_faceRuntime.invoke(stack, manager, nullptr, &ex) : nullptr;
+		void* classType = il2cpp_class_get_type(dofClass);
+		void* type = classType ? il2cpp_type_get_object(classType) : nullptr;
+		void* args[] = {type};
+		void* volume = stackObject && type && !ex ? g_faceRuntime.invoke(component, stackObject, args, &ex) : nullptr;
+		void* focal = nullptr;
+		if (volume && !ex) g_faceRuntime.readField(volume, focalField, &focal);
+		void* boxed = focal && !ex ? g_faceRuntime.invoke(getter, focal, nullptr, &ex) : nullptr;
+		void* value = boxed && !ex ? g_safeBones.unbox(boxed) : nullptr;
+		if (!value) { g_hostContext.logInfo("[GakuMotion][LiveDoFValue] active value unavailable; no focus changed"); return; }
+		const float current = *static_cast<float*>(value);
+		if (std::isfinite(current)) g_hostContext.logInfo("[GakuMotion][LiveDoFValue] focalPoint=%.4f; read-only", current);
+	}
+
+	struct LiveFocusAccess
+	{
+		void* dofClass{}; void* focalField{};
+		const void* instance{}; const void* stack{}; const void* component{}; const void* getter{};
+	};
+	inline LiveFocusAccess liveFocusApi;
+	using DofRender = bool (*)(void*, void*, void*, void*, void*, void*);
+	inline DofRender originalDofRender = nullptr;
+	inline std::atomic_bool independentDofDisabled{false};
+	inline std::atomic<uint64_t> dofRenderCalls{0}, dofRenderSkipped{0};
+	inline bool dofRenderInstalled = false, dofRenderAttempted = false;
+	inline bool InstallIndependentDof();
+	inline bool DofRenderDetour(void* self, void* cmd, void* source, void* destination, void* cameraData, void* method)
+	{
+		const bool disabled = independentDofDisabled.load(std::memory_order_acquire);
+		dofRenderCalls.fetch_add(1, std::memory_order_relaxed);
+		if (disabled) dofRenderSkipped.fetch_add(1, std::memory_order_relaxed);
+		return GakuMotion::InvokeDofRender(disabled,
+		                                originalDofRender, self, cmd, source, destination, cameraData, method);
+	}
+	inline bool ResolveLiveFocusApi()
+	{
+		if (liveFocusApi.getter) return true;
+		if (!OnUnityThread() || !g_faceRuntime.invoke || !g_faceRuntime.readField || !g_safeBones.unbox ||
+		    !il2cpp_class_get_type || !il2cpp_type_get_object) return false;
+		const auto api = GroundShadowProbeBootstrap::Resolve(g_gameAssembly);
+		auto find = [](const char* n) { return FindClass("Unity.RenderPipelines.Core.Runtime.dll", "UnityEngine.Rendering", n); };
+		void* manager = find("VolumeManager"); void* stack = find("VolumeStack"); void* component = find("VolumeComponent");
+		void* minFloat = find("MinFloatParameter"); void* type = FindClass("mscorlib.dll", "System", "Type");
+		std::string image; void* dof = FindLoadedDofClass("VL.Rendering", "VLDOF", image);
+		LiveFocusAccess a;
+		a.dofClass = dof; a.focalField = dof && api.field ? api.field(dof, "focalPoint") : nullptr;
+		a.instance = api.method.Find(manager, "get_instance", true, {0x12, manager}, {});
+		a.stack = api.method.Find(manager, "get_stack", false, {0x12, stack}, {});
+		a.component = api.method.Find(stack, "GetComponent", false, {0x12, component}, {{0x12, type}});
+		a.getter = api.method.Find(minFloat, "get_value", false, {0x0c}, {});
+		if (!manager || !stack || !component || !minFloat || !type || !a.dofClass || !a.focalField ||
+		    !a.instance || !a.stack || !a.component || !a.getter || !api.fieldType ||
+		    !api.method.classFromType || api.method.classFromType(api.fieldType(a.focalField)) != minFloat) return false;
+		liveFocusApi = a; return true;
+	}
+	inline bool ReadLiveFocus(void* focal, float& value)
+	{
+		void* ex = nullptr;
+		void* boxed = focal ? g_faceRuntime.invoke(liveFocusApi.getter, focal, nullptr, &ex) : nullptr;
+		void* raw = boxed && !ex ? g_safeBones.unbox(boxed) : nullptr;
+		if (!raw) return false;
+		value = *static_cast<float*>(raw); return std::isfinite(value);
+	}
+	// Compare the global blended stack against the selected camera's existing
+	// stack without creating a stack or changing either one. A null camera stack
+	// is a valid observation and does not prove which stack the renderer uses.
+	inline void TraceCameraFocus(void* camera)
+	{
+		static auto last = std::chrono::steady_clock::time_point{};
+		const auto now = std::chrono::steady_clock::now();
+		if (!g_hostContext.logInfo || now - last < std::chrono::seconds(4)) return;
+		last = now;
+		if (!camera || !ResolveLiveFocusApi()) return;
+		const auto api = GroundShadowProbeBootstrap::Resolve(g_gameAssembly);
+		void* additional = FindClass("Unity.RenderPipelines.Universal.Runtime.dll", "UnityEngine.Rendering.Universal", "UniversalAdditionalCameraData");
+		void* componentClass = FindClass("UnityEngine.CoreModule.dll", "UnityEngine", "Component");
+		void* typeClass = FindClass("mscorlib.dll", "System", "Type");
+		void* stackClass = FindClass("Unity.RenderPipelines.Core.Runtime.dll", "UnityEngine.Rendering", "VolumeStack");
+		const auto getComponent = api.method.Find(componentClass, "GetComponent", false, {0x12, componentClass}, {{0x12, typeClass}});
+		const auto getStack = api.method.Find(additional, "get_volumeStack", false, {0x12, stackClass}, {});
+		if (!additional || !componentClass || !typeClass || !stackClass || !getComponent || !getStack)
+		{ g_hostContext.logInfo("[GakuMotion][CameraFocusTrace] metadata_unavailable=1"); return; }
+		void* ex = nullptr;
+		void* additionalClassType = il2cpp_class_get_type(additional);
+		void* additionalType = additionalClassType ? il2cpp_type_get_object(additionalClassType) : nullptr;
+		void* args[]{additionalType};
+		void* data = additionalType ? g_faceRuntime.invoke(getComponent, camera, args, &ex) : nullptr;
+		void* cameraStack = data && !ex ? g_faceRuntime.invoke(getStack, data, nullptr, &ex) : nullptr;
+		void* manager = !ex ? g_faceRuntime.invoke(liveFocusApi.instance, nullptr, nullptr, &ex) : nullptr;
+		void* globalStack = manager && !ex ? g_faceRuntime.invoke(liveFocusApi.stack, manager, nullptr, &ex) : nullptr;
+		void* classType = il2cpp_class_get_type(liveFocusApi.dofClass);
+		void* dofType = classType ? il2cpp_type_get_object(classType) : nullptr;
+		void* dofArgs[]{dofType};
+		void* volume = cameraStack && dofType && !ex ? g_faceRuntime.invoke(liveFocusApi.component, cameraStack, dofArgs, &ex) : nullptr;
+		void* focal = nullptr;
+		if (volume && !ex) g_faceRuntime.readField(volume, liveFocusApi.focalField, &focal);
+		float value = 0;
+		const bool valid = !ex && focal && ReadLiveFocus(focal, value);
+		g_hostContext.logInfo("[GakuMotion][CameraFocusTrace] data=%p camera_stack=%p global_stack=%p same_stack=%d focal=%p valid=%d value=%.3f exception=%d",
+		                     data, cameraStack, globalStack, int(cameraStack && cameraStack == globalStack), focal,
+		                     int(valid), value, int(ex != nullptr));
 	}
 
 	inline bool ReadNativeFov(void* object, int offset, float& value)
@@ -375,6 +599,7 @@ namespace CameraBridge
 			if (!item.saved || !IsAlive(item.object) || !RestoreNativeFov(item.object,
 				brainCurrentStateOffset + unboxedCameraStateLensOffset + unboxedLensFovOffset,item.fov)) result.confirmed=false;
 		}
+		if (independentDofDisabled.exchange(false, std::memory_order_acq_rel)) result.modified = true;
 		if (focalPointModified)
 		{
 			result.modified=true;
@@ -404,6 +629,7 @@ namespace CameraBridge
 	{
 		if (restore) { ReleaseVirtualCamerasForCapture(); return; }
 		trackedVcams.clear(); trackedBrains.clear(); focalOwner=focalModel=nullptr;
+		independentDofDisabled.store(false, std::memory_order_release);
 		originalFocalPointSaved=focalPointModified=false;
 		trackedActCtrl=nullptr; trackedModel=nullptr;
 	}
@@ -597,7 +823,12 @@ namespace CameraBridge
 	inline void Write(void* camera, void* transform, const GakuMotion::CameraFrame& frame)
 	{
 		if (!OnUnityThread() || !ready || !IsAlive(camera) || !IsAlive(transform)) return;
-		if (GakuMotion::Core::Instance().liveTakeoverActive) ReportLiveDofMetadata();
+		if (GakuMotion::Core::Instance().liveTakeoverActive && !liveDofMetadataReported)
+		{
+			ReportLivePhysicsMetadata();
+			ReportLiveDofMetadata();
+			ReportLiveDofValue();
+		}
 		void* cameraSelf = Self(camera);
 		void* transformSelf = Self(transform);
 		if (!cameraSelf || !transformSelf) return;
@@ -650,16 +881,44 @@ namespace CameraBridge
 				GakuMotion::Quaternion actorRot;
 				if (ctrl.fnActorPose(ctrl.actor, actorPos, actorRot, hips))
 				{
-					GakuMotion::Vector3 delta = frame.position - actorPos;
-					focalDistance = std::sqrt(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z);
+					if (GakuMotion::Core::Instance().liveTakeoverActive)
+					{
+						const GakuMotion::Vector3 delta = hips - frame.position;
+						const GakuMotion::Vector3 forward = frame.rotation.Normalized().Rotate({0,0,1});
+						focalDistance = delta.x*forward.x + delta.y*forward.y + delta.z*forward.z;
+					}
+					else
+					{
+						const GakuMotion::Vector3 delta = frame.position - actorPos;
+						focalDistance = std::sqrt(delta.x*delta.x + delta.y*delta.y + delta.z*delta.z);
+					}
 				}
 			}
 		}
 
-		if (focalDistance >= 0.2f && focalDistance <= 50.0f)
+		auto& liveCore = GakuMotion::Core::Instance();
+		if (liveCore.liveTakeoverActive)
 		{
-			WritePhotographyDoFFocalPoint(focalDistance);
+			TraceCameraFocus(camera);
+			if (liveCore.liveDofDisabled)
+			{
+				const bool available = InstallIndependentDof();
+				independentDofDisabled.store(available, std::memory_order_release);
+				liveCore.liveDofDisableStatus = available ? 1 : -1;
+				static auto lastDofTrace = std::chrono::steady_clock::time_point{};
+				const auto now = std::chrono::steady_clock::now();
+				if (g_hostContext.logInfo && now - lastDofTrace >= std::chrono::seconds(4))
+				{
+					g_hostContext.logInfo("[GakuMotion][LiveDoFRenderTrace] hook=%d calls=%llu skipped=%llu",
+					    int(available), static_cast<unsigned long long>(dofRenderCalls.load(std::memory_order_relaxed)),
+					    static_cast<unsigned long long>(dofRenderSkipped.load(std::memory_order_relaxed)));
+					lastDofTrace = now;
+				}
+			}
+			else { independentDofDisabled.store(false, std::memory_order_release); liveCore.liveDofDisableStatus = 0; }
 		}
+		else if (focalDistance >= 0.2f && focalDistance <= 50.0f)
+			WritePhotographyDoFFocalPoint(focalDistance);
 
 		// Use icalls rather than the host's managed FOV detour.
 		setOrthographic(cameraSelf, (frame.flags & 1u) != 0);
@@ -786,6 +1045,30 @@ namespace CameraBridge
 			g_hostContext.logWarn("[GakuMotion][Camera] MH_EnableHook failed: %s target=%p status=%s", name, target,
 				MH_StatusToString(enabled));
 		return enabled == MH_OK;
+	}
+	inline bool InstallIndependentDof()
+	{
+		if (dofRenderInstalled) return true;
+		if (dofRenderAttempted || !OnUnityThread() || !g_gameAssembly) return false;
+		dofRenderAttempted = true;
+		const auto api = GroundShadowProbeBootstrap::Resolve(g_gameAssembly);
+		void* pass = FindClass("Unity.RenderPipelines.Universal.Runtime.dll", "VL.Rendering.Internal", "VLPostProcessPass");
+		void* cmd = FindClass("UnityEngine.CoreModule.dll", "UnityEngine.Rendering", "CommandBuffer");
+		void* rt = FindClass("Unity.RenderPipelines.Core.Runtime.dll", "UnityEngine.Rendering", "RTHandle");
+		void* cameraData = FindClass("Unity.RenderPipelines.Universal.Runtime.dll", "UnityEngine.Rendering.Universal", "CameraData");
+		if (!pass || !cmd || !rt || !cameraData) return false;
+		const void* method = api.method.Find(pass, "DoVLDOF", false, {0x02},
+			{{0x12, cmd}, {0x12, rt}, {0x12, rt}, {0x11, cameraData, true}});
+		void* target = method ? GroundShadowProbeBootstrap::MethodPointer(method) : nullptr;
+		if (!target)
+		{
+			if (g_hostContext.logWarn) g_hostContext.logWarn("[GakuMotion][LiveDoF] exact render signature unavailable; no hook installed");
+			return false;
+		}
+		dofRenderInstalled = InstallHook("Live DoVLDOF", target, reinterpret_cast<void*>(&DofRenderDetour),
+		                                 reinterpret_cast<void**>(&originalDofRender));
+		if (g_hostContext.logInfo) g_hostContext.logInfo("[GakuMotion][LiveDoF] independent render hook installed=%d", int(dofRenderInstalled));
+		return dofRenderInstalled;
 	}
 
 	inline void ReapplyLens(void* c)
@@ -1068,6 +1351,7 @@ namespace CameraBridge
 
 	inline void Shutdown()
 	{
+		independentDofDisabled.store(false, std::memory_order_release);
 		sharedBeginEnabled.store(false, std::memory_order_release);
 		if (sharedBeginSubscribed) sharedBegin.unsubscribe(sharedBegin.context, SharedCameraBegin, nullptr);
 		sharedBeginSubscribed = false;

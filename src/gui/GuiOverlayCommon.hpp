@@ -135,6 +135,7 @@ namespace GakuMotion
 		uint32_t eyeBoneFrames{0};
 		uint32_t morphFrames{0};
 		uint32_t cameraFrames{0};
+		uint32_t bodyEndFrame{0}, morphEndFrame{0};
 
 		bool CanUseAsMotion() const { return valid && bodyBoneFrames > 0; }
 		bool CanUseAsFacial() const { return valid && (morphFrames > 0 || eyeBoneFrames > 0); }
@@ -209,11 +210,14 @@ namespace GakuMotion
 			return false;
 		};
 
-		const uint32_t scanCount = (std::min)(boneCount, 4096u);
+		const uint32_t scanCount = boneCount;
 		for (uint32_t i = 0; i < scanCount; ++i)
 		{
 			char bname[16]{};
 			file.read(bname, 15);
+			if (!file) return info;
+			uint32_t frame = 0;
+			file.read(reinterpret_cast<char*>(&frame), 4);
 			if (!file) return info;
 
 			if (IsEyeBone(bname))
@@ -223,13 +227,9 @@ namespace GakuMotion
 			else if (bname[0] != '\0')
 			{
 				++info.bodyBoneFrames;
-				if (boneCount > 4096u && info.bodyBoneFrames > 0)
-				{
-					// 已明确包含身体动作骨骼，直接跳转跳过剩余骨骼块（< 0.1ms）
-					break;
-				}
+				info.bodyEndFrame = (std::max)(info.bodyEndFrame, frame);
 			}
-			file.seekg(96, std::ios::cur);
+			file.seekg(92, std::ios::cur);
 		}
 
 		// 精确跳至骨骼记录块末尾
@@ -250,6 +250,15 @@ namespace GakuMotion
 				if (static_cast<uint64_t>(morphCount) <= remAfterMorphCount / 23ull)
 				{
 					info.morphFrames = morphCount;
+					for (uint32_t i = 0; i < morphCount; ++i)
+					{
+						file.seekg(15, std::ios::cur);
+						uint32_t frame = 0;
+						file.read(reinterpret_cast<char*>(&frame), 4);
+						if (!file) return VmdProbeInfo{};
+						info.morphEndFrame = (std::max)(info.morphEndFrame, frame);
+						file.seekg(4, std::ios::cur);
+					}
 					const auto morphBlockEnd = posAfterBones + 4 + static_cast<std::streamoff>(static_cast<uint64_t>(morphCount) * 23ull);
 					file.seekg(morphBlockEnd, std::ios::beg);
 				}

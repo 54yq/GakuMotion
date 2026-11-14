@@ -94,6 +94,17 @@ namespace GakuMotion
 		}
 		if (overlay.cameraSettingsPending) ImGui::TextDisabled("正在应用镜头设置…");
 		ImGui::TextWrapped("选择“游戏”恢复游戏手动镜头，并保留 GakuMotion 镜头参数。");
+		if (ctx.liveTakeoverActive && ctx.fnSetLiveDofDisabled)
+		{
+			ImGui::BeginDisabled(!settings.enabled);
+			bool disableDof = ctx.liveDofDisabled;
+			if (ctx.fnSetLiveDofDisabled && ImGui::Checkbox("关闭 Live 景深（测试）", &disableDof))
+				ctx.fnSetLiveDofDisabled(ctx.self, disableDof);
+			if (disableDof)
+				ImGui::TextWrapped("景深关闭：%s", ctx.liveDofDisableStatus > 0 ? "渲染开关已启用，画面效果待验证" : ctx.liveDofDisableStatus < 0 ? "当前渲染接口不可用" : "等待镜头");
+			ImGui::EndDisabled();
+			ImGui::TextWrapped("取消勾选或退出接管后，恢复游戏原本的景深处理。");
+		}
 		ImGui::BeginDisabled(!settings.enabled);
 		if (ImGui::Checkbox("镜头随主角色朝向", &settings.followPlacementYaw)) changed = true;
 		ImGui::EndDisabled();
