@@ -126,3 +126,5 @@ GakuMotion 的开发过程中参考了 MMD 动作生态、游戏 Mod 工具及�
  - [ifui小灰灰 / ArinLee](https://arin3000.github.io/) — 学马仕动画与原生表现相关研究。
  - [nijinekoyo - Gakuen-idolmaster-ab-decrypt](https://github.com/nijinekoyo/Gakuen-idolmaster-ab-decrypt) — 提供了版本研究思路。
  - [Akisaira](https://github.com/Akisaira) — 援助了早期兼容性研究的智能体调用额度。
+
+配套源码：[GakuBurstBridge 原生物理桥](tools/GakuBurstBridge/README.md)。
