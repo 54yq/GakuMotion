@@ -26,11 +26,11 @@ internal static unsafe class NativeExports
     private static int _running;
 
     /// <summary>
-    /// ABI v3 persists per-track playback speed and offset. Older modules would
+    /// ABI v4 also preserves source frame rate and rebake requests. Older modules would
     /// silently drop those fields, so the plugin refuses to pair with them.
     /// </summary>
     [UnmanagedCallersOnly(EntryPoint = "GkVmdImporter_AbiVersion")]
-    public static int AbiVersion() => 3;
+    public static int AbiVersion() => 4;
 
     [UnmanagedCallersOnly(EntryPoint = "GkCameraImporter_AbiVersion")]
     public static int CameraAbiVersion() => 1;
