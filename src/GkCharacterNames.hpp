@@ -6,11 +6,16 @@ namespace GakuMotion
 {
 	struct IdolName { const char* code; const char* chinese; };
 	inline constexpr IdolName kIdolNames[] = {
-		{"hski", "花海咲季"}, {"ttmr", "月村手毬"}, {"krnh", "有栖川凛花"},
-		{"fktn", "藤田琴音"}, {"atbm", "有村麻央"}, {"kcna", "仓本千奈"},
-		{"shro", "篠泽广"}, {"ssmk", "紫云清夏"}, {"kllj", "葛城莉莉娅"},
-		{"hume", "花海佑芽"}, {"hmsz", "姬崎莉波"}, {"jsna", "十王星南"},
-		{"hrnm", "秦谷美铃"}, {"amao", "雨夜燕"}, {"nasr", "根绪亚纱里"}
+		// Codes and names checked against the local Character translation data.
+		{"amao", "有村麻央"}, {"andk", "蓝井抚子"}, {"atbm", "雨夜燕"},
+		{"fktn", "藤田琴音"}, {"hkne", "冰渡香名江"}, {"hmsz", "秦谷美铃"},
+		{"hrnm", "姬崎莉波"}, {"hski", "花海咲季"}, {"hume", "花海佑芽"},
+		{"jkno", "十王邦夫"}, {"jsna", "十王星南"}, {"kcna", "仓本千奈"},
+		{"kllj", "葛城莉莉娅"}, {"krnh", "贺阳燐羽"}, {"ktko", "黑井崇男"},
+		{"myu0", "真城优"}, {"nasr", "根绪亚纱里"}, {"sgka", "白草月花"},
+		{"shro", "筱泽广"}, {"ssmk", "紫云清夏"}, {"sson", "白草四音"},
+		{"trda", "舞蹈训练员"}, {"trvi", "视觉训练员"}, {"trvo", "歌唱训练员"},
+		{"ttmr", "月村手毬"}
 	};
 
 	inline std::string DetectIdolCharacterCode(std::string name)
