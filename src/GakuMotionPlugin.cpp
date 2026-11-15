@@ -5,6 +5,7 @@
 #include "GkCaptureSafety.hpp"
 #include "GkGmlClient.hpp"
 #include "GakuMotion.hpp"
+#include "GkWebPanelBridge.hpp"
 #include "GakuMotionControl.h"
 #include "GkLog.hpp"
 #include "GkCsharpImport.hpp"
@@ -886,6 +887,12 @@ namespace
 	uint64_t g_importLogReadOffset{0};
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
+
+	// Resident web-panel bridge (gakumotion.web-panel/v1). Created during
+	// MotionActivate, silently invalidated by MotionShutdown on the Unity
+	// thread; bridge.closed is emitted from the UI-thread onShutdown callback.
+	// Like every other provider table here it lives until process exit.
+	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 
 	void ReleasePendingFileDialog()
 	{
@@ -3308,6 +3315,7 @@ void MotionShutdown(void*)
 	std::lock_guard<std::mutex> lifecycleLock(g_lifecycleMutex);
 	if (!g_pluginInitialized) return;
 	g_runtimeReady.store(false, std::memory_order_release);
+		if (g_webPanelBridge) g_webPanelBridge->Invalidate("plugin-shutdown");
 	GakuMotion::host::UnregisterHotkey(kShowGuiActionId);
 	GakuMotion::host::UnregisterHotkey(kReloadOverridesActionId);
 	GakuMotion::host::UnregisterHotkey(kToggleOverridesActionId);
@@ -3395,6 +3403,217 @@ GakuStatus PublishActorApi()
 		GAKU_MOTION_ACTOR_SERVICE, sizeof(service), &service);
 }
 
+	// ---- gakumotion.web-panel/v1 provider ------------------------------------
+	// The Loader owns the WebView2 controller and calls these on its desktop UI
+	// thread (onUiTick shares the onDesktopUi callback gate, so the host
+	// file-drop services are legal here). Domain semantics live in
+	// GkWebPanelBridge.hpp; this block only wires Windows/host services to it.
+
+	void WebPanelModuleAnchor() {}
+
+	std::wstring WebPanelAssetsDir()
+	{
+		static std::wstring cached;
+		static bool resolved = false;
+		if (resolved) return cached;
+		resolved = true;
+		HMODULE module = nullptr;
+		if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+			reinterpret_cast<LPCWSTR>(&WebPanelModuleAnchor), &module) || !module)
+			return {};
+		wchar_t buffer[32768]{};
+		const DWORD length = GetModuleFileNameW(module, buffer, static_cast<DWORD>(std::size(buffer)));
+		if (!length || length >= std::size(buffer)) return {};
+		const std::filesystem::path modulePath(buffer, buffer + length);
+		cached = (modulePath.parent_path() / L"GakuMotion.UI").wstring();
+		return cached;
+	}
+
+	bool WebPanelOpenLibraryFolder(std::string& notice)
+	{
+		std::string folder;
+		{
+			auto& core = GakuMotion::Core::Instance();
+			std::lock_guard<std::recursive_mutex> lock(core.stateMutex);
+			folder = core.motionsRoot;
+		}
+		std::wstring wide;
+		if (folder.empty() || !GakuMotion::windows_path::FromUtf8(folder, wide))
+		{
+			notice = "曲库目录不可用";
+			return false;
+		}
+		const auto result = reinterpret_cast<INT_PTR>(
+			ShellExecuteW(nullptr, L"open", wide.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
+		if (result <= 32)
+		{
+			notice = "无法打开曲库文件夹，请检查目录是否存在（错误 " + std::to_string(result) + "）";
+			return false;
+		}
+		return true;
+	}
+
+	bool WebPanelDropSetTarget(bool enabled, std::string& notice)
+	{
+		const auto& service = GakuMotion::host::fileDrop;
+		if (!service.setTarget)
+		{
+			notice = "宿主文件拖放服务不可用";
+			return false;
+		}
+		if (!enabled)
+		{
+			service.setTarget(service.context, nullptr);
+			return true;
+		}
+		HWND window = GakuMotion::host::desktopWindow.getWindow
+			? static_cast<HWND>(GakuMotion::host::desktopWindow.getWindow()) : nullptr;
+		RECT rect{0, 0, 1920, 1080};
+		if (window) GetClientRect(window, &rect);
+		const GakuFileDropTarget target{GAKU_SERVICE_VERSION, sizeof(GakuFileDropTarget),
+			static_cast<float>(rect.left), static_cast<float>(rect.top),
+			static_cast<float>(rect.right), static_cast<float>(rect.bottom)};
+		if (service.setTarget(service.context, &target) != GAKU_OK)
+		{
+			notice = "拖放目标注册失败";
+			return false;
+		}
+		return true;
+	}
+
+	GakuMotion::webpanel::DropPeek WebPanelDropPeek()
+	{
+		GakuMotion::webpanel::DropPeek peek;
+		const auto& drop = GakuMotion::host::fileDrop;
+		const auto& drag = GakuMotion::host::fileDrag;
+		if (!drop.poll) return peek;
+		GakuFileDropResult result{};
+		if (drop.poll(drop.context, sizeof(result), &result, 0, nullptr) == GAKU_OK)
+			peek.pendingCount = result.fileCount;
+		if (drag.peek)
+		{
+			GakuFileDragState state{};
+			if (drag.peek(drag.context, sizeof(state), &state, 0, nullptr) == GAKU_OK)
+			{
+				peek.hostBlocked = (state.flags & GAKU_FILE_DRAG_HOST_BLOCKED) != 0;
+				peek.hostElevated = (state.flags & GAKU_FILE_DRAG_HOST_ELEVATED) != 0;
+				if (state.flags & GAKU_FILE_DRAG_INSIDE_TARGET) peek.visual = "hover";
+				else if (state.flags & GAKU_FILE_DRAG_ACTIVE) peek.visual = "armed";
+			}
+		}
+		else if (peek.pendingCount > 0) peek.visual = "armed";
+		peek.ok = true;
+		return peek;
+	}
+
+	GakuMotion::webpanel::DropBatch WebPanelDropConsume()
+	{
+		GakuMotion::webpanel::DropBatch batch;
+		const auto& service = GakuMotion::host::fileDrop;
+		if (!service.poll) return batch;
+		GakuFileDropResult result{};
+		if (service.poll(service.context, sizeof(result), &result, 0, nullptr) != GAKU_OK ||
+			result.fileCount == 0)
+		{
+			batch.ok = true;
+			return batch;
+		}
+		if (result.requiredBytes == 0 || result.requiredBytes > GAKU_FILE_DROP_MAX_BYTES)
+		{
+			batch.notice = "拖放批次超出宿主限制";
+			return batch;
+		}
+		std::string buffer(result.requiredBytes, '\0');
+		if (service.poll(service.context, sizeof(result), &result,
+			static_cast<uint32_t>(buffer.size()), buffer.data()) != GAKU_OK)
+		{
+			batch.notice = "拖放读取失败";
+			return batch;
+		}
+		size_t start = 0;
+		while (start < buffer.size() && batch.paths.size() < result.fileCount)
+		{
+			const size_t end = buffer.find('\0', start);
+			if (end == std::string::npos) break;
+			if (end > start) batch.paths.push_back(buffer.substr(start, end - start));
+			start = end + 1;
+		}
+		batch.ok = true;
+		return batch;
+	}
+
+	GakuMotion::webpanel::AppearanceInfo WebPanelAppearance()
+	{
+		GakuMotion::webpanel::AppearanceInfo info;
+		const auto& service = GakuMotion::host::appearance;
+		if (!service.getAppearance) return info;
+		GakuUiAppearanceV1 data{};
+		if (service.getAppearance(sizeof(data), &data) != GAKU_OK) return info;
+		info.ok = true;
+		info.theme = static_cast<int>(data.theme);
+		info.uiScale = data.uiScale;
+		return info;
+	}
+
+	GakuMotion::webpanel::HostHooks MakeWebPanelHooks()
+	{
+		GakuMotion::webpanel::HostHooks hooks;
+		hooks.assetsDir = WebPanelAssetsDir;
+		hooks.openLibraryFolder = WebPanelOpenLibraryFolder;
+		hooks.releaseFileDialog = ReleasePendingFileDialog;
+		hooks.dropSetTarget = WebPanelDropSetTarget;
+		hooks.dropPeek = WebPanelDropPeek;
+		hooks.dropConsume = WebPanelDropConsume;
+		hooks.appearance = WebPanelAppearance;
+		hooks.pluginVersion = "0.1.1";
+		return hooks;
+	}
+
+	GakuStatus WebPanelGetAssets(void* context, GakuWebPanelAssetsV1* output)
+	{
+		auto* bridge = static_cast<GakuMotion::webpanel::Bridge*>(context);
+		if (!bridge) return GAKU_E_UNAVAILABLE;
+		try { return bridge->GetAssets(output); }
+		catch (...) { return GAKU_E_INTERNAL; }
+	}
+	void WebPanelOnShow(void* context)
+	{
+		if (auto* bridge = static_cast<GakuMotion::webpanel::Bridge*>(context)) bridge->OnShow();
+	}
+	void WebPanelOnHide(void* context)
+	{
+		if (auto* bridge = static_cast<GakuMotion::webpanel::Bridge*>(context)) bridge->OnHide();
+	}
+	void WebPanelOnUiTick(void* context)
+	{
+		if (auto* bridge = static_cast<GakuMotion::webpanel::Bridge*>(context)) bridge->OnUiTick();
+	}
+	void WebPanelSetEventSink(void* context, GakuWebPanelEventSink sink, void* userData)
+	{
+		if (auto* bridge = static_cast<GakuMotion::webpanel::Bridge*>(context)) bridge->SetEventSink(sink, userData);
+	}
+	GakuStatus WebPanelHandleMessage(void* context, const char* requestJson,
+		uint32_t responseCapacity, char* responseJson, uint32_t* requiredBytes)
+	{
+		auto* bridge = static_cast<GakuMotion::webpanel::Bridge*>(context);
+		if (!bridge) return GAKU_E_UNAVAILABLE;
+		return bridge->HandleMessage(requestJson, responseCapacity, responseJson, requiredBytes);
+	}
+	void WebPanelOnShutdown(void* context)
+	{
+		if (auto* bridge = static_cast<GakuMotion::webpanel::Bridge*>(context)) bridge->OnShutdown();
+	}
+
+	GakuStatus PublishWebPanelApi()
+	{
+		if (!g_webPanelBridge) return GAKU_E_UNAVAILABLE;
+		const GakuWebPanelServiceV1 service{GAKU_WEB_PANEL_VERSION, sizeof(service), g_webPanelBridge,
+			WebPanelGetAssets, WebPanelOnShow, WebPanelOnHide, WebPanelOnUiTick,
+			WebPanelSetEventSink, WebPanelHandleMessage, WebPanelOnShutdown};
+		return GakuMotion::host::api.registerService(GakuMotion::host::api.hostContext,
+			"gakumotion" GAKU_WEB_PANEL_SERVICE_SUFFIX, sizeof(service), &service);
+	}
+
 template<class Function>
 GakuMotion::scene_nodes::v1::Status SceneNodesCall(bool mutation, Function&& function) noexcept
 {
@@ -3463,6 +3682,19 @@ GakuStatus MotionActivate(const GakuHostApi* host, void** pluginState)
 	if (!InitializeMotion()) return GAKU_E_INTERNAL;
 	GakuMotion::Core::Instance().SetControlActive(true);
 	*pluginState = &GakuMotion::Core::Instance();
+
+	// Optional provider-owned web panel. A registration miss never fails
+	// activation: the Loader keeps the ImGui fallback (RenderGmlMotion).
+	// Each activation builds a fresh bridge so the frontend sees a new sid;
+	// the retired instance stays resident because copied service tables may
+	// still reference its context until the Loader re-queries.
+	if (g_webPanelBridge) g_webPanelBridge->Invalidate("plugin-reactivation");
+	g_webPanelBridge = new GakuMotion::webpanel::Bridge(GakuMotion::Core::Instance(), MakeWebPanelHooks());
+	const auto webPanelPublished = PublishWebPanelApi();
+	if (webPanelPublished != GAKU_OK)
+		MotionLogWarn("[GakuMotion] web-panel service unavailable (%d); ImGui fallback remains", webPanelPublished);
+	else
+		GakuMotion::host::Info("[GakuMotion] gakumotion.web-panel/v1 published (WebView2 manager panel)");
 
 	const auto hotkey = GakuMotion::host::RegisterHotkey(kShowGuiActionId, "Show Motion controls",
 		'M', GAKU_HOTKEY_MOD_CTRL, ShowGuiHotkey);
