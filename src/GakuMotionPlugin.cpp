@@ -11,6 +11,7 @@
 #include "GakuSafeBoneLookup.h"
 #include "GkExactMethod.hpp"
 #include "GkLiveApi.hpp"
+#include "GkLiveAudio.hpp"
 #include "GkLiveViewingGate.hpp"
 #include "GkLiveTakeoverDriver.hpp"
 #include "GkLivePlaybackProbeGate.hpp"
@@ -568,6 +569,7 @@ namespace
 	int g_verifiedActiveSceneHandle = 0;
 	GakuMotion::injection::OwnerSnapshot g_sceneOwner, g_boundSceneOwner;
 	GakuMotion::live_takeover::Api g_liveApi;
+	GakuMotion::live_audio::Api g_liveAudioApi;
 	GakuMotion::live_takeover::ViewingGate g_liveViewingGate;
 	GakuMotion::live_takeover::Driver g_liveDriver;
 	std::atomic<bool> g_liveTakeoverEnabled{false};
@@ -1398,6 +1400,7 @@ namespace
 #include "GkCameraBridge.hpp"
 #include "GkLiveSchedulingProbe.hpp"
 #include "GkLiveCodeCapture.hpp"
+#include "GkLiveAudioGraphProbe.hpp"
 #include "GkLiveActorClockMvp.hpp"
     std::deque<LiveDynamicFollowerClock> g_followerClocks;
 	bool RestoreFollowerClock(size_t index)
@@ -2626,6 +2629,7 @@ void MotionRuntimeReady(void*)
 	// Metadata inspection only. Live remains denied by the existing policy;
 	// resolving these signatures does not discover or modify a game object.
 	g_liveApi = GakuMotion::live_takeover::Api::Resolve(FindClass, StageLoader::metadata);
+	g_liveAudioApi = GakuMotion::live_audio::Api::Resolve(FindClass, StageLoader::metadata);
 	auto readStaticField = reinterpret_cast<void (*)(void*, void*)>(
 		GetProcAddress(g_gameAssembly, "il2cpp_field_static_get_value"));
 	g_liveViewingGate = GakuMotion::live_takeover::ViewingGate::Resolve(FindClass, StageLoader::metadata,
@@ -2966,7 +2970,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	}
 	if (core.liveObservation.confirmed && activeActor)
 	{
-		LiveActorProps::Tick(core,activeActor,sceneHandle);
+		if(!GakuMotion::visual_handoff::Requested())LiveActorProps::Tick(core,activeActor,sceneHandle);
 		if (core.liveViewingConfirmed && g_sceneOwner.Valid() && sceneHandle == g_sceneOwner.sceneHandle &&
 			core.sceneActorRegistry.Find(activeActor)) {
 			static std::array<void*, 3> sampledActors{};
@@ -3098,12 +3102,77 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	// Without Unity's frame counter, the first callbacks can precede the 2ms
 	// fallback boundary. They still share a nonzero camera deduplication ID.
 	if (s_cameraPhysicalFrame == 0) s_cameraPhysicalFrame = 1;
-    if (core.InjectionAllowed() && core.injectionPolicy.Read().captureDepth==0)
+    if (core.InjectionAllowed() && core.injectionPolicy.Read().captureDepth==0 && !GakuMotion::visual_handoff::Requested())
         ActorModelVisibility::Tick(core,activeActor);
+    static auto nextVisualHandoffAttempt=std::chrono::steady_clock::time_point{};
+    const auto visualHandoffNow=std::chrono::steady_clock::now();
+    // Camera handoff is a host-level ownership operation, independent of
+    // whether animation injection is enabled for the current scene.
+    static auto nextCameraHandoffAttempt=std::chrono::steady_clock::time_point{};
+    if(GakuMotion::camera_handoff::Requested()&&!GakuMotion::camera_handoff::IsReleased()&&visualHandoffNow>=nextCameraHandoffAttempt) {
+        nextCameraHandoffAttempt=visualHandoffNow+std::chrono::milliseconds(500);
+        const bool wasOwned=core.camera.owned;
+        const auto restored=core.camera.ReleaseForCapture();
+        const bool ready=restored.confirmed&&!core.camera.owned&&!core.camera.captureRestorePending;
+        if(ready)GakuMotion::camera_handoff::released.store(true,std::memory_order_release);
+        if(g_hostContext.logInfo)g_hostContext.logInfo("[GakuMotion][CameraHandoff] requested=1 owned_before=%d modified=%d confirmed=%d released=%d",int(wasOwned),int(restored.modified),int(restored.confirmed),int(ready));
+    }
+    if (GakuMotion::visual_handoff::Requested() && !GakuMotion::visual_handoff::IsReleased() && visualHandoffNow>=nextVisualHandoffAttempt) {
+        nextVisualHandoffAttempt=visualHandoffNow+std::chrono::milliseconds(500);
+        const bool props=LiveActorProps::RestoreAll(core);
+        const bool models=ActorModelVisibility::RestoreAll(core);
+        const bool stage=core.stageManager.SetInjectionEnabled(false);
+        StageLoadOverride::Shutdown();
+        const bool hookReleased=StageLoadOverride::target==nullptr;
+        if(props)core.actorPropHidden.clear();
+        if(props&&models&&stage&&hookReleased)GakuMotion::visual_handoff::released.store(true,std::memory_order_release);
+    } else if (!GakuMotion::visual_handoff::Requested() && !StageLoadOverride::attempted) {
+        StageLoadOverride::Install();
+    }
 	// Fresh typed snapshots remove disabled/destroyed actors even when no actor
 	// callback remains. Never retain an accumulating list of seen scene actors.
 	RefreshSceneActors(core, sceneChanged);
     if (isNewPhysicalFrame) RecordEnsemblePhysicsHealth(core);
+	if(isNewPhysicalFrame) {
+		const bool valid=core.liveViewingConfirmed&&core.liveObservation.confirmed&&core.liveOwnerToken&&
+			g_sceneOwner.Valid()&&sceneHandle==core.liveOwnerScene&&sceneHandle==g_sceneOwner.sceneHandle&&
+			core.injectionPolicy.Read().captureDepth==0&&GakuMotion::capture::LiveAutoPhotoIdle();
+		if(valid) {
+			if(!g_liveAudioApi.Ready())g_liveAudioApi=GakuMotion::live_audio::Api::Resolve(FindClass,StageLoader::metadata);
+			auto access=LiveRuntimeAccess();void* scene=reinterpret_cast<void*>(core.liveOwnerToken);
+			if(core.liveAudioSeekPending) {
+				const bool same=core.liveAudioSeekOwner==core.liveOwnerToken&&core.liveAudioSeekScene==sceneHandle&&!core.liveTakeoverFault;
+				const bool ok=same&&GakuMotion::live_audio::Seek(g_liveAudioApi,g_liveApi,access,scene,core.liveAudioSeekTime);
+				core.liveAudioSeekPending=false;core.liveAudioSeekOwner=0;core.liveAudioSeekScene=0;
+				core.liveAudioNotice=ok?"已调整原生歌曲音频位置。":"音频调整未完成，请重新确认 Live 状态。";
+			}
+			const auto a=GakuMotion::live_audio::Observe(g_liveAudioApi,g_liveApi,access,scene);
+			core.liveAudioAvailable=a.available;core.liveAudioTime=a.time;core.liveAudioDuration=a.duration;core.liveAudioSources=a.sources;
+			static uintptr_t graphOwner{};static int graphScene{};static auto nextGraphProbe=std::chrono::steady_clock::time_point{};
+			if((graphOwner!=core.liveOwnerToken||graphScene!=sceneHandle)&&core.liveObservation.time>3.0f&&std::chrono::steady_clock::now()>=nextGraphProbe) {
+				nextGraphProbe=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+				if(LiveAudioGraphProbe::Inspect(scene,access)){graphOwner=core.liveOwnerToken;graphScene=sceneHandle;}
+			}
+			static uintptr_t lastOwner{};static unsigned lastCount=~0u;static bool lastPaused{};
+			static auto nextAudioLog=std::chrono::steady_clock::time_point{};const auto audioNow=std::chrono::steady_clock::now();
+			if(g_hostContext.logInfo&&(lastOwner!=core.liveOwnerToken||lastCount!=a.sources||lastPaused!=core.liveObservation.paused||audioNow>=nextAudioLog)) {
+				void* playerObj=GakuMotion::live_takeover::SceneField(g_liveApi,access,scene,"_livePlayer",g_liveApi.playerClass);
+				void* threeD=GakuMotion::live_audio::Field(access,playerObj,g_liveApi.playerClass,"_3dLive",g_liveAudioApi.threeD);
+				void* bgm=GakuMotion::live_audio::Field(access,threeD,g_liveAudioApi.threeD,"_bgmSource",g_liveAudioApi.source);
+				void* voice=GakuMotion::live_audio::Field(access,threeD,g_liveAudioApi.threeD,"_voiceSource",g_liveAudioApi.source);
+				auto clipInfo=[&](void* s)->int {if(!s||!g_liveAudioApi.getClip||!access.invoke)return -1;void* ex=nullptr;void* c=access.invoke(g_liveAudioApi.getClip,s,nullptr,&ex);return ex?-2:!c?0:access.objectClass(c)==g_liveAudioApi.clip?1:2;};
+				void* liveClip=GakuMotion::live_audio::Field(access,threeD,g_liveAudioApi.threeD,"_liveAudio",g_liveAudioApi.clip);
+				std::string clipName;
+				if(liveClip&&g_getNameNative){void* s=g_getNameNative(liveClip);auto* str=static_cast<Il2CppString*>(s);if(str&&str->length>0&&str->length<=256){auto v=Il2CppStringToUtf8(s);if(v.rfind("sud_music_",0)==0&&v.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-/")==std::string::npos)clipName=v;}}
+				g_hostContext.logInfo("[GakuMotion][LiveAudioProbe] available=%d api=%d player=%d threeD=%d bgm=%d bgm_clip=%d voice=%d voice_clip=%d live_clip=%d live_clip_name=%s sources=%u audio_time=%.3f audio_duration=%.3f live_time=%.3f live_paused=%d takeover=%d",
+					int(a.available),int(g_liveAudioApi.Ready()),int(playerObj!=nullptr),int(threeD!=nullptr),int(bgm!=nullptr),clipInfo(bgm),int(voice!=nullptr),clipInfo(voice),int(liveClip!=nullptr),clipName.empty()?"-":clipName.c_str(),a.sources,a.time,a.duration,core.liveObservation.time,int(core.liveObservation.paused),int(core.liveTakeoverActive));
+				lastOwner=core.liveOwnerToken;lastCount=a.sources;lastPaused=core.liveObservation.paused;
+				nextAudioLog=audioNow+std::chrono::seconds(5);
+			}
+		} else {
+			core.liveAudioAvailable=false;core.liveAudioSeekPending=false;core.liveAudioSources=0;
+		}
+	}
 	uint64_t requestedArmSnapshot = 0;
 	uint64_t periodicArmSnapshot = 0;
 	if (core.liveContinuousArmDiagnostics && core.liveViewingConfirmed && core.liveObservation.confirmed && g_sceneOwner.Valid() &&
@@ -3404,10 +3473,10 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	if (player.state != GakuMotion::PlaybackState::Stopped)
 		DispatchFollowerPhysics(core, activeActor, unityFrame >= 0 ? unityFrame : s_fallbackFrame);
 	NativeAudio::Sync();
-	if (isNewPhysicalFrame)
+	if (isNewPhysicalFrame && !GakuMotion::visual_handoff::IsReleased())
 	{
 		void* mainCam = HelperCameraGetMain();
-		const bool applyStage = core.InjectionAllowed() && !core.stageStoppedByTransport &&
+		const bool applyStage = !GakuMotion::visual_handoff::Requested() && core.InjectionAllowed() && !core.stageStoppedByTransport &&
 			core.stageManager.HasCustomizations() && core.PrepareInjection();
 		core.stageManager.SetInjectionEnabled(applyStage, mainCam);
 		core.stageManager.OnLateUpdate(activeActor, dtToPass, g_currentSceneName, mainCam);
@@ -3739,6 +3808,8 @@ void ShowGuiHotkey(void*)
 
 void MotionShutdown(void*)
 {
+    GakuMotion::visual_handoff::Request(0);
+    GakuMotion::camera_handoff::Request(0);
 	std::lock_guard<std::mutex> lifecycleLock(g_lifecycleMutex);
 	if (!g_pluginInitialized) return;
 	g_runtimeReady.store(false, std::memory_order_release);

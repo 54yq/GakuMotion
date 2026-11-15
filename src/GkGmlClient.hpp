@@ -3,6 +3,8 @@
 #include "GakuFileDrop.h"
 #include "GakuPaths.hpp"
 #include "GakuMotionServices.h"
+#include "GkVisualHandoff.hpp"
+#include "GkCameraHandoff.hpp"
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -114,7 +116,20 @@ inline void Error(const char* format, ...) {
 }
 inline GakuStatus PublishPlayback() {
     const PlaybackService service{1u, sizeof(PlaybackService), IsPlaying};
-    return api.registerService(api.hostContext, GAKUMOTION_SERVICE_PLAYBACK_STATE, sizeof(service), &service);
+    const auto status=api.registerService(api.hostContext, GAKUMOTION_SERVICE_PLAYBACK_STATE, sizeof(service), &service);
+    if(status!=GAKU_OK)return status;
+    struct VisualService {uint32_t abiVersion,structSize;uint32_t(*request)(uint32_t);uint32_t(*isReleased)();};
+    const VisualService visuals{1u,sizeof(VisualService),visual_handoff::Request,visual_handoff::IsReleased};
+    const auto visualStatus=api.registerService(api.hostContext,"gakumotion.visual-handoff",sizeof(visuals),&visuals);
+    if(visualStatus!=GAKU_OK)Warn("[GakuMotion] Visual handoff service unavailable: %d",visualStatus);
+    const VisualService cameras{1u,sizeof(VisualService),camera_handoff::Request,camera_handoff::IsReleased};
+    const auto cameraStatus=api.registerService(api.hostContext,"gakumotion.camera-handoff",sizeof(cameras),&cameras);
+    if(cameraStatus!=GAKU_OK)Warn("[GakuMotion] Camera handoff service unavailable: %d",cameraStatus);
+    struct CameraWrites {uint32_t abiVersion,structSize;uint32_t(*nativeAbi)();GakuStatus(*subscribe)(camera_handoff::WriteCallback,void*);GakuStatus(*unsubscribe)(camera_handoff::WriteCallback,void*);GakuStatus(*setTargets)(void*,void*,void*);};
+    const CameraWrites writes{1u,sizeof(CameraWrites),camera_handoff::NativeAbi,camera_handoff::Subscribe,camera_handoff::Unsubscribe,camera_handoff::SetTargets};
+    const auto writeStatus=api.registerService(api.hostContext,"gakumotion.camera-write-observer",sizeof(writes),&writes);
+    if(writeStatus!=GAKU_OK)Warn("[GakuMotion] Camera observer service unavailable: %d",writeStatus);
+    return GAKU_OK;
 }
 // A host without the hotkey service reports GAKU_E_UNAVAILABLE instead of
 // failing activation; callers only log the miss.

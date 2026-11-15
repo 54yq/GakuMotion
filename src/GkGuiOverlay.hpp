@@ -98,6 +98,8 @@ namespace GakuMotion
 		int liveDofDisableStatus{0};
 		void (*fnSetLiveDofDisabled)(void*, bool){nullptr};
 		float liveTime{0}, liveDuration{0};
+		bool liveAudioAvailable{false};float liveAudioTime{0},liveAudioDuration{0};unsigned liveAudioSources{0};
+		std::string liveAudioNotice;void (*fnSeekLiveAudio)(void*,float){nullptr};
 		std::string liveControlNotice;
 		void (*fnSetLivePaused)(void*, bool){nullptr};
 		void (*fnSeekLive)(void*, float){nullptr};
@@ -507,6 +509,7 @@ namespace GakuMotion
                                 ImGui::TextDisabled("暂停或接管期间不循环；提前量过小可能错过跳转。");
                             }
                             ImGui::EndChild();
+                            if(!ctx.liveAudioNotice.empty())ImGui::TextWrapped("%s",ctx.liveAudioNotice.c_str());
                             ImGui::Spacing();
                             const char* physics=!ctx.physicsMonitorFresh?"待播放":ctx.physicsMonitor.actual==2?"原生运行中":ctx.physicsMonitor.actual==1?"内建物理":"未运行";
                             ImGui::TextWrapped("接管：%s    Live：%s    物理：%s",ctx.liveTakeoverAvailable?"可用":"等待确认",ctx.liveViewingConfirmed?"已识别":"等待确认",physics);

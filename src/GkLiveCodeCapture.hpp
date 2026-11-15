@@ -2,6 +2,7 @@
 #include <set>
 #include <fstream>
 #include <iomanip>
+#include <cctype>
 // Included in the plugin namespace. Metadata enumeration and bounded code reads
 // only. No runtime_invoke, hooks, memory protection changes, or object writes.
 namespace LiveCodeCapture {
@@ -127,6 +128,68 @@ namespace LiveCodeCapture {
             if(Open() && rows.size()<8192 && rows.insert(label).second){manifest<<"object_type\t"<<ClassName(klass)<<'\t'<<fieldName<<"\t-\t-\t-\t-\t0\t"<<ClassName(actual)<<"\t-\n";manifest.flush();}Class(actual);}
         return value;
     }
+    // Narrow, read-only diagnostics: enumerate only audio-related fields on
+    // fresh objects from the confirmed Live scene. Never retain managed objects
+    // or log arbitrary strings from the game.
+    inline void AudioFields(void* object) {
+        if(!object || !il2cpp_class_get_fields || !il2cpp_field_get_name || !g_faceRuntime.objectClass ||
+           !g_faceRuntime.fieldType || !g_faceRuntime.fieldFlags || !g_faceRuntime.typeCode || !g_faceRuntime.readField) return;
+        void* klass=g_faceRuntime.objectClass(object); if(!klass)return;
+        Class(klass); void* it=nullptr; unsigned count=0, children=0;
+        while(void* field=il2cpp_class_get_fields(klass,&it)) {
+            if(++count>128) break;
+            const char* raw=il2cpp_field_get_name(field);if(!raw)continue;
+            std::string name=raw;std::transform(name.begin(),name.end(),name.begin(),[](unsigned char c){return static_cast<char>(std::tolower(c));});
+            if(name.find("music")==std::string::npos && name.find("audio")==std::string::npos &&
+               name.find("cue")==std::string::npos && name.find("acb")==std::string::npos &&
+               name.find("sound")==std::string::npos && name.find("name")==std::string::npos)continue;
+            void* type=g_faceRuntime.fieldType(field);if(!type || (g_faceRuntime.fieldFlags(field)&0x10))continue;
+            const int code=g_faceRuntime.typeCode(type);
+            if(code==0x0e) {
+                void* value=nullptr;g_faceRuntime.readField(object,field,&value);
+                auto* str=static_cast<Il2CppString*>(value);
+                if(str && str->length>0 && str->length<=256) {
+                    const std::string text=Il2CppStringToUtf8(value);
+                    if(text.rfind("sud_music_",0)==0 && text.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-/")==std::string::npos) {
+                        const auto label=ClassName(klass)+"."+raw+"="+text;
+                        const bool first=Open() && rows.size()<8192 && rows.insert(label).second;
+                        if(first) {manifest<<"audio_identifier\t"<<ClassName(klass)<<'\t'<<raw<<"\t-\t-\t-\t-\t0\t"<<text<<"\t-\n";manifest.flush();
+                            if(g_hostContext.logInfo)g_hostContext.logInfo("[GakuMotion][LiveAudioProbe] %s.%s=%s",ClassName(klass).c_str(),raw,text.c_str());}
+                    }
+                }
+            } else if((code==0x12 || code==0x1c) && children++<16) ObjectField(object,klass,raw);
+        }
+    }
+    // Record the small set of metadata needed to identify the native Timeline
+    // audio graph. Values/managed pointers are not retained or logged.
+    inline void AudioGraphMetadata(void* klass) {
+        if(!klass||!Open()||!il2cpp_class_get_fields||!il2cpp_field_get_name)return;
+        const std::string owner=ClassName(klass),key="audio_graph_class="+owner;
+        if(rows.size()>=8192||!rows.insert(key).second)return;
+        const auto meta=GroundShadowProbeBootstrap::Resolve(g_gameAssembly).method;
+        void* iter=nullptr;unsigned count=0;
+        while(void* field=il2cpp_class_get_fields(klass,&iter)) {
+            if(++count>256)break;const char* name=il2cpp_field_get_name(field);void* type=g_faceRuntime.fieldType?g_faceRuntime.fieldType(field):nullptr;
+            if(!name||!type)continue;
+            void* fieldClass=meta.classFromType?meta.classFromType(type):nullptr;
+            manifest<<"audio_graph_field\t"<<owner<<'\t'<<name<<"\t-\t-\t-\t-\t0\t"<<ClassName(fieldClass)<<"\t-\n";
+        }
+        if(meta.methods&&meta.name&&meta.count&&meta.parameter&&meta.result&&meta.typeCode&&meta.classFromType) {
+            iter=nullptr;count=0;
+            while(const void* method=meta.methods(klass,&iter)) {
+                if(++count>512)break;const char* name=meta.name(method);if(!name)continue;
+                std::string lower=name;std::transform(lower.begin(),lower.end(),lower.begin(),[](unsigned char c){return static_cast<char>(std::tolower(c));});
+                if(lower.find("audio")==std::string::npos&&lower.find("clip")==std::string::npos&&lower.find("graph")==std::string::npos&&
+                   lower.find("playable")==std::string::npos&&lower.find("output")==std::string::npos&&lower.find("input")==std::string::npos&&
+                   lower.find("time")==std::string::npos&&lower.find("target")==std::string::npos&&lower.find("valid")==std::string::npos)continue;
+                std::string sig=name;sig+='(';const auto n=meta.count(method);
+                for(unsigned i=0;i<n&&i<16;++i){if(i)sig+=',';void* t=meta.parameter(method,i);sig+=t?std::to_string(meta.typeCode(t))+":"+ClassName(meta.classFromType(t)):"?";}
+                void* ret=meta.result(method);sig+=") -> "+(ret?std::to_string(meta.typeCode(ret))+":"+ClassName(meta.classFromType(ret)):"?");
+                manifest<<"audio_graph_method\t"<<owner<<'\t'<<sig<<"\t-\t-\t-\t-\t0\tmetadata_only\t-\n";
+            }
+        }
+        manifest.flush();
+    }
     inline void Capture(void* componentClass,void* actualPlayerClass,void* playerBase,void* scene) {
         try {
             // Run before this plugin installs its scheduling detours.
@@ -138,7 +201,20 @@ namespace LiveCodeCapture {
                 if(live) ObjectField(live,g_liveApi.presenterClass,"_liveSequence");
                 void* livePlayer=ObjectField(scene,g_liveApi.sceneClass,"_livePlayer");
                 if(livePlayer) {void* threeD=ObjectField(livePlayer,g_liveApi.playerClass,"_3dLive");
-                    if(threeD) ObjectField(threeD,g_faceRuntime.objectClass(threeD),"_controller");}
+                    if(threeD) {void* cls=g_faceRuntime.objectClass(threeD);void* controller=ObjectField(threeD,cls,"_controller");
+                        if(controller&&il2cpp_class_get_parent){void* c=g_faceRuntime.objectClass(controller);for(unsigned i=0;c&&i<4;++i,c=il2cpp_class_get_parent(c))AudioGraphMetadata(c);}
+                        for(const auto& item:std::array<std::pair<const char*,const char*>,6>{{
+                            {"UnityEngine.DirectorModule.dll","PlayableDirector"},{"UnityEngine.CoreModule.dll","PlayableGraph"},
+                            {"UnityEngine.CoreModule.dll","PlayableHandle"},{"UnityEngine.CoreModule.dll","PlayableOutputHandle"},
+                            {"UnityEngine.AudioModule.dll","AudioClipPlayable"},{"UnityEngine.AudioModule.dll","AudioPlayableOutput"}}}) {
+                            const char* ns=std::strstr(item.second,"Audio")==item.second?"UnityEngine.Audio":"UnityEngine.Playables";
+                            void* type=FindClass(item.first,ns,item.second);
+                            if(!type&&std::strcmp(ns,"UnityEngine.Playables")==0)type=FindClass("UnityEngine.DirectorModule.dll",ns,item.second);
+                            AudioGraphMetadata(type);
+                        }
+                        AudioFields(ObjectField(threeD,cls,"_liveAudio"));
+                        AudioFields(ObjectField(threeD,cls,"_bgmSource"));
+                        AudioFields(ObjectField(threeD,cls,"_voiceSource"));}}
             }
             Address("observed_caller","actor_evaluate",reinterpret_cast<void*>(LiveSchedulingProbe::evalCaller.load()));
             Address("observed_caller","live_end",reinterpret_cast<void*>(LiveSchedulingProbe::endCaller.load()));

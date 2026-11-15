@@ -951,6 +951,7 @@ namespace CameraBridge
 		if (!writing && Controller().owned &&
 			(nativeSelf ? tr == ownedNativeTransform : Controller().BlocksTransform(tr)))
 			Controller().BeforeRender(Controller().camera);
+		if(nativeSelf)GakuMotion::camera_handoff::Notify(0,tr);
 	}
 
 	inline void SharedTransformWritten(void*, uint32_t kind, void* transformSelf)
@@ -1077,6 +1078,7 @@ namespace CameraBridge
 		if (!writing && Controller().owned &&
 			(nativeSelf ? c == ownedNativeCamera : Controller().BlocksCamera(c)))
 			Controller().BeforeRender(Controller().camera);
+		if(nativeSelf)GakuMotion::camera_handoff::Notify(1,c);
 	}
 
 	inline void WorldPosition(void* tr, UnityVector3* p)
@@ -1369,6 +1371,7 @@ namespace CameraBridge
 		ReleaseVirtualCameras(OnUnityThread());
 		Controller().Release(OnUnityThread());
 		ready = false;
+		GakuMotion::camera_handoff::nativeAbi.store(false,std::memory_order_release);
 		// Never disable/uninitialize another module's hooks.
 		for (void* target : installed)
 		{
@@ -1678,6 +1681,7 @@ namespace CameraBridge
 		}
 
 		ready = true;
+		GakuMotion::camera_handoff::nativeAbi.store(nativeSelf,std::memory_order_release);
 		sharedWritesEnabled.store(sharedWritesSubscribed, std::memory_order_release);
 		auto& c = Controller();
 		c.fnGetCamera = []() -> void* { return OnUnityThread() ? getMain(nullptr) : nullptr; };

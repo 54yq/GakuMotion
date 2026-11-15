@@ -17,6 +17,8 @@
 #include "GkCaptureSafety.hpp"
 #include "GkStageLoadSettings.hpp"
 #include "GkDataLayout.hpp"
+#include "GkVisualHandoff.hpp"
+#include "GkCameraHandoff.hpp"
 
 #include <cstdarg>
 #include <cstdio>
@@ -128,6 +130,11 @@ namespace GakuMotion
 		float liveSeekTime{0};
 		uintptr_t liveSeekOwner{0};
 		int liveSeekScene{0};
+		bool liveAudioAvailable{false}, liveAudioSeekPending{false};
+		float liveAudioTime{0},liveAudioDuration{0},liveAudioSeekTime{0};
+		unsigned liveAudioSources{0};
+		uintptr_t liveAudioSeekOwner{0};int liveAudioSeekScene{0};
+		std::string liveAudioNotice;
 		bool liveLoopEnabled{false}, liveLoopWaiting{false};
 		float liveLoopLead{1.0f};
 		uint64_t liveLoopCycles{};
@@ -250,7 +257,7 @@ namespace GakuMotion
 			}
 			// Preview and paused states retain their exact time and do not start audio.
 			NotifyMotionPlaying(player.state == PlaybackState::Playing);
-			const bool resumeStage = capturePerformanceWasActive && !stageStoppedByTransport &&
+			const bool resumeStage = !visual_handoff::Requested() && capturePerformanceWasActive && !stageStoppedByTransport &&
 				stageManager.HasCustomizations();
 			const bool stageEnabled = resumeStage && stageManager.SetInjectionEnabled(true);
 			captureResumeReason = player.state != PlaybackState::Stopped ? "same_session_restored" :
@@ -724,6 +731,13 @@ namespace GakuMotion
 			}
 			for (const auto& cmd : commands)
 			{
+                if(visual_handoff::Requested() && (cmd.action==GuiAction::SetMicrophoneHidden ||
+                    cmd.action==GuiAction::SetActorModelHidden || cmd.action==GuiAction::SetActorPropHidden ||
+                    cmd.action==GuiAction::StageSettings || cmd.action==GuiAction::StagePreset ||
+                    cmd.action==GuiAction::ToggleStageCandidate || cmd.action==GuiAction::MountCustomStage ||
+                    cmd.action==GuiAction::UnloadCustomStage || cmd.action==GuiAction::RestoreCameraSkybox)) {
+                    ensembleNotice="资源控制已交给 GakuActors；请先在 GakuActors 中释放";continue;
+                }
 				// This command stores a future Photography-load preference only.
 				// It never touches Unity, playback or the current background.
 				if (cmd.action == GuiAction::StageLoadReplacement)
@@ -1321,7 +1335,11 @@ namespace GakuMotion
 				}
 			}
 			if (!cameraActor) cameraActor = actor;
-			if (player.state == PlaybackState::Stopped) camera.Release();
+			if (camera_handoff::Requested()) {
+				// The host processes the release before the injection gate, so a
+				// disabled Motion session can still hand the camera to GakuActors.
+			}
+			else if (player.state == PlaybackState::Stopped) camera.Release();
 			else if (actor == cameraActor)
 			{
 				camera.LoadTrack(player.currentMotionDir, player.clip);
@@ -3497,6 +3515,14 @@ namespace GakuMotion
 			ctx.livePaused = liveObservation.paused;
 			ctx.liveTime = liveObservation.time;
 			ctx.liveDuration = liveObservation.duration;
+			ctx.liveAudioAvailable=liveAudioAvailable;ctx.liveAudioTime=liveAudioTime;
+			ctx.liveAudioDuration=liveAudioDuration;ctx.liveAudioSources=liveAudioSources;ctx.liveAudioNotice=liveAudioNotice;
+			ctx.fnSeekLiveAudio=[](void* self,float seconds) {
+				auto* c=static_cast<Core*>(self);
+				if(!c->liveViewingConfirmed||!c->liveOwnerToken||!c->liveAudioAvailable||c->liveTakeoverFault||
+				   c->injectionPolicy.Read().captureDepth!=0||!std::isfinite(seconds)||seconds<0||seconds>=c->liveAudioDuration)return;
+				c->liveAudioSeekPending=true;c->liveAudioSeekTime=seconds;c->liveAudioSeekOwner=c->liveOwnerToken;c->liveAudioSeekScene=c->liveOwnerScene;
+			};
 			ctx.liveViewingConfirmed = liveViewingConfirmed && !liveTakeoverFault;
 			ctx.liveTakeoverActive = liveTakeoverActive;
 			ctx.liveContinuousArmDiagnostics = liveContinuousArmDiagnostics;
