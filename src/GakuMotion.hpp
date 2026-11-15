@@ -73,6 +73,7 @@ namespace GakuMotion
 			return s_instance;
 		}
 
+		LiveFrameMonitor liveFrameMonitor;
 		MotionPlayer player;
 		EnsembleRuntime ensemble;
 		bool ensembleRestoreUnconfirmed{false};
@@ -3512,6 +3513,9 @@ namespace GakuMotion
 			GuiContext ctx;
 			ctx.injectionAllowed = InjectionAllowed();
 			ctx.liveObserved = liveObservation.confirmed;
+            ctx.liveFrameMonitor = liveFrameMonitor.display;
+            for (const auto& follower : ensemble.Followers())
+                if (follower.player && follower.actorToken) ++ctx.liveFrameFollowers;
 			ctx.livePaused = liveObservation.paused;
 			ctx.liveTime = liveObservation.time;
 			ctx.liveDuration = liveObservation.duration;

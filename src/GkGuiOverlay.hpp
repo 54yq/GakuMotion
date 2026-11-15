@@ -28,6 +28,7 @@
 #include "GkCamera.hpp"
 #include "GkSceneActors.hpp"
 #include "GkPhysicsMonitor.hpp"
+#include "GkLiveFrameMonitor.hpp"
 #include "GkLiveEndLoopContract.hpp"
 #include "gui/GuiOverlayCommon.hpp"
 
@@ -85,6 +86,8 @@ namespace GakuMotion
 		std::string injectionNotice;
 		bool liveObserved{false}, livePaused{false};
 		bool liveViewingConfirmed{false};
+        LiveFrameMonitor::Snapshot liveFrameMonitor{};
+        uint32_t liveFrameFollowers{};
 		bool liveTakeoverActive{false}, liveTakeoverAvailable{false};
 		bool liveLoopEnabled{false};
 		float liveLoopLead{1.0f};
@@ -509,6 +512,19 @@ namespace GakuMotion
                                 ImGui::TextDisabled("暂停或接管期间不循环；提前量过小可能错过跳转。");
                             }
                             ImGui::EndChild();
+                            if (ImGui::CollapsingHeader("Live 帧数监测")) {
+                                const auto& frame = ctx.liveFrameMonitor;
+                                if (!frame.available) ImGui::TextWrapped("等待 Live 场景确认和帧采样。");
+                                else {
+                                    ImGui::Text("Unity 更新频率：%.1f FPS", frame.fps);
+                                    ImGui::Text("最近帧间隔：%.1f ms", frame.frameMs);
+                                    ImGui::Text("近期基准：%.1f ms", frame.baselineMs);
+                                    ImGui::Text("本次 Live 卡顿次数：%llu", static_cast<unsigned long long>(frame.stalls));
+                                    ImGui::Text("最近卡顿：%.1f ms", frame.lastStallMs);
+                                    ImGui::Text("绑定的副角色：%u", ctx.liveFrameFollowers);
+                                }
+                                ImGui::TextWrapped("帧间隔达到 50 ms 且不低于近期基准两倍时记录线索；这些指标不能单独证明卡顿原因。此处为 Unity 更新频率，并非显示器输出帧率。");
+                            }
                             if(!ctx.liveAudioNotice.empty())ImGui::TextWrapped("%s",ctx.liveAudioNotice.c_str());
                             ImGui::Spacing();
                             const char* physics=!ctx.physicsMonitorFresh?"待播放":ctx.physicsMonitor.actual==2?"原生运行中":ctx.physicsMonitor.actual==1?"内建物理":"未运行";

@@ -3939,6 +3939,21 @@ void MotionTick(void*, float)
 		RefreshProtectedContext();
 		auto& core = GakuMotion::Core::Instance();
 		std::lock_guard<std::recursive_mutex> lock(core.stateMutex);
+        const bool frameLog = core.liveFrameMonitor.Update(GakuMotion::LiveFrameMonitor::Clock::now(),
+            core.liveViewingConfirmed && core.liveObservation.confirmed, core.liveOwnerToken, core.liveOwnerScene);
+        if (frameLog && g_hostContext.logWarn) {
+            GakuFrameContextV1 context{};
+            GakuMotion_GetFrameContext(&context, sizeof(context));
+            const auto& frame = core.liveFrameMonitor.display;
+            SYSTEMTIME time{}; GetLocalTime(&time);
+            g_hostContext.logWarn("[GakuMotion][LiveFrame][Stall] time=%04u-%02u-%02uT%02u:%02u:%02u.%03u frame_ms=%.2f baseline_ms=%.2f fps_1s=%.1f live_time=%.3f motion_time=%.3f live_paused=%u takeover=%u followers=%u physics_requested=%u physics_actual=%u physics_dispatch_ms=%.3f physics_native_avg_ms=%.3f physics_solver_avg_ms=%.3f failures=%llu expired=%llu identity_skips=%llu",
+                time.wYear,time.wMonth,time.wDay,time.wHour,time.wMinute,time.wSecond,time.wMilliseconds,
+                frame.lastStallMs,frame.baselineMs,frame.fps,context.liveTime,context.motionTime,context.livePaused,context.takeover,
+                context.boundFollowers,context.physicsRequested,context.physicsActual,context.physicsDispatchNs/1e6,
+                context.physicsNativeNs/1e6,context.physicsSolverNs/1e6,
+                static_cast<unsigned long long>(context.physicsFailures),static_cast<unsigned long long>(context.physicsExpired),
+                static_cast<unsigned long long>(context.physicsIdentitySkips));
+        }
 		if(core.swingReportLoadPending) {
 			core.swingReportLoadPending=false;
 			try {
