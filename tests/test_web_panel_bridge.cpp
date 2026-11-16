@@ -8,6 +8,7 @@
 #include "GkWebPanelBridge.hpp"
 
 #include <cstdio>
+#include <fstream>
 #include <future>
 #include <memory>
 #include <string>
@@ -173,12 +174,11 @@ static void TestWireFraming()
 	const auto* id = unknown.Find("id");
 	Check(id && id->numberValue == 7, "response id correlates with request");
 
-	const auto reserved = f.ReqJson("ensemble.set");
-	Check(reserved.Find("error") && reserved.Find("error")->Find("code")->stringValue == "not_implemented",
-		"reserved method -> not_implemented");
-	const auto reservedDomain = f.ReqJson("gaze.setMode");
-	Check(reservedDomain.Find("error") && reservedDomain.Find("error")->Find("code")->stringValue == "not_implemented",
-		"reserved domain -> not_implemented");
+	const auto missingEnsembleParams = f.ReqJson("ensemble.set");
+	Check(f.ErrorCode(f.Req("ensemble.set")) == "invalid_params",
+		"implemented domain validates params instead of returning not_implemented");
+	Check(f.ErrorCode(f.Req("gaze.setMode")) == "invalid_params",
+		"gaze domain validates params instead of returning not_implemented");
 
 	const auto badParams = ParseJson(f.bridge->HandleMessageForTest(
 		"{\"v\":1,\"id\":3,\"type\":\"request\",\"method\":\"bridge.ping\",\"params\":42}"));
@@ -207,15 +207,28 @@ static void TestHelloCapabilities()
 	};
 	Check(hasMethod("player.play") && hasMethod("state.get") && hasMethod("library.delete") &&
 		hasMethod("camera.set") && hasMethod("stage.set"), "core methods advertised");
-	Check(!hasMethod("dialog.pickFile") && !hasMethod("drop.poll") && !hasMethod("library.import") &&
-		!hasMethod("ensemble.set"), "gated methods not advertised");
+	Check(hasMethod("dialog.pickFile") && hasMethod("dialog.poll") && hasMethod("drop.setTarget") &&
+		hasMethod("drop.poll") && hasMethod("drop.peek") && hasMethod("library.import") &&
+		hasMethod("library.probeFiles") && hasMethod("library.startEdit") && hasMethod("ensemble.set") &&
+		hasMethod("ensemble.presetSave") && hasMethod("ensemble.presetLoad") && hasMethod("ensemble.probe") &&
+		hasMethod("stage.scan") && hasMethod("stage.toggleNode") && hasMethod("stage.setLoadReplacement") &&
+		hasMethod("bone.get") && hasMethod("bone.set") && hasMethod("bone.reset") &&
+		hasMethod("bone.resetAll") && hasMethod("bone.setMaster") && hasMethod("bone.reload") &&
+		hasMethod("bone.saveToMotion") && hasMethod("bone.saveToGlobal") &&
+		hasMethod("gaze.get") && hasMethod("gaze.set") && hasMethod("gaze.cycle") &&
+		hasMethod("sole.get") && hasMethod("sole.set") && hasMethod("sole.save") && hasMethod("sole.load") &&
+		hasMethod("solePitch.get") && hasMethod("solePitch.set") &&
+		hasMethod("studio.get") && hasMethod("studio.set") && hasMethod("studio.reset") &&
+		hasMethod("experiments.get") && hasMethod("experiments.set") && hasMethod("telemetry.get"),
+		"phase-2 protocol methods advertised");
 	const auto* events = motionHello.Find("result")->Find("supportedEvents");
 	const auto hasEvent = [&](const char* name) {
 		for (size_t i = 0; i < events->Size(); ++i)
 			if (events->At(i)->stringValue == name) return true;
 		return false;
 	};
-	Check(hasEvent("player.stateChanged") && hasEvent("bridge.closed") && hasEvent("library.changed"),
+	Check(hasEvent("player.stateChanged") && hasEvent("bridge.closed") && hasEvent("library.changed") &&
+		hasEvent("stage.nodesChanged"),
 		"events advertised");
 	Check(motionHello.Find("result")->Find("pluginVersion")->stringValue == "0.1.1-test",
 		"pluginVersion forwarded from hooks");
@@ -231,7 +244,8 @@ static void TestStateSnapshot()
 	const auto* result = snapshot.Find("result");
 	for (const char* key : {"permission", "player", "library", "loaded", "playlist", "actors", "camera",
 		"stage", "facial", "position", "ensemble", "physicsBackend", "musicVolumeSupport",
-		"musicVolumeNotice", "importProgress", "motionsRoot"})
+		"musicVolumeNotice", "importProgress", "motionsRoot", "gaze", "bone", "sole", "solePitch",
+		"studio", "experiments"})
 		Check(result && result->Find(key), std::string("snapshot carries ") + key);
 	Check(result->Find("player")->Find("state")->stringValue == "stopped", "idle player stopped");
 	Check(result->Find("player")->Find("title")->stringValue == "未加载曲目", "idle title");
@@ -555,24 +569,25 @@ static void TestDialogHostService()
 		return pollState;
 	};
 
-	Check(f.ErrorCode(f.Req("dialog.pickFile", "{\"kind\":0,\"multiple\":true}")) == "invalid_params",
-		"multiple selection unsupported");
 	Check(f.ErrorCode(f.Req("dialog.pickFile", "{\"kind\":9,\"multiple\":false}")) == "invalid_params",
 		"invalid kind rejected");
-	const auto picked = f.ReqJson("dialog.pickFile", "{\"kind\":0,\"multiple\":false}");
+	Check(f.Ok(f.Req("dialog.pickFile", "{\"kind\":5,\"multiple\":true}")),
+		"kind=5 and multiple=true accepted");
+	f.bridge->OnShutdown();
+	const auto picked = f.ReqJson("dialog.pickFile", "{\"kind\":1,\"multiple\":false}");
 	Check(picked.Find("ok") && picked.Find("ok")->boolValue, "pickFile begins host dialog");
 	Check(picked.Find("result") && picked.Find("result")->Find("dialogId") &&
-		picked.Find("result")->Find("dialogId")->numberValue == 1, "dialogId issued");
-	Check(beginCalls == 1, "host beginOpen called once");
-	Check(f.ErrorCode(f.Req("dialog.pickFile", "{\"kind\":1,\"multiple\":false}")) == "busy",
+		picked.Find("result")->Find("dialogId")->numberValue == 2, "dialogId advances across dialogs");
+	Check(beginCalls == 2, "host beginOpen called for web kinds");
+	Check(f.ErrorCode(f.Req("dialog.pickFile", "{\"kind\":4,\"multiple\":false}")) == "busy",
 		"second dialog while pending -> busy");
 
-	auto poll = f.ReqJson("dialog.poll", "{\"dialogId\":1}");
+	auto poll = f.ReqJson("dialog.poll", "{\"dialogId\":2}");
 	Check(poll.Find("result")->Find("state")->stringValue == "pending", "poll pending");
 	pollState = GAKU_FILE_DIALOG_ACCEPTED;
 	pollPath = "C:\\synthetic\\motion.vmd";
 	f.bridge->OnUiTick();
-	poll = f.ReqJson("dialog.poll", "{\"dialogId\":1}");
+	poll = f.ReqJson("dialog.poll", "{\"dialogId\":2}");
 	Check(poll.Find("result")->Find("state")->stringValue == "accepted", "onUiTick drives dialog completion");
 	Check(poll.Find("result")->Find("paths")->At(0)->stringValue == "C:\\synthetic\\motion.vmd",
 		"accepted path returned");
@@ -582,23 +597,62 @@ static void TestDialogHostService()
 static void TestShutdownInvalidation()
 {
 	BeginTest("shutdown_invalidation");
-	Fixture f;
-	f.bridge->OnUiTick();
-	f.bridge->OnShutdown();
-	Check(f.bridge->Closed(), "onShutdown closes bridge");
-	Check(f.CountEvents("bridge.closed") == 1, "bridge.closed emitted once");
-	const auto closed = ParseJson(f.events.back());
+	namespace fs = std::filesystem;
+	const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+	const fs::path assetsRoot = fs::temp_directory_path() / ("gaku_webpanel_reattach_" + std::to_string(stamp));
+	fs::create_directories(assetsRoot);
+	{ std::ofstream out(assetsRoot / "index.html", std::ios::binary); out << "<!doctype html>"; }
+
+	Core core;
+	HostHooks hooks;
+	hooks.assetsDirs = [&] { return std::vector<std::wstring>{assetsRoot.wstring()}; };
+	std::vector<std::string> events;
+	Bridge bridge(core, hooks);
+	auto sink = [](void* user, const char* json) {
+		static_cast<std::vector<std::string>*>(user)->emplace_back(json ? json : "");
+	};
+	bridge.SetEventSink(sink, &events);
+	bridge.OnShow();
+	bridge.OnUiTick();
+	const uint64_t initialSid = bridge.SessionId();
+	const size_t beforeShutdown = events.size();
+
+	// UI detach (OnShutdown) notifies bridge.closed, detaches the sink, advances
+	// sessionId, and leaves the bridge reusable when re-shown later.
+	bridge.OnShutdown();
+	Check(!bridge.Closed(), "onShutdown detaches session without permanent plugin close");
+	Check(events.size() == beforeShutdown + 1, "bridge.closed emitted once");
+	const auto closed = ParseJson(events.back());
 	Check(closed.Find("name")->stringValue == "bridge.closed", "last event is bridge.closed");
 	Check(closed.Find("payload")->Find("reason") != nullptr, "closure reason present");
-	Check(f.ErrorCode(f.Req("bridge.ping")) == "not_allowed", "requests after close rejected");
-	const int eventCount = static_cast<int>(f.events.size());
-	f.bridge->OnUiTick();
-	Check(static_cast<int>(f.events.size()) == eventCount, "no events after close");
+	Check(bridge.SessionId() > initialSid, "sessionId advances across UI detach");
 
+	GakuWebPanelAssetsV1 assets{};
+	Check(bridge.GetAssets(&assets) == GAKU_OK, "bridge remains queryable after UI detach");
+	events.clear();
+	bridge.SetEventSink(sink, &events);
+	bridge.OnShow();
+	bridge.OnUiTick();
+	Check(!events.empty(), "re-attached UI session receives fresh baseline events");
+	const auto firstReattached = ParseJson(events.front());
+	Check(firstReattached.Find("seq")->numberValue == 1 &&
+		firstReattached.Find("sid")->numberValue == static_cast<double>(bridge.SessionId()),
+		"new UI session resets seq=1 with new sessionId");
+
+	// Permanent unload (Invalidate on plugin shutdown) refuses everything silently.
 	Fixture silent;
 	silent.bridge->Invalidate("plugin-shutdown");
-	Check(silent.bridge->Closed(), "silent invalidate closes bridge");
+	Check(silent.bridge->Closed(), "silent invalidate closes bridge permanently");
 	Check(silent.events.empty(), "Unity-thread invalidate never calls the sink");
+	Check(silent.ErrorCode(silent.Req("bridge.ping")) == "not_allowed", "requests after Invalidate rejected");
+	GakuWebPanelAssetsV1 dummyAssets{};
+	Check(silent.bridge->GetAssets(&dummyAssets) == GAKU_E_SHUTTING_DOWN, "getAssets after Invalidate -> SHUTTING_DOWN");
+	const int eventCount = static_cast<int>(silent.events.size());
+	silent.bridge->OnUiTick();
+	Check(static_cast<int>(silent.events.size()) == eventCount, "no events after Invalidate");
+
+	std::error_code ec;
+	fs::remove_all(assetsRoot, ec);
 }
 
 static void TestScrubResetOnPermissionLoss()
@@ -618,6 +672,500 @@ static void TestScrubResetOnPermissionLoss()
 	Check(scrubEnd && scrubEnd->value == 1.25f, "scrub end preserves current time");
 }
 
+static void TestGetAssetsCandidates()
+{
+	BeginTest("get_assets_candidates");
+	namespace fs = std::filesystem;
+	const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+	const fs::path root = fs::temp_directory_path() / ("gaku_webpanel_assets_" + std::to_string(stamp));
+	const fs::path gameUi = root / "game" / "GakuMotion.UI";
+	const fs::path pluginUi = root / "plugins" / "GakuMotion" / "GakuMotion.UI";
+	fs::create_directories(gameUi);
+	fs::create_directories(pluginUi);
+	const auto writeIndex = [](const fs::path& dir) {
+		std::ofstream out(dir / "index.html", std::ios::binary | std::ios::trunc);
+		out << "<!doctype html><title>synthetic</title>";
+	};
+
+	Core core;
+	HostHooks hooks;
+	hooks.assetsDirs = [&] {
+		return std::vector<std::wstring>{gameUi.wstring(), pluginUi.wstring()};
+	};
+	Bridge bridge(core, hooks);
+	GakuWebPanelAssetsV1 assets{};
+
+	Check(bridge.GetAssets(nullptr) == GAKU_E_INVALID_ARGUMENT, "null output rejected");
+	Check(bridge.GetAssets(&assets) == GAKU_E_UNAVAILABLE, "no entry file anywhere -> UNAVAILABLE");
+
+	writeIndex(pluginUi);
+	Check(bridge.GetAssets(&assets) == GAKU_OK, "module-dir fallback accepted");
+	Check(assets.assetsDir == pluginUi.wstring(), "fallback resolves to plugin module dir");
+	Check(std::wstring(assets.entryPath) == L"index.html", "entryPath is index.html");
+	Check(std::wstring(assets.virtualHost) == L"gakumotion.invalid", "virtualHost gakumotion.invalid");
+	Check(assets.abiVersion == GAKU_WEB_PANEL_VERSION && assets.structSize == sizeof(GakuWebPanelAssetsV1),
+		"assets ABI header filled");
+
+	writeIndex(gameUi);
+	Check(bridge.GetAssets(&assets) == GAKU_OK, "game-root candidate accepted");
+	Check(assets.assetsDir == gameUi.wstring(), "host game root preferred over module dir");
+
+	bridge.Invalidate("test");
+	Check(bridge.GetAssets(&assets) == GAKU_E_SHUTTING_DOWN, "closed bridge refuses getAssets");
+
+	Core bareCore;
+	Bridge bareBridge(bareCore, HostHooks{});
+	Check(bareBridge.GetAssets(&assets) == GAKU_E_UNAVAILABLE, "missing hook -> UNAVAILABLE");
+
+	std::error_code ec;
+	fs::remove_all(root, ec);
+}
+
+static void WriteSyntheticVmd(const std::filesystem::path& path, uint32_t bodyFrames,
+	uint32_t morphFrames, uint32_t cameraFrames)
+{
+	std::ofstream out(path, std::ios::binary | std::ios::trunc);
+	char header[30]{};
+	std::memcpy(header, "Vocaloid Motion Data 0002", 25);
+	out.write(header, 30);
+	char model[20]{};
+	out.write(model, 20);
+	out.write(reinterpret_cast<const char*>(&bodyFrames), 4);
+	for (uint32_t i = 0; i < bodyFrames; ++i)
+	{
+		char record[111]{};
+		std::memcpy(record, "Center", 6);
+		out.write(record, 111);
+	}
+	out.write(reinterpret_cast<const char*>(&morphFrames), 4);
+	for (uint32_t i = 0; i < morphFrames; ++i)
+	{
+		char record[23]{};
+		std::memcpy(record, "mouth", 5);
+		out.write(record, 23);
+	}
+	out.write(reinterpret_cast<const char*>(&cameraFrames), 4);
+	for (uint32_t i = 0; i < cameraFrames; ++i)
+	{
+		char record[61]{};
+		out.write(record, 61);
+	}
+}
+
+static std::string EnsembleSettingsJson(bool enabled)
+{
+	std::string slots;
+	for (int i = 0; i < 3; ++i)
+	{
+		if (i) slots += ",";
+		slots += "{\"enabled\":false,\"actorToken\":0,\"actorHint\":\"\",\"motionKey\":\"\","
+			"\"offset\":{\"x\":0,\"y\":0,\"z\":0},\"yawDegrees\":0}";
+	}
+	return std::string("{\"enabled\":") + (enabled ? "true" : "false") +
+		",\"masterSlot\":0,\"cameraSlot\":0,\"slots\":[" + slots + "]}";
+}
+
+static void TestLibraryImportProbe()
+{
+	BeginTest("library_import_probe");
+	namespace fs = std::filesystem;
+	const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+	const fs::path root = fs::temp_directory_path() / ("gaku_webpanel_import_" + std::to_string(stamp));
+	fs::create_directories(root);
+	const fs::path motion = root / "synthetic_motion.vmd";
+	const fs::path facial = root / "synthetic_facial.vmd";
+	const fs::path camera = root / "synthetic_camera.vmd";
+	const fs::path audio = root / "synthetic.wav";
+	WriteSyntheticVmd(motion, 1, 1, 0);
+	WriteSyntheticVmd(facial, 0, 1, 0);
+	WriteSyntheticVmd(camera, 0, 0, 1);
+	{ std::ofstream out(audio, std::ios::binary | std::ios::trunc); out << "RIFF"; }
+
+	Fixture f;
+	const std::string paths = "[" + JString(MotionPathToUtf8(motion)) + "," +
+		JString(MotionPathToUtf8(facial)) + "," + JString(MotionPathToUtf8(camera)) + "," +
+		JString(MotionPathToUtf8(audio)) + "]";
+	const auto probe = f.ReqJson("library.probeFiles", "{\"paths\":" + paths + "}");
+	Check(f.Ok(f.Req("library.probeFiles", "{\"paths\":" + paths + "}")), "probeFiles accepted");
+	const auto* classification = probe.Find("result")->Find("classification");
+	Check(classification && classification->IsObject(), "probeFiles returns classification object");
+	Check(classification->Find("motionCandidate")->stringValue == MotionPathToUtf8(motion), "motion candidate classified");
+	Check(classification->Find("facialCandidate")->stringValue == MotionPathToUtf8(facial), "facial candidate classified");
+	Check(classification->Find("cameraCandidate")->stringValue == MotionPathToUtf8(camera), "camera candidate classified");
+	Check(classification->Find("audioCandidate")->stringValue == MotionPathToUtf8(audio), "audio candidate classified");
+	const auto* probes = probe.Find("result")->Find("probes");
+	Check(probes && probes->Size() == 4, "per-file probes returned");
+	Check(probes->At(0)->Find("tendency")->stringValue == "motionAndFacial", "probe tendency string enum");
+	Check(probes->At(1)->Find("tendency")->stringValue == "facialOnly", "facial tendency string enum");
+	Check(probes->At(2)->Find("tendency")->stringValue == "cameraOnly", "camera tendency string enum");
+
+	const std::string reqBody = "{\"request\":{\"title\":\"Synthetic\",\"editKey\":\"\","
+		"\"motionFile\":" + JString(MotionPathToUtf8(motion)) +
+		",\"facialFile\":" + JString(MotionPathToUtf8(facial)) +
+		",\"cameraFile\":" + JString(MotionPathToUtf8(camera)) +
+		",\"audioFile\":" + JString(MotionPathToUtf8(audio)) +
+		",\"disableMorph\":false,\"clearCamera\":false,\"clearAudio\":false,"
+		"\"fps\":30,\"timing\":{\"motion\":{\"speed\":1.5,\"offsetSeconds\":0.2}}}}";
+	const auto imported = f.ReqJson("library.import", reqBody);
+	Check(imported.Find("result")->Find("started")->boolValue, "import started");
+	const auto* command = f.FindCommand(Core::GuiAction::Import);
+	Check(command && command->import.vmd == MotionPathToUtf8(motion), "import queues motion path");
+	Check(command && command->import.morphVmd == MotionPathToUtf8(facial), "import queues facial path");
+	Check(command && command->import.cameraVmd == MotionPathToUtf8(camera), "import queues camera path");
+	Check(command && command->import.audio == MotionPathToUtf8(audio), "import queues audio path");
+	Check(command && command->import.fps == 30.0f, "fps 30 preserved");
+	Check(command && command->import.timing.motion.speed == 1.5f, "track speed preserved");
+	Check(command && command->import.timing.motion.offsetSeconds == 0.2f, "track offset preserved");
+
+	f.core.importBusy = true;
+	Check(f.ErrorCode(f.Req("library.import", reqBody)) == "busy",
+		"duplicate import while busy rejected");
+	f.core.importBusy = false;
+
+	f.AddSyntheticLibrary();
+	f.core.motions[0].hasFacial = true;
+	f.core.motions[0].hasCamera = true;
+	f.core.motions[0].hasAudio = true;
+	const auto edit = f.ReqJson("library.startEdit", "{\"key\":\"alpha\",\"revision\":5}");
+	Check(f.Ok(f.Req("library.startEdit", "{\"key\":\"alpha\",\"revision\":5}")), "startEdit accepted");
+	Check(edit.Find("result")->Find("key")->stringValue == "alpha", "startEdit returns flat edit key");
+	Check(edit.Find("result")->Find("title") != nullptr &&
+		edit.Find("result")->Find("hasFacial")->boolValue &&
+		edit.Find("result")->Find("hasCamera")->boolValue &&
+		edit.Find("result")->Find("hasAudio")->boolValue &&
+		edit.Find("result")->Find("timing") != nullptr,
+		"startEdit returns EditEntryInfo contract");
+	Check(f.ErrorCode(f.Req("library.startEdit", "{\"key\":\"alpha\",\"revision\":9}")) == "stale_revision",
+		"startEdit revision guard");
+
+	f.LoadSyntheticClip();
+	f.core.loadedMotionKey = "alpha";
+	f.core.player.state = PlaybackState::Playing;
+	const std::string editReq = "{\"request\":{\"title\":\"Alpha\",\"editKey\":\"alpha\","
+		"\"motionFile\":\"\",\"facialFile\":\"\",\"cameraFile\":\"\",\"audioFile\":\"\","
+		"\"disableMorph\":false,\"clearCamera\":false,\"clearAudio\":false,\"fps\":0}}";
+	Check(f.ErrorCode(f.Req("library.import", editReq)) == "protected",
+		"editing playing track rejected");
+	f.core.player.state = PlaybackState::Stopped;
+	f.ClearCommands();
+	Check(f.Ok(f.Req("library.import", editReq)), "editing stopped track accepted");
+	const auto* editCommand = f.FindCommand(Core::GuiAction::Import);
+	Check(editCommand && editCommand->import.editKey == "alpha", "edit key queued");
+	Check(editCommand && !editCommand->import.disableMorph && editCommand->import.morphVmd.empty(),
+		"keep facial track does not clear or replace");
+
+	std::error_code ec;
+	fs::remove_all(root, ec);
+}
+
+static void TestEnsembleContracts()
+{
+	BeginTest("ensemble_contracts");
+	namespace fs = std::filesystem;
+	const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+	const fs::path root = fs::temp_directory_path() / ("gaku_webpanel_ensemble_" + std::to_string(stamp));
+	fs::create_directories(root);
+
+	Fixture f;
+	f.core.configRoot = MotionPathToUtf8(root);
+	f.core.ensembleSnapshot.revision = 4;
+	const uint64_t epoch = f.core.sceneActorRegistry.Epoch();
+	const std::string settings = EnsembleSettingsJson(false);
+	const std::string params = "{\"settings\":" + settings + ",\"revision\":4,\"actorEpoch\":" +
+		std::to_string(epoch) + "}";
+	Check(f.Ok(f.Req("ensemble.set", params)), "ensemble.set accepted");
+	const auto* command = f.FindCommand(Core::GuiAction::EnsembleSettings);
+	Check(command && command->loadedGeneration == 4 && command->actorEpoch == epoch,
+		"ensemble revision and epoch queued");
+	Check(f.ErrorCode(f.Req("ensemble.set", "{\"settings\":" + settings + ",\"revision\":5,\"actorEpoch\":" +
+		std::to_string(epoch) + "}")) == "stale_revision", "ensemble stale revision");
+	Check(f.ErrorCode(f.Req("ensemble.set", "{\"settings\":" + settings + ",\"revision\":4,\"actorEpoch\":99}")) ==
+		"stale_token", "ensemble stale epoch");
+	f.core.ensembleSnapshot.active = true;
+	f.core.player.state = PlaybackState::Playing;
+	Check(f.ErrorCode(f.Req("ensemble.set", params)) == "protected", "ensemble editing while playing protected");
+	f.core.player.state = PlaybackState::Stopped;
+
+	const std::string preset = "{\"name\":\"synthetic\",\"settings\":" + settings + "}";
+	Check(f.Ok(f.Req("ensemble.presetSave", preset)), "ensemble.presetSave accepted");
+	Check(fs::exists(root / "ensembles" / "synthetic.json"), "preset JSON written under configRoot/ensembles");
+	const auto loadedPreset = f.ReqJson("ensemble.presetLoad", "{\"name\":\"synthetic\"}");
+	Check(loadedPreset.Find("ok") && loadedPreset.Find("ok")->boolValue, "ensemble.presetLoad accepted");
+	const auto* loadedSettings = loadedPreset.Find("result")->Find("settings");
+	Check(loadedSettings && loadedSettings->Find("slots") &&
+		loadedSettings->Find("slots")->At(0)->Find("actorToken")->numberValue == 0,
+		"presetLoad returns settings with cleared actorToken");
+	Check(f.ErrorCode(f.Req("ensemble.presetSave", "{\"name\":\"../bad\",\"settings\":" + settings + "}")) ==
+		"invalid_params", "preset name validated");
+	f.ClearCommands();
+	Check(f.Ok(f.Req("ensemble.probe", "{\"enabled\":true}")), "ensemble.probe accepted");
+	const auto* probe = f.FindCommand(Core::GuiAction::EnsembleProbe);
+	Check(probe && probe->flag, "probe flag queued");
+
+	std::error_code ec;
+	fs::remove_all(root, ec);
+}
+
+static void TestStageNodes()
+{
+	BeginTest("stage_nodes");
+	namespace fs = std::filesystem;
+	const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+	const fs::path root = fs::temp_directory_path() / ("gaku_webpanel_stage_" + std::to_string(stamp));
+	fs::create_directories(root);
+
+	Fixture f;
+	f.core.configRoot = MotionPathToUtf8(root);
+	const auto scanEmpty = f.ReqJson("stage.scan");
+	Check(scanEmpty.Find("ok") && scanEmpty.Find("ok")->boolValue, "stage.scan accepted");
+	Check(scanEmpty.Find("result")->Find("nodes") && scanEmpty.Find("result")->Find("nodes")->IsArray(),
+		"stage.scan returns {nodes: []}");
+	Check(f.FindCommand(Core::GuiAction::ScanStageCandidates) != nullptr, "scan queued");
+	{
+		std::lock_guard<std::mutex> lock(f.core.stageManager.stageMutex);
+		StageCandidate parent;
+		parent.name = "Background";
+		parent.currentlyActive = true;
+		parent.hasChildren = true;
+		StageCandidate child;
+		child.name = "Mesh";
+		child.parentIndex = 0;
+		child.currentlyActive = true;
+		StageCandidate locked;
+		locked.name = "Collider";
+		locked.isColliderLocked = true;
+		f.core.stageManager.candidates = {parent, child, locked};
+	}
+	f.bridge->OnUiTick();
+	Check(f.CountEvents("stage.nodesChanged") >= 1, "stage.nodesChanged emitted when candidates update");
+	const auto scanWithNodes = f.ReqJson("stage.scan");
+	Check(scanWithNodes.Find("result")->Find("nodes")->Size() == 3, "stage.scan returns current nodes");
+	Check(f.ErrorCode(f.Req("stage.toggleNode", "{\"index\":2,\"active\":false}")) == "protected",
+		"collider node locked");
+	{
+		std::lock_guard<std::mutex> lock(f.core.stageManager.stageMutex);
+		f.core.stageManager.candidates[0].currentlyActive = false;
+	}
+	Check(f.ErrorCode(f.Req("stage.toggleNode", "{\"index\":1,\"active\":false}")) == "protected",
+		"ancestor inactive blocks child");
+	{
+		std::lock_guard<std::mutex> lock(f.core.stageManager.stageMutex);
+		f.core.stageManager.candidates[0].currentlyActive = true;
+	}
+	f.ClearCommands();
+	Check(f.Ok(f.Req("stage.toggleNode", "{\"index\":1,\"active\":false}")), "valid node toggle accepted");
+	const auto* toggle = f.FindCommand(Core::GuiAction::ToggleStageCandidate);
+	Check(toggle && toggle->candidateIndex == 1 && !toggle->flag, "toggle index and flag queued");
+	Check(f.ErrorCode(f.Req("stage.toggleNode", "{\"index\":99,\"active\":true}")) == "invalid_params",
+		"invalid node index");
+	Check(f.ErrorCode(f.Req("stage.setLoadReplacement", "{\"key\":\"bad\"}")) == "invalid_params",
+		"invalid replacement key");
+	const auto replacement = f.ReqJson("stage.setLoadReplacement", "{\"key\":\"env_3d_live_courtyard-00-00-noon\"}");
+	Check(replacement.Find("ok") && replacement.Find("ok")->boolValue, "valid replacement key accepted");
+	Check(replacement.Find("result")->Find("notice") && replacement.Find("result")->Find("notice")->IsString(),
+		"stage.setLoadReplacement returns {notice}");
+	Check(fs::exists(root / "stage.json"), "stage.json saved immediately");
+	const auto stage = f.ReqJson("state.get");
+	Check(stage.Find("result")->Find("stage")->Find("candidates")->Size() == 3, "stage snapshot exposes candidates");
+
+	std::error_code ec;
+	fs::remove_all(root, ec);
+}
+
+static void TestBoneOverrides()
+{
+	BeginTest("bone_overrides");
+	Fixture f;
+	Check(f.Ok(f.Req("bone.set", "{\"humanoidId\":13,\"boneName\":\"LeftUpperArm\",\"pitch\":5,\"yaw\":1,\"roll\":2,"
+		"\"spaceWorld\":false,\"enabled\":true,\"symmetrical\":true}")), "bone.set accepted");
+	const auto allBones = f.ReqJson("bone.get");
+	Check(allBones.Find("ok") && allBones.Find("result")->Find("masterEnabled")->boolValue, "bone.get returns BoneState");
+	const auto* overrides = allBones.Find("result")->Find("overrides");
+	Check(overrides && overrides->Size() == 2, "symmetrical bone.set created both overrides");
+	const auto mirrored = f.ReqJson("bone.get", "{\"hid\":14}");
+	Check(mirrored.Find("result")->Find("found")->boolValue, "symmetrical override created");
+	Check(mirrored.Find("result")->Find("pitch")->numberValue == 5 &&
+		mirrored.Find("result")->Find("yaw")->numberValue == -1 &&
+		mirrored.Find("result")->Find("roll")->numberValue == -2, "MMD mirror formula preserved");
+	Check(f.Ok(f.Req("bone.reset", "{\"humanoidId\":13,\"boneName\":\"LeftUpperArm\",\"symmetrical\":true}")), "bone.reset accepted");
+	Check(!f.ReqJson("bone.get", "{\"hid\":13}").Find("result")->Find("found")->boolValue, "reset removes override");
+	Check(f.Ok(f.Req("bone.setMaster", "{\"enabled\":false}")), "bone.setMaster accepted");
+	Check(!f.core.masterOverridesEnabled, "bone.setMaster updates master switch");
+	namespace fs = std::filesystem;
+	const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+	const fs::path root = fs::temp_directory_path() / ("gaku_webpanel_bone_" + std::to_string(stamp));
+	fs::create_directories(root);
+	f.core.globalOverridePath = MotionPathToUtf8(root / "bone_overrides.json");
+	Check(f.Ok(f.Req("bone.saveToGlobal")), "saveToGlobal accepted");
+	Check(fs::exists(root / "bone_overrides.json"), "global override file written");
+	std::error_code ec;
+	fs::remove_all(root, ec);
+}
+
+static void NoopLookAtTarget(void*, void*) {}
+static void NoopLookAtWeights(void*, float, float, float) {}
+static void NoopLookAtEnabled(void*, bool) {}
+
+static void TestGazeSettings()
+{
+	BeginTest("gaze_settings");
+	Fixture f;
+	Check(f.ErrorCode(f.Req("gaze.set", "{\"settings\":{\"mode\":2,\"desktopLookAtEnabled\":false,\"eyeWeight\":1,\"headWeight\":0.5,\"bodyWeight\":0.25}}")) == "not_ready",
+		"gaze unavailable without runtime callbacks");
+	f.core.lookAt.fnSetTarget = NoopLookAtTarget;
+	f.core.lookAt.fnSetWeights = NoopLookAtWeights;
+	f.core.lookAt.fnSetEnabled = NoopLookAtEnabled;
+	Check(f.Ok(f.Req("gaze.set", "{\"settings\":{\"mode\":2,\"desktopLookAtEnabled\":false,\"eyeWeight\":0.5,\"headWeight\":0.2,\"bodyWeight\":0.1}}")),
+		"gaze.set accepted");
+	Check(f.core.config.gazeMode == 2 && !f.core.lookAt.desktopLookAtEnabled.load() &&
+		f.core.lookAt.eyeWeight.load() == 0.5f && f.core.config.headWeight == 0.2f,
+		"gaze.set applied all fields");
+	Check(f.ErrorCode(f.Req("gaze.set", "{\"settings\":{\"eyeWeight\":1.5}}")) == "invalid_params",
+		"gaze weight range validated");
+	const auto cycle = f.ReqJson("gaze.cycle");
+	Check(cycle.Find("result")->Find("mode")->numberValue == 0, "gaze cycle wraps");
+	const auto gaze = f.ReqJson("gaze.get");
+	const auto* gazeResult = gaze.Find("result");
+	Check(gazeResult && gazeResult->Find("runtimeAvailable")->boolValue &&
+		gazeResult->Find("vrifyQueryAvailable") != nullptr &&
+		gazeResult->Find("settings")->Find("mode")->numberValue == 0,
+		"gaze.get returns protocol GazeState shape");
+}
+
+static void TestSoleStudio()
+{
+	BeginTest("sole_studio");
+	Fixture f;
+	const std::string sole = "{\"settings\":{\"enabled\":true,\"useBootProxy\":true,\"planeCalibrated\":true,"
+		"\"shoeCalibrated\":true,\"planeNormal\":{\"x\":0,\"y\":1,\"z\":0},\"planeOffsetM\":0,\"displayBandM\":0.002}}";
+	Check(f.Ok(f.Req("sole.set", sole)), "sole.set accepted");
+	Check(f.FindCommand(Core::GuiAction::SoleSettings) != nullptr, "sole settings queued");
+	Check(f.Ok(f.Req("sole.save")), "sole.save accepted");
+	Check(f.FindCommand(Core::GuiAction::SaveSoleSettings) != nullptr, "sole save queued");
+	Check(f.Ok(f.Req("sole.load")), "sole.load accepted");
+	Check(f.FindCommand(Core::GuiAction::LoadSoleSettings) != nullptr, "sole load queued");
+	const auto soleState = f.ReqJson("sole.get");
+	Check(soleState.Find("result")->Find("generation") != nullptr, "sole.get exposes generation");
+	Check(f.ErrorCode(f.Req("solePitch.set", "{\"settings\":{\"maxPitchDegrees\":50}}")) == "invalid_params",
+		"solePitch range validated");
+	Check(f.Ok(f.Req("solePitch.set", "{\"settings\":{\"enabled\":true,\"maxPitchDegrees\":20,\"useMeshEnvelope\":true}}")),
+		"solePitch.set accepted");
+	const auto* pitchCmd = f.FindCommand(Core::GuiAction::ExperimentalSolePitch);
+	Check(pitchCmd && pitchCmd->experimentalSolePitchSettings.experimentalSolePitchCorrection &&
+		pitchCmd->experimentalSolePitchSettings.useMeshEnvelope, "solePitch settings queued");
+	const auto pitchState = f.ReqJson("solePitch.get");
+	Check(pitchState.Find("result")->Find("settings")->Find("enabled") != nullptr &&
+		pitchState.Find("result")->Find("feet") != nullptr, "solePitch.get exposes flat SolePitchState");
+
+	Check(f.Ok(f.Req("studio.set", "{\"settings\":{\"lighting\":{\"enabled\":true},\"video\":{\"enabled\":false,\"path\":\"\"}}}")),
+		"studio.set accepted");
+	const auto* studio = f.FindCommand(Core::GuiAction::StudioSettings);
+	Check(studio && studio->studioSettings.lighting.enabled, "studio lighting queued");
+	f.ClearCommands();
+	Check(f.Ok(f.Req("studio.setLighting", "{\"lighting\":{\"enabled\":false}}")), "studio.setLighting accepted");
+	const auto* lighting = f.FindCommand(Core::GuiAction::StudioSettings);
+	Check(lighting && !lighting->studioSettings.lighting.enabled, "lighting-only update queued");
+	Check(f.Ok(f.Req("studio.reset")), "studio.reset accepted");
+	Check(f.FindCommand(Core::GuiAction::StudioReset) != nullptr, "studio reset queued");
+	const auto snapshot = f.ReqJson("studio.get");
+	Check(snapshot.Find("result")->Find("revision")->numberValue >= 1, "studio revision exposed");
+}
+
+static void TestExperimentsTelemetry()
+{
+	BeginTest("experiments_telemetry");
+	Fixture f;
+	Check(f.Ok(f.Req("experiments.set", "{\"patch\":{\"mikuMouthFit\":false,\"mikuEyeFit\":true,\"mikuFitAllowUnverified\":true,\"waistSupport\":false}}")),
+		"experiments.set accepted");
+	Check(f.core.config.facialMikuMouthFit == 0 && f.core.config.facialMikuEyeFit == 1 &&
+		f.core.config.facialMikuFitAllowUnverified == 1, "Miku switches written");
+	const auto* waist = f.FindCommand(Core::GuiAction::ExperimentalWaistSupport);
+	Check(waist && !waist->flag, "waist support flag queued");
+	Check(f.Ok(f.Req("experiments.set", "{\"patch\":{\"beforeQuartz\":true}}")), "BeforeQuartz accepted on native");
+	Check(f.FindCommand(Core::GuiAction::BeforeQuartzExperiment) != nullptr, "BeforeQuartz queued");
+	f.core.guiPhysicsBackend.store(1);
+	Check(f.ErrorCode(f.Req("experiments.set", "{\"patch\":{\"beforeQuartz\":true}}")) == "invalid_params",
+		"BeforeQuartz rejected without native backend");
+	const auto telemetry = f.ReqJson("telemetry.get");
+	Check(telemetry.Find("result")->Find("statusLine")->IsString(), "telemetry status line");
+	Check(telemetry.Find("result")->Find("player")->Find("stateName")->IsString(), "telemetry player stateName");
+	Check(telemetry.Find("result")->Find("actor")->Find("actorLabel")->IsString(), "telemetry actorLabel");
+	const auto experiments = f.ReqJson("experiments.get");
+	const auto* expResult = experiments.Find("result");
+	Check(expResult && expResult->Find("settings")->Find("mikuMouthFit") != nullptr &&
+		expResult->Find("mouthFitStatus")->IsString() && expResult->Find("eyeFitStatus")->IsString(),
+		"experiments.get exposes ExperimentsState shape");
+}
+
+static void TestDropPeek()
+{
+	BeginTest("drop_peek");
+	Core core;
+	HostHooks hooks;
+	bool targetActive = false;
+	int setTargetCalls = 0;
+	int peekCalls = 0;
+	std::vector<std::string> nextBatch;
+	DropPeek syntheticPeek;
+	syntheticPeek.ok = true;
+	syntheticPeek.visual = "hover";
+	syntheticPeek.dragPaths = {"C:\\temp\\a.vmd", "C:\\temp\\b.txt"};
+
+	hooks.dropSetTarget = [&](bool enabled, std::string&) {
+		++setTargetCalls;
+		targetActive = enabled;
+		return true;
+	};
+	hooks.dropPeek = [&] {
+		++peekCalls;
+		return syntheticPeek;
+	};
+	hooks.dropConsume = [&] {
+		DropBatch batch;
+		batch.ok = true;
+		batch.paths = nextBatch;
+		nextBatch.clear();
+		syntheticPeek.pendingCount = 0;
+		return batch;
+	};
+	Bridge bridge(core, hooks);
+	bridge.OnShow();
+	const auto setOk = ParseJson(bridge.HandleMessageForTest(
+		"{\"v\":1,\"id\":1,\"type\":\"request\",\"method\":\"drop.setTarget\",\"params\":{\"enabled\":true}}"));
+	Check(setOk.Find("ok")->boolValue && setTargetCalls == 0,
+		"drop.setTarget never calls host outside OnUiTick");
+	bridge.OnUiTick();
+	Check(targetActive && peekCalls == 1, "OnUiTick refreshes drop target and peeks drag state");
+
+	const auto response = ParseJson(bridge.HandleMessageForTest(
+		"{\"v\":1,\"id\":2,\"type\":\"request\",\"method\":\"drop.peek\",\"params\":{}}"));
+	Check(response.Find("ok")->boolValue, "drop.peek accepted");
+	Check(response.Find("result")->Find("visual")->stringValue == "hover", "peek visual hover for valid .vmd");
+	Check(response.Find("result")->Find("fileCount")->numberValue == 2, "peek fileCount computed");
+	Check(response.Find("result")->Find("accepted")->numberValue == 1, "peek accepted count excludes .txt");
+	Check(peekCalls == 1, "drop.peek serves cached Tick state without calling host outside callback");
+
+	syntheticPeek.dragPaths = {"C:\\temp\\only.txt"};
+	bridge.OnUiTick();
+	const auto invalidPeek = ParseJson(bridge.HandleMessageForTest(
+		"{\"v\":1,\"id\":3,\"type\":\"request\",\"method\":\"drop.peek\",\"params\":{}}"));
+	Check(invalidPeek.Find("result")->Find("visual")->stringValue == "invalid",
+		"unsupported files downgrade hover visual to invalid");
+
+	syntheticPeek.pendingCount = 1;
+	nextBatch = {"C:\\temp\\dance.vmd"};
+	bridge.OnUiTick();
+	const auto poll = ParseJson(bridge.HandleMessageForTest(
+		"{\"v\":1,\"id\":4,\"type\":\"request\",\"method\":\"drop.poll\",\"params\":{}}"));
+	Check(poll.Find("result")->Find("files")->Size() == 1 &&
+		poll.Find("result")->Find("files")->At(0)->stringValue == "C:\\temp\\dance.vmd",
+		"drop.poll drains Tick-consumed files");
+
+	bridge.OnHide();
+	bridge.OnUiTick();
+	Check(!targetActive, "hiding panel disarms drop target on next OnUiTick");
+}
+
 int main()
 {
 	std::setvbuf(stdout, nullptr, _IONBF, 0);
@@ -635,6 +1183,15 @@ int main()
 	TestDialogHostService();
 	TestShutdownInvalidation();
 	TestScrubResetOnPermissionLoss();
+	TestGetAssetsCandidates();
+	TestLibraryImportProbe();
+	TestEnsembleContracts();
+	TestStageNodes();
+	TestBoneOverrides();
+	TestGazeSettings();
+	TestSoleStudio();
+	TestExperimentsTelemetry();
+	TestDropPeek();
 	std::printf("\nweb-panel bridge contracts: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail == 0 ? 0 : 1;
 }

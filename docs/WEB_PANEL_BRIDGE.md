@@ -28,9 +28,13 @@ Authoritative frontend definitions: GakuLoader
 - `handleMessage` buffer rule: on short/NULL buffer returns `GAKU_E_SIZE` and
   sets `requiredBytes` = UTF-8 bytes + 1 (NUL included), output untouched;
   success also reports `requiredBytes` including the NUL.
-- `getAssets`: `<plugin DLL dir>\GakuMotion.UI` (absolute), `index.html`,
-  virtual host `gakumotion.invalid`; `GAKU_E_UNAVAILABLE` when the entry file
-  is missing so the Loader can fall back to ImGui.
+- `getAssets`: ordered candidates — host `runtime.gameRoot\GakuMotion.UI`
+  first (the Loader's offline package stages the UI next to `version.dll`),
+  then `<plugin DLL dir>\GakuMotion.UI` (the plugin usually lives in
+  `GakuLoader/plugins`). The first candidate that actually contains
+  `index.html` wins; both missing → `GAKU_E_UNAVAILABLE` so the Loader can
+  fall back to ImGui. Entry `index.html`, virtual host `gakumotion.invalid`,
+  absolute `assetsDir`.
 
 ## Threading / lifecycle
 

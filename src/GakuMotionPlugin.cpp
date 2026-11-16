@@ -3411,7 +3411,7 @@ GakuStatus PublishActorApi()
 
 	void WebPanelModuleAnchor() {}
 
-	std::wstring WebPanelAssetsDir()
+	std::wstring WebPanelModuleAssetsDir()
 	{
 		static std::wstring cached;
 		static bool resolved = false;
@@ -3427,6 +3427,22 @@ GakuStatus PublishActorApi()
 		const std::filesystem::path modulePath(buffer, buffer + length);
 		cached = (modulePath.parent_path() / L"GakuMotion.UI").wstring();
 		return cached;
+	}
+
+	// The Loader's offline package stages GakuMotion.UI next to version.dll in
+	// the game root, while the plugin DLL usually lives in GakuLoader/plugins.
+	// Prefer the host game root when it actually carries the entry file, then
+	// fall back to the plugin module directory; the bridge reports UNAVAILABLE
+	// when neither candidate has index.html.
+	std::vector<std::wstring> WebPanelAssetsDirs()
+	{
+		std::vector<std::wstring> candidates;
+		const wchar_t* gameRoot = GakuMotion::host::runtime.gameRoot;
+		if (gameRoot && *gameRoot)
+			candidates.push_back((std::filesystem::path(gameRoot) / L"GakuMotion.UI").wstring());
+		const std::wstring moduleDir = WebPanelModuleAssetsDir();
+		if (!moduleDir.empty()) candidates.push_back(moduleDir);
+		return candidates;
 	}
 
 	bool WebPanelOpenLibraryFolder(std::string& notice)
@@ -3481,6 +3497,66 @@ GakuStatus PublishActorApi()
 		return true;
 	}
 
+	bool WebPanelBeginFileDialog(int webKind, bool /*multiple*/, std::string& notice)
+	{
+		const auto& service = GakuMotion::host::fileDialog;
+		if (!service.beginOpen || !service.poll || !service.release)
+		{
+			notice = "GakuLoader 文件选择服务不可用，请更新宿主或输入完整文件路径";
+			return false;
+		}
+		if (g_fileDialogTicket)
+		{
+			notice = "已有文件选择请求正在进行";
+			return false;
+		}
+		GakuFileFilter filter{L"VMD 动作", L"*.vmd"};
+		const wchar_t* title = L"选择文件";
+		switch (webKind)
+		{
+		case 0:
+			title = L"选择演出与导入素材";
+			filter = GakuFileFilter{L"演出与导入素材 (*.vmd;*.gkcamera;*.wav)", L"*.vmd;*.gkcamera;*.wav"};
+			break;
+		case 1:
+			title = L"选择身体动作 VMD";
+			filter = GakuFileFilter{L"VMD 身体动作", L"*.vmd"};
+			break;
+		case 2:
+			title = L"选择表情/口型 VMD";
+			filter = GakuFileFilter{L"VMD 表情动作", L"*.vmd"};
+			break;
+		case 3:
+			title = L"选择镜头文件";
+			filter = GakuFileFilter{L"镜头 VMD / GKCAM", L"*.vmd;*.gkcamera"};
+			break;
+		case 4:
+			title = L"选择 WAV 音频";
+			filter = GakuFileFilter{L"WAV 音频", L"*.wav"};
+			break;
+		case 5:
+			title = L"选择本地视频";
+			filter = GakuFileFilter{L"本地视频", L"*.mp4;*.m4v;*.mov;*.webm;*.avi;*.wmv"};
+			break;
+		default:
+			notice = "不支持的文件选择类型";
+			return false;
+		}
+		const GakuFileDialogRequest request{GAKU_SERVICE_VERSION, sizeof(GakuFileDialogRequest), title, 1, &filter};
+		uint64_t ticket = 0;
+		const auto status = service.beginOpen(service.context, &request, &ticket);
+		if (status != GAKU_OK || !ticket)
+		{
+			char detail[128]{};
+			std::snprintf(detail, sizeof(detail), "文件选择请求失败 (status=%d)", status);
+			notice = detail;
+			return false;
+		}
+		g_fileDialogTicket = ticket;
+		notice.clear();
+		return true;
+	}
+
 	GakuMotion::webpanel::DropPeek WebPanelDropPeek()
 	{
 		GakuMotion::webpanel::DropPeek peek;
@@ -3493,12 +3569,32 @@ GakuStatus PublishActorApi()
 		if (drag.peek)
 		{
 			GakuFileDragState state{};
-			if (drag.peek(drag.context, sizeof(state), &state, 0, nullptr) == GAKU_OK)
+			const auto dragStatus = drag.peek(drag.context, sizeof(state), &state, 0, nullptr);
+			if (dragStatus == GAKU_OK || dragStatus == GAKU_E_SIZE)
 			{
 				peek.hostBlocked = (state.flags & GAKU_FILE_DRAG_HOST_BLOCKED) != 0;
 				peek.hostElevated = (state.flags & GAKU_FILE_DRAG_HOST_ELEVATED) != 0;
 				if (state.flags & GAKU_FILE_DRAG_INSIDE_TARGET) peek.visual = "hover";
 				else if (state.flags & GAKU_FILE_DRAG_ACTIVE) peek.visual = "armed";
+				if (state.fileCount > 0) peek.fileCount = state.fileCount;
+				if (state.requiredBytes > 0 && state.requiredBytes <= GAKU_FILE_DROP_MAX_BYTES)
+				{
+					std::string buffer(state.requiredBytes, '\0');
+					if (drag.peek(drag.context, sizeof(state), &state,
+						static_cast<uint32_t>(buffer.size()), buffer.data()) == GAKU_OK)
+					{
+						size_t start = 0;
+						while (start < buffer.size())
+						{
+							const size_t end = buffer.find('\0', start);
+							if (end == std::string::npos) break;
+							if (end > start) peek.dragPaths.push_back(buffer.substr(start, end - start));
+							start = end + 1;
+						}
+						if (peek.fileCount == 0 && !peek.dragPaths.empty())
+							peek.fileCount = static_cast<uint32_t>(peek.dragPaths.size());
+					}
+				}
 			}
 		}
 		else if (peek.pendingCount > 0) peek.visual = "armed";
@@ -3558,8 +3654,9 @@ GakuStatus PublishActorApi()
 	GakuMotion::webpanel::HostHooks MakeWebPanelHooks()
 	{
 		GakuMotion::webpanel::HostHooks hooks;
-		hooks.assetsDir = WebPanelAssetsDir;
+		hooks.assetsDirs = WebPanelAssetsDirs;
 		hooks.openLibraryFolder = WebPanelOpenLibraryFolder;
+		hooks.beginWebFileDialog = WebPanelBeginFileDialog;
 		hooks.releaseFileDialog = ReleasePendingFileDialog;
 		hooks.dropSetTarget = WebPanelDropSetTarget;
 		hooks.dropPeek = WebPanelDropPeek;
