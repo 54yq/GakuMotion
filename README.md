@@ -44,9 +44,9 @@ GakuMotion 是运行在 GakuLoader 之上的《学园偶像大师》原生演出
 
 ## 功能演示
 
-以下为野生的空白发布的 B 站演示：
+以下视频由野生的空白发布，均包含部分基础修正，表中列出各视频主要展示的功能：
 
-| 演示 | 内容 |
+| 演示 | 主要展示 |
 | --- | --- |
 | [多人同步演出](https://www.bilibili.com/video/BV1otWa62EgK) | 多名角色分别绑定动作并同步演出。 |
 | [导入未实装人物并接管舞台](https://www.bilibili.com/video/BV1G6s76KE3C/) | 配合 GakuActors 导入人物，再使用 GakuMotion 接管舞台。 |
