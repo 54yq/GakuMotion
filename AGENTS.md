@@ -7,7 +7,7 @@
 - Keep user data and unrelated working changes intact. Use synthetic inputs for isolated tests.
 - Record build/test results separately from game loading and visual acceptance.
 - Make local Git checkpoints after validating the requested changes.
-- Before uploading or publishing feature iterations of this fork, review and update `README.md` to reflect the current functionality. Distinguish inherited upstream capabilities, fork additions, upstream contributions integrated into the fork, and experimental limitations; retain branding and attribution, and link to upstream installation and general usage guides.
+- Whenever features change, update `README.md` alongside the implementation and review it before uploading or publishing. Preserve the agreed structure: 基础功能 (including 已合入上游的改进) → 分支扩展 → 功能演示 → 上游 PR 说明 → 文档与反馈 → 相关项目. Integrate changes into the relevant section, consolidate repeated descriptions, and keep each demo video in the demo section. Distinguish upstream capabilities, fork additions, integrated upstream contributions and experimental limitations; retain branding and attribution, and link to upstream installation and general usage guides.
 
 - Refer to fork maintainer 54yq as 野生的空白 in reader-facing text. Describe upstream PR contributions briefly and factually; link the relevant feature descriptions directly to their PRs with verified target branches and statuses. Distinguish merged, pending and closed-unmerged PRs, refresh the dated PR list, and avoid repeated ownership claims or promotional wording.
 
