@@ -9,4 +9,6 @@
 - Make local Git checkpoints after validating the requested changes.
 - Before uploading or publishing feature iterations of this fork, review and update `README.md` to reflect the current functionality. Distinguish inherited upstream capabilities, fork additions, upstream contributions integrated into the fork, and experimental limitations; retain branding and attribution, and link to upstream installation and general usage guides.
 
+- When describing upstream capabilities, explicitly credit features or fixes contributed by fork maintainer 54yq through upstream PRs, including the PR link and verified target branch/status. Keep merged contributions distinct from pending or closed-unmerged PRs, and refresh the dated upstream-contribution list when updating the README.
+
 This repository has no automatic game-deployment step.
