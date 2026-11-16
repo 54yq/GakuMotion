@@ -8,7 +8,8 @@ param(
     [string]$OutputRoot = '',
     [string]$WindowsSdkRoot = '',
     [string]$PortableVisualStudio = '',
-    [string]$DotNet = 'dotnet'
+    [string]$DotNet = 'dotnet',
+    [switch]$LegacyImGui
 )
 $ErrorActionPreference = 'Stop'
 $repo = $PSScriptRoot
@@ -16,8 +17,11 @@ if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
     $OutputRoot = Join-Path $repo 'build'
 }
 $OutputRoot = [IO.Path]::GetFullPath($OutputRoot)
-$runtimeInputs = @('GakuMotion.vcxproj', 'src/GakuMotionPlugin.cpp', 'deps/imgui/imgui.cpp',
+$runtimeInputs = @('GakuMotion.vcxproj', 'src/GakuMotionPlugin.cpp',
     'deps/KineTexture/src/KineTexture/Math.hpp')
+if ($LegacyImGui) {
+    $runtimeInputs += 'deps/imgui/imgui.cpp'
+}
 $importInputs = @('interop/GakuMotion.VmdImporter.Native/GakuMotion.VmdImporter.Native.csproj',
     'candidate/csharp/src/GakuMotion.VmdImporter/GakuMotion.VmdImporter.csproj',
     'candidate/csharp/src/GakuMotion.VmdImporter/Resources/gakumas_bone_profile.json',
@@ -66,14 +70,20 @@ if ($Target -eq 'Runtime' -or $Target -eq 'All') {
         $nativeObjects = Join-Path $OutputRoot 'obj\native'
         New-Item -ItemType Directory -Path $nativeOutput,$nativeObjects -Force | Out-Null
         $compiler = Join-Path $msvc.FullName 'bin\Hostx64\x64\cl.exe'
-        $sources = @('src/GakuMotionPlugin.cpp', 'deps/imgui/imgui.cpp', 'deps/imgui/imgui_draw.cpp',
-            'deps/imgui/imgui_widgets.cpp', 'deps/imgui/imgui_tables.cpp', 'include/minhook/src/buffer.c',
+        $sources = @('src/GakuMotionPlugin.cpp', 'include/minhook/src/buffer.c',
             'include/minhook/src/hook.c', 'include/minhook/src/trampoline.c',
-            'include/minhook/src/hde/hde32.c', 'include/minhook/src/hde/hde64.c') | ForEach-Object { Join-Path $repo $_ }
+            'include/minhook/src/hde/hde32.c', 'include/minhook/src/hde/hde64.c')
+        $imguiArgs = @()
+        if ($LegacyImGui) {
+            $sources += @('deps/imgui/imgui.cpp', 'deps/imgui/imgui_draw.cpp',
+                'deps/imgui/imgui_widgets.cpp', 'deps/imgui/imgui_tables.cpp')
+            $imguiArgs += @('/DGKMOTION_ENABLE_IMGUI', "/I$(Join-Path $repo 'deps/imgui')")
+        }
+        $sources = $sources | ForEach-Object { Join-Path $repo $_ }
         $args = @('/nologo', '/LD', '/std:c++20', '/utf-8', '/O2', '/EHsc', '/MT', '/W3',
-            '/DWIN32', '/DNDEBUG', '/D_WINDOWS', '/D_USRDLL', '/DGKMOTION_ENABLE_IMGUI',
+            '/DWIN32', '/DNDEBUG', '/D_WINDOWS', '/D_USRDLL',
             "/I$(Join-Path $repo 'include')", "/I$(Join-Path $repo 'src')",
-            "/I$(Join-Path $repo 'deps/KineTexture/src')", "/I$(Join-Path $repo 'deps/imgui')",
+            "/I$(Join-Path $repo 'deps/KineTexture/src')") + $imguiArgs + @(
             "/Fo$nativeObjects\") + $sources + @('winmm.lib', 'user32.lib', 'comdlg32.lib',
             '/link', "/OUT:$(Join-Path $nativeOutput 'GakuMotion.dll')", '/SUBSYSTEM:WINDOWS', '/OPT:REF', '/OPT:ICF')
         & $compiler @args
@@ -91,11 +101,12 @@ if ($Target -eq 'Runtime' -or $Target -eq 'All') {
         $nativeOutput = Join-Path $OutputRoot 'native'
         $nativeObjects = Join-Path $OutputRoot 'obj\native'
         New-Item -ItemType Directory -Path $nativeOutput,$nativeObjects -Force | Out-Null
+        $configName = if ($LegacyImGui) { 'Release ImGui' } else { 'Release' }
         # Trailing separators are forward slashes on purpose: PowerShell re-quotes an
         # argument that contains a space (e.g. a checkout under "D:\... \Gakumas Develop\...")
         # and a trailing backslash then escapes the closing quote, so MSBuild sees a
         # literal quote and reports MSB1008 "only one project can be specified".
-        & $msbuild (Join-Path $repo 'GakuMotion.vcxproj') '/p:Configuration=Release ImGui' '/p:Platform=x64' "/p:PlatformToolset=$toolset" `
+        & $msbuild (Join-Path $repo 'GakuMotion.vcxproj') "/p:Configuration=$configName" '/p:Platform=x64' "/p:PlatformToolset=$toolset" `
             "/p:OutDir=$nativeOutput/" "/p:IntDir=$nativeObjects/" "/p:ImGuiIncludeDir=$(Join-Path $repo 'deps\imgui')" `
             "/p:KineTextureIncludeDir=$(Join-Path $repo 'deps\KineTexture\src')" '/p:GkCaptureDiagnostics=false' '/nologo' '/verbosity:minimal'
         if ($LASTEXITCODE -ne 0) { throw ('Runtime build failed: ' + $LASTEXITCODE) }

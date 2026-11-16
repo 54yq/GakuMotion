@@ -3903,7 +3903,12 @@ extern "C" GAKU_PLUGIN_EXPORT GakuStatus GakuPlugin_Query(
 	const GakuPluginDescriptor descriptor{GAKU_ABI_VERSION, sizeof(GakuPluginDescriptor),
 		"gakumotion", "GakuMotion", "0.1.1",
 		MotionActivate, MotionRuntimeReady, MotionTick, MotionActorTick,
-		RenderGmlMotion, MotionShutdown};
+#if defined(GKMOTION_ENABLE_IMGUI) || defined(HAS_IMGUI)
+		RenderGmlMotion,
+#else
+		nullptr,
+#endif
+		MotionShutdown};
 	*output = descriptor;
 	return GAKU_OK;
 }
