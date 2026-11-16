@@ -7,5 +7,6 @@
 - Keep user data and unrelated working changes intact. Use synthetic inputs for isolated tests.
 - Record build/test results separately from game loading and visual acceptance.
 - Make local Git checkpoints after validating the requested changes.
+- Before uploading or publishing feature iterations of this fork, review and update `README.md` to reflect the current functionality. Distinguish inherited upstream capabilities, fork additions, upstream contributions integrated into the fork, and experimental limitations; retain branding and attribution, and link to upstream installation and general usage guides.
 
 This repository has no automatic game-deployment step.
