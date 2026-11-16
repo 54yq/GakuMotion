@@ -10,6 +10,8 @@ GakuMotion 是运行在 GakuLoader 之上的《学园偶像大师》原生演出
 
 **本仓库是 [crested-ezios/GakuMotion](https://github.com/crested-ezios/GakuMotion) 的功能扩展分支**，主要围绕多人同步演出、Live 观看场景接管、角色站位与运镜适配，以及动作导入和校正展开。本 README 先介绍上游基础能力，并单独标出由本分支贡献、已经回馈上游的功能，再说明本分支的其他扩展。
 
+本分支由[野生的空白（54yq）](https://github.com/54yq)维护。下方附有 B 站功能演示。
+
 [上游项目](https://github.com/crested-ezios/GakuMotion) · [上游安装指南](https://github.com/crested-ezios/GakuMotion/blob/main/docs/INSTALLATION.md) · [上游使用指南](https://github.com/crested-ezios/GakuMotion/blob/main/docs/USAGE.md) · [上游常见问题](https://github.com/crested-ezios/GakuMotion/blob/main/docs/TROUBLESHOOTING.md)
 
 > 项目仍处于开发预览阶段。下文按本分支当前代码与合入历史区分功能来源；上游后续也可能合入相同能力。Live、原生物理和标有“实验”的功能仍需按游戏版本、角色、服装与场景分别验证。
@@ -29,7 +31,7 @@ GakuMotion 是运行在 GakuLoader 之上的《学园偶像大师》原生演出
 
 以下改进已通过 PR 合入上游 `dev` 分支：
 
-| 已回馈上游的功能或修复 | 本分支贡献 | 上游 PR 与合入位置 |
+| 已合入上游的功能或修复 | 改进内容 | 上游 PR 与合入位置 |
 | --- | --- | --- |
 | 表情幅度控制 | 增加整体、眉毛、眼部和嘴部倍率，支持重置与保存。 | [#2](https://github.com/crested-ezios/GakuMotion/pull/2)，已合入 `dev`。 |
 | 独立音乐音量 | 增加 0–100% 音乐音量及保存功能，并处理旧音频后端的兼容回退。 | [#2](https://github.com/crested-ezios/GakuMotion/pull/2)，已合入 `dev`。 |
@@ -40,9 +42,23 @@ GakuMotion 是运行在 GakuLoader 之上的《学园偶像大师》原生演出
 
 基础动作功能沿用上游的摄影及指定更衣室场景支持。安装、资源准备、快捷键和通用操作请参阅上方的上游文档；本页集中说明分支差异。
 
-## 本分支发起的功能与扩展
+## 功能演示
+
+以下为野生的空白发布的 B 站演示：
+
+| 演示 | 内容 |
+| --- | --- |
+| [多人同步演出](https://www.bilibili.com/video/BV1otWa62EgK) | 多名角色分别绑定动作并同步演出。 |
+| [导入未实装人物并接管舞台](https://www.bilibili.com/video/BV1G6s76KE3C/) | 配合 GakuActors 导入人物，再使用 GakuMotion 接管舞台。 |
+| [舞台接管与超出三人的多人演出](https://www.bilibili.com/video/BV14Ds76bE4e) | 接管舞台并导入多名人物，展示超出原三人上限的演出。 |
+
+人物资源导入使用配套插件 [GakuActors](https://github.com/54yq/GakuActors)，动作播放与 Live 接管由 GakuMotion 负责。实际效果取决于游戏版本、资源与插件组合。
+
+## 分支功能与扩展
 
 ### 多人同步演出
+
+动态槽位与多人原生物理已提交上游 [PR #8](https://github.com/crested-ezios/GakuMotion/pull/8)，尚未合并。可查看[多人演出](https://www.bilibili.com/video/BV1otWa62EgK)和[超出三人的舞台演出](https://www.bilibili.com/video/BV14Ds76bE4e)演示。
 
 - **动态角色槽位**：从早期三人同步扩展为按需新增角色槽位，为已检测到的场景角色分别绑定曲库动作。未绑定的槽位跳过，播放、暂停、进度、音乐和镜头统一以主角色为准。
 - **每人独立设置**：附加角色分别使用自己的身体动作、骨骼覆盖、动作延迟、位置和朝向；表情幅度沿用面板设置。同一场景内切换动作或重新绑定时保留对应角色的站位。
@@ -55,7 +71,7 @@ GakuMotion 是运行在 GakuLoader 之上的《学园偶像大师》原生演出
 
 - **独立位置与朝向**：主角色和附加角色可分别调整世界坐标偏移与原地朝向。转向同时旋转身体姿态和动作位移轨迹，方便把整支舞放到合适的位置；主角色初始站位可保存为下次启动的默认值。
 - **角色模型显隐**：可分别隐藏主角色或已绑定附加角色的模型，并恢复之前的渲染状态；Live 接管中还可分别隐藏麦克风。
-- **外部人物识别**：可识别受支持的 GakuActors 新增人物，并在角色列表中显示其自定义预设名称，便于区分多人组合。人物创建和头身组合由 GakuActors 提供，动作绑定由本分支负责。
+- **外部人物识别**：可识别受支持的 GakuActors 新增人物，并在角色列表中显示其自定义预设名称，便于区分多人组合。人物创建和头身组合由 [GakuActors](https://github.com/54yq/GakuActors) 提供，动作绑定由本分支负责；参见[人物导入与舞台接管演示](https://www.bilibili.com/video/BV1G6s76KE3C/)。角色名称修正与预设名显示已提交上游 [PR #11](https://github.com/crested-ezios/GakuMotion/pull/11)，尚未合并。
 
 多人站位预设的界面目前隐藏，已有预设文件保留；当前可用的队形功能为上面的“以主角色对齐原曲队形”。人物显隐与麦克风识别依赖游戏接口和场景资源，不能保证所有模型均适用。
 
@@ -77,7 +93,7 @@ Live 接管默认关闭，游戏主页、养成和未适配页面仍不开放动
 
 ### 镜头适配
 
-- **VMD 运镜范围缩放（本分支贡献，已通过 [PR #4](https://github.com/crested-ezios/GakuMotion/pull/4) 合入上游 `dev`）**：在 0.30–1.00 倍间缩小轨迹，以角色附近为中心调整运镜范围；保留镜头朝向和视野，并同步处理焦点距离及正交视野。
+- **VMD 运镜范围缩放（已通过 [PR #4](https://github.com/crested-ezios/GakuMotion/pull/4) 合入上游 `dev`）**：在 0.30–1.00 倍间缩小轨迹，以角色附近为中心调整运镜范围；保留镜头朝向和视野，并同步处理焦点距离及正交视野。
 - **镜头随主角色朝向**：使插件镜头的位置与方向跟随主角色站位朝向旋转，方便调整舞蹈面对的方向；可保存镜头设置。
 - **关闭 Live 景深（测试）**：接管期间提供景深渲染开关，取消勾选或退出接管后恢复原处理；接口启用与实际画面效果需分别确认。
 - **自由视角交接**：与配套 GakuActors 协调相机控制，开启其自由视角时释放 Motion 镜头，关闭后交还。自由视角的操作入口和实现由 GakuActors 提供。
@@ -87,8 +103,8 @@ Live 接管默认关闭，游戏主页、养成和未适配页面仍不开放动
 ### 动作导入与兼容修正
 
 - **区分源帧率和输出采样率**：导入及管理曲目时可选择自动、30 或 60 fps 的源动作帧率，并单独设置输出采样率。源帧率决定素材的时间基准，输出采样率决定保存密度；已有曲目可指定参数重新烘焙。
-- **改进自动帧率判断**：参考身体骨骼与音频判断时间基准，减少少量晚结束的表情轨道对判断的影响；表情末帧明显晚于身体时显示提示，保留原关键帧。
-- **兼容烘焙腿部动作**：识别特征明确的 `D` 腿骨，以及普通腿骨逐帧烘焙配合空 IK 轨道的 VMD，保留烘焙后的腿部姿态。显式 IK 开关、实际运动的 IK 轨道和无法明确识别的素材沿用原有处理。
+- **改进自动帧率判断**：参考身体骨骼与音频判断时间基准，减少少量晚结束的表情轨道对判断的影响；表情末帧明显晚于身体时显示提示，保留原关键帧。上述源帧率、输出采样率与自动识别改进已提交上游 [PR #9](https://github.com/crested-ezios/GakuMotion/pull/9)，尚未合并。
+- **兼容烘焙腿部动作**：识别特征明确的 `D` 腿骨，以及普通腿骨逐帧烘焙配合空 IK 轨道的 VMD，保留烘焙后的腿部姿态。显式 IK 开关、实际运动的 IK 轨道和无法明确识别的素材沿用原有处理。对应上游 [PR #10](https://github.com/crested-ezios/GakuMotion/pull/10)，已提交、尚未合并。
 - **修正局部骨骼覆盖的帧计算**：修复 gkclip 局部骨骼微调使用的参考帧问题。
 
 自动帧率判断仍可能需要人工调整。导入器更新不会自动重写已有曲目；应用腿部兼容修正需要重新导入原始 VMD。
@@ -97,10 +113,10 @@ Live 接管默认关闭，游戏主页、养成和未适配页面仍不开放动
 
 | 功能 | 本分支新增的控制 |
 | --- | --- |
-| 表情幅度（本分支贡献，已通过 [PR #2](https://github.com/crested-ezios/GakuMotion/pull/2) 合入上游 `dev`） | 分别调整整体、眉毛、眼部和嘴部倍率（0.00–2.00），支持重置与保存；不改变眼骨视线或 LookAt。 |
-| 独立音乐音量（本分支贡献，已通过 [PR #2](https://github.com/crested-ezios/GakuMotion/pull/2) 合入上游 `dev`） | 将 GakuMotion 播放的音乐调整为 0–100%，松开后自动保存，不改变游戏原声音量；旧音频后端可能不支持独立调节。 |
+| 表情幅度（已通过 [PR #2](https://github.com/crested-ezios/GakuMotion/pull/2) 合入上游 `dev`） | 分别调整整体、眉毛、眼部和嘴部倍率（0.00–2.00），支持重置与保存；不改变眼骨视线或 LookAt。 |
+| 独立音乐音量（已通过 [PR #2](https://github.com/crested-ezios/GakuMotion/pull/2) 合入上游 `dev`） | 将 GakuMotion 播放的音乐调整为 0–100%，松开后自动保存，不改变游戏原声音量；旧音频后端可能不支持独立调节。 |
 | 按角色校正前臂（实验） | 为检测到的角色分别调整前臂扭转分担、轴向角度和锁定状态；尚未绑定动作的角色也可预设。主角色锁定可保存，其他角色设置在当前场景内保留，适用于 gkclip。 |
-| 辅助骨旋转符号修正（本分支修复，已通过 [PR #4](https://github.com/crested-ezios/GakuMotion/pull/4) 合入上游 `dev`） | 使表示同一旋转的 q 与 -q 得到一致的辅助骨输出；不改写动作文件或主骨骼旋转。 |
+| 辅助骨旋转符号修正（已通过 [PR #4](https://github.com/crested-ezios/GakuMotion/pull/4) 合入上游 `dev`） | 使表示同一旋转的 q 与 -q 得到一致的辅助骨输出；不改写动作文件或主骨骼旋转。 |
 | 手臂辅助骨对照（实验） | 高级动作设置提供拟合、锁定初始姿态、归零、录制回放和旧版解算等模式，可用 F8 切换，用于比较手臂变形。 |
 | 载入前初始化骨骼（实验） | 可在下一次载入动作时重置各角色动画器，用于对照；可能改变站位或物理状态。 |
 
@@ -121,7 +137,7 @@ Live 接管默认关闭，游戏主页、养成和未适配页面仍不开放动
 
 ## 本分支向上游提交的 PR
 
-以下 PR 均由本分支维护者 54yq 提交，状态核对于 **2026-11-17**。本分支中的功能实现与面向上游的移植版本可能存在差别，功能详情以各 PR 的实际范围为准。
+以下为[野生的空白（54yq）](https://github.com/54yq)提交的上游 PR，状态核对于 **2026-11-17**。本分支中的功能实现与面向上游的移植版本可能存在差别，功能详情以各 PR 的实际范围为准。
 
 | PR | 功能或修复 | 上游状态 |
 | --- | --- | --- |
@@ -145,6 +161,7 @@ Live 接管默认关闭，游戏主页、养成和未适配页面仍不开放动
 ### 依赖项目
 
 - [GakuLoader](https://github.com/Gaku-Mod-Tools/GakuLoader)：提供插件宿主、按键分发与控制窗口支持。
+- [GakuActors](https://github.com/54yq/GakuActors)：可选的人物与场景资源管理插件，用于导入额外人物、管理头身组合及场景资源。
 - [KineTexture](https://github.com/crested-ezios/KineTexture)：提供底层正向运动学、数学计算与动作采样能力。
 - [GakuBurstBridge](https://github.com/crested-ezios/GakuBurstBridge)：可选的原生物理伴生库，用于让官方 Burst 物理读取动作输入。
 - 模组源码遵循 [MIT 许可证](LICENSE)，第三方组件遵循各自许可证，详见 [第三方通知](THIRD_PARTY_NOTICES.md)。

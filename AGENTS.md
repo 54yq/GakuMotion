@@ -9,6 +9,8 @@
 - Make local Git checkpoints after validating the requested changes.
 - Before uploading or publishing feature iterations of this fork, review and update `README.md` to reflect the current functionality. Distinguish inherited upstream capabilities, fork additions, upstream contributions integrated into the fork, and experimental limitations; retain branding and attribution, and link to upstream installation and general usage guides.
 
-- When describing upstream capabilities, explicitly credit features or fixes contributed by fork maintainer 54yq through upstream PRs, including the PR link and verified target branch/status. Keep merged contributions distinct from pending or closed-unmerged PRs, and refresh the dated upstream-contribution list when updating the README.
+- Refer to fork maintainer 54yq as 野生的空白 in reader-facing text. Describe upstream PR contributions briefly and factually; link the relevant feature descriptions directly to their PRs with verified target branches and statuses. Distinguish merged, pending and closed-unmerged PRs, refresh the dated PR list, and avoid repeated ownership claims or promotional wording.
+
+- Keep the README feature demos linked to the relevant capabilities: BV1otWa62EgK for ensemble playback, BV1G6s76KE3C for character import and stage takeover, and BV14Ds76bE4e for takeover with more than three actors. Link character-import functionality to https://github.com/54yq/GakuActors and distinguish its role from Motion playback/takeover.
 
 This repository has no automatic game-deployment step.
