@@ -1,25 +1,28 @@
 # GakuMotion web-panel native service (`gakumotion.web-panel/v1`)
 
-Provider-owned optional service for the GakuLoader WebView2 manager panel.
-The ImGui fallback (`RenderGmlMotion`) is untouched; a registration miss only
-logs a warning and never fails activation.
+Provider-owned optional service for the GakuLoader WebView2 plugin content panel.
+In default `Release` builds the React WebView2 panel is the sole primary UI;
+legacy ImGui (`RenderGmlMotion` under `GKMOTION_ENABLE_IMGUI` / `-LegacyImGui`)
+is retired from default builds and kept only as an explicit compile-time fallback.
 
 ## Layout
 
-- `include/GakuWebPanel.h` — ABI contract, copied verbatim from GakuLoader
-  `worktrees/webview2-ui/include/GakuWebPanel.h` (keep in sync; ABI frozen).
+- `include/GakuWebPanel.h` — ABI contract shared with GakuLoader (`GAKU_WEB_PANEL_VERSION = 1`, ABI frozen).
+- `frontend/` — GakuMotion React + Vite + Tailwind + Vitest frontend (`src/motion/`),
+  independent preview mode (`?preview=1` / `dist-preview/`), offline asset build (`frontend/build.ps1`),
+  and visual check (`frontend/scripts/visual-check.mjs`).
 - `src/GkWebPanelBridge.hpp` — wire protocol, method allow-list, revision/token
   guards, event sequencing, async polling. Windows-free and headless-testable.
 - `src/GakuMotionPlugin.cpp` — service publication (`PublishWebPanelApi`),
-  host-service hooks (module assets dir, ShellExecute folder opener, host
+  host-service hooks (plugin-directory `GakuMotion.UI`, ShellExecute folder opener, host
   file-dialog/file-drop/file-drag/appearance), lifecycle wiring.
 - `tests/test_web_panel_bridge.cpp` + `tests/run_web_panel_tests.ps1` —
   synthetic headless contract tests (no game, no real user assets).
 
 ## Wire contract
 
-Authoritative frontend definitions: GakuLoader
-`frontend/src/motion/protocol.ts` and `frontend/docs/motion-bridge-protocol.md`.
+Authoritative frontend definitions: [frontend/src/motion/protocol.ts](../frontend/src/motion/protocol.ts)
+and [frontend/docs/motion-bridge-protocol.md](../frontend/docs/motion-bridge-protocol.md).
 
 - request `{v:1,id,type:"request",method,params}`
 - response `{v:1,type:"response",id,ok,result|error:{code,message,details?}}`
@@ -28,13 +31,11 @@ Authoritative frontend definitions: GakuLoader
 - `handleMessage` buffer rule: on short/NULL buffer returns `GAKU_E_SIZE` and
   sets `requiredBytes` = UTF-8 bytes + 1 (NUL included), output untouched;
   success also reports `requiredBytes` including the NUL.
-- `getAssets`: ordered candidates — host `runtime.gameRoot\GakuMotion.UI`
-  first (the Loader's offline package stages the UI next to `version.dll`),
-  then `<plugin DLL dir>\GakuMotion.UI` (the plugin usually lives in
-  `GakuLoader/plugins`). The first candidate that actually contains
-  `index.html` wins; both missing → `GAKU_E_UNAVAILABLE` so the Loader can
-  fall back to ImGui. Entry `index.html`, virtual host `gakumotion.invalid`,
-  absolute `assetsDir`.
+- `getAssets`: resolves solely from GakuMotion's own plugin directory
+  (`<plugin DLL dir>\GakuMotion.UI`, e.g. `GakuLoader\plugins\GakuMotion.UI`).
+  Never reads `<gameRoot>\GakuMotion.UI`. If `index.html` is absent in the plugin
+  directory, returns `GAKU_E_UNAVAILABLE`. Entry `index.html`, virtual host
+  `gakumotion.invalid`, absolute `assetsDir`.
 
 ## Threading / lifecycle
 
@@ -54,29 +55,37 @@ Authoritative frontend definitions: GakuLoader
 
 ## Methods
 
-Advertised in `motion.hello.supportedMethods`: `bridge.hello`, `bridge.ping`,
-`motion.hello`, `state.get`, `player.play/pause/resume/stop/cycle/seek/
-seekFrame/stepFrame/scrubBegin/scrubUpdate/scrubEnd/setSpeed/setVolume/
-saveVolume/reload`, `playlist.setMode`, `library.refresh/select/delete/
-openFolder`, `actors.selectTarget`, `facial.setWeights/save`, `position.set/
-save`, `camera.set/save`, `stage.set`, `settings.setPhysics`,
-`shell.setTextInputActive`, `appearance.get`.
+Advertised in `motion.hello.supportedMethods` (`kSupportedMethods` in
+`src/GkWebPanelBridge.hpp`): `bridge.hello`, `bridge.ping`, `motion.hello`,
+`state.get`, `player.play/pause/resume/stop/cycle/seek/seekFrame/stepFrame/
+scrubBegin/scrubUpdate/scrubEnd/setSpeed/setVolume/saveVolume/reload`,
+`playlist.setMode`, `library.refresh/select/delete/openFolder/import/probeFiles/
+startEdit`, `actors.selectTarget`, `facial.setWeights/save`, `position.set/save`,
+`camera.set/save`, `stage.set/scan/toggleNode/setLoadReplacement`,
+`settings.setPhysics`, `shell.setTextInputActive`, `appearance.get`,
+`dialog.pickFile/poll`, `drop.setTarget/poll/peek`, `ensemble.set/presetSave/
+presetLoad/probe`, `bone.get/set/reset/resetAll/setMaster/reload/saveToMotion/
+saveToGlobal`, `gaze.get/set/cycle`, `sole.get/set/save/load`,
+`solePitch.get/set`, `studio.get/set/reset`, `experiments.get/set`,
+`telemetry.get`.
 
-Implemented but capability-gated (not advertised; enable by adding to the
-allow-list): `dialog.pickFile`, `dialog.poll`, `drop.setTarget`, `drop.poll`.
+`Dispatch` also accepts compatibility aliases (`ensemble.preset`,
+`ensemble.preset.save/load`, `bone.tree`, `bone.toggle`,
+`gaze.setMode/setDesktop/setWeights`, `sole.read/apply`,
+`studio.setLighting/setVideo`, `experiments.setMiku/setWaistSupport/setBeforeQuartz`).
+Host-dependent methods (`library.openFolder`, `dialog.pickFile`, `drop.*`) return
+structured `not_implemented` when the corresponding host service hook is absent;
+anything outside `Dispatch` returns `unknown_method`.
 
-Reserved → structured `not_implemented`: `library.import`, `library.probeFiles`,
-`ensemble.*`, `stage.scan/toggleNode/setLoadReplacement`, and the
-`gaze./bone./sole./solePitch./studio./experiments./telemetry.` domains.
-Anything else → `unknown_method`.
-
-Events: `player.stateChanged` (~10 Hz while playing, immediate after commands),
-`permission.changed`, `library.changed`, `loaded.changed`, `playlist.changed`,
-`actors.changed`, `camera.changed`, `stage.changed`, `facial.changed`,
-`position.changed`, `ensemble.changed`, `settings.changed`, `import.progress`,
-`appearance.changed`, `bridge.closed`. Permission loss / injection-session
-change finishes an in-flight native scrub through the queue (the frontend
-drops its scrub without sending `scrubEnd`).
+Events (`kSupportedEvents`): `player.stateChanged` (~10 Hz while playing,
+immediate after commands), `permission.changed`, `library.changed`,
+`loaded.changed`, `playlist.changed`, `actors.changed`, `camera.changed`,
+`stage.changed`, `stage.nodesChanged`, `facial.changed`, `position.changed`,
+`ensemble.changed`, `settings.changed`, `import.progress`,
+`appearance.changed`, `bridge.closed`, `gaze.changed`, `bone.changed`,
+`sole.changed`, `solePitch.changed`, `studio.changed`, `experiments.changed`.
+Permission loss / injection-session change finishes an in-flight native scrub
+through the queue (the frontend drops its scrub without sending `scrubEnd`).
 
 ## Known boundaries
 
@@ -84,19 +93,25 @@ drops its scrub without sending `scrubEnd`).
   `camera.actorShadowExperimentMode`, `hideBackground` → green screen /
   camera clear / skybox restore). `stage.json` persistence follows existing
   Core semantics: only `loadReplacementKey` is persisted, by the dedicated
-  (still gated) `stage.setLoadReplacement` control; visual stage settings are
-  not persisted by Core today.
+  `stage.setLoadReplacement` control; visual stage settings are not persisted
+  by Core today.
 - File dialogs, drag/drop, hotkeys and ShellExecute stay on host services /
   Win32; no Web API substitutes. WebView-child-HWND OLE drop swallowing is a
   live-acceptance risk flagged by the Loader host.
-- Direct `gaze` writes and the reserved domains above are intentionally
-  unimplemented; `facial.setWeights` uses the same under-lock direct write as
-  the ImGui overlay.
+- `facial.setWeights` and `gaze.*` write directly under `core_.stateMutex`
+  (matching the ImGui overlay; `gaze.*` requires `GazeRuntimeAvailable()`,
+  returning `not_ready` otherwise).
 
 ## Verification
 
-- `tests/run_web_panel_tests.ps1` — 14 groups / 173 assertions (synthetic).
-- `build.ps1 -Target Runtime` — native `GakuMotion.dll` (Release ImGui).
+- `tests/run_web_panel_tests.ps1` — 23 groups / 304 assertions (synthetic).
+- `tests/run_frontend_tests.ps1` — TypeScript typecheck, Vitest unit tests,
+  `preview:build`, and `frontend/build.ps1` offline asset verification.
+- `build.ps1 -Target Runtime` — native `GakuMotion.dll` (default `Release`
+  without ImGui; pass `-LegacyImGui` for `Release ImGui`).
+- `build.ps1 -Target Frontend` — builds `frontend/dist/` and stages
+  `build/native/GakuMotion.UI/` (`build.ps1 -Target All` builds native,
+  NativeAOT importer, and frontend together).
 - `build.ps1 -Target Contracts` — existing stage-load contracts (regression).
 
 Game loading, WebView rendering and drag/drop acceptance are manual steps and

@@ -1,0 +1,226 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Theme tokens mirror GakuLoader's five host ImGui themes (GakuUiTheme 0..4).
+ * Values are HSL channels consumed by shadcn/ui components. The native host
+ * remains authoritative for the selected theme; React only renders it.
+ */
+@layer base {
+  :root,
+  [data-theme='dark'] {
+    --background: 222 13% 13%;
+    --foreground: 220 14% 93%;
+    --card: 220 13% 16%;
+    --card-foreground: 220 14% 93%;
+    --popover: 220 14% 15%;
+    --popover-foreground: 220 14% 93%;
+    --primary: 211 84% 65%;
+    --primary-foreground: 222 24% 10%;
+    --secondary: 217 12% 23%;
+    --secondary-foreground: 220 14% 90%;
+    --muted: 218 12% 20%;
+    --muted-foreground: 218 10% 64%;
+    --accent: 216 14% 27%;
+    --accent-foreground: 220 14% 93%;
+    --destructive: 0 70% 56%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 142 55% 46%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 90% 56%;
+    --warning-foreground: 38 60% 12%;
+    --border: 218 12% 28%;
+    --input: 218 12% 24%;
+    --ring: 211 84% 65%;
+    --sidebar: 222 14% 11%;
+    --sidebar-foreground: 220 12% 82%;
+    --sidebar-accent: 216 14% 22%;
+    --sidebar-accent-foreground: 220 14% 95%;
+    --sidebar-border: 218 12% 22%;
+    --radius: 0.5rem;
+    color-scheme: dark;
+  }
+
+  [data-theme='sapphire'] {
+    --background: 222 33% 10%;
+    --foreground: 210 40% 95%;
+    --card: 220 30% 14%;
+    --card-foreground: 210 40% 95%;
+    --popover: 221 32% 13%;
+    --popover-foreground: 210 40% 95%;
+    --primary: 207 100% 69%;
+    --primary-foreground: 222 40% 9%;
+    --secondary: 218 28% 22%;
+    --secondary-foreground: 210 40% 92%;
+    --muted: 219 26% 18%;
+    --muted-foreground: 213 22% 66%;
+    --accent: 217 30% 26%;
+    --accent-foreground: 210 40% 95%;
+    --border: 217 30% 30%;
+    --input: 218 28% 22%;
+    --ring: 207 100% 62%;
+    --sidebar: 222 35% 8%;
+    --sidebar-foreground: 210 30% 84%;
+    --sidebar-accent: 217 30% 20%;
+    --sidebar-accent-foreground: 210 40% 96%;
+    --sidebar-border: 217 30% 22%;
+    color-scheme: dark;
+  }
+
+  [data-theme='paper'] {
+    --background: 60 7% 95%;
+    --foreground: 240 8% 13%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 8% 13%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 8% 13%;
+    --primary: 213 54% 38%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 60 6% 88%;
+    --secondary-foreground: 240 8% 18%;
+    --muted: 60 6% 88%;
+    --muted-foreground: 240 5% 40%;
+    --accent: 220 12% 86%;
+    --accent-foreground: 240 8% 15%;
+    --destructive: 0 65% 46%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 142 50% 34%;
+    --success-foreground: 0 0% 100%;
+    --warning: 35 85% 42%;
+    --warning-foreground: 0 0% 100%;
+    --border: 60 4% 72%;
+    --input: 60 6% 82%;
+    --ring: 213 54% 42%;
+    --sidebar: 60 8% 92%;
+    --sidebar-foreground: 240 6% 28%;
+    --sidebar-accent: 220 12% 84%;
+    --sidebar-accent-foreground: 240 8% 14%;
+    --sidebar-border: 60 4% 80%;
+    color-scheme: light;
+  }
+
+  [data-theme='apple-light'] {
+    --background: 240 11% 96%;
+    --foreground: 240 8% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 8% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 8% 12%;
+    --primary: 211 100% 50%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 10% 92%;
+    --secondary-foreground: 240 8% 16%;
+    --muted: 240 10% 92%;
+    --muted-foreground: 240 5% 42%;
+    --accent: 214 30% 90%;
+    --accent-foreground: 240 8% 14%;
+    --destructive: 0 72% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 142 55% 38%;
+    --success-foreground: 0 0% 100%;
+    --warning: 35 92% 46%;
+    --warning-foreground: 0 0% 100%;
+    --border: 240 6% 84%;
+    --input: 240 8% 88%;
+    --ring: 211 100% 50%;
+    --sidebar: 240 12% 93%;
+    --sidebar-foreground: 240 6% 30%;
+    --sidebar-accent: 214 30% 88%;
+    --sidebar-accent-foreground: 240 8% 14%;
+    --sidebar-border: 240 6% 86%;
+    color-scheme: light;
+  }
+
+  [data-theme='apple-dark'] {
+    --background: 240 4% 11%;
+    --foreground: 240 11% 96%;
+    --card: 240 4% 17%;
+    --card-foreground: 240 11% 96%;
+    --popover: 240 4% 15%;
+    --popover-foreground: 240 11% 96%;
+    --primary: 210 100% 52%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 4% 22%;
+    --secondary-foreground: 240 11% 92%;
+    --muted: 240 4% 20%;
+    --muted-foreground: 240 5% 64%;
+    --accent: 240 4% 26%;
+    --accent-foreground: 240 11% 96%;
+    --border: 240 4% 26%;
+    --input: 240 4% 22%;
+    --ring: 210 100% 52%;
+    --sidebar: 240 4% 9%;
+    --sidebar-foreground: 240 8% 82%;
+    --sidebar-accent: 240 4% 20%;
+    --sidebar-accent-foreground: 240 11% 96%;
+    --sidebar-border: 240 4% 20%;
+    color-scheme: dark;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: "Microsoft YaHei", "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif;
+    margin: 0;
+    overflow: hidden;
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  /* A faint primary-tinted wash gives the flat manager surface a little depth
+     without changing the theme identity. */
+  #root {
+    background-image: radial-gradient(
+      120% 90% at 100% 0%,
+      hsl(var(--primary) / 0.06) 0%,
+      transparent 55%
+    );
+  }
+  ::selection {
+    background: hsl(var(--primary) / 0.3);
+  }
+}
+
+/* Scrollbars rendered in the active theme, not the browser default. */
+@layer base {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border));
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.7);
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}
+
+@layer utilities {
+  .focus-ring {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+}

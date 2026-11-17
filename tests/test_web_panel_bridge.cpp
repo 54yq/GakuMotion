@@ -1,7 +1,7 @@
 // Synthetic headless contract tests for gakumotion.web-panel/v1.
 // No game, no real user assets: a local Core plus fake host hooks drive the
 // bridge exactly like the Loader's UI thread would. Wire shapes mirror
-// GakuLoader frontend/src/motion/protocol.ts (v1).
+// frontend/src/motion/protocol.ts (v1).
 //
 // Build/run: tests/run_web_panel_tests.ps1 (MSVC, /std:c++20 /utf-8).
 
@@ -678,10 +678,10 @@ static void TestGetAssetsCandidates()
 	namespace fs = std::filesystem;
 	const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
 	const fs::path root = fs::temp_directory_path() / ("gaku_webpanel_assets_" + std::to_string(stamp));
-	const fs::path gameUi = root / "game" / "GakuMotion.UI";
 	const fs::path pluginUi = root / "plugins" / "GakuMotion" / "GakuMotion.UI";
-	fs::create_directories(gameUi);
+	const fs::path fallbackUi = root / "fallback" / "GakuMotion.UI";
 	fs::create_directories(pluginUi);
+	fs::create_directories(fallbackUi);
 	const auto writeIndex = [](const fs::path& dir) {
 		std::ofstream out(dir / "index.html", std::ios::binary | std::ios::trunc);
 		out << "<!doctype html><title>synthetic</title>";
@@ -690,7 +690,7 @@ static void TestGetAssetsCandidates()
 	Core core;
 	HostHooks hooks;
 	hooks.assetsDirs = [&] {
-		return std::vector<std::wstring>{gameUi.wstring(), pluginUi.wstring()};
+		return std::vector<std::wstring>{pluginUi.wstring(), fallbackUi.wstring()};
 	};
 	Bridge bridge(core, hooks);
 	GakuWebPanelAssetsV1 assets{};
@@ -698,17 +698,17 @@ static void TestGetAssetsCandidates()
 	Check(bridge.GetAssets(nullptr) == GAKU_E_INVALID_ARGUMENT, "null output rejected");
 	Check(bridge.GetAssets(&assets) == GAKU_E_UNAVAILABLE, "no entry file anywhere -> UNAVAILABLE");
 
-	writeIndex(pluginUi);
-	Check(bridge.GetAssets(&assets) == GAKU_OK, "module-dir fallback accepted");
-	Check(assets.assetsDir == pluginUi.wstring(), "fallback resolves to plugin module dir");
+	writeIndex(fallbackUi);
+	Check(bridge.GetAssets(&assets) == GAKU_OK, "secondary candidate accepted when primary missing");
+	Check(assets.assetsDir == fallbackUi.wstring(), "resolves to first existing candidate");
 	Check(std::wstring(assets.entryPath) == L"index.html", "entryPath is index.html");
 	Check(std::wstring(assets.virtualHost) == L"gakumotion.invalid", "virtualHost gakumotion.invalid");
 	Check(assets.abiVersion == GAKU_WEB_PANEL_VERSION && assets.structSize == sizeof(GakuWebPanelAssetsV1),
 		"assets ABI header filled");
 
-	writeIndex(gameUi);
-	Check(bridge.GetAssets(&assets) == GAKU_OK, "game-root candidate accepted");
-	Check(assets.assetsDir == gameUi.wstring(), "host game root preferred over module dir");
+	writeIndex(pluginUi);
+	Check(bridge.GetAssets(&assets) == GAKU_OK, "plugin module dir candidate accepted");
+	Check(assets.assetsDir == pluginUi.wstring(), "plugin module dir preferred first");
 
 	bridge.Invalidate("test");
 	Check(bridge.GetAssets(&assets) == GAKU_E_SHUTTING_DOWN, "closed bridge refuses getAssets");

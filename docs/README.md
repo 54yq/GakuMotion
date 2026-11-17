@@ -12,6 +12,7 @@
 | 排查面板不可用、导入或播放问题 | [常见问题](TROUBLESHOOTING.md) |
 | 准备工具链与查看当前构建入口 | [构建指南](../BUILD_NOTES.md) |
 | 理解宿主、导入器、运行时与共享核心 | [架构](ARCHITECTURE.md) |
+| 了解 WebView2 前端与桥接协议 | [Web Panel 桥接](WEB_PANEL_BRIDGE.md)、[前端协议](../frontend/docs/motion-bridge-protocol.md)、[前端实现清单](../frontend/docs/motion-ui-implementation.md) |
 | 读写动作与镜头文件 | [动作文件格式](formats/ACTION_FORMATS.md) |
 | 开发宿主插件 | [GakuLoader 插件指南](https://github.com/crested-ezios/GakuLoader/blob/main/docs/PLUGIN_DEVELOPMENT.md) |
 | 使用实验性多人舞台 | [摄影多人舞台](ENSEMBLE_STAGE_V1.md) |

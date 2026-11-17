@@ -3429,17 +3429,12 @@ GakuStatus PublishActorApi()
 		return cached;
 	}
 
-	// The Loader's offline package stages GakuMotion.UI next to version.dll in
-	// the game root, while the plugin DLL usually lives in GakuLoader/plugins.
-	// Prefer the host game root when it actually carries the entry file, then
-	// fall back to the plugin module directory; the bridge reports UNAVAILABLE
-	// when neither candidate has index.html.
+	// GakuMotion owns its React/WebView2 UI bundle and ships GakuMotion.UI beside
+	// GakuMotion.dll in the plugin directory (for example GakuLoader/plugins/GakuMotion.UI).
+	// Never read a host-global UI folder outside the plugin's own directory.
 	std::vector<std::wstring> WebPanelAssetsDirs()
 	{
 		std::vector<std::wstring> candidates;
-		const wchar_t* gameRoot = GakuMotion::host::runtime.gameRoot;
-		if (gameRoot && *gameRoot)
-			candidates.push_back((std::filesystem::path(gameRoot) / L"GakuMotion.UI").wstring());
 		const std::wstring moduleDir = WebPanelModuleAssetsDir();
 		if (!moduleDir.empty()) candidates.push_back(moduleDir);
 		return candidates;

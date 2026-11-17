@@ -8,10 +8,14 @@ GakuMotion 在 Windows x64 的 PC DMM 版中由 GakuLoader 加载。
 <游戏根目录>/
   gakumas.exe
   version.dll
+  WebView2Loader.dll
   GakuLoader/
     plugins/
       GakuMotion.dll
       GakuMotion.VmdImporter.Native.dll
+      GakuMotion.UI/                    # WebView2 React 前端离线产物
+        index.html
+        assets/
       GakuBurstBridge.dll               # 可选伴生库
     Configs/gakumotion/
       control.json
@@ -30,7 +34,7 @@ GakuMotion 在 Windows x64 的 PC DMM 版中由 GakuLoader 加载。
 
 配置按需生成；空曲库会在首次初始化时创建，不需要先添加曲目才能刷新。曲目目录可包含身体 `motion.gkclip`、表情、运镜、音频、元数据和用户附属文件；移动或备份时保留整个曲目目录。用户动作文件归 `PluginData/gakumotion/motions/`。
 
-两个 Motion DLL 应来自同一配套包。
+两个 Motion DLL 与 `GakuMotion.UI/` 应来自同一配套包，并保留在同一个插件目录下。目标机器需已安装 Microsoft Edge WebView2 Evergreen Runtime（宿主 `version.dll` 与 `WebView2Loader.dll` 由 GakuLoader 提供）。
 
 ## 首次使用
 

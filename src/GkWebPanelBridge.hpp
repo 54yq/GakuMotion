@@ -5,7 +5,7 @@
 // =============================================================================
 // Implements the GakuWebPanelServiceV1 domain semantics for the Loader's
 // WebView2 manager panel. The wire contract mirrors the frontend authority
-// (GakuLoader frontend/src/motion/protocol.ts and
+// (frontend/src/motion/protocol.ts and
 // frontend/docs/motion-bridge-protocol.md):
 //   request  {v:1, id, type:"request", method, params}
 //   response {v:1, type:"response", id, ok, result | error:{code,message,details?}}
@@ -136,8 +136,8 @@ namespace GakuMotion::webpanel
 
 	struct HostHooks
 	{
-		// Ordered asset-directory candidates (host game root first, plugin
-		// module directory second). GetAssets picks the first one that
+		// Ordered asset-directory candidates supplied by the plugin (the plugin
+		// module directory's GakuMotion.UI). GetAssets picks the first one that
 		// actually contains index.html.
 		std::function<std::vector<std::wstring>()> assetsDirs;
 		std::function<bool(std::string& notice)> openLibraryFolder;

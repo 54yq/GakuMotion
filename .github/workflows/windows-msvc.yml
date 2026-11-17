@@ -1,0 +1,67 @@
+name: GakuMotion Validation
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-validation:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Build native plugin (Release, React WebView2 default)
+        shell: powershell
+        run: ./build.ps1 -Target Runtime
+      - name: Build and run stage-load contracts
+        shell: powershell
+        run: ./build.ps1 -Target Contracts
+      - name: Build and run web-panel bridge contracts
+        shell: powershell
+        run: ./tests/run_web_panel_tests.ps1
+      - name: Run offline release core and GUI syntax checks
+        shell: powershell
+        run: ./tests/run_release_tests.ps1
+      - name: Run layout, migration, and Unicode path checks
+        shell: powershell
+        run: |
+          ./tests/run_layout_tests.ps1
+          ./tests/test_layout_migration.ps1
+          ./tests/run_unicode_path_tests.ps1
+  nativeaot-validation:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Build NativeAOT VMD importer
+        shell: powershell
+        run: ./build.ps1 -Target NativeAOT
+  frontend-validation:
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: powershell
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install locked frontend dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Typecheck frontend
+        run: npm run typecheck
+      - name: Run frontend unit tests
+        run: npm test
+      - name: Build standalone preview bundle (dist-preview)
+        run: npm run preview:build
+      - name: Build and verify offline production assets (dist) and stage GakuMotion.UI
+        run: ./build.ps1 -Dependencies Skip -StageDir ../build/native/GakuMotion.UI

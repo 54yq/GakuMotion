@@ -35,8 +35,9 @@ GakuMotion 目前处于 Developer Preview 阶段。
 
 ### 前置要求
 - 操作系统：Windows 10 / 11 64 位（x64）
-- 宿主程序：[GakuLoader](https://github.com/crested-ezios/GakuLoader)（游戏根目录下的 `version.dll`）
-- 核心文件：配套版本的 `GakuMotion.dll` 与 `GakuMotion.VmdImporter.Native.dll`
+- 运行环境：Microsoft Edge WebView2 Evergreen Runtime（用于 GakuLoader 插件内容区的现代 React 界面；缺失或禁用时回退兼容路径）
+- 宿主程序：[GakuLoader](https://github.com/crested-ezios/GakuLoader)（游戏根目录下的 `version.dll` 与 `WebView2Loader.dll`）
+- 核心文件：配套版本的 `GakuMotion.dll`、`GakuMotion.VmdImporter.Native.dll` 与插件前端资产目录 `GakuMotion.UI/`
 
 ### 文件放置路径
 
@@ -46,10 +47,14 @@ GakuMotion 目前处于 Developer Preview 阶段。
 <游戏根目录>/
 ├── gakumas.exe
 ├── version.dll                                  # GakuLoader 宿主
+├── WebView2Loader.dll                           # GakuLoader 伴生 WebView2 SDK loader
 └── GakuLoader/
     ├── plugins/
     │   ├── GakuMotion.dll                       # 动作播放插件
     │   ├── GakuMotion.VmdImporter.Native.dll     # VMD 原生导入器
+    │   ├── GakuMotion.UI/                       # GakuMotion React 前端离线构建产物
+    │   │   ├── index.html
+    │   │   └── assets/
     │   └── GakuBurstBridge.dll                  # 可选物理伴生库
     ├── Configs/gakumotion/                      # Motion 配置
     ├── Logs/
@@ -106,9 +111,9 @@ GakuMotion 当前仍在积极开发中。已知问题目录请参考 [已知问�
 
 ## 源码构建
 
-源码构建需要 Windows x64 系统，并安装 Visual Studio 2022（或更高版本，包含 MSVC C++20 工具集）以及 .NET 8 SDK。
+源码构建需要 Windows x64 系统，并安装 Visual Studio 2022（或更高版本，包含 MSVC C++20 工具集）、.NET 8 SDK 以及 Node.js 24（用于构建 `frontend/` 中的 React 界面）。
 
-发布源码和开发源码的构建入口、参数及产物目录不同。请按所在仓库使用 [构建指南](BUILD_NOTES.md) 中对应的命令。编译完成后，将配套的两个 DLL 放入游戏的 `GakuLoader/plugins/`，并重启游戏。
+请按所在仓库使用 [构建指南](BUILD_NOTES.md) 中对应的命令。编译完成后，将 `GakuMotion.dll`、`GakuMotion.VmdImporter.Native.dll` 与 `GakuMotion.UI/` 一并放入游戏的 `GakuLoader/plugins/`，并重启游戏。
 
 ## 相关项目
 ### 依赖项目

@@ -1,14 +1,17 @@
 #Requires -Version 5.1
 # SPDX-License-Identifier: MIT
-# Build local binaries and synthetic tests. There is no deployment path.
+# Build local binaries, frontend assets, and synthetic tests. There is no deployment path.
+# NOTE: Keep this script ASCII-only (Windows PowerShell 5.1 ANSI parsing).
 [CmdletBinding()]
 param(
-    [ValidateSet('Preflight', 'Contracts', 'Runtime', 'NativeAOT', 'All')]
+    [ValidateSet('Preflight', 'Contracts', 'Runtime', 'NativeAOT', 'Frontend', 'All')]
     [string]$Target = 'All',
     [string]$OutputRoot = '',
     [string]$WindowsSdkRoot = '',
     [string]$PortableVisualStudio = '',
     [string]$DotNet = 'dotnet',
+    [ValidateSet('Auto', 'Ci', 'Install', 'Skip')]
+    [string]$FrontendDependencies = 'Auto',
     [switch]$LegacyImGui
 )
 $ErrorActionPreference = 'Stop'
@@ -29,12 +32,23 @@ $importInputs = @('interop/GakuMotion.VmdImporter.Native/GakuMotion.VmdImporter.
     'tools/vmd2gkmotion/gakumas_morph_map.json', 'tools/vmd2gkmotion/vmd_eye_profile.json',
     'tools/vmd2gkmotion/tooth_appearance_lut.json', 'tools/vmd2gkmotion/root_retarget_profiles.json',
     'tools/vmd2gkmotion/miku_raw_eye_keys.json')
-$inputs = if ($Target -eq 'Runtime') { $runtimeInputs } elseif ($Target -eq 'NativeAOT') { $importInputs } elseif ($Target -eq 'Contracts') { @('tests/test_stage_load_runtime.cpp') } else { $runtimeInputs + $importInputs }
+$frontendInputs = @('frontend/package.json', 'frontend/package-lock.json',
+    'frontend/vite.config.ts', 'frontend/build.ps1', 'frontend/index.html', 'frontend/src/App.tsx')
+$inputs = switch ($Target) {
+    'Runtime' { $runtimeInputs }
+    'NativeAOT' { $importInputs }
+    'Frontend' { $frontendInputs }
+    'Contracts' { @('tests/test_stage_load_runtime.cpp') }
+    default { $runtimeInputs + $importInputs + $frontendInputs }
+}
 foreach ($inputPath in $inputs) {
     if (-not (Test-Path -LiteralPath (Join-Path $repo $inputPath) -PathType Leaf)) { throw ('Missing build input: ' + $inputPath) }
 }
 if ($Target -in @('NativeAOT', 'All', 'Preflight') -and -not (Get-Command $DotNet -ErrorAction SilentlyContinue)) {
     throw 'Install the .NET 8 SDK, or pass -DotNet to a private SDK installation.'
+}
+if ($Target -in @('Frontend', 'All', 'Preflight') -and -not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
+    throw 'Install Node.js/npm and make npm.cmd available on PATH.'
 }
 
 New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
@@ -58,7 +72,7 @@ if ([string]::IsNullOrWhiteSpace($sdk)) {
 if ([string]::IsNullOrWhiteSpace($sdk)) { throw 'Windows SDK not found; pass -WindowsSdkRoot.' }
 $sdkVersion = Get-ChildItem -LiteralPath (Join-Path $sdk 'Include') -Directory | Sort-Object Name -Descending | Select-Object -First 1
 if (-not $sdkVersion) { throw 'Windows SDK Include directory not found.' }
-if ($Target -eq 'Preflight') { Write-Host 'Build inputs, MSVC and Windows SDK found.'; exit 0 }
+if ($Target -eq 'Preflight') { Write-Host 'Build inputs, MSVC, Windows SDK, .NET, and Node/npm found.'; exit 0 }
 if ($Target -eq 'Runtime' -or $Target -eq 'All') {
     if ($PortableVisualStudio) {
         $env:INCLUDE = @((Join-Path $msvc.FullName 'include'), (Join-Path $sdk "Include\$($sdkVersion.Name)\ucrt"),
@@ -125,6 +139,17 @@ if ($Target -eq 'NativeAOT' -or $Target -eq 'All') {
             "-p:CppLinker=$linker" "-p:CppLibCreator=$libCreator"
         if ($LASTEXITCODE -ne 0) { throw ('NativeAOT build failed: ' + $LASTEXITCODE) }
     } finally { Pop-Location }
+}
+if ($Target -eq 'Frontend' -or $Target -eq 'All') {
+    $resolvedDeps = $FrontendDependencies
+    if ($resolvedDeps -eq 'Auto') {
+        $viteBin = Join-Path $repo 'frontend\node_modules\.bin\vite.cmd'
+        $resolvedDeps = if (Test-Path -LiteralPath $viteBin -PathType Leaf) { 'Skip' } else { 'Ci' }
+    }
+    $uiStageDir = Join-Path $OutputRoot 'native\GakuMotion.UI'
+    $global:LASTEXITCODE = 0
+    & (Join-Path $repo 'frontend\build.ps1') -Dependencies $resolvedDeps -StageDir $uiStageDir -AllowedStageRoot $OutputRoot
+    if ($LASTEXITCODE -ne 0) { throw ('Frontend build failed: ' + $LASTEXITCODE) }
 }
 if ($Target -ne 'Contracts') { Write-Host 'Requested product build completed locally.'; exit 0 }
 # The CL/LIB/PATH defaults are only needed by the manual contracts compile below.

@@ -45,3 +45,25 @@ BSD-3-Clause third-party adaptation, not wholly first-party MIT code.
 Retain `candidate/csharp/THIRD_PARTY_NOTICES.md` and
 `candidate/csharp/third_party/numpy/LICENSE.txt` with relevant source and any
 derived binaries. No NumPy binary or Python runtime is included here.
+
+## Bundled Web UI runtime packages (`GakuMotion.UI`)
+
+The compiled WebView2 frontend (`GakuMotion.UI/assets/*.js`) bundles open-source
+JavaScript UI dependencies locked in `frontend/package-lock.json`:
+
+- `react` (`^19.3.1`, MIT) and `react-dom` (`^19.3.1`, MIT)
+- `@radix-ui/react-alert-dialog`, `@radix-ui/react-checkbox`,
+  `@radix-ui/react-collapsible`, `@radix-ui/react-dialog`,
+  `@radix-ui/react-label`, `@radix-ui/react-select`,
+  `@radix-ui/react-separator`, `@radix-ui/react-slider`,
+  `@radix-ui/react-slot`, `@radix-ui/react-switch`,
+  `@radix-ui/react-tabs`, `@radix-ui/react-tooltip` (MIT, plus transitive
+  MIT primitives recorded in `frontend/package-lock.json`)
+- `lucide-react` (`^1.73.0`, ISC)
+- `clsx` (`^2.1.1`, MIT) and `tailwind-merge` (`^3.7.0`, MIT)
+- `class-variance-authority` (`^0.7.1`, Apache-2.0)
+
+Build-time CSS/tooling (`tailwindcss`, `tailwindcss-animate`, `postcss`,
+`autoprefixer`, `vite`, `vitest`, `playwright`, `typescript`) are listed in
+`frontend/package.json` / `frontend/package-lock.json`; `node_modules` and source
+maps are excluded from `GakuMotion.UI` and release packages.

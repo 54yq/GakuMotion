@@ -29,7 +29,9 @@ flowchart LR
 | [`interop/GakuMotion.VmdImporter.Native/`](../interop/GakuMotion.VmdImporter.Native/) | 产品导入事务、身体与表情轨道、眼动、时基、镜头和曲目编辑 |
 | [`candidate/csharp/`](../candidate/csharp/) | 冻结源求值器生产源码 |
 | [`deps/KineTexture/`](../deps/KineTexture/) | 通用动作计算、采样、变换与重定向核心 |
-| [`src/gui/`](../src/gui/) | 用户界面与操作入口 |
+| [`frontend/`](../frontend/) | WebView2 React 前端界面（`src/motion/`）、Mock 预览、单测与离线构建产物 `GakuMotion.UI/` |
+| [`src/GkWebPanelBridge.hpp`](../src/GkWebPanelBridge.hpp) | `gakumotion.web-panel/v1` Native Bridge 协议实现 |
+| [`src/gui/`](../src/gui/) | Legacy ImGui 回退界面（默认构建关闭，需 `-LegacyImGui` 显式启用） |
 
 ## 导入边界
 
