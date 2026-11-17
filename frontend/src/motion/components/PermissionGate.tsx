@@ -1,11 +1,10 @@
-import { ShieldAlert } from 'lucide-react'
+import { RiShieldKeyholeFill, RiWrenchFill } from '@remixicon/react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { motionStore, useMotionStore } from '../store'
 import { StageReplacementTab, StudioTab } from '../pages/DeveloperPage'
 import { MotionStatusBar } from './MotionStatusBar'
+import { CollapsiblePropertySection, PropertyRow, PropertySection } from './PropertyGroup'
 import { UnsupportedPanel } from './Unsupported'
 
 const DEFAULT_NOTICE =
@@ -22,39 +21,50 @@ export function PermissionGate() {
   const studioSupported = capabilities.includes('studio.set')
 
   return (
-    <div className="flex h-full flex-col" data-testid="permission-gate">
+    <div className="flex h-full flex-col overflow-hidden" data-testid="permission-gate">
       <MotionStatusBar />
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
-        <Alert variant="destructive">
-          <ShieldAlert />
-          <AlertTitle>控制已禁用</AlertTitle>
-          <AlertDescription>{permission.notice || DEFAULT_NOTICE}</AlertDescription>
-        </Alert>
-        {stage.settings.loadReplacementKey !== '' && (
-          <p className="text-sm text-muted-foreground">
-            已保留实验舞台选择；可在下方开发者选项中修改或恢复原生背景。
-          </p>
-        )}
-        <Collapsible>
-          <CollapsibleTrigger className="text-sm font-medium underline-offset-4 hover:underline">
-            开发者选项
-          </CollapsibleTrigger>
-          <CollapsibleContent className="mt-3 space-y-4">
-            <div className="flex items-center gap-2">
-              <Switch
-                id="permission-developer-mode"
-                checked={developerMode}
-                onCheckedChange={(checked) => motionStore.setDeveloperMode(checked)}
-              />
-              <Label htmlFor="permission-developer-mode">开发者模式</Label>
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+        <div className="mx-auto max-w-3xl space-y-4">
+          <Alert variant="destructive" className="rounded-lg p-3.5">
+            <RiShieldKeyholeFill className="size-4" />
+            <AlertTitle className="text-sm font-semibold">控制已禁用</AlertTitle>
+            <AlertDescription className="mt-1 text-xs leading-relaxed">
+              {permission.notice || DEFAULT_NOTICE}
+            </AlertDescription>
+          </Alert>
+
+          {stage.settings.loadReplacementKey !== '' && (
+            <div className="rounded-lg border border-warning/40 bg-warning/5 px-3.5 py-2.5 text-xs text-muted-foreground">
+              已保留实验舞台选择（<code className="font-mono text-foreground">{stage.settings.loadReplacementKey}</code>）；可在下方开发者选项中修改或恢复原生背景。
             </div>
+          )}
+
+          <CollapsiblePropertySection
+            title="开发者选项"
+            description="在控制权限受限的场景下仍可配置摄影舞台替换与摄影棚实验开关"
+            summary={<RiWrenchFill className="size-3.5 text-muted-foreground" />}
+            bodyClassName="space-y-3"
+          >
+            <PropertySection className="border-0">
+              <PropertyRow
+                label="开发者模式"
+                description="开启后可配置尚未完成的摄影舞台替换与布光视频实验功能。"
+                htmlFor="permission-developer-mode"
+              >
+                <Switch
+                  id="permission-developer-mode"
+                  checked={developerMode}
+                  onCheckedChange={(checked) => motionStore.setDeveloperMode(checked)}
+                />
+              </PropertyRow>
+            </PropertySection>
+
             {developerMode ? (
-              <>
+              <div className="space-y-3">
                 {replacementSupported ? (
-                  <section className="space-y-2 rounded-md border p-4">
-                    <h3 className="text-sm font-medium">摄影舞台替换</h3>
+                  <PropertySection title="摄影舞台替换" bodyClassName="p-3.5">
                     <StageReplacementTab />
-                  </section>
+                  </PropertySection>
                 ) : (
                   <UnsupportedPanel
                     title="摄影舞台替换"
@@ -63,10 +73,9 @@ export function PermissionGate() {
                   />
                 )}
                 {studioSupported ? (
-                  <section className="space-y-2 rounded-md border p-4">
-                    <h3 className="text-sm font-medium">布光与视频（实验）</h3>
+                  <PropertySection title="布光与视频（实验）" bodyClassName="p-3.5">
                     <StudioTab />
-                  </section>
+                  </PropertySection>
                 ) : (
                   <UnsupportedPanel
                     title="布光与视频（实验）"
@@ -74,12 +83,12 @@ export function PermissionGate() {
                     methods={['studio.*']}
                   />
                 )}
-              </>
+              </div>
             ) : (
-              <p className="text-sm text-muted-foreground">开启开发者模式后可配置尚未完成的摄影舞台替换。</p>
+              <p className="text-xs text-muted-foreground">开启开发者模式后可配置尚未完成的摄影舞台替换。</p>
             )}
-          </CollapsibleContent>
-        </Collapsible>
+          </CollapsiblePropertySection>
+        </div>
       </div>
     </div>
   )

@@ -66,6 +66,9 @@ import {
 
 export type MotionPage = 'library' | 'motion' | 'camera' | 'stage' | 'settings' | 'developer'
 
+export type LibraryFilter = 'all' | 'camera' | 'audio' | 'facial' | 'motionOnly'
+export type LibrarySort = 'default' | 'title' | 'durationDesc' | 'durationAsc'
+
 export interface PendingDelete {
   key: string
   directory: string
@@ -86,6 +89,7 @@ export interface ImportFormState {
   editRevision: number
   editInfo: EditEntryInfo | null
   title: string
+  subtitle: string
   timing: PerformanceTiming
   slots: Record<ImportSlotKey, ImportSlotState>
   unsupportedAudio: number
@@ -125,6 +129,7 @@ function emptyImportForm(): ImportFormState {
     editRevision: 0,
     editInfo: null,
     title: '',
+    subtitle: '',
     timing: defaultPerformanceTiming(),
     slots: {
       motion: { candidates: [], selection: 0 },
@@ -422,6 +427,7 @@ function normalizeEditEntryInfo(raw: unknown, fallbackKey: string): EditEntryInf
   return {
     key: asStr(obj.key ?? entry.editKey, fallbackKey),
     title: asStr(obj.title ?? entry.title, fallbackKey),
+    subtitle: asStr(obj.subtitle ?? entry.subtitle, ''),
     hasFacial: asBool(obj.hasFacial, false),
     hasCamera: asBool(obj.hasCamera, false),
     hasAudio: asBool(obj.hasAudio, false),
@@ -508,6 +514,11 @@ export interface MotionAppState {
   developerMode: boolean
   selectedLibraryKey: string | null
   librarySearch: string
+  libraryFilter: LibraryFilter
+  librarySort: LibrarySort
+  seekStepSeconds: number
+  precisionPanelOpen: boolean
+  precisionPanelPinned: boolean
   pendingDelete: PendingDelete | null
   deleteStale: boolean
   importDialogOpen: boolean
@@ -611,6 +622,11 @@ function initialState(): MotionAppState {
     developerMode: false,
     selectedLibraryKey: null,
     librarySearch: '',
+    libraryFilter: 'all',
+    librarySort: 'default',
+    seekStepSeconds: 5,
+    precisionPanelOpen: false,
+    precisionPanelPinned: false,
     pendingDelete: null,
     deleteStale: false,
     importDialogOpen: false,
@@ -714,6 +730,7 @@ export class MotionStore {
         if (!permission.injectionAllowed) {
           patch.scrub = { active: false, value: 0 }
           patch.navigationError = null
+          patch.precisionPanelOpen = false
         }
         this.set(patch)
       }),
@@ -904,6 +921,17 @@ export class MotionStore {
 
   setLibrarySearch = (search: string): void => this.set({ librarySearch: search })
 
+  setLibraryFilter = (libraryFilter: LibraryFilter): void => this.set({ libraryFilter })
+
+  setLibrarySort = (librarySort: LibrarySort): void => this.set({ librarySort })
+
+  setSeekStepSeconds = (seconds: number): void =>
+    this.set({ seekStepSeconds: [1, 5, 10, 15].includes(seconds) ? seconds : 5 })
+
+  setPrecisionPanelOpen = (precisionPanelOpen: boolean): void => this.set({ precisionPanelOpen })
+
+  setPrecisionPanelPinned = (precisionPanelPinned: boolean): void => this.set({ precisionPanelPinned })
+
   setImportDialogOpen = (open: boolean): void => this.set({ importDialogOpen: open })
 
   clearActionError = (): void => this.set({ actionError: null })
@@ -1006,6 +1034,18 @@ export class MotionStore {
     }
   }
 
+  seekRelative = async (deltaSeconds: number): Promise<void> => {
+    const { totalFrames, duration, time } = this.state.player
+    if (totalFrames <= 0 || duration <= 0) return
+    const target = Math.min(Math.max(time + deltaSeconds, 0), duration)
+    try {
+      await this.client().request('player.seek', { seconds: target })
+      this.set({ navigationError: null, actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
   seekFrame = async (input: string): Promise<void> => {
     const frame = parseTransportFrame(input)
     if (frame === null) {
@@ -1041,6 +1081,14 @@ export class MotionStore {
     } catch (error) {
       this.reportActionError(error)
     }
+  }
+
+  cyclePlayMode = async (): Promise<void> => {
+    const maxModes = this.state.ensemble.active ? 2 : 4
+    const current = this.state.player.playMode
+    const normalized = current >= 0 && current < maxModes ? current : 1
+    const next = (normalized + 1) % maxModes
+    await this.setPlayMode(next)
   }
 
   // Dragging sends throttled updates; releasing commits and saves (ImGui saves
@@ -1497,6 +1545,7 @@ export class MotionStore {
       form.editRevision = revision
       form.editInfo = info
       form.title = info.title
+      form.subtitle = info.subtitle ?? ''
       form.timing = info.timing
       form.slots.motion.candidates = [IMPORT_SLOT.keepMotion]
       form.slots.facial.candidates = [IMPORT_SLOT.clear]
@@ -1585,6 +1634,10 @@ export class MotionStore {
     this.set({ importForm: { ...this.state.importForm, title } })
   }
 
+  setImportSubtitle = (subtitle: string): void => {
+    this.set({ importForm: { ...this.state.importForm, subtitle } })
+  }
+
   setImportTiming = (slot: ImportSlotKey, patch: Partial<TrackTiming>): void => {
     const timing = { ...this.state.importForm.timing, [slot]: { ...this.state.importForm.timing[slot], ...patch } }
     const track = timing[slot]
@@ -1637,6 +1690,7 @@ export class MotionStore {
     const picks = this.importFormPicks()
     const request = defaultImportRequest()
     request.title = form.title.trim() !== '' ? form.title : '未命名演出'
+    request.subtitle = form.subtitle.trim()
     request.timing = form.timing
     const isDisk = (path: string) => !isSlotPlaceholder(path)
     if (form.mode === 'edit') {

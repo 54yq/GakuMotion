@@ -23,7 +23,8 @@ namespace GakuMotion
 
 	struct MotionImportRequest
 	{
-		std::string vmd, audio, title, python;
+		std::string vmd, audio, title, subtitle, python;
+		bool hasSubtitle{false};
 		std::string morphVmd;
 		std::string cameraVmd;
 		std::string cameraRootRegistration{"auto"}; // auto | off | required (camera root pairing)

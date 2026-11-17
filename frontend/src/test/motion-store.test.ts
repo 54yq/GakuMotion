@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { MotionMockBridgeClient } from '@/motion/mock'
+import { MotionMockBridgeClient, type MockCapabilityProfile } from '@/motion/mock'
 import { BridgeError } from '@/motion/protocol'
 import { MotionStore } from '@/motion/store'
 
-async function startedStore() {
-  const bridge = new MotionMockBridgeClient()
+async function startedStore(capabilityProfile: MockCapabilityProfile = 'full') {
+  const bridge = new MotionMockBridgeClient({ capabilityProfile })
   const store = new MotionStore(bridge)
   await store.start()
   return { bridge, store }
@@ -15,8 +15,8 @@ afterEach(() => {
 })
 
 describe('MotionStore startup', () => {
-  it('negotiates capabilities and loads the snapshot', async () => {
-    const { bridge, store } = await startedStore()
+  it('negotiates full capabilities by default and supports phase1 degradation profile', async () => {
+    const { bridge, store } = await startedStore('full')
     const state = store.getState()
     expect(state.ready).toBe(true)
     expect(state.connected).toBe(true)
@@ -24,11 +24,16 @@ describe('MotionStore startup', () => {
     expect(state.library.entries.length).toBe(5)
     expect(state.permission.injectionAllowed).toBe(true)
     expect(store.supports('player.play')).toBe(true)
-    // Reserved methods stay unavailable even against the mock.
-    expect(store.supports('library.import')).toBe(false)
-    expect(store.supports('dialog.pickFile')).toBe(false)
-    expect(store.supports('ensemble.set')).toBe(false)
+    expect(store.supports('library.import')).toBe(true)
+    expect(store.supports('ensemble.set')).toBe(true)
     bridge.close()
+
+    const phase1 = await startedStore('phase1')
+    expect(phase1.store.supports('player.play')).toBe(true)
+    expect(phase1.store.supports('library.import')).toBe(false)
+    expect(phase1.store.supports('dialog.pickFile')).toBe(false)
+    expect(phase1.store.supports('ensemble.set')).toBe(false)
+    phase1.bridge.close()
   })
 })
 
@@ -44,6 +49,33 @@ describe('MotionStore transport', () => {
     await store.stop()
     expect(store.getState().player.state).toBe('stopped')
     expect(store.getState().player.time).toBe(0)
+    bridge.close()
+  })
+
+  it('seeks relative within clip bounds via seekRelative', async () => {
+    const { bridge, store } = await startedStore()
+    await store.selectMotion('hikari-no-saki', false)
+    await store.seekRelative(10)
+    expect(store.getState().player.time).toBeCloseTo(10)
+    await store.seekRelative(-25)
+    expect(store.getState().player.time).toBe(0)
+    await store.seekRelative(9999)
+    expect(store.getState().player.time).toBeCloseTo(store.getState().player.duration)
+    bridge.close()
+  })
+
+  it('updates UI filter, sort, and precision panel preferences locally', async () => {
+    const { bridge, store } = await startedStore()
+    store.setLibraryFilter('camera')
+    store.setLibrarySort('durationDesc')
+    store.setSeekStepSeconds(10)
+    store.setPrecisionPanelOpen(true)
+    store.setPrecisionPanelPinned(true)
+    expect(store.getState().libraryFilter).toBe('camera')
+    expect(store.getState().librarySort).toBe('durationDesc')
+    expect(store.getState().seekStepSeconds).toBe(10)
+    expect(store.getState().precisionPanelOpen).toBe(true)
+    expect(store.getState().precisionPanelPinned).toBe(true)
     bridge.close()
   })
 
@@ -124,7 +156,6 @@ describe('MotionStore library guards', () => {
     const { bridge, store } = await startedStore()
     await store.selectMotion('hikari-no-saki', true)
     expect(store.getState().loaded.motionKey).toBe('hikari-no-saki')
-    // Force a stale revision by deleting through the bridge directly.
     await bridge.request('library.delete', { key: 'encore-demo', revision: store.getState().library.revision })
     vi.spyOn(bridge, 'request').mockImplementationOnce(async () => {
       throw new BridgeError('stale_revision', '曲库已变化')
@@ -168,6 +199,14 @@ describe('MotionStore library guards', () => {
     expect(store.deleteGuardChanged()).toBe(true)
     bridge.close()
   })
+
+  it('cycles play modes through cyclePlayMode cleanly', async () => {
+    const { bridge, store } = await startedStore()
+    const initial = store.getState().player.playMode
+    await store.cyclePlayMode()
+    expect(store.getState().player.playMode).toBe((initial + 1) % 4)
+    bridge.close()
+  })
 })
 
 describe('MotionStore camera and stage', () => {
@@ -176,7 +215,6 @@ describe('MotionStore camera and stage', () => {
     const promise = store.setCameraQuickMode(2)
     expect(store.getState().cameraPending).toBe(true)
     await promise
-    // The mock echoes camera.changed with the applied settings.
     expect(store.getState().cameraPending).toBe(false)
     expect(store.getState().camera.settings.mode).toBe(2)
     expect(store.getState().camera.settings.followBehavior).toBe(1)

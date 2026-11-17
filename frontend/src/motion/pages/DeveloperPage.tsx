@@ -10,7 +10,9 @@ import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { GAZE_MODES, STAGE_REPLACEMENT_OPTIONS, type RgbColor } from '../protocol'
 import { motionStore, useMotionStore } from '../store'
+import { DragFloat } from '../components/DragFloat'
 import { Vector3Field } from '../components/NumberField'
+import { PropertySection } from '../components/PropertyGroup'
 import { PendingBadge } from '../components/Unsupported'
 
 function ColorField({ label, value, disabled, onChange }: {
@@ -51,88 +53,92 @@ function ExperimentsTab() {
   const supports = (method: string) => capabilities.includes(method)
   const settings = experiments.settings
   return (
-    <div className="space-y-4">
-      <div className="space-y-2">
-        <p className="text-sm font-medium">Miku 拟合</p>
-        {([
-          ['mikuMouthFit', '嘴形拟合'],
-          ['mikuEyeFit', '眼眉拟合'],
-          ['mikuFitAllowUnverified', '允许未验收分量'],
-        ] as const).map(([key, label]) => (
-          <label key={key} className="flex items-center gap-2 text-sm">
-            <Checkbox
-              checked={settings[key]}
-              disabled={!supports('experiments.set')}
-              onCheckedChange={(checked) => void motionStore.setExperiment({ [key]: checked === true })}
-            />
-            {label}
-          </label>
-        ))}
-        <p className="text-xs text-muted-foreground">嘴形：{experiments.mouthFitStatus}；眼眉：{experiments.eyeFitStatus}</p>
-        {experiments.fittedFaceLabel && <p className="text-xs text-muted-foreground">脸型：{experiments.fittedFaceLabel}</p>}
-      </div>
-      <Separator />
-      <div className="space-y-2">
-        <label className="flex items-center gap-2 text-sm">
-          <Checkbox
-            checked={settings.waistSupport}
-            disabled={!supports('experiments.set')}
-            onCheckedChange={(checked) => void motionStore.setExperiment({ waistSupport: checked === true })}
-          />
-          腰部支撑
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <Checkbox
-            checked={settings.beforeQuartz}
-            disabled={!supports('experiments.set')}
-            onCheckedChange={(checked) => void motionStore.setExperiment({ beforeQuartz: checked === true })}
-          />
-          BeforeQuartz
-        </label>
-      </div>
-      <Separator />
-      <div className="space-y-3">
-        <div className="flex items-center gap-2">
-          <p className="text-sm font-medium">视线</p>
-          {!supports('gaze.set') && <PendingBadge />}
+    <PropertySection title="动作实验与视线控制" description="Miku 表情拟合、腰部支撑与眼部/头部追焦实验参数" divided={false} bodyClassName="p-3.5">
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <p className="text-sm font-medium">Miku 拟合</p>
+          {([
+            ['mikuMouthFit', '嘴形拟合'],
+            ['mikuEyeFit', '眼眉拟合'],
+            ['mikuFitAllowUnverified', '允许未验收分量'],
+          ] as const).map(([key, label]) => (
+            <label key={key} className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={settings[key]}
+                disabled={!supports('experiments.set')}
+                onCheckedChange={(checked) => void motionStore.setExperiment({ [key]: checked === true })}
+              />
+              {label}
+            </label>
+          ))}
+          <p className="text-xs text-muted-foreground">嘴形：{experiments.mouthFitStatus}；眼眉：{experiments.eyeFitStatus}</p>
+          {experiments.fittedFaceLabel && <p className="text-xs text-muted-foreground">脸型：{experiments.fittedFaceLabel}</p>}
         </div>
-        <Select value={String(gaze.settings.mode)} onValueChange={(value) => void motionStore.setGazeSettings({ mode: Number(value) })}>
-          <SelectTrigger className="h-8 w-80"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {GAZE_MODES.map((mode, index) => (
-              <SelectItem key={mode} value={String(index)}>{mode}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Button variant="outline" size="sm" onClick={() => motionStore.cycleGazeMode()}>循环切换</Button>
-        <label className="flex items-center gap-2 text-sm">
-          <Checkbox
-            checked={gaze.settings.desktopLookAtEnabled}
-            onCheckedChange={(checked) => void motionStore.setGazeSettings({ desktopLookAtEnabled: checked === true })}
-          />
-          桌面追焦
-        </label>
-        {([
-          ['eyeWeight', '眼睛权重'],
-          ['headWeight', '头部权重'],
-          ['bodyWeight', '身体权重'],
-        ] as const).map(([key, label]) => (
-          <div key={key} className="flex items-center gap-3">
-            <span className="w-16 text-xs text-muted-foreground">{label}</span>
-            <Slider
-              className="max-w-xs flex-1"
-              min={0}
-              max={1}
-              step={0.01}
-              value={[gaze.settings[key]]}
-              onValueChange={([next]) => void motionStore.setGazeSettings({ [key]: next })}
+        <Separator />
+        <div className="space-y-2">
+          <label className="flex items-center gap-2 text-sm">
+            <Checkbox
+              checked={settings.waistSupport}
+              disabled={!supports('experiments.set')}
+              onCheckedChange={(checked) => void motionStore.setExperiment({ waistSupport: checked === true })}
             />
-            <span className="w-10 text-xs tabular-nums">{gaze.settings[key].toFixed(2)}</span>
+            腰部支撑
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <Checkbox
+              checked={settings.beforeQuartz}
+              disabled={!supports('experiments.set')}
+              onCheckedChange={(checked) => void motionStore.setExperiment({ beforeQuartz: checked === true })}
+            />
+            BeforeQuartz
+          </label>
+        </div>
+        <Separator />
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-medium">视线</p>
+            {!supports('gaze.set') && <PendingBadge />}
           </div>
-        ))}
-        <p className="text-xs text-muted-foreground">运行时{gaze.runtimeAvailable ? '已接入' : '未接入'}；{gaze.notice}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={String(gaze.settings.mode)} onValueChange={(value) => void motionStore.setGazeSettings({ mode: Number(value) })}>
+              <SelectTrigger className="h-8 w-80"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {GAZE_MODES.map((mode, index) => (
+                  <SelectItem key={mode} value={String(index)}>{mode}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button variant="outline" size="sm" onClick={() => motionStore.cycleGazeMode()}>循环切换</Button>
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <Checkbox
+              checked={gaze.settings.desktopLookAtEnabled}
+              onCheckedChange={(checked) => void motionStore.setGazeSettings({ desktopLookAtEnabled: checked === true })}
+            />
+            桌面追焦
+          </label>
+          {([
+            ['eyeWeight', '眼睛权重'],
+            ['headWeight', '头部权重'],
+            ['bodyWeight', '身体权重'],
+          ] as const).map(([key, label]) => (
+            <div key={key} className="flex items-center gap-3">
+              <span className="w-16 text-xs text-muted-foreground">{label}</span>
+              <Slider
+                className="max-w-xs flex-1"
+                min={0}
+                max={1}
+                step={0.01}
+                value={[gaze.settings[key]]}
+                onValueChange={([next]) => void motionStore.setGazeSettings({ [key]: next })}
+              />
+              <span className="w-10 text-xs tabular-nums">{gaze.settings[key].toFixed(2)}</span>
+            </div>
+          ))}
+          <p className="text-xs text-muted-foreground">运行时{gaze.runtimeAvailable ? '已接入' : '未接入'}；{gaze.notice}</p>
+        </div>
       </div>
-    </div>
+    </PropertySection>
   )
 }
 
@@ -146,15 +152,23 @@ function TelemetryTab() {
     const timer = setInterval(() => void motionStore.refreshTelemetry(), 1000)
     return () => clearInterval(timer)
   }, [])
-  if (!telemetry) return <p className="text-sm text-muted-foreground">遥测不可用。</p>
   return (
-    <div className="space-y-2 text-sm" data-testid="telemetry-tab">
-      <p className="text-muted-foreground">{telemetry.statusLine}</p>
-      <p>播放器：{telemetry.player.stateName} / {telemetry.player.time.toFixed(3)}s / {telemetry.player.duration.toFixed(3)}s / {telemetry.player.totalFrames} 帧 @ {telemetry.player.fps}fps</p>
-      <p>骨骼：{telemetry.player.boneCount}；文件：{telemetry.player.loadedMotionFile || '无'}</p>
-      <p>角色：{telemetry.actor.actorLabel}（绑定 {telemetry.actor.boundBoneCount}/{telemetry.actor.totalBoneCount} 骨）</p>
-      <p className="text-xs text-muted-foreground">Scrub 探针：begin={begin} update={update} end={end}</p>
-    </div>
+    <PropertySection title="实时遥测与诊断" description="每秒刷新播放器时基、绑定骨骼数量与 Scrub 探针计数" divided={false} bodyClassName="p-3.5">
+      {!telemetry ? (
+        <p className="text-sm text-muted-foreground">遥测不可用。</p>
+      ) : (
+        <div className="space-y-2 text-sm" data-testid="telemetry-tab">
+          <p className="text-muted-foreground">{telemetry.statusLine}</p>
+          <p>
+            播放器：{telemetry.player.stateName} / {telemetry.player.time.toFixed(3)}s /{' '}
+            {telemetry.player.duration.toFixed(3)}s / {telemetry.player.totalFrames} 帧 @ {telemetry.player.fps}fps
+          </p>
+          <p>骨骼：{telemetry.player.boneCount}；文件：{telemetry.player.loadedMotionFile || '无'}</p>
+          <p>角色：{telemetry.actor.actorLabel}（绑定 {telemetry.actor.boundBoneCount}/{telemetry.actor.totalBoneCount} 骨）</p>
+          <p className="font-mono text-xs text-muted-foreground">Scrub 探针：begin={begin} update={update} end={end}</p>
+        </div>
+      )}
+    </PropertySection>
   )
 }
 
@@ -169,76 +183,100 @@ function SoleTab() {
     return () => motionStore.stopSolePolling()
   }, [])
   return (
-    <div className="space-y-3" data-testid="sole-tab">
-      <div className="flex flex-wrap gap-3">
-        {([
-          ['enabled', '测量开关'],
-          ['useBootProxy', '使用培育靴粗略代理'],
-          ['planeCalibrated', '地面已校准'],
-          ['shoeCalibrated', '鞋型已核对'],
-        ] as const).map(([key, label]) => (
-          <label key={key} className="flex items-center gap-2 text-sm">
-            <Checkbox
-              checked={draft[key]}
-              onCheckedChange={(checked) => motionStore.patchSoleDraft({ [key]: checked === true })}
-            />
-            {label}
-          </label>
-        ))}
-        <Button variant="outline" size="sm" onClick={() => motionStore.useSoleManualFallback()}>切回手工点</Button>
-      </div>
-      <Vector3Field
-        labelPrefix="平面法线"
-        value={draft.planeNormal}
-        min={-1}
-        max={1}
-        step={0.01}
-        onCommit={(next) => motionStore.patchSoleDraft({ planeNormal: next })}
-      />
-      <div className="grid gap-2 sm:grid-cols-2">
-        <div className="space-y-1">
-          <Label className="text-xs">平面距离 (米)</Label>
-          <Input type="number" step={0.001} value={draft.planeOffsetM}
-            onChange={(event) => motionStore.patchSoleDraft({ planeOffsetM: Number(event.target.value) })} />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">显示容差 (米)</Label>
-          <Input type="number" step={0.001} value={draft.displayBandM}
-            onChange={(event) => motionStore.patchSoleDraft({ displayBandM: Number(event.target.value) })} />
-        </div>
-      </div>
-      <div className="flex gap-2">
-        <Button variant="outline" size="sm" onClick={() => motionStore.normalizeSolePlaneNormal()}>归一化法线</Button>
-        <Button variant="outline" size="sm" onClick={() => motionStore.setSoleHorizontalPlane()}>水平世界平面</Button>
-      </div>
-      {[0, 1].map((side) => (
-        <div key={side} className="space-y-1">
-          <p className="text-xs font-medium">{side === 0 ? '左靴' : '右靴'}手工三点</p>
-          {draft.points[side].map((point, index) => (
-            <Vector3Field
-              key={index}
-              labelPrefix={`点${index + 1}`}
-              value={point}
-              min={-10}
-              max={10}
-              step={0.001}
-              onCommit={(next) => motionStore.patchSoleDraftPoint(side, index, next)}
-            />
+    <PropertySection title="鞋底平面与足部代理测量 v2" description="校准地面法线、偏移距离与左右靴代理测量点" divided={false} bodyClassName="p-3.5">
+      <div className="space-y-3" data-testid="sole-tab">
+        <div className="flex flex-wrap gap-3">
+          {([
+            ['enabled', '测量开关'],
+            ['useBootProxy', '使用培育靴粗略代理'],
+            ['planeCalibrated', '地面已校准'],
+            ['shoeCalibrated', '鞋型已核对'],
+          ] as const).map(([key, label]) => (
+            <label key={key} className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={draft[key]}
+                onCheckedChange={(checked) => motionStore.patchSoleDraft({ [key]: checked === true })}
+              />
+              {label}
+            </label>
           ))}
+          <Button variant="outline" size="sm" onClick={() => motionStore.useSoleManualFallback()}>切回手工点</Button>
         </div>
-      ))}
-      <div className="flex flex-wrap gap-2">
-        <Button size="sm" disabled={!supports('sole.set')} onClick={() => void motionStore.applySoleSettings()}>应用</Button>
-        <Button variant="outline" size="sm" onClick={() => motionStore.reloadSoleDraft()}>读取已应用值</Button>
-        <Button variant="outline" size="sm" disabled={!supports('sole.save')} onClick={() => void motionStore.saveSoleSettings()}>保存</Button>
-        <Button variant="outline" size="sm" disabled={!supports('sole.load')} onClick={() => void motionStore.loadSoleSettings()}>载入</Button>
+        <Vector3Field
+          labelPrefix="平面法线"
+          value={draft.planeNormal}
+          min={-1}
+          max={1}
+          step={0.01}
+          onCommit={(next) => motionStore.patchSoleDraft({ planeNormal: next })}
+        />
+        <div className="grid gap-2 sm:grid-cols-2">
+          <div className="space-y-1">
+            <Label className="text-xs">平面距离 (米)</Label>
+            <DragFloat
+              ariaLabel="平面距离"
+              className="w-full"
+              inputClassName="h-8 w-full text-xs"
+              value={draft.planeOffsetM}
+              min={-10000}
+              max={10000}
+              step={0.001}
+              decimals={4}
+              unit="m"
+              onChange={(planeOffsetM) => motionStore.patchSoleDraft({ planeOffsetM })}
+              onCommit={(planeOffsetM) => motionStore.patchSoleDraft({ planeOffsetM })}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">显示容差 (米)</Label>
+            <DragFloat
+              ariaLabel="显示容差"
+              className="w-full"
+              inputClassName="h-8 w-full text-xs"
+              value={draft.displayBandM}
+              min={0}
+              max={0.05}
+              step={0.0001}
+              decimals={4}
+              unit="m"
+              onChange={(displayBandM) => motionStore.patchSoleDraft({ displayBandM })}
+              onCommit={(displayBandM) => motionStore.patchSoleDraft({ displayBandM })}
+            />
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => motionStore.normalizeSolePlaneNormal()}>归一化法线</Button>
+          <Button variant="outline" size="sm" onClick={() => motionStore.setSoleHorizontalPlane()}>水平世界平面</Button>
+        </div>
+        {[0, 1].map((side) => (
+          <div key={side} className="space-y-1">
+            <p className="text-xs font-medium">{side === 0 ? '左靴' : '右靴'}手工三点</p>
+            {draft.points[side].map((point, index) => (
+              <Vector3Field
+                key={index}
+                labelPrefix={`点${index + 1}`}
+                value={point}
+                min={-10}
+                max={10}
+                step={0.001}
+                onCommit={(next) => motionStore.patchSoleDraftPoint(side, index, next)}
+              />
+            ))}
+          </div>
+        ))}
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" disabled={!supports('sole.set')} onClick={() => void motionStore.applySoleSettings()}>应用</Button>
+          <Button variant="outline" size="sm" onClick={() => motionStore.reloadSoleDraft()}>读取已应用值</Button>
+          <Button variant="outline" size="sm" disabled={!supports('sole.save')} onClick={() => void motionStore.saveSoleSettings()}>保存</Button>
+          <Button variant="outline" size="sm" disabled={!supports('sole.load')} onClick={() => void motionStore.loadSoleSettings()}>载入</Button>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">视图跨度 (米)</Label>
+          <Slider min={0.2} max={3} step={0.1} value={[span]} onValueChange={([next]) => motionStore.setSolePlotSpan(next)} />
+        </div>
+        <p className="text-xs text-muted-foreground">{sole.notice}</p>
       </div>
-      <div className="space-y-1">
-        <Label className="text-xs">视图跨度 (米)</Label>
-        <Slider min={0.2} max={3} step={0.1} value={[span]} onValueChange={([next]) => motionStore.setSolePlotSpan(next)} />
-      </div>
-      <p className="text-xs text-muted-foreground">{sole.notice}</p>
-    </div>
+    </PropertySection>
   )
 }
 
@@ -249,31 +287,33 @@ function SolePitchTab() {
     return () => motionStore.stopSolePitchPolling()
   }, [])
   return (
-    <div className="space-y-3" data-testid="sole-pitch-tab">
-      <div className="flex flex-wrap gap-4">
-        <label className="flex items-center gap-2 text-sm">
-          <Switch checked={state.settings.enabled} onCheckedChange={(checked) => void motionStore.setSolePitchSettings({ enabled: checked })} />
-          Demo 开关
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <Checkbox checked={state.settings.useMeshEnvelope} onCheckedChange={(checked) => void motionStore.setSolePitchSettings({ useMeshEnvelope: checked === true })} />
-          实测蓝靴包络
-        </label>
+    <PropertySection title="Pitch Demo [Experimental]" description="实验性足部俯仰穿模修正求解器" divided={false} bodyClassName="p-3.5">
+      <div className="space-y-3" data-testid="sole-pitch-tab">
+        <div className="flex flex-wrap gap-4">
+          <label className="flex items-center gap-2 text-sm">
+            <Switch checked={state.settings.enabled} onCheckedChange={(checked) => void motionStore.setSolePitchSettings({ enabled: checked })} />
+            Demo 开关
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <Checkbox checked={state.settings.useMeshEnvelope} onCheckedChange={(checked) => void motionStore.setSolePitchSettings({ useMeshEnvelope: checked === true })} />
+            实测蓝靴包络
+          </label>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="w-20 text-xs text-muted-foreground">最大 pitch</span>
+          <Slider className="max-w-xs flex-1" min={0} max={35} step={0.5}
+            value={[state.settings.maxPitchDegrees]}
+            onValueChange={([next]) => void motionStore.setSolePitchSettings({ maxPitchDegrees: next })} />
+          <span className="w-12 text-xs tabular-nums">{state.settings.maxPitchDegrees}°</span>
+        </div>
+        {state.feet.map((foot, index) => (
+          <p key={index} className="text-xs text-muted-foreground">
+            {index === 0 ? '左' : '右'}：{foot.status}；pitch={foot.solution.pitchDegrees.toFixed(1)}°；穿透={foot.solution.beforePenetrationM.toFixed(4)}m
+          </p>
+        ))}
+        <p className="text-xs text-muted-foreground">{state.notice}</p>
       </div>
-      <div className="flex items-center gap-3">
-        <span className="w-20 text-xs text-muted-foreground">最大 pitch</span>
-        <Slider className="max-w-xs flex-1" min={0} max={35} step={0.5}
-          value={[state.settings.maxPitchDegrees]}
-          onValueChange={([next]) => void motionStore.setSolePitchSettings({ maxPitchDegrees: next })} />
-        <span className="w-12 text-xs tabular-nums">{state.settings.maxPitchDegrees}°</span>
-      </div>
-      {state.feet.map((foot, index) => (
-        <p key={index} className="text-xs text-muted-foreground">
-          {index === 0 ? '左' : '右'}：{foot.status}；pitch={foot.solution.pitchDegrees.toFixed(1)}°；穿透={foot.solution.beforePenetrationM.toFixed(4)}m
-        </p>
-      ))}
-      <p className="text-xs text-muted-foreground">{state.notice}</p>
-    </div>
+    </PropertySection>
   )
 }
 
@@ -403,7 +443,7 @@ export function StudioTab() {
 
 export function DeveloperPage() {
   return (
-    <Tabs defaultValue="motion" className="space-y-3" data-testid="developer-page">
+    <Tabs defaultValue="motion" className="mx-auto max-w-5xl space-y-3" data-testid="developer-page">
       <TabsList className="h-auto flex-wrap">
         <TabsTrigger value="motion">动作</TabsTrigger>
         <TabsTrigger value="telemetry">遥测与诊断</TabsTrigger>
@@ -416,8 +456,16 @@ export function DeveloperPage() {
       <TabsContent value="telemetry" className="mt-3"><TelemetryTab /></TabsContent>
       <TabsContent value="sole" className="mt-3"><SoleTab /></TabsContent>
       <TabsContent value="pitch" className="mt-3"><SolePitchTab /></TabsContent>
-      <TabsContent value="replacement" className="mt-3"><StageReplacementTab /></TabsContent>
-      <TabsContent value="studio" className="mt-3"><StudioTab /></TabsContent>
+      <TabsContent value="replacement" className="mt-3">
+        <PropertySection title="摄影舞台替换" description="预约下次进入摄影模式时替换的场景 AssetBundle" divided={false} bodyClassName="p-3.5">
+          <StageReplacementTab />
+        </PropertySection>
+      </TabsContent>
+      <TabsContent value="studio" className="mt-3">
+        <PropertySection title="摄影棚自定义布光与视频幕布" description="三点布光颜色/强度控制及背景本地视频投影" divided={false} bodyClassName="p-3.5">
+          <StudioTab />
+        </PropertySection>
+      </TabsContent>
     </Tabs>
   )
 }

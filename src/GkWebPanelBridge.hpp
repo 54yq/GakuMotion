@@ -1134,6 +1134,7 @@ namespace GakuMotion::webpanel
 			const MotionEntry& entry = core_.motions[index];
 			return CmdResult::Ok("{\"key\":" + JString(key) +
 				",\"title\":" + JString(entry.title) +
+				",\"subtitle\":" + JString(entry.subtitle) +
 				",\"hasFacial\":" + JBool(entry.hasFacial) +
 				",\"hasCamera\":" + JBool(entry.hasCamera) +
 				",\"hasAudio\":" + JBool(entry.hasAudio) +
@@ -1243,6 +1244,14 @@ namespace GakuMotion::webpanel
 
 			MotionImportRequest request;
 			request.title = title;
+			std::string subtitle;
+			if (draft->Find("subtitle"))
+			{
+				if (!StringParam(*draft, "subtitle", subtitle))
+					return CmdResult::Err("invalid_params", "subtitle must be a string");
+				request.hasSubtitle = true;
+				request.subtitle = subtitle;
+			}
 			request.fps = resolvedFps;
 			request.timing = timing;
 			request.editKey = editKey;
@@ -2344,6 +2353,7 @@ namespace GakuMotion::webpanel
 				const auto& entry = core_.motions[i];
 				if (i) entries += ",";
 				entries += "{\"id\":" + JString(entry.name) + ",\"title\":" + JString(entry.title) +
+					",\"subtitle\":" + JString(entry.subtitle) +
 					",\"directory\":" + JString(entry.dir) +
 					",\"durationSeconds\":" + JNum(entry.durationSeconds) +
 					",\"totalFrames\":" + JNum(entry.totalFrames) +

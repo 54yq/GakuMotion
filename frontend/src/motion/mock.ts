@@ -1,16 +1,33 @@
-// DEV-ONLY mock of the GakuMotion web-panel bridge. This is NOT evidence of
-// native integration: it exists so `npm run dev` and component tests are
-// interactive without the game. The UI labels mock mode with a banner, and
-// methods outside SUPPORTED_METHODS stay "待迁移/不可用" even here.
+// DEV/PREVIEW mock of the GakuMotion web-panel bridge (`gakumotion.web-panel/v1`).
+// Supports two capability profiles:
+//   - 'full' (default): simulates all Phase 1 + Phase 2 native methods for rich
+//     standalone preview (?preview=1) and interactive testing.
+//   - 'phase1': exposes only core Phase 1 methods so capability-gating and
+//     "待迁移" degradation UI can be verified directly.
 
 import {
   BridgeError,
   DEFAULT_CAMERA_SETTINGS,
+  DEFAULT_EXPERIMENT_SETTINGS,
   DEFAULT_FACIAL_WEIGHTS,
+  DEFAULT_GAZE_SETTINGS,
   DEFAULT_PLAYER_STATE,
+  DEFAULT_SOLE_PITCH_SETTINGS,
   DEFAULT_STAGE_SETTINGS,
+  boneNameByHid,
+  defaultPerformanceTiming,
+  defaultSoleSettings,
+  defaultStudioSettings,
+  symmetricalHid,
+  type BoneState,
   type CameraSettings,
+  type DropPeek,
+  type EditEntryInfo,
+  type EnsembleSettings,
   type EnsembleSnapshot,
+  type ExperimentsState,
+  type GazeState,
+  type ImportRequest,
   type LibraryEntry,
   type MotionBridgeClient,
   type MotionEventName,
@@ -18,13 +35,24 @@ import {
   type MotionMethodName,
   type MotionMethods,
   type MotionStateSnapshot,
+  type PerformanceTiming,
   type PlayerState,
   type RequestOptions,
+  type SolePitchState,
+  type SoleState,
+  type StageNode,
+  type StudioSettings,
+  type StudioState,
+  type TelemetrySnapshot,
+  type VmdProbe,
 } from './protocol'
-import { clamp } from './utils'
 import { steppedFrame } from './time'
+import { clamp } from './utils'
+import { classifyImportFiles, validateEnsemble, validateSole, validateStudio } from './validation'
 
-const SUPPORTED_METHODS: MotionMethodName[] = [
+export type MockCapabilityProfile = 'full' | 'phase1'
+
+const PHASE1_METHODS: MotionMethodName[] = [
   'bridge.hello',
   'bridge.ping',
   'motion.hello',
@@ -62,6 +90,46 @@ const SUPPORTED_METHODS: MotionMethodName[] = [
   'appearance.get',
 ]
 
+const PHASE2_METHODS: MotionMethodName[] = [
+  'library.import',
+  'library.probeFiles',
+  'library.startEdit',
+  'dialog.pickFile',
+  'dialog.poll',
+  'drop.setTarget',
+  'drop.poll',
+  'drop.peek',
+  'ensemble.set',
+  'ensemble.presetSave',
+  'ensemble.presetLoad',
+  'ensemble.probe',
+  'bone.get',
+  'bone.set',
+  'bone.reset',
+  'bone.resetAll',
+  'bone.setMaster',
+  'bone.reload',
+  'bone.saveToMotion',
+  'bone.saveToGlobal',
+  'gaze.get',
+  'gaze.set',
+  'stage.scan',
+  'stage.toggleNode',
+  'stage.setLoadReplacement',
+  'experiments.get',
+  'experiments.set',
+  'telemetry.get',
+  'sole.get',
+  'sole.set',
+  'sole.save',
+  'sole.load',
+  'solePitch.get',
+  'solePitch.set',
+  'studio.get',
+  'studio.set',
+  'studio.reset',
+]
+
 const SUPPORTED_EVENTS: MotionEventName[] = [
   'player.stateChanged',
   'permission.changed',
@@ -71,25 +139,86 @@ const SUPPORTED_EVENTS: MotionEventName[] = [
   'actors.changed',
   'camera.changed',
   'stage.changed',
+  'stage.nodesChanged',
   'facial.changed',
   'position.changed',
   'ensemble.changed',
   'settings.changed',
+  'import.progress',
   'appearance.changed',
   'bridge.closed',
+  'bone.changed',
+  'gaze.changed',
+  'experiments.changed',
+  'sole.changed',
+  'solePitch.changed',
+  'studio.changed',
 ]
 
 function seedEntries(): LibraryEntry[] {
   return [
-    { id: 'hikari-no-saki', title: '輝きの先へ', directory: 'gakumas-local/motions/hikari-no-saki', durationSeconds: 212, totalFrames: 12720, hasMotion: true, hasFacial: true, hasCamera: true, hasAudio: true },
-    { id: 'starlight-step', title: 'Starlight Step', directory: 'gakumas-local/motions/starlight-step', durationSeconds: 185.5, totalFrames: 11130, hasMotion: true, hasFacial: false, hasCamera: true, hasAudio: true },
-    { id: 'aoi-haru', title: '青い春', directory: 'gakumas-local/motions/aoi-haru', durationSeconds: 240, totalFrames: 14400, hasMotion: true, hasFacial: true, hasCamera: false, hasAudio: true },
-    { id: 'practice-room', title: '练习室镜像', directory: 'gakumas-local/motions/practice-room', durationSeconds: 96, totalFrames: 5760, hasMotion: true, hasFacial: false, hasCamera: false, hasAudio: false },
-    { id: 'encore-demo', title: 'Encore（演示）', directory: 'gakumas-local/motions/encore-demo', durationSeconds: 30, totalFrames: 1800, hasMotion: true, hasFacial: true, hasCamera: true, hasAudio: false },
+    {
+      id: 'hikari-no-saki',
+      title: '輝きの先へ',
+      subtitle: '初星学園, 花海咲季',
+      directory: 'gakumas-local/motions/hikari-no-saki',
+      durationSeconds: 212,
+      totalFrames: 12720,
+      hasMotion: true,
+      hasFacial: true,
+      hasCamera: true,
+      hasAudio: true,
+    },
+    {
+      id: 'starlight-step',
+      title: 'Starlight Step',
+      subtitle: '初星学園, 篠澤広, 姫崎莉波',
+      directory: 'gakumas-local/motions/starlight-step',
+      durationSeconds: 185.5,
+      totalFrames: 11130,
+      hasMotion: true,
+      hasFacial: false,
+      hasCamera: true,
+      hasAudio: true,
+    },
+    {
+      id: 'aoi-haru',
+      title: '青い春',
+      subtitle: '初星学園, 月村手毬',
+      directory: 'gakumas-local/motions/aoi-haru',
+      durationSeconds: 240,
+      totalFrames: 14400,
+      hasMotion: true,
+      hasFacial: true,
+      hasCamera: false,
+      hasAudio: true,
+    },
+    {
+      id: 'practice-room',
+      title: '练习室镜像',
+      directory: 'gakumas-local/motions/practice-room',
+      durationSeconds: 96,
+      totalFrames: 5760,
+      hasMotion: true,
+      hasFacial: false,
+      hasCamera: false,
+      hasAudio: false,
+    },
+    {
+      id: 'encore-demo',
+      title: 'Encore（演示）',
+      directory: 'gakumas-local/motions/encore-demo',
+      durationSeconds: 30,
+      totalFrames: 1800,
+      hasMotion: true,
+      hasFacial: true,
+      hasCamera: true,
+      hasAudio: false,
+    },
   ]
 }
 
-function seedEnsemble(): EnsembleSnapshot {
+function seedEnsemble(available: boolean): EnsembleSnapshot {
   return {
     settings: {
       enabled: false,
@@ -104,19 +233,144 @@ function seedEnsemble(): EnsembleSnapshot {
         yawDegrees: 0,
       })),
     },
-    revision: 0,
+    revision: 1,
     actorEpoch: 1,
-    available: false,
-    verified: false,
+    available,
+    verified: available,
     probeEnabled: false,
     active: false,
     notice: '',
-    physics: ['', '', ''],
+    physics: ['原生', '原生', '原生'],
+  }
+}
+
+function seedStageNodes(): StageNode[] {
+  return [
+    {
+      index: 0,
+      name: 'StudioStageRoot',
+      displayName: 'StudioStageRoot',
+      parentIndex: -1,
+      depth: 0,
+      hasChildren: true,
+      currentlyActive: true,
+      isColliderLocked: false,
+      isIdentifiedBackground: false,
+      isLightingRoot: false,
+      isLightingNode: false,
+    },
+    {
+      index: 1,
+      name: 'StageLights',
+      displayName: 'StageLights（舞台灯光组）',
+      parentIndex: 0,
+      depth: 1,
+      hasChildren: true,
+      currentlyActive: true,
+      isColliderLocked: false,
+      isIdentifiedBackground: false,
+      isLightingRoot: true,
+      isLightingNode: true,
+    },
+    {
+      index: 2,
+      name: 'BackdropWall',
+      displayName: 'BackdropWall（背景幕布）',
+      parentIndex: 0,
+      depth: 1,
+      hasChildren: false,
+      currentlyActive: true,
+      isColliderLocked: false,
+      isIdentifiedBackground: true,
+      isLightingRoot: false,
+      isLightingNode: false,
+    },
+    {
+      index: 3,
+      name: 'StageFloorCollider',
+      displayName: 'StageFloorCollider（地面碰撞）',
+      parentIndex: 0,
+      depth: 1,
+      hasChildren: false,
+      currentlyActive: true,
+      isColliderLocked: true,
+      isIdentifiedBackground: false,
+      isLightingRoot: false,
+      isLightingNode: false,
+    },
+    {
+      index: 4,
+      name: 'SpotDecalProps',
+      displayName: 'SpotDecalProps（舞台装饰）',
+      parentIndex: 0,
+      depth: 1,
+      hasChildren: false,
+      currentlyActive: true,
+      isColliderLocked: false,
+      isIdentifiedBackground: false,
+      isLightingRoot: false,
+      isLightingNode: false,
+    },
+  ]
+}
+
+function probeFromPath(filePath: string): VmdProbe {
+  const lower = filePath.toLowerCase()
+  if (lower.endsWith('.gkcamera')) {
+    return {
+      path: filePath,
+      valid: true,
+      isGkCamera: true,
+      tendency: 'cameraOnly',
+      boneFrames: 0,
+      bodyBoneFrames: 0,
+      eyeBoneFrames: 0,
+      morphFrames: 0,
+      cameraFrames: 4200,
+    }
+  }
+  if (lower.includes('cam') || filePath.includes('镜头') || filePath.includes('运镜')) {
+    return {
+      path: filePath,
+      valid: true,
+      isGkCamera: false,
+      tendency: 'cameraOnly',
+      boneFrames: 0,
+      bodyBoneFrames: 0,
+      eyeBoneFrames: 0,
+      morphFrames: 0,
+      cameraFrames: 3600,
+    }
+  }
+  if (lower.includes('face') || lower.includes('facial') || lower.includes('morph') || filePath.includes('表情')) {
+    return {
+      path: filePath,
+      valid: true,
+      isGkCamera: false,
+      tendency: 'facialOnly',
+      boneFrames: 120,
+      bodyBoneFrames: 0,
+      eyeBoneFrames: 120,
+      morphFrames: 1850,
+      cameraFrames: 0,
+    }
+  }
+  return {
+    path: filePath,
+    valid: true,
+    isGkCamera: false,
+    tendency: 'motionAndFacial',
+    boneFrames: 11200,
+    bodyBoneFrames: 10900,
+    eyeBoneFrames: 300,
+    morphFrames: 1400,
+    cameraFrames: 0,
   }
 }
 
 export class MotionMockBridgeClient implements MotionBridgeClient {
   readonly kind = 'mock' as const
+  private capabilityProfile: MockCapabilityProfile
   private readonly handlers = new Map<MotionEventName, Set<(payload: never) => void>>()
   private appearanceState = { theme: 0, uiScale: 1, dpiScale: 1, scaleLimited: false }
   private closed = false
@@ -124,11 +378,13 @@ export class MotionMockBridgeClient implements MotionBridgeClient {
   private seq = 0
   private tickTimer: ReturnType<typeof setInterval> | null = null
   private refreshTimer: ReturnType<typeof setTimeout> | null = null
+  private importTimers: Array<ReturnType<typeof setTimeout>> = []
   private scrubbing = false
 
   private permission = { injectionAllowed: true, notice: '' }
   private player: PlayerState = { ...DEFAULT_PLAYER_STATE }
   private entries = seedEntries()
+  private timings = new Map<string, PerformanceTiming>()
   private libraryRevision = 1
   private libraryNotice = ''
   private refreshing = false
@@ -139,6 +395,7 @@ export class MotionMockBridgeClient implements MotionBridgeClient {
     actors: [
       { token: 101, label: '咲季', selected: true },
       { token: 102, label: '凛', selected: false },
+      { token: 103, label: '手毬', selected: false },
     ],
     targetLabel: '咲季',
     boundLabel: '咲季',
@@ -152,12 +409,123 @@ export class MotionMockBridgeClient implements MotionBridgeClient {
     followTargetError: '',
     notice: '',
   }
-  private stage = { settings: { ...DEFAULT_STAGE_SETTINGS }, sceneName: '摄影棚 A', statusNotice: '' }
+  private stage = { settings: { ...DEFAULT_STAGE_SETTINGS }, sceneName: '摄影棚 A', statusNotice: '就绪' }
+  private stageNodes: StageNode[] = seedStageNodes()
   private facial = { weights: { ...DEFAULT_FACIAL_WEIGHTS }, notice: '' }
   private position = { offset: { x: 0, y: 0, z: 0 }, notice: '' }
-  private ensemble = seedEnsemble()
+  private ensemble: EnsembleSnapshot
+  private ensemblePresets = new Map<string, EnsembleSettings>()
   private physicsBackend = 2
   private volumeSaved = 1
+
+  private bone: BoneState = {
+    masterEnabled: true,
+    overrides: [
+      {
+        humanoidId: 10,
+        boneName: 'Head',
+        enabled: true,
+        spaceWorld: false,
+        eulerDeg: { x: 2.5, y: -4.0, z: 0 },
+        isDynamic: false,
+      },
+    ],
+    notice: '',
+  }
+  private gaze: GazeState = {
+    settings: { ...DEFAULT_GAZE_SETTINGS },
+    runtimeAvailable: true,
+    vrifyQueryAvailable: false,
+    vrifyLiveGazeActive: false,
+    notice: '',
+  }
+  private experiments: ExperimentsState = {
+    settings: { ...DEFAULT_EXPERIMENT_SETTINGS },
+    mouthFitStatus: '已适配（合成预览）',
+    eyeFitStatus: '已适配（合成预览）',
+    fittedFaceLabel: '咲季 · Standard',
+    notice: '',
+  }
+  private sole: SoleState = {
+    settings: defaultSoleSettings(),
+    snapshot: { available: true, calibrated: false, clipTime: 0, feet: [] },
+    generation: 1,
+    notice: '',
+  }
+  private solePitch: SolePitchState = {
+    settings: { ...DEFAULT_SOLE_PITCH_SETTINGS },
+    clipTime: 0,
+    feet: [
+      {
+        status: '观测中',
+        applied: false,
+        setterReadbackMatches: true,
+        measuredAfterValid: true,
+        measuredAfterMinimumDistanceM: 0.0012,
+        solution: { valid: true, pitchDegrees: 3.4, usedMeshEnvelope: false, beforePenetrationM: 0.0021 },
+      },
+      {
+        status: '观测中',
+        applied: false,
+        setterReadbackMatches: true,
+        measuredAfterValid: true,
+        measuredAfterMinimumDistanceM: 0.0005,
+        solution: { valid: true, pitchDegrees: 1.2, usedMeshEnvelope: false, beforePenetrationM: 0.0008 },
+      },
+    ],
+    notice: '',
+  }
+  private studio: StudioState = {
+    settings: defaultStudioSettings(),
+    revision: 1,
+    lightingNotice: '',
+    videoNotice: '',
+  }
+
+  private nextDialogId = 1
+  private dialogResults = new Map<number, { paths: string[] }>()
+  private dropTargetEnabled = false
+  private pendingDropFiles: string[] = []
+  private dropPeekState: DropPeek = {
+    visual: 'none',
+    fileCount: 0,
+    accepted: 0,
+    hostElevated: false,
+    hostBlocked: false,
+  }
+
+  constructor(options?: { capabilityProfile?: MockCapabilityProfile }) {
+    this.capabilityProfile = options?.capabilityProfile ?? 'full'
+    this.ensemble = seedEnsemble(this.capabilityProfile === 'full')
+  }
+
+  getCapabilityProfile(): MockCapabilityProfile {
+    return this.capabilityProfile
+  }
+
+  setCapabilityProfile(profile: MockCapabilityProfile): void {
+    this.capabilityProfile = profile
+    this.ensemble = {
+      ...this.ensemble,
+      available: profile === 'full',
+      verified: profile === 'full',
+    }
+  }
+
+  simulateFileDrop(paths: string[]): void {
+    this.pendingDropFiles = [...paths]
+    this.dropPeekState = {
+      visual: 'none',
+      fileCount: 0,
+      accepted: 0,
+      hostElevated: false,
+      hostBlocked: false,
+    }
+  }
+
+  private supportedMethods(): MotionMethodName[] {
+    return this.capabilityProfile === 'full' ? [...PHASE1_METHODS, ...PHASE2_METHODS] : [...PHASE1_METHODS]
+  }
 
   private emit<E extends MotionEventName>(event: E, payload: MotionEvents[E]): void {
     this.seq += 1
@@ -165,7 +533,6 @@ export class MotionMockBridgeClient implements MotionBridgeClient {
     if (set) for (const handler of set) (handler as (p: unknown) => void)(payload)
   }
 
-  // Test/dev helper to push a native-style event.
   push<E extends MotionEventName>(event: E, payload: MotionEvents[E]): void {
     this.emit(event, payload)
   }
@@ -247,6 +614,12 @@ export class MotionMockBridgeClient implements MotionBridgeClient {
     if (!this.permission.injectionAllowed) throw new BridgeError('not_allowed', 'GakuMotion 当前已禁用')
   }
 
+  private requireCapability(method: MotionMethodName): void {
+    if (!this.supportedMethods().includes(method)) {
+      throw new BridgeError('not_implemented', `待迁移：${method} 尚未接入原生实现`)
+    }
+  }
+
   async request<M extends MotionMethodName>(
     method: M,
     params?: MotionMethods[M]['params'],
@@ -255,6 +628,7 @@ export class MotionMockBridgeClient implements MotionBridgeClient {
     if (this.closed) throw new BridgeError('closed', 'The bridge is closed')
     await new Promise((resolve) => setTimeout(resolve, 5))
     const p = (params ?? {}) as Record<string, unknown>
+
     switch (method) {
       case 'bridge.hello':
         return { protocol: 1, sessionId: this.sessionId } as MotionMethods[M]['result']
@@ -264,8 +638,8 @@ export class MotionMockBridgeClient implements MotionBridgeClient {
         return {
           protocol: 1,
           sessionId: this.sessionId,
-          pluginVersion: '0.1.1-mock',
-          supportedMethods: [...SUPPORTED_METHODS],
+          pluginVersion: '0.2.0-mock',
+          supportedMethods: this.supportedMethods(),
           supportedEvents: [...SUPPORTED_EVENTS],
         } as MotionMethods[M]['result']
       case 'state.get':
@@ -408,7 +782,12 @@ export class MotionMockBridgeClient implements MotionBridgeClient {
         this.libraryRevision += 1
         if (this.loaded.motionKey === p.key) {
           this.loaded = { ...this.loaded, motionKey: '', generation: this.loaded.generation + 1 }
-          this.player = { ...DEFAULT_PLAYER_STATE, volume: this.player.volume, speed: this.player.speed, playMode: this.player.playMode }
+          this.player = {
+            ...DEFAULT_PLAYER_STATE,
+            volume: this.player.volume,
+            speed: this.player.speed,
+            playMode: this.player.playMode,
+          }
           this.emit('loaded.changed', { ...this.loaded })
           this.emitPlayer()
         }
@@ -463,7 +842,11 @@ export class MotionMockBridgeClient implements MotionBridgeClient {
         return {} as MotionMethods[M]['result']
       case 'camera.set': {
         this.requireAllowed()
-        this.camera = { ...this.camera, settings: { ...(p.settings as CameraSettings) }, owned: (p.settings as CameraSettings).enabled }
+        this.camera = {
+          ...this.camera,
+          settings: { ...(p.settings as CameraSettings) },
+          owned: (p.settings as CameraSettings).enabled,
+        }
         this.emit('camera.changed', { ...this.camera, settings: { ...this.camera.settings } })
         return {} as MotionMethods[M]['result']
       }
@@ -476,7 +859,6 @@ export class MotionMockBridgeClient implements MotionBridgeClient {
         const settings = { ...(p.settings as MotionStateSnapshot['stage']['settings']) }
         this.stage = { ...this.stage, settings }
         this.emit('stage.changed', { ...this.stage, settings: { ...settings } })
-        // Native-owned cross-domain linkage (ImGui did this in the UI layer).
         const shadowMode = settings.lightingEffectsEnabled ? 1 : 2
         if (this.camera.settings.actorShadowExperimentMode !== shadowMode) {
           this.camera = {
@@ -498,6 +880,403 @@ export class MotionMockBridgeClient implements MotionBridgeClient {
         return {} as MotionMethods[M]['result']
       case 'appearance.get':
         return { ...this.appearanceState } as MotionMethods[M]['result']
+
+      // ---- Phase 2 methods ----
+      case 'dialog.pickFile': {
+        this.requireCapability('dialog.pickFile')
+        const kind = Number(p.kind)
+        const multiple = Boolean(p.multiple)
+        const dialogId = this.nextDialogId++
+        const sampleByKind: Record<number, string[]> = {
+          0: multiple
+            ? ['C:\\Sample\\StageLive_motion.vmd', 'C:\\Sample\\StageLive_camera.vmd', 'C:\\Sample\\StageLive.wav']
+            : ['C:\\Sample\\StageLive_motion.vmd'],
+          1: ['C:\\Sample\\NewDance_motion.vmd'],
+          2: ['C:\\Sample\\NewDance_facial.vmd'],
+          3: ['C:\\Sample\\NewDance_camera.vmd'],
+          4: ['C:\\Sample\\NewDance_song.wav'],
+          5: ['C:\\Sample\\StageBackdrop.mp4'],
+        }
+        this.dialogResults.set(dialogId, { paths: sampleByKind[kind] ?? sampleByKind[0] })
+        return { dialogId } as MotionMethods[M]['result']
+      }
+      case 'dialog.poll': {
+        this.requireCapability('dialog.poll')
+        const dialogId = Number(p.dialogId)
+        const picked = this.dialogResults.get(dialogId)
+        this.dialogResults.delete(dialogId)
+        if (!picked) return { state: 'cancelled', paths: [], notice: '' } as MotionMethods[M]['result']
+        return { state: 'accepted', paths: picked.paths, notice: '' } as MotionMethods[M]['result']
+      }
+      case 'library.probeFiles': {
+        this.requireCapability('library.probeFiles')
+        const paths = Array.isArray(p.paths) ? (p.paths as string[]) : []
+        const probes = paths.filter((item) => /\.(vmd|gkcamera)$/i.test(item)).map(probeFromPath)
+        const classification = classifyImportFiles(paths, probes)
+        return { classification, probes } as MotionMethods[M]['result']
+      }
+      case 'library.startEdit': {
+        this.requireCapability('library.startEdit')
+        if (Number(p.revision) !== this.libraryRevision) throw new BridgeError('stale_revision', '曲库已变化，请刷新后重试')
+        const entry = this.entries.find((item) => item.id === p.key)
+        if (!entry) throw new BridgeError('invalid_params', '曲目不存在')
+        const result: EditEntryInfo = {
+          key: entry.id,
+          title: entry.title,
+          subtitle: entry.subtitle ?? '',
+          hasFacial: entry.hasFacial,
+          hasCamera: entry.hasCamera,
+          hasAudio: entry.hasAudio,
+          timing: this.timings.get(entry.id) ?? defaultPerformanceTiming(),
+        }
+        return result as MotionMethods[M]['result']
+      }
+      case 'library.import': {
+        this.requireCapability('library.import')
+        this.requireAllowed()
+        const req = p.request as ImportRequest
+        if (!req || !req.title.trim()) throw new BridgeError('invalid_params', '无效的导入请求')
+        if (req.editKey && this.loaded.motionKey === req.editKey && (this.player.state === 'playing' || this.player.state === 'paused')) {
+          throw new BridgeError('protected', '播放中禁止覆盖当前曲目')
+        }
+        const applyImport = () => {
+          if (this.closed) return
+          const isEdit = req.editKey !== ''
+          const id = isEdit
+            ? req.editKey
+            : `${req.title.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'custom'}-${Date.now().toString(36)}`
+          const existingIndex = this.entries.findIndex((item) => item.id === id)
+          if (isEdit && existingIndex >= 0) {
+            const current = this.entries[existingIndex]
+            this.entries[existingIndex] = {
+              ...current,
+              title: req.title.trim(),
+              subtitle: req.subtitle !== undefined ? req.subtitle.trim() : current.subtitle,
+              hasFacial: req.disableMorph ? false : req.facialFile !== '' || current.hasFacial,
+              hasCamera: req.clearCamera ? false : req.cameraFile !== '' || current.hasCamera,
+              hasAudio: req.clearAudio ? false : req.audioFile !== '' || current.hasAudio,
+            }
+          } else {
+            this.entries.unshift({
+              id,
+              title: req.title.trim(),
+              subtitle: req.subtitle?.trim() || undefined,
+              directory: `gakumas-local/motions/${id}`,
+              durationSeconds: 180,
+              totalFrames: 10800,
+              hasMotion: true,
+              hasFacial: !req.disableMorph,
+              hasCamera: req.cameraFile !== '',
+              hasAudio: !req.clearAudio && req.audioFile !== '',
+            })
+          }
+          this.timings.set(id, req.timing)
+          this.libraryRevision += 1
+          this.libraryNotice = isEdit ? `已更新曲目：${req.title}` : `已导入曲目：${req.title}`
+          this.emit('import.progress', {
+            active: false,
+            finished: true,
+            succeeded: true,
+            progress: 1,
+            stage: 'DONE',
+            statusText: '导入完成',
+            errorDetail: '',
+          })
+          this.emitLibrary()
+        }
+        this.emit('import.progress', {
+          active: true,
+          finished: false,
+          succeeded: false,
+          progress: 0.25,
+          stage: 'READING',
+          statusText: '正在解析 VMD 与音频轨道...',
+          errorDetail: '',
+        })
+        const t1 = setTimeout(() => {
+          if (!this.closed) {
+            this.emit('import.progress', {
+              active: true,
+              finished: false,
+              succeeded: false,
+              progress: 0.72,
+              stage: 'BUILDING',
+              statusText: '正在生成标准化演出缓存...',
+              errorDetail: '',
+            })
+          }
+        }, 120)
+        const t2 = setTimeout(applyImport, 280)
+        this.importTimers.push(t1, t2)
+        return { started: true } as MotionMethods[M]['result']
+      }
+      case 'drop.setTarget':
+        this.requireCapability('drop.setTarget')
+        this.dropTargetEnabled = Boolean(p.enabled)
+        return {} as MotionMethods[M]['result']
+      case 'drop.peek':
+        this.requireCapability('drop.peek')
+        return {
+          visual: this.dropTargetEnabled ? this.dropPeekState.visual : 'none',
+          fileCount: this.dropPeekState.fileCount,
+          accepted: this.dropPeekState.accepted,
+          hostElevated: this.dropPeekState.hostElevated,
+          hostBlocked: this.dropPeekState.hostBlocked,
+        } as MotionMethods[M]['result']
+      case 'drop.poll': {
+        this.requireCapability('drop.poll')
+        const files = this.pendingDropFiles
+        this.pendingDropFiles = []
+        return { files } as MotionMethods[M]['result']
+      }
+      case 'ensemble.probe':
+        this.requireCapability('ensemble.probe')
+        this.ensemble = { ...this.ensemble, probeEnabled: Boolean(p.enabled) }
+        this.emit('ensemble.changed', { ...this.ensemble })
+        return {} as MotionMethods[M]['result']
+      case 'ensemble.set': {
+        this.requireCapability('ensemble.set')
+        this.requireAllowed()
+        if (Number(p.revision) !== this.ensemble.revision) throw new BridgeError('stale_revision', '多人舞台配置已变化')
+        if (Number(p.actorEpoch) !== this.ensemble.actorEpoch) throw new BridgeError('stale_token', '角色名单已变化')
+        const nextSettings = p.settings as EnsembleSettings
+        const err = validateEnsemble(nextSettings)
+        if (err) throw new BridgeError('invalid_params', err)
+        this.ensemble = {
+          ...this.ensemble,
+          settings: nextSettings,
+          revision: this.ensemble.revision + 1,
+          active: nextSettings.enabled,
+          notice: nextSettings.enabled ? '多人舞台配置已应用（mock）' : '多人舞台已停用（mock）',
+        }
+        this.emit('ensemble.changed', { ...this.ensemble })
+        return {} as MotionMethods[M]['result']
+      }
+      case 'ensemble.presetSave': {
+        this.requireCapability('ensemble.presetSave')
+        const name = String(p.name ?? '').trim()
+        if (!name) throw new BridgeError('invalid_params', '预设名不能为空')
+        this.ensemblePresets.set(name, p.settings as EnsembleSettings)
+        this.ensemble = { ...this.ensemble, notice: `已保存预设：${name}` }
+        this.emit('ensemble.changed', { ...this.ensemble })
+        return {} as MotionMethods[M]['result']
+      }
+      case 'ensemble.presetLoad': {
+        this.requireCapability('ensemble.presetLoad')
+        const name = String(p.name ?? '').trim()
+        const preset = this.ensemblePresets.get(name) ?? this.ensemble.settings
+        return { settings: preset } as MotionMethods[M]['result']
+      }
+      case 'bone.get':
+        this.requireCapability('bone.get')
+        return { ...this.bone, overrides: this.bone.overrides.map((item) => ({ ...item, eulerDeg: { ...item.eulerDeg } })) } as MotionMethods[M]['result']
+      case 'bone.set': {
+        this.requireCapability('bone.set')
+        this.requireAllowed()
+        const hid = Number(p.humanoidId)
+        const pitch = Number(p.pitch)
+        const yaw = Number(p.yaw)
+        const roll = Number(p.roll)
+        const spaceWorld = Boolean(p.spaceWorld)
+        const enabled = Boolean(p.enabled)
+        const symmetrical = Boolean(p.symmetrical)
+        const upsert = (targetHid: number, sign: number) => {
+          const name = boneNameByHid(targetHid) || String(p.boneName ?? '')
+          const nextEntry = {
+            humanoidId: targetHid,
+            boneName: name,
+            enabled,
+            spaceWorld,
+            eulerDeg: { x: pitch, y: yaw * sign, z: roll * sign },
+            isDynamic: false,
+          }
+          const idx = this.bone.overrides.findIndex((o) => o.humanoidId === targetHid)
+          if (idx >= 0) this.bone.overrides[idx] = nextEntry
+          else this.bone.overrides.push(nextEntry)
+        }
+        upsert(hid, 1)
+        if (symmetrical) {
+          const mirror = symmetricalHid(hid)
+          if (mirror >= 0) upsert(mirror, -1)
+        }
+        this.bone = { ...this.bone, notice: '' }
+        this.emit('bone.changed', { ...this.bone })
+        return {} as MotionMethods[M]['result']
+      }
+      case 'bone.reset': {
+        this.requireCapability('bone.reset')
+        const hid = Number(p.humanoidId)
+        const mirror = Boolean(p.symmetrical) ? symmetricalHid(hid) : -1
+        this.bone = {
+          ...this.bone,
+          overrides: this.bone.overrides.filter((o) => o.humanoidId !== hid && o.humanoidId !== mirror),
+          notice: '已重置指定骨骼',
+        }
+        this.emit('bone.changed', { ...this.bone })
+        return {} as MotionMethods[M]['result']
+      }
+      case 'bone.resetAll':
+        this.requireCapability('bone.resetAll')
+        this.bone = { ...this.bone, overrides: [], notice: '已清空全部骨骼覆盖' }
+        this.emit('bone.changed', { ...this.bone })
+        return {} as MotionMethods[M]['result']
+      case 'bone.setMaster':
+        this.requireCapability('bone.setMaster')
+        this.bone = { ...this.bone, masterEnabled: Boolean(p.enabled) }
+        this.emit('bone.changed', { ...this.bone })
+        return {} as MotionMethods[M]['result']
+      case 'bone.reload':
+        this.requireCapability('bone.reload')
+        this.bone = { ...this.bone, notice: '已从磁盘重载骨骼覆盖（mock）' }
+        this.emit('bone.changed', { ...this.bone })
+        return {} as MotionMethods[M]['result']
+      case 'bone.saveToMotion':
+        this.requireCapability('bone.saveToMotion')
+        this.bone = { ...this.bone, notice: '已保存骨骼覆盖至当前曲目（mock）' }
+        this.emit('bone.changed', { ...this.bone })
+        return {} as MotionMethods[M]['result']
+      case 'bone.saveToGlobal':
+        this.requireCapability('bone.saveToGlobal')
+        this.bone = { ...this.bone, notice: '已保存骨骼覆盖至全局配置（mock）' }
+        this.emit('bone.changed', { ...this.bone })
+        return {} as MotionMethods[M]['result']
+      case 'gaze.get':
+        this.requireCapability('gaze.get')
+        return { ...this.gaze, settings: { ...this.gaze.settings } } as MotionMethods[M]['result']
+      case 'gaze.set':
+        this.requireCapability('gaze.set')
+        this.gaze = { ...this.gaze, settings: { ...(p.settings as GazeState['settings']) } }
+        this.emit('gaze.changed', { ...this.gaze })
+        return {} as MotionMethods[M]['result']
+      case 'stage.scan':
+        this.requireCapability('stage.scan')
+        this.emit('stage.nodesChanged', { nodes: this.stageNodes.map((n) => ({ ...n })) })
+        return { nodes: this.stageNodes.map((n) => ({ ...n })) } as MotionMethods[M]['result']
+      case 'stage.toggleNode': {
+        this.requireCapability('stage.toggleNode')
+        const idx = Number(p.index)
+        const active = Boolean(p.active)
+        this.stageNodes = this.stageNodes.map((node) =>
+          node.index === idx && !node.isColliderLocked ? { ...node, currentlyActive: active } : node,
+        )
+        this.emit('stage.nodesChanged', { nodes: this.stageNodes.map((n) => ({ ...n })) })
+        return {} as MotionMethods[M]['result']
+      }
+      case 'stage.setLoadReplacement': {
+        this.requireCapability('stage.setLoadReplacement')
+        const key = String(p.key ?? '')
+        this.stage = { ...this.stage, settings: { ...this.stage.settings, loadReplacementKey: key } }
+        this.emit('stage.changed', { ...this.stage, settings: { ...this.stage.settings } })
+        return { notice: key ? `已预约舞台替换：${key}` : '已恢复原生摄影背景' } as MotionMethods[M]['result']
+      }
+      case 'experiments.get':
+        this.requireCapability('experiments.get')
+        return { ...this.experiments, settings: { ...this.experiments.settings } } as MotionMethods[M]['result']
+      case 'experiments.set':
+        this.requireCapability('experiments.set')
+        this.experiments = {
+          ...this.experiments,
+          settings: { ...this.experiments.settings, ...(p.patch as ExperimentsState['settings']) },
+        }
+        this.emit('experiments.changed', { ...this.experiments })
+        return {} as MotionMethods[M]['result']
+      case 'telemetry.get': {
+        this.requireCapability('telemetry.get')
+        const stateCode =
+          this.player.state === 'playing' ? 1 : this.player.state === 'paused' ? 2 : this.player.state === 'preview' ? 3 : 0
+        const stateName =
+          this.player.state === 'playing'
+            ? '播放中'
+            : this.player.state === 'paused'
+              ? '已暂停'
+              : this.player.state === 'preview'
+                ? '预览中'
+                : '已停止'
+        const snap: TelemetrySnapshot = {
+          statusLine: `Mock Ready | ${this.stage.sceneName}`,
+          player: {
+            state: stateCode,
+            stateName,
+            time: this.player.time,
+            duration: this.player.duration,
+            totalFrames: this.player.totalFrames,
+            fps: this.player.fps,
+            boneCount: 51,
+            loadedMotionFile: this.loaded.motionKey ? `${this.loaded.motionKey}/motion.vmd` : '',
+          },
+          actor: {
+            actorLabel: this.actors.boundLabel || '尚未绑定角色',
+            boundBoneCount: 51,
+            totalBoneCount: 51,
+          },
+        }
+        return snap as MotionMethods[M]['result']
+      }
+      case 'sole.get':
+        this.requireCapability('sole.get')
+        return { ...this.sole } as MotionMethods[M]['result']
+      case 'sole.set': {
+        this.requireCapability('sole.set')
+        const nextSettings = p.settings as SoleState['settings']
+        const err = validateSole(nextSettings)
+        if (err) throw new BridgeError('invalid_params', err)
+        this.sole = {
+          ...this.sole,
+          settings: nextSettings,
+          generation: this.sole.generation + 1,
+          notice: '已应用鞋底测量配置（mock）',
+        }
+        this.emit('sole.changed', { ...this.sole })
+        return {} as MotionMethods[M]['result']
+      }
+      case 'sole.save':
+        this.requireCapability('sole.save')
+        this.sole = { ...this.sole, notice: '已保存鞋底设置（mock）' }
+        this.emit('sole.changed', { ...this.sole })
+        return {} as MotionMethods[M]['result']
+      case 'sole.load':
+        this.requireCapability('sole.load')
+        this.sole = { ...this.sole, notice: '已载入鞋底设置（mock）' }
+        this.emit('sole.changed', { ...this.sole })
+        return {} as MotionMethods[M]['result']
+      case 'solePitch.get':
+        this.requireCapability('solePitch.get')
+        return { ...this.solePitch } as MotionMethods[M]['result']
+      case 'solePitch.set':
+        this.requireCapability('solePitch.set')
+        this.solePitch = {
+          ...this.solePitch,
+          settings: { ...(p.settings as SolePitchState['settings']) },
+        }
+        this.emit('solePitch.changed', { ...this.solePitch })
+        return {} as MotionMethods[M]['result']
+      case 'studio.get':
+        this.requireCapability('studio.get')
+        return { ...this.studio } as MotionMethods[M]['result']
+      case 'studio.set': {
+        this.requireCapability('studio.set')
+        const nextSettings = p.settings as StudioSettings
+        const err = validateStudio(nextSettings)
+        if (err) throw new BridgeError('invalid_params', err)
+        this.studio = {
+          settings: nextSettings,
+          revision: this.studio.revision + 1,
+          lightingNotice: nextSettings.lighting.enabled ? '自定义布光已启用（mock）' : '',
+          videoNotice: nextSettings.video.enabled ? '幕布视频已启用（mock）' : '',
+        }
+        this.emit('studio.changed', { ...this.studio })
+        return {} as MotionMethods[M]['result']
+      }
+      case 'studio.reset':
+        this.requireCapability('studio.reset')
+        this.studio = {
+          settings: defaultStudioSettings(),
+          revision: this.studio.revision + 1,
+          lightingNotice: '已恢复默认摄影棚配置',
+          videoNotice: '',
+        }
+        this.emit('studio.changed', { ...this.studio })
+        return {} as MotionMethods[M]['result']
       default:
         throw new BridgeError('not_implemented', `待迁移：${method} 尚未接入原生实现`)
     }
@@ -520,7 +1299,13 @@ export class MotionMockBridgeClient implements MotionBridgeClient {
       stage: { ...this.stage, settings: { ...this.stage.settings } },
       facial: { weights: { ...this.facial.weights }, notice: this.facial.notice },
       position: { offset: { ...this.position.offset }, notice: this.position.notice },
-      ensemble: { ...this.ensemble, settings: { ...this.ensemble.settings, slots: this.ensemble.settings.slots.map((slot) => ({ ...slot, offset: { ...slot.offset } })) } },
+      ensemble: {
+        ...this.ensemble,
+        settings: {
+          ...this.ensemble.settings,
+          slots: this.ensemble.settings.slots.map((slot) => ({ ...slot, offset: { ...slot.offset } })),
+        },
+      },
       physicsBackend: this.physicsBackend,
       musicVolumeSupport: 0,
       musicVolumeNotice: '',
@@ -529,7 +1314,6 @@ export class MotionMockBridgeClient implements MotionBridgeClient {
     }
   }
 
-  // Dev/test helpers to exercise permission, appearance, and session flows.
   setPermission(injectionAllowed: boolean, notice = ''): void {
     this.permission = { injectionAllowed, notice }
     if (!injectionAllowed) this.scrubbing = false
@@ -561,7 +1345,9 @@ export class MotionMockBridgeClient implements MotionBridgeClient {
     this.closed = true
     if (this.tickTimer) clearInterval(this.tickTimer)
     if (this.refreshTimer) clearTimeout(this.refreshTimer)
+    for (const timer of this.importTimers) clearTimeout(timer)
     this.tickTimer = null
     this.refreshTimer = null
+    this.importTimers = []
   }
 }

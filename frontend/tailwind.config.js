@@ -12,6 +12,8 @@ export default {
         ring: 'hsl(var(--ring))',
         background: 'hsl(var(--background))',
         foreground: 'hsl(var(--foreground))',
+        surface: 'hsl(var(--surface-elevated))',
+        playerBar: 'hsl(var(--player-bar))',
         primary: { DEFAULT: 'hsl(var(--primary))', foreground: 'hsl(var(--primary-foreground))' },
         secondary: { DEFAULT: 'hsl(var(--secondary))', foreground: 'hsl(var(--secondary-foreground))' },
         destructive: { DEFAULT: 'hsl(var(--destructive))', foreground: 'hsl(var(--destructive-foreground))' },
@@ -35,8 +37,8 @@ export default {
         sm: 'calc(var(--radius) - 4px)',
       },
       fontFamily: {
-        sans: ['"Microsoft YaHei"', '"Microsoft YaHei UI"', '"Segoe UI"', 'system-ui', 'sans-serif'],
-        mono: ['Cascadia Code', 'Consolas', 'monospace'],
+        sans: ['"Segoe UI"', 'Arial', '"Microsoft YaHei UI"', '"Microsoft YaHei"', 'system-ui', 'sans-serif'],
+        mono: ['"Segoe UI"', 'Arial', 'Cascadia Code', 'Consolas', 'monospace'],
       },
       keyframes: {
         'accordion-down': { from: { height: '0' }, to: { height: 'var(--radix-accordion-content-height)' } },

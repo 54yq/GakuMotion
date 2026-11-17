@@ -15,6 +15,8 @@ internal sealed class ImportRequest
     public bool DisableMorph { get; init; }
     public required string MotionsRoot { get; init; }
     public string Title { get; init; } = string.Empty;
+    public string Subtitle { get; init; } = string.Empty;
+    public bool HasSubtitle { get; init; }
     public float Fps { get; init; }
     public string Audio { get; init; } = string.Empty;
     public bool ClearAudio { get; init; }
@@ -62,6 +64,9 @@ internal sealed class ImportRequest
                 : 0.0f;
         }
 
+        bool hasSubtitle = root.TryGetProperty("subtitle", out JsonElement subtitleVal) &&
+                           subtitleVal.ValueKind == JsonValueKind.String;
+
         string editDir = Optional("edit_dir");
         return new ImportRequest
         {
@@ -71,6 +76,8 @@ internal sealed class ImportRequest
             DisableMorph = OptionalBool("disable_morph"),
             MotionsRoot = editDir.Length == 0 ? Require("motions_root") : Optional("motions_root"),
             Title = Optional("title"),
+            Subtitle = hasSubtitle ? (subtitleVal.GetString() ?? string.Empty) : string.Empty,
+            HasSubtitle = hasSubtitle,
             Fps = OptionalFloat("fps"),
             Audio = Optional("audio"),
             ClearAudio = OptionalBool("clear_audio"),

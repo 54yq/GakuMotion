@@ -1,4 +1,4 @@
-import { Construction } from 'lucide-react'
+import { RiToolsFill } from '@remixicon/react'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 
@@ -30,7 +30,7 @@ export function UnsupportedPanel({
   return (
     <div className={cn('rounded-md border border-dashed border-border bg-muted/30 p-4', className)} data-testid="unsupported-panel">
       <div className="flex items-center gap-2">
-        <Construction className="size-4 text-warning" />
+        <RiToolsFill className="size-4 text-warning" />
         <span className="text-sm font-medium">{title}</span>
         <PendingBadge label="待迁移 / 不可用" />
       </div>

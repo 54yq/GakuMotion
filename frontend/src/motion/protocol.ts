@@ -30,6 +30,7 @@ export interface PlayerState {
 export interface LibraryEntry {
   id: string
   title: string
+  subtitle?: string
   directory: string
   durationSeconds: number
   totalFrames: number
@@ -266,6 +267,7 @@ export interface ImportClassification {
 
 export interface ImportRequest {
   title: string
+  subtitle?: string
   editKey: string
   motionFile: string
   facialFile: string
@@ -281,6 +283,7 @@ export interface ImportRequest {
 export interface EditEntryInfo {
   key: string
   title: string
+  subtitle?: string
   hasFacial: boolean
   hasCamera: boolean
   hasAudio: boolean
@@ -758,6 +761,7 @@ export function defaultPerformanceTiming(): PerformanceTiming {
 export function defaultImportRequest(): ImportRequest {
   return {
     title: '',
+    subtitle: '',
     editKey: '',
     motionFile: '',
     facialFile: '',

@@ -435,7 +435,7 @@ describe('Phase 2 C++ wire contract & crash resilience', () => {
     expect(overlay).toHaveTextContent('管理员权限')
 
     await user.click(screen.getByTestId('library-row-starlight-step'))
-    await user.click(screen.getByRole('button', { name: '管理选中' }))
+    await user.click(screen.getByRole('button', { name: '编辑 Starlight Step' }))
     const importDialog = await screen.findByTestId('import-dialog')
     expect(importDialog).toBeInTheDocument()
 

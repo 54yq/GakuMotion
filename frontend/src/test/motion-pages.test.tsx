@@ -81,7 +81,13 @@ describe('SettingsPage', () => {
 })
 
 describe('MotionPage', () => {
-  it('selects the drive actor and renders the ensemble and bone sections', async () => {
+  it('selects the drive actor, expands ensemble & bone sections, and labels phase1 unsupported badges', async () => {
+    bridge.close()
+    bridge = new MotionMockBridgeClient({ capabilityProfile: 'phase1' })
+    setMotionBridge(bridge)
+    motionStore.reset()
+    await motionStore.start()
+
     const user = userEvent.setup()
     render(<MotionPage />)
     await user.click(screen.getByRole('combobox', { name: '驱动角色' }))

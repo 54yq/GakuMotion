@@ -102,6 +102,7 @@ namespace GakuMotion
 		std::string name; // 文件夹名（用作唯一 key）
 		std::string dir; // 绝对/相对路径
 		std::string title; // info.json 的 title（缺省回退为文件夹名）
+		std::string subtitle; // info.json 的 subtitle（副标题/作者，半角逗号分隔）
 		float durationSeconds{0.0f};
 		uint32_t totalFrames{0};
 		uint32_t boneCount{0};
@@ -324,6 +325,7 @@ namespace GakuMotion
 				if (parsed)
 				{
 					m.title = info.StringPath("title", m.name);
+					m.subtitle = info.StringPath("subtitle", "");
 					m.durationSeconds = info.FloatPath("duration_seconds", m.durationSeconds);
 					m.totalFrames = static_cast<uint32_t>(info.IntPath("total_frames", static_cast<int>(m.totalFrames)));
 					m.boneCount = static_cast<uint32_t>(info.IntPath("bone_count", static_cast<int>(m.boneCount)));

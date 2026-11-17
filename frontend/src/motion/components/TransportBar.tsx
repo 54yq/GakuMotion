@@ -1,19 +1,34 @@
 import * as React from 'react'
-import { Pause, Play, SkipBack, SkipForward, Square } from 'lucide-react'
+import * as SliderPrimitive from '@radix-ui/react-slider'
+import {
+  RiAlertFill,
+  RiCameraFill,
+  RiCheckFill,
+  RiDiscFill,
+  RiEqualizerFill,
+  RiOrderPlayFill,
+  RiPauseFill,
+  RiPlayFill,
+  RiRepeatFill,
+  RiRepeatOneFill,
+  RiRewindFill,
+  RiShuffleFill,
+  RiSpeedFill,
+  RiSpeedUpFill,
+  RiStopFill,
+  RiVolumeDownFill,
+  RiVolumeMuteFill,
+  RiVolumeUpFill,
+} from '@remixicon/react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Slider } from '@/components/ui/slider'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { cn } from '@/lib/utils'
+import { CAMERA_MODES, ENSEMBLE_PLAY_MODES, PLAYBACK_SPEEDS, PLAY_MODES } from '../protocol'
 import { motionStore, useMotionStore } from '../store'
-import { CAMERA_QUICK_MODES, ENSEMBLE_PLAY_MODES, PLAYBACK_SPEEDS, PLAY_MODES } from '../protocol'
-import {
-  durationMismatch,
-  formatTransportTime,
-  framePosition,
-  lastFrameTime,
-  validTimeline,
-} from '../time'
+import { durationMismatch, formatTransportTime, framePosition, validTimeline } from '../time'
+import { PrecisionControlPanel } from './PrecisionControlPanel'
 import { PendingBadge } from './Unsupported'
 
 function IconTooltip({ label, children }: { label: string; children: React.ReactNode }) {
@@ -25,18 +40,38 @@ function IconTooltip({ label, children }: { label: string; children: React.React
   )
 }
 
+function playModeIcon(mode: number, ensembleActive: boolean) {
+  if (ensembleActive) {
+    return mode === 1 ? RiRepeatFill : RiOrderPlayFill
+  }
+  if (mode === 1) return RiRepeatOneFill
+  if (mode === 2) return RiRepeatFill
+  if (mode === 3) return RiShuffleFill
+  return RiOrderPlayFill
+}
+
 export function TransportBar() {
   const player = useMotionStore((state) => state.player)
   const scrub = useMotionStore((state) => state.scrub)
-  const ensembleActive = useMotionStore((state) => state.ensemble.active)
-  const libraryEmpty = useMotionStore((state) => state.library.entries.length === 0)
   const loaded = useMotionStore((state) => state.loaded)
+  const libraryEntries = useMotionStore((state) => state.library.entries)
+  const actors = useMotionStore((state) => state.actors)
+  const ensembleActive = useMotionStore((state) => state.ensemble.active)
   const musicVolumeSupport = useMotionStore((state) => state.musicVolumeSupport)
   const musicVolumeNotice = useMotionStore((state) => state.musicVolumeNotice)
   const navigationError = useMotionStore((state) => state.navigationError)
   const actionError = useMotionStore((state) => state.actionError)
   const cameraPending = useMotionStore((state) => state.cameraPending)
   const capabilities = useMotionStore((state) => state.capabilities)
+  const seekStepSeconds = useMotionStore((state) => state.seekStepSeconds)
+  const precisionOpen = useMotionStore((state) => state.precisionPanelOpen)
+  const precisionPinned = useMotionStore((state) => state.precisionPanelPinned)
+
+  const [cameraOpen, setCameraOpen] = React.useState(false)
+  const [speedOpen, setSpeedOpen] = React.useState(false)
+  const [volumeOpen, setVolumeOpen] = React.useState(false)
+  const [hoverInfo, setHoverInfo] = React.useState<{ ratio: number; seconds: number } | null>(null)
+  const lastVolumeRef = React.useRef<number>(100)
 
   const supports = (method: string) => capabilities.includes(method)
   const hasClip = validTimeline(player.totalFrames, player.fps)
@@ -47,71 +82,62 @@ export function TransportBar() {
   const isPlaying = player.state === 'playing'
   const isPaused = player.state === 'paused'
   const isPreview = player.state === 'preview'
-  const statusLabel = isPlaying ? '[播放]' : isPaused ? '[暂停]' : isPreview ? '[预览]' : '[停止]'
-  const statusClass = isPlaying
-    ? 'text-success'
-    : isPaused
-      ? 'text-warning'
-      : isPreview
-        ? 'text-primary'
-        : 'text-muted-foreground'
 
   const displayTime = scrub.active ? scrub.value : player.time
-  const framePos = hasClip ? framePosition(player.time, player.fps, player.totalFrames) : 0
-  const playMode = player.playMode >= 0 && player.playMode <= 3 ? player.playMode : 1
-  const playModeLabels = ensembleActive ? ENSEMBLE_PLAY_MODES : PLAY_MODES
-
-  // Time/frame drafts reset when the loaded motion identity changes, and never
-  // show live values while the user is editing (ImGui navigation semantics).
-  const [timeText, setTimeText] = React.useState('00:00.000')
-  const [editingTime, setEditingTime] = React.useState(false)
-  const [frameText, setFrameText] = React.useState('0')
-  const [editingFrame, setEditingFrame] = React.useState(false)
-  const identity = `${loaded.motionKey}:${loaded.generation}:${loaded.injectionSession}`
-
-  React.useEffect(() => {
-    setEditingTime(false)
-    setEditingFrame(false)
-  }, [identity])
-
-  React.useEffect(() => {
-    if (!editingTime) setTimeText(formatTransportTime(player.time))
-  }, [player.time, editingTime])
-
-  React.useEffect(() => {
-    if (!editingFrame) setFrameText(String(Math.floor(framePos)))
-  }, [framePos, editingFrame])
-
-  const commitTime = () => {
-    setEditingTime(false)
-    void motionStore.seekTime(timeText)
-  }
-  const commitFrame = () => {
-    setEditingFrame(false)
-    void motionStore.seekFrame(frameText)
-  }
-
   const volumePercent = Math.round(player.volume * 100)
-  const speedLabel = `倍速: ${player.speed.toFixed(1)}x`
+  React.useEffect(() => {
+    if (volumePercent > 0) lastVolumeRef.current = volumePercent
+  }, [volumePercent])
+
+  const currentEntry = React.useMemo(
+    () => libraryEntries.find((entry) => entry.id === loaded.motionKey) ?? null,
+    [libraryEntries, loaded.motionKey],
+  )
+  const currentSubtitle = React.useMemo(() => {
+    if (!currentEntry?.subtitle) return ''
+    return currentEntry.subtitle
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .join(' / ')
+  }, [currentEntry?.subtitle])
+
   const cameraModeIndex = motionStore.cameraQuickModeIndex()
+  const playModeLabels = ensembleActive ? ENSEMBLE_PLAY_MODES : PLAY_MODES
+  const normalizedPlayMode =
+    player.playMode >= 0 && player.playMode < playModeLabels.length ? player.playMode : 1
+  const currentPlayModeLabel = playModeLabels[normalizedPlayMode] ?? playModeLabels[0]
+  const PlayModeIcon = playModeIcon(normalizedPlayMode, ensembleActive)
+
+  const hasDurationMismatch = hasClip && durationMismatch(player.totalFrames, player.fps, player.duration)
+  const showSourceNotice = loaded.sourceMissing || loaded.sourceChanged
+  const showVolumeNotice = musicVolumeSupport < 0 || musicVolumeNotice !== ''
+
+  const handleTrackPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!hasClip || duration <= 0) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    if (rect.width <= 0) return
+    const ratio = Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1)
+    setHoverInfo({ ratio, seconds: ratio * duration })
+  }
+
+  const VolumeIcon = volumePercent === 0 ? RiVolumeMuteFill : volumePercent < 50 ? RiVolumeDownFill : RiVolumeUpFill
+  const speedModified = Math.abs(player.speed - 1) > 0.01
 
   return (
-    <div className="border-t bg-card/60 px-3 py-2" data-testid="transport-bar">
-      {/* Row 1: title + time */}
-      <div className="flex items-baseline justify-between gap-3">
-        <div className={`min-w-0 truncate text-sm font-medium ${statusClass}`} data-testid="transport-title">
-          {statusLabel} {player.title}
-        </div>
-        <div className="shrink-0 text-xs tabular-nums text-muted-foreground" data-testid="transport-time">
-          {formatTransportTime(displayTime)} / {formatTransportTime(duration)}
-        </div>
-      </div>
-
-      {/* Row 2: three-stage scrub slider */}
-      <div className="mt-1.5 flex items-center gap-2">
-        <Slider
+    <footer
+      className="relative z-30 shrink-0 bg-playerBar select-none"
+      data-testid="transport-bar"
+    >
+      {/* Top Edge: Full-width precision timeline scrubber */}
+      <div
+        className="group relative -mt-1.5 flex h-3 w-full cursor-pointer items-center"
+        onPointerMove={handleTrackPointerMove}
+        onPointerLeave={() => setHoverInfo(null)}
+      >
+        <SliderPrimitive.Root
           aria-label="播放进度"
-          className="flex-1"
+          className="relative flex h-full w-full touch-none select-none items-center data-[disabled]:cursor-not-allowed data-[disabled]:opacity-55"
           min={0}
           max={duration > 0 ? duration : 1}
           step={0.001}
@@ -122,249 +148,387 @@ export function TransportBar() {
             else motionStore.scrubMove(value)
           }}
           onValueCommit={([value]) => {
-            // Radix fires keyboard commits inside the state updater, before the
-            // change callback. Defer so begin→update→end order holds for both
-            // pointer drags and keyboard steps.
             setTimeout(() => motionStore.scrubCommit(value), 0)
           }}
-        />
-        {!supports('player.scrubBegin') && <PendingBadge />}
+        >
+          <SliderPrimitive.Track className="relative h-[2px] w-full grow overflow-hidden bg-border transition-[height] duration-150 group-hover:h-[4px]">
+            <SliderPrimitive.Range className="absolute h-full bg-primary transition-colors" />
+          </SliderPrimitive.Track>
+          <SliderPrimitive.Thumb
+            aria-label="播放进度"
+            className={cn(
+              'block size-3 rounded-full border-2 border-primary bg-background shadow-sm transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none',
+              scrub.active
+                ? 'scale-100 opacity-100'
+                : 'scale-75 opacity-0 group-hover:scale-100 group-hover:opacity-100 focus-visible:scale-100 focus-visible:opacity-100',
+            )}
+          />
+        </SliderPrimitive.Root>
+
+        {hoverInfo && hasClip && (
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute -top-7 z-40 -translate-x-1/2 whitespace-nowrap rounded-md border bg-popover px-2 py-0.5 text-[11px] font-medium tabular-nums text-popover-foreground shadow-md"
+            style={{ left: `${Math.min(Math.max(hoverInfo.ratio * 100, 5), 95)}%` }}
+          >
+            {formatTransportTime(hoverInfo.seconds)} / {formatTransportTime(duration)} · 帧{' '}
+            {Math.floor(framePosition(hoverInfo.seconds, player.fps, player.totalFrames))}
+          </div>
+        )}
       </div>
 
-      {/* Row 3: transport buttons + mode + speed + volume + camera quick mode */}
-      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
-        <div className="flex items-center gap-1">
-          <IconTooltip label="上一曲">
-            <Button
-              variant="outline"
-              size="icon"
-              className="size-8"
-              aria-label="上一曲"
-              disabled={ensembleActive || libraryEmpty || !supports('player.cycle')}
-              onClick={() => void motionStore.cycle(-1)}
+      {/* Inline diagnostic strip when critical notices/errors are present */}
+      {(actionError || showSourceNotice || (navigationError && !precisionOpen) || (hasDurationMismatch && !precisionOpen)) && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border/60 bg-muted/40 px-4 py-1 text-xs">
+          {showSourceNotice && (
+            <span className="flex items-center gap-1 text-warning">
+              <RiAlertFill className="size-3.5 shrink-0" />
+              {loaded.sourceMissing
+                ? '曲目源文件已移除：请先恢复文件，再到曲库重新加载当前曲目。'
+                : '曲目文件已更新：请到曲库重新加载当前曲目；音乐更新后需要重新加载才能开播。'}
+            </span>
+          )}
+          {hasDurationMismatch && !precisionOpen && (
+            <button
+              type="button"
+              onClick={() => motionStore.setPrecisionPanelOpen(true)}
+              className="text-left text-warning underline-offset-2 hover:underline"
+              data-testid="transport-duration-warning"
             >
-              <SkipBack className="size-4" />
+              源动作头部时长与采样帧不一致（点击查看详情）
+            </button>
+          )}
+          {navigationError && !precisionOpen && (
+            <span className="text-destructive" role="alert" data-testid="transport-navigation-error">
+              {navigationError}
+            </span>
+          )}
+          {actionError && (
+            <span className="ml-auto flex items-center gap-2 text-destructive" role="alert" data-testid="transport-action-error">
+              <span>{actionError}</span>
+              <button
+                type="button"
+                onClick={() => motionStore.clearActionError()}
+                className="text-[11px] underline underline-offset-2"
+              >
+                忽略
+              </button>
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Main 3-Zone Player Bar */}
+      <div className="flex items-center justify-between gap-3 px-4 py-2">
+        {/* Left: Calm neutral icon + Title + Status + Time + Actor */}
+        <div className="flex min-w-0 flex-1 items-center gap-2.5">
+          <div
+            aria-hidden="true"
+            className={cn(
+              'flex size-9 shrink-0 items-center justify-center rounded-md border',
+              hasClip
+                ? 'border-primary/25 bg-primary/10 text-primary'
+                : 'border-border bg-muted/60 text-muted-foreground',
+            )}
+          >
+            <RiDiscFill className="size-4" />
+          </div>
+          <div className="min-w-0 flex-1 space-y-0.5">
+            <div className="flex items-center gap-2">
+              <div
+                className="min-w-0 truncate text-[13px] font-semibold leading-tight text-foreground"
+                data-testid="transport-title"
+              >
+                {player.title}
+              </div>
+              {!supports('player.scrubBegin') && <PendingBadge />}
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+              <span className="truncate">
+                {currentSubtitle || (ensembleActive ? '多人舞台' : actors.targetLabel || '未绑定角色')}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Center: PlayMode hot-toggle + Rewind + Play/Pause + Fast-Forward + Stop */}
+        <div className="flex shrink-0 items-center gap-1">
+          <IconTooltip label={`播放模式：${currentPlayModeLabel}（点击切换）`}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-8 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+              aria-label="切换播放模式"
+              data-testid="transport-playmode-toggle"
+              disabled={!supports('playlist.setMode')}
+              onClick={() => void motionStore.cyclePlayMode()}
+            >
+              <PlayModeIcon className="size-4" />
             </Button>
           </IconTooltip>
-          <IconTooltip label={isPlaying ? '暂停' : isPaused || isPreview ? '继续（从当前位置续播）' : '播放'}>
+
+          <IconTooltip label={`快退 ${seekStepSeconds} 秒 (←)`}>
             <Button
-              variant="outline"
+              type="button"
+              variant="ghost"
               size="icon"
-              className="size-8"
+              className="size-8 rounded-md text-foreground/85 hover:bg-accent"
+              aria-label="快退"
+              disabled={!hasClip || !supports('player.seek')}
+              onClick={() => void motionStore.seekRelative(-seekStepSeconds)}
+            >
+              <RiRewindFill className="size-4" />
+            </Button>
+          </IconTooltip>
+
+          <IconTooltip label={isPlaying ? '暂停 (Space / F9)' : isPaused || isPreview ? '继续播放 (Space / F9)' : '播放 (Space / F9)'}>
+            <Button
+              type="button"
+              variant="default"
+              size="icon"
+              className="size-9 rounded-full shadow-sm transition-transform active:scale-95"
               aria-label={isPlaying ? '暂停' : '播放'}
               disabled={!hasClip || !transportSupported}
               onClick={() => void (isPlaying ? motionStore.pause() : motionStore.play())}
             >
-              {isPlaying ? <Pause className="size-4" /> : <Play className="size-4" />}
+              {isPlaying ? <RiPauseFill className="size-4" /> : <RiPlayFill className="size-4 translate-x-[0.5px]" />}
             </Button>
           </IconTooltip>
-          <IconTooltip label="停止：归零并恢复游戏动作">
+
+          <IconTooltip label={`快进 ${seekStepSeconds} 秒 (→)`}>
             <Button
-              variant="outline"
+              type="button"
+              variant="ghost"
               size="icon"
-              className="size-8"
+              className="size-8 rounded-md text-foreground/85 hover:bg-accent"
+              aria-label="快进"
+              disabled={!hasClip || !supports('player.seek')}
+              onClick={() => void motionStore.seekRelative(seekStepSeconds)}
+            >
+              <RiSpeedFill className="size-4" />
+            </Button>
+          </IconTooltip>
+
+          <IconTooltip label="停止：归零并恢复游戏动作 (F10)">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-8 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
               aria-label="停止"
               disabled={!hasClip || !supports('player.stop')}
               onClick={() => void motionStore.stop()}
             >
-              <Square className="size-4" />
-            </Button>
-          </IconTooltip>
-          <IconTooltip label="下一曲">
-            <Button
-              variant="outline"
-              size="icon"
-              className="size-8"
-              aria-label="下一曲"
-              disabled={ensembleActive || libraryEmpty || !supports('player.cycle')}
-              onClick={() => void motionStore.cycle(1)}
-            >
-              <SkipForward className="size-4" />
+              <RiStopFill className="size-4" />
             </Button>
           </IconTooltip>
           {!transportSupported && <PendingBadge />}
         </div>
 
-        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Select
-            value={String(ensembleActive ? Math.min(playMode, 1) : playMode)}
-            disabled={!supports('playlist.setMode')}
-            onValueChange={(value) => void motionStore.setPlayMode(Number(value))}
-          >
-            <SelectTrigger className="h-8 w-[110px] text-xs" aria-label="播放模式">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {playModeLabels.map((label, index) => (
-                <SelectItem key={label} value={String(index)}>
-                  {label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </label>
+        {/* Right: Camera Badge Popover, Speed Icon, Volume Icon, Precision Drawer Trigger */}
+        <div className="flex flex-1 items-center justify-end gap-1.5">
+          {/* Compact Camera Mode Badge (NetEase right-side badge aesthetic) */}
+          <div className="flex items-center gap-1">
+            <Popover open={cameraOpen} onOpenChange={setCameraOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="镜头快捷模式"
+                  data-testid="camera-mode-badge"
+                  disabled={!supports('camera.set')}
+                  className="inline-flex h-6 items-center gap-1 rounded-[4px] border border-border bg-background/70 px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+                >
+                  <RiCameraFill className="size-3 shrink-0" />
+                  <span>{CAMERA_MODES[cameraModeIndex] ?? 'VMD'}</span>
+                </button>
+              </PopoverTrigger>
+              <PopoverContent side="top" align="end" className="w-36 p-1">
+                <div className="px-2 py-1 text-[10px] font-medium text-muted-foreground">镜头模式</div>
+                {CAMERA_MODES.map((label, index) => {
+                  const active = cameraModeIndex === index
+                  return (
+                    <button
+                      key={label}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={active}
+                      onClick={() => {
+                        setCameraOpen(false)
+                        void motionStore.setCameraQuickMode(index)
+                      }}
+                      className={cn(
+                        'flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent',
+                        active ? 'font-semibold text-primary' : 'text-foreground',
+                      )}
+                    >
+                      <span>{label}</span>
+                      {active && <RiCheckFill className="size-3.5 text-primary" />}
+                    </button>
+                  )
+                })}
+              </PopoverContent>
+            </Popover>
+            {cameraPending && (
+              <span className="size-2 animate-pulse rounded-full bg-primary" title="正在应用镜头设置" />
+            )}
+            {!supports('camera.set') && <PendingBadge />}
+          </div>
 
-        <Select
-          value={String(player.speed)}
-          disabled={!supports('player.setSpeed')}
-          onValueChange={(value) => void motionStore.setSpeed(Number(value))}
-        >
-          <SelectTrigger className="h-8 w-[110px] text-xs" aria-label="倍速">
-            <SelectValue>{speedLabel}</SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            {PLAYBACK_SPEEDS.map((speed) => (
-              <SelectItem key={speed} value={String(speed)}>
-                {`倍速: ${speed.toFixed(1)}x`}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          {/* Speed Icon Only (Tooltip shows current value) */}
+          <Popover open={speedOpen} onOpenChange={setSpeedOpen}>
+            <IconTooltip label={`播放倍速: ${player.speed.toFixed(2)}x`}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant={speedModified ? 'secondary' : 'ghost'}
+                  size="icon"
+                  aria-label="播放速度"
+                  className={cn(
+                    'size-7 rounded-md',
+                    speedModified ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  <RiSpeedUpFill className="size-4" />
+                </Button>
+              </PopoverTrigger>
+            </IconTooltip>
+            <PopoverContent side="top" align="end" className="w-60 space-y-2.5 p-3">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold">播放倍速</span>
+                <span className="font-semibold tabular-nums text-primary">{player.speed.toFixed(2)}x</span>
+              </div>
+              <div className="grid grid-cols-3 gap-1">
+                {PLAYBACK_SPEEDS.map((speed) => {
+                  const active = Math.abs(player.speed - speed) < 0.01
+                  return (
+                    <button
+                      key={speed}
+                      type="button"
+                      disabled={!supports('player.setSpeed')}
+                      onClick={() => void motionStore.setSpeed(speed)}
+                      className={cn(
+                        'rounded border px-2 py-1 text-xs tabular-nums transition-colors disabled:opacity-50',
+                        active
+                          ? 'border-primary bg-primary text-primary-foreground'
+                          : 'border-border bg-background/60 text-muted-foreground hover:text-foreground',
+                      )}
+                    >
+                      {speed.toFixed(1)}x
+                    </button>
+                  )
+                })}
+              </div>
+              <div className="flex items-center gap-2 pt-0.5">
+                <Slider
+                  aria-label="快捷倍速"
+                  min={0.1}
+                  max={3}
+                  step={0.05}
+                  disabled={!supports('player.setSpeed')}
+                  value={[player.speed]}
+                  onValueChange={([value]) => void motionStore.setSpeed(Math.round(value * 100) / 100)}
+                />
+              </div>
+            </PopoverContent>
+          </Popover>
 
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">音乐音量</span>
-          <Slider
-            aria-label="音乐音量"
-            className="w-[120px]"
-            min={0}
-            max={100}
-            step={1}
-            disabled={!supports('player.setVolume')}
-            value={[volumePercent]}
-            onValueChange={([value]) => motionStore.setVolume(value)}
-            onValueCommit={([value]) => motionStore.commitVolume(value)}
-          />
-          <span className="w-9 text-xs tabular-nums text-muted-foreground">{volumePercent}%</span>
-        </div>
+          {/* Volume Icon Only + Vertical Volume Popover */}
+          <Popover open={volumeOpen} onOpenChange={setVolumeOpen}>
+            <IconTooltip label={`音乐音量: ${volumePercent}%`}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant={showVolumeNotice ? 'outline' : 'ghost'}
+                  size="icon"
+                  aria-label="音量控制"
+                  className={cn(
+                    'size-7 rounded-md',
+                    showVolumeNotice ? 'text-warning' : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  <VolumeIcon className="size-4" />
+                </Button>
+              </PopoverTrigger>
+            </IconTooltip>
+            <PopoverContent
+              side="top"
+              align="center"
+              className={cn(
+                'flex flex-col items-center gap-2 p-2.5',
+                showVolumeNotice ? 'w-44' : 'w-14',
+              )}
+            >
+              <div className="flex h-28 w-full items-center justify-center py-1">
+                <Slider
+                  orientation="vertical"
+                  aria-label="音乐音量"
+                  min={0}
+                  max={100}
+                  step={1}
+                  disabled={!supports('player.setVolume')}
+                  value={[volumePercent]}
+                  onValueChange={([value]) => motionStore.setVolume(value)}
+                  onValueCommit={([value]) => motionStore.commitVolume(value)}
+                />
+              </div>
+              <span className="text-[11px] font-medium tabular-nums text-muted-foreground">
+                {volumePercent}%
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-7 shrink-0 rounded-md"
+                aria-label={volumePercent === 0 ? '取消静音' : '静音'}
+                disabled={!supports('player.setVolume')}
+                onClick={() => {
+                  const next = volumePercent === 0 ? lastVolumeRef.current || 100 : 0
+                  motionStore.commitVolume(next)
+                }}
+              >
+                <VolumeIcon className="size-4" />
+              </Button>
+              {showVolumeNotice && (
+                <p className="border-t border-border/60 pt-1.5 text-center text-[11px] leading-snug text-warning">
+                  {musicVolumeSupport < 0
+                    ? '当前音乐后端不支持独立音量，音乐仍以原音量播放。'
+                    : musicVolumeNotice}
+                </p>
+              )}
+            </PopoverContent>
+          </Popover>
 
-        <div className="flex items-center gap-1.5">
-          <Select
-            value={String(cameraModeIndex)}
-            disabled={!supports('camera.set')}
-            onValueChange={(value) => void motionStore.setCameraQuickMode(Number(value))}
-          >
-            <SelectTrigger className="h-8 w-[120px] text-xs" aria-label="镜头快捷模式">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {CAMERA_QUICK_MODES.map((label, index) => (
-                <SelectItem key={label} value={String(index)}>
-                  {label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {cameraPending && <span className="text-xs text-muted-foreground">应用中…</span>}
-          {!supports('camera.set') && <PendingBadge />}
+          {/* Precision Control Drawer Trigger */}
+          <Popover open={precisionOpen} onOpenChange={(next) => motionStore.setPrecisionPanelOpen(next)}>
+            <PopoverTrigger asChild>
+              <Button
+                type="button"
+                variant={precisionOpen ? 'default' : 'outline'}
+                size="icon"
+                className="relative size-7 rounded-md"
+                aria-label="精细控制"
+                title="精细控制与专业定位面板"
+                data-testid="precision-control-trigger"
+              >
+                <RiEqualizerFill className="size-3.5" />
+                {(precisionPinned || navigationError) && !precisionOpen && (
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      'absolute -right-0.5 -top-0.5 size-2 rounded-full',
+                      navigationError ? 'bg-destructive' : 'bg-primary',
+                    )}
+                  />
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent side="top" align="end" pinned={precisionPinned} className="p-3.5">
+              <PrecisionControlPanel onClose={() => motionStore.setPrecisionPanelOpen(false)} />
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
-
-      {/* Row 4: frame stepping + precise time/frame navigation */}
-      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
-        <div className="flex items-center gap-1">
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8"
-            disabled={!hasClip || !supports('player.stepFrame')}
-            onClick={() => void motionStore.stepFrame(-1)}
-          >
-            上一帧
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8"
-            disabled={!hasClip || !supports('player.stepFrame')}
-            onClick={() => void motionStore.stepFrame(1)}
-          >
-            下一帧
-          </Button>
-        </div>
-
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs text-muted-foreground">时间</span>
-          <Input
-            className="h-8 w-[120px] px-2 text-xs tabular-nums"
-            aria-label="时间定位"
-            value={timeText}
-            disabled={!hasClip || !supports('player.seek')}
-            onFocus={() => setEditingTime(true)}
-            onChange={(event) => setTimeText(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') commitTime()
-              else if (event.key === 'Escape') {
-                setEditingTime(false)
-                setTimeText(formatTransportTime(player.time))
-              }
-            }}
-          />
-          <Button variant="outline" size="sm" className="h-8" disabled={!hasClip || !supports('player.seek')} onClick={commitTime}>
-            定位
-          </Button>
-        </div>
-
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs text-muted-foreground">动作帧</span>
-          <Input
-            className="h-8 w-[90px] px-2 text-xs tabular-nums"
-            aria-label="动作帧定位"
-            value={frameText}
-            disabled={!hasClip || !supports('player.seekFrame')}
-            onFocus={() => setEditingFrame(true)}
-            onChange={(event) => setFrameText(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') commitFrame()
-              else if (event.key === 'Escape') {
-                setEditingFrame(false)
-                setFrameText(String(Math.floor(framePos)))
-              }
-            }}
-          />
-          <Button variant="outline" size="sm" className="h-8" disabled={!hasClip || !supports('player.seekFrame')} onClick={commitFrame}>
-            定位
-          </Button>
-        </div>
-      </div>
-
-      {/* Row 5: position info + warnings (only rendered when present) */}
-      <div className="mt-1.5 space-y-0.5 text-xs">
-        {hasClip && (
-          <div className="text-muted-foreground" data-testid="transport-frame-info">
-            {framePos === Math.floor(framePos)
-              ? `当前位置：动作帧 ${Math.floor(framePos)} / ${player.totalFrames - 1} · ${Number(player.fps.toPrecision(6))} fps`
-              : `当前位置：帧间 ${framePos.toFixed(3)} / ${player.totalFrames - 1} · ${Number(player.fps.toPrecision(6))} fps`}
-          </div>
-        )}
-        {hasClip && durationMismatch(player.totalFrames, player.fps, player.duration) && (
-          <div className="text-warning" data-testid="transport-duration-warning">
-            源动作头部时长与采样帧不一致：头部 {player.duration.toFixed(3)} 秒；末采样{' '}
-            {lastFrameTime(player.totalFrames, player.fps).toFixed(3)} 秒。
-          </div>
-        )}
-        {(loaded.sourceMissing || loaded.sourceChanged) && (
-          <div className="text-warning">
-            {loaded.sourceMissing
-              ? '曲目源文件已移除：请先恢复文件，再到曲库重新加载当前曲目。'
-              : '曲目文件已更新：请到曲库重新加载当前曲目；音乐更新后需要重新加载才能开播。'}
-          </div>
-        )}
-        {(musicVolumeSupport < 0 || musicVolumeNotice !== '') && (
-          <div className="text-warning">
-            {musicVolumeSupport < 0 ? '当前音乐后端不支持独立音量，音乐仍以原音量播放。' : musicVolumeNotice}
-          </div>
-        )}
-        {navigationError && (
-          <div className="text-destructive" role="alert" data-testid="transport-navigation-error">
-            {navigationError}
-          </div>
-        )}
-        {actionError && (
-          <div className="text-destructive" role="alert" data-testid="transport-action-error">
-            {actionError}
-          </div>
-        )}
-      </div>
-    </div>
+    </footer>
   )
 }

@@ -1,11 +1,11 @@
 import * as React from 'react'
-import { FlaskConical, Loader2, PlugZap, RefreshCw } from 'lucide-react'
+import { RiFlaskFill, RiLoader4Fill, RiPlugFill, RiRefreshFill, RiUploadCloud2Fill } from '@remixicon/react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { motionStore, useMotionStore } from '../store'
 import { getMotionBridge, MotionMockBridgeClient, setMotionBridge } from '../bridge'
-import { useMotionAppearanceEffect, useMotionTextInputBridge } from '../hooks'
+import { useMotionAppearanceEffect, useMotionKeyboardShortcuts, useMotionTextInputBridge } from '../hooks'
 import { DropOverlay } from './DropOverlay'
 import { ImportProgressModal } from './ImportProgressModal'
 import { MotionErrorBoundary } from './MotionErrorBoundary'
@@ -22,23 +22,28 @@ import { DeveloperPage } from '../pages/DeveloperPage'
 
 function BootScreen({ error, canReconnect }: { error: string | null; canReconnect: boolean }) {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
+    <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-muted-foreground">
       {error ? (
-        <>
-          <PlugZap className="size-8 text-destructive" />
-          <p className="max-w-md text-center text-sm">GakuMotion 桥不可用：{error}</p>
+        <div className="flex max-w-md flex-col items-center gap-3 rounded-xl border bg-card/85 p-6 text-center shadow-sm">
+          <div className="flex size-11 items-center justify-center rounded-full bg-destructive/15 text-destructive">
+            <RiPlugFill className="size-5" />
+          </div>
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-foreground">GakuMotion 原生桥接不可用</p>
+            <p className="text-xs leading-relaxed text-muted-foreground">{error}</p>
+          </div>
           {canReconnect && (
             <Button type="button" variant="outline" size="sm" onClick={() => void motionStore.restart()}>
-              <RefreshCw className="size-3.5" />
+              <RiRefreshFill className="size-3.5" />
               重新连接
             </Button>
           )}
-        </>
+        </div>
       ) : (
-        <>
-          <Loader2 className="size-7 animate-spin text-primary" />
+        <div className="flex flex-col items-center gap-2.5">
+          <RiLoader4Fill className="size-7 animate-spin text-primary" />
           <p className="text-sm">正在连接 GakuMotion…</p>
-        </>
+        </div>
       )}
     </div>
   )
@@ -87,6 +92,9 @@ function PreviewToolbar({
 }) {
   const client = getMotionBridge()
   const mock = client instanceof MotionMockBridgeClient ? client : null
+  const [profile, setProfile] = React.useState<'full' | 'phase1'>(() =>
+    mock?.getCapabilityProfile() ?? 'full',
+  )
   if (!mock) return null
   return (
     <div className="ml-auto flex flex-wrap items-center gap-2" data-testid="preview-toolbar">
@@ -120,6 +128,41 @@ function PreviewToolbar({
           ))}
         </select>
       </label>
+      <label className="flex items-center gap-1 text-xs">
+        <span className="text-muted-foreground">能力集</span>
+        <select
+          aria-label="模拟能力集"
+          className="h-6 rounded border bg-background px-1.5 text-xs text-foreground"
+          value={profile}
+          onChange={(e) => {
+            const next = e.target.value === 'phase1' ? 'phase1' : 'full'
+            setProfile(next)
+            mock.setCapabilityProfile(next)
+            void motionStore.resync()
+          }}
+        >
+          <option value="full">完整预览</option>
+          <option value="phase1">基础降级</option>
+        </select>
+      </label>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="h-6 px-2 text-xs"
+        disabled={!injectionAllowed || profile !== 'full'}
+        onClick={() => {
+          motionStore.setPage('library')
+          mock.simulateFileDrop([
+            'C:\\Preview\\DemoLive_motion.vmd',
+            'C:\\Preview\\DemoLive_camera.vmd',
+            'C:\\Preview\\DemoLive_song.wav',
+          ])
+        }}
+      >
+        <RiUploadCloud2Fill className="size-3" />
+        模拟拖入
+      </Button>
       <Button
         type="button"
         variant="outline"
@@ -143,7 +186,7 @@ function PreviewToolbar({
           void motionStore.start()
         }}
       >
-        <RefreshCw className="size-3" />
+        <RiRefreshFill className="size-3" />
         重置会话
       </Button>
     </div>
@@ -172,6 +215,7 @@ export default function MotionApp() {
 
   useMotionAppearanceEffect(appearance)
   useMotionTextInputBridge(textInputSupported)
+  useMotionKeyboardShortcuts(ready && connected)
 
   return (
     <MotionErrorBoundary scope="app" onRestart={() => void motionStore.restart()}>
@@ -179,10 +223,10 @@ export default function MotionApp() {
         <BootScreen error={error ?? (ready ? '桥已断开' : null)} canReconnect={ready} />
       ) : (
         <TooltipProvider delayDuration={250}>
-          <div className="relative flex h-full flex-col">
+          <div className="relative flex h-full flex-col overflow-hidden">
             {bridgeKind === 'mock' && (
               <Alert variant="warning" className="rounded-none border-x-0 border-t-0 py-1.5" data-testid="mock-banner">
-                <FlaskConical />
+                <RiFlaskFill className="size-4" />
                 <AlertDescription className="flex flex-wrap items-center gap-2 text-xs">
                   <span>
                     {standalonePreview
@@ -200,11 +244,11 @@ export default function MotionApp() {
             )}
             {permission.injectionAllowed ? (
               <>
-                <div className="flex min-h-0 flex-1">
+                <div className="flex min-h-0 flex-1 overflow-hidden">
                   <MotionSidebar />
-                  <main className="flex min-w-0 flex-1 flex-col">
+                  <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
                     <MotionStatusBar />
-                    <div ref={mainScrollRef} className="min-h-0 flex-1 overflow-y-auto p-4">
+                    <div ref={mainScrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
                       <MotionErrorBoundary
                         scope="page"
                         resetKey={page}

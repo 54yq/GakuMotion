@@ -353,6 +353,7 @@ internal static class ImportPipeline
             }
             if (!string.IsNullOrWhiteSpace(request.Title)) info["title"] = request.Title.Trim();
             else if (info["title"] is null || info["title"]!.ToString().Length == 0) info["title"] = Path.GetFileName(target);
+            if (request.HasSubtitle) info["subtitle"] = request.Subtitle.Trim();
             if (request.TrackTiming != null) info["track_timing"] = request.TrackTiming.ToJson();
             WriteEditInfo(stage, info);
 
@@ -820,6 +821,8 @@ internal static class ImportPipeline
 
             // Save inside the same directory transaction as all four sources.
             JsonObject info = ReadEditInfo(Path.Combine(stage, "info.json"));
+            if (request.HasSubtitle && !string.IsNullOrWhiteSpace(request.Subtitle))
+                info["subtitle"] = request.Subtitle.Trim();
             info["track_timing"] = (request.TrackTiming ?? new PerformanceTimingSettings()).ToJson();
             WriteEditInfo(stage, info);
             PublishNewTrack(stage, commit);
