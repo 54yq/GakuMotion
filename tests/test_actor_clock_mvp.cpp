@@ -25,6 +25,7 @@ void* g_animatorKlass=reinterpret_cast<void*>(99);
 void* HelperGetActorAnimator(void*){return reinterpret_cast<void*>(2);}
 void* FindClass(const char*,const char*,const char* name){
  if(!std::strcmp(name,"PlayableOutputHandle"))return reinterpret_cast<void*>(33);
+ if(!std::strcmp(name,"PlayableHandle"))return reinterpret_cast<void*>(31);
  if(!std::strcmp(name,"AnimationScriptPlayable"))return reinterpret_cast<void*>(34);
  if(!std::strcmp(name,"CampusActorAnimationJob"))return reinterpret_cast<void*>(35);
  if(!std::strcmp(name,"AnimationMixerPlayable"))return reinterpret_cast<void*>(36);
@@ -35,12 +36,14 @@ namespace GroundShadowProbeBootstrap {
 struct Metadata {
  const void* Find(void* owner,const char* name,bool,GakuMotion::ExactMethodMetadata::Type,std::initializer_list<GakuMotion::ExactMethodMetadata::Type>) const {
   if(owner==reinterpret_cast<void*>(33)&&!std::strcmp(name,"IsValid"))return reinterpret_cast<void*>(11);
+  if(owner==reinterpret_cast<void*>(31)&&!std::strcmp(name,"IsNull"))return reinterpret_cast<void*>(30);
   if(!std::strcmp(name,"op_Explicit"))return reinterpret_cast<void*>(12);
   if(!std::strcmp(name,"GetTarget"))return reinterpret_cast<void*>(13);
   const char* loopNames[]{"GetRootPlayableCount","GetTime","GetRootPlayableInternal","GetInputCount","GetInputHandle","SetTime","SetDone"};
   for(uintptr_t i=0;i<7;++i)if(!std::strcmp(name,loopNames[i]))return reinterpret_cast<void*>(i+14);
-  const char* isolationNames[]{"GetSourcePlayable","GetPlayableType","GetJobType","GetInputWeightFromIndex","SetInputWeightFromIndex"};
-  for(uintptr_t i=0;i<5;++i)if(!std::strcmp(name,isolationNames[i]))return reinterpret_cast<void*>(i+21);
+  const char* isolationNames[]{"GetSourcePlayable","GetPlayableType","GetJobType","GetInputWeightFromIndex","SetInputWeightFromIndex",
+   "GetOutputCount","GetOutputHandle","ConnectInternal","DisconnectInternal"};
+  for(uintptr_t i=0;i<9;++i)if(!std::strcmp(name,isolationNames[i]))return reinterpret_cast<void*>(i+21);
   const char* names[]{"IsValid","IsPlaying","GetTimeUpdateMode","SetTimeUpdateMode","Play","Stop","GetOutputInternal","GetOutput","GetHandle","IsNull"};
   for(uintptr_t i=0;i<10;++i)if(!std::strcmp(name,names[i]))return i==6&&internalMissing?nullptr:reinterpret_cast<void*>(i+1);
   return nullptr;
@@ -57,7 +60,7 @@ int modeValue=3,playingValue=0,validValue=1,reply{};bool failPlay{},failStop{};i
 double times[]{145.0,145.0}; bool failNodeRead{},failNodeWrite{};int nodeWrites{};
 float inputWeight=0.75f;
 int isolationWrites{};
-bool wrongJobType{}, failWeightReadback{};
+bool wrongJobType{}, failDisconnectReadback{}, inputConnected=true;
 void* Invoke(const void* m,void* self,void** args,void** ex){
  *ex=nullptr;
  switch(reinterpret_cast<uintptr_t>(m)){
@@ -78,14 +81,20 @@ void* Invoke(const void* m,void* self,void** args,void** ex){
  case 15:{if(failNodeRead){*ex=reinterpret_cast<void*>(1);break;}int i{};std::memcpy(&i,self,4);return &times[i];}
  case 16:{static std::array<unsigned char,16> h{};return h.data();}
  case 17:{int i{};std::memcpy(&i,self,4);reply=i==0?1:0;return &reply;}
- case 18:{static std::array<unsigned char,16> h{};h[0]=1;return h.data();}
+ case 18:{if(!inputConnected&&failDisconnectReadback){failDisconnectReadback=false;return nullptr;}
+          static std::array<unsigned char,16> h{};h[0]=inputConnected?1:255;return h.data();}
  case 19:{++nodeWrites;if(failNodeWrite){*ex=reinterpret_cast<void*>(1);break;}int i{};std::memcpy(&i,self,4);times[i]=*static_cast<double*>(args[0]);break;}
  case 20:++nodeWrites;break;
  case 21:{static std::array<unsigned char,16> job{};return job.data();}
  case 22:return reinterpret_cast<void*>(34);
  case 23:return reinterpret_cast<void*>(uintptr_t(wrongJobType?36:35));
- case 24:if(failWeightReadback && inputWeight==0.0f)return nullptr;return &inputWeight;
+ case 24:return &inputWeight;
  case 25:++isolationWrites;inputWeight=*static_cast<float*>(args[1]);break;
+ case 26:reply=1;return &reply;
+ case 27:{static std::array<unsigned char,16> job{};return job.data();}
+ case 28:++isolationWrites;inputConnected=true;inputWeight=0.0f;reply=1;return &reply;
+ case 29:++isolationWrites;inputConnected=false;break;
+ case 30:reply=*static_cast<unsigned char*>(self)==255;return &reply;
  }return nullptr;
 }
 struct {void*(*invoke)(const void*,void*,void**,void**)=Invoke;} g_faceRuntime;
@@ -164,24 +173,24 @@ struct ClockTest : LiveActorClockMvp { static int Run(){
  CHECK(CaptureLoop(10,2.0)&&nodes.size()==2&&std::abs(loopWindow-1.85)<0.001);
  c.liveTakeoverActive=true;wrongJobType=true;
  CHECK(!Start(10,true) && !active && inputWeight==0.75f && isolationWrites==0);
- wrongJobType=false;failWeightReadback=true;
- CHECK(!Start(10,true) && active && playingValue==0 && inputWeight==0.0f);
- CHECK(RestoreGraph() && inputWeight==0.75f);
- failWeightReadback=false;offer();
- CHECK(Start(10,true)&&mmdSession && inputWeight==0.0f && inputIsolation.JobCount()==1);
+ wrongJobType=false;failDisconnectReadback=true;
+ CHECK(!Start(10,true) && active && playingValue==0 && !inputConnected);
+ CHECK(RestoreGraph() && inputConnected && inputWeight==0.75f);
+ offer();
+ CHECK(Start(10,true)&&mmdSession && !inputConnected && inputIsolation.JobCount()==1);
  times[0]+=1.9;times[1]+=1.9;CHECK(TickLoop(11.9)&&loops==0&&nodeWrites==0);
  CHECK(TickLoop(200)&&loops==0&&nodeWrites==0); // no graph rewind even far beyond Live duration
- CHECK(RestoreGraph() && inputWeight==0.75f);
- offer();CHECK(Start(18,true) && inputWeight==0.0f);
- inputWeight=0.25f;CHECK(!TickLoop(18.5) && RestoreGraph() && inputWeight==0.75f);
+ CHECK(RestoreGraph() && inputConnected && inputWeight==0.75f);
+ offer();CHECK(Start(18,true) && !inputConnected);
+ inputConnected=true;inputWeight=0.25f;CHECK(!TickLoop(18.5) && RestoreGraph() && inputWeight==0.75f);
  modeValue=1; playingValue=1; c.liveTakeoverActive=true; offer();
  const int borrowedWrites=writes;
- CHECK(offered && Start(19,true) && active && borrowedRunningGraph && writes==borrowedWrites && inputWeight==0.0f);
- CHECK(TickLoop(19.1) && RestoreGraph() && modeValue==1 && playingValue==1 && writes==borrowedWrites && inputWeight==0.75f);
+ CHECK(offered && Start(19,true) && active && borrowedRunningGraph && writes==borrowedWrites && !inputConnected);
+ CHECK(TickLoop(19.1) && RestoreGraph() && modeValue==1 && playingValue==1 && writes==borrowedWrites && inputConnected && inputWeight==0.75f);
  offer(); CHECK(Start(19.2,true) && borrowedRunningGraph);
  const int beforeIsolationLoss=isolationWrites;
  c.liveOwnerToken=99; CHECK(!RestoreGraph() && writes==borrowedWrites && isolationWrites==beforeIsolationLoss); c.liveOwnerToken=42;
- inputWeight=0.75f;
+ inputConnected=true;inputWeight=0.75f;
  c.liveTakeoverActive=false; offer(); CHECK(!offered); // Never borrow for the manual experiment.
  modeValue=3; playingValue=0;
  c.liveTakeoverActive=false;offer();failNodeRead=true;const int oldWrites=nodeWrites;
@@ -194,8 +203,8 @@ struct ClockTest : LiveActorClockMvp { static int Run(){
  auto originalActor=actor;
  LiveFollowerClock1::Offer(LiveFollowerClock1::graph.data(),reinterpret_cast<void*>(1),reinterpret_cast<void*>(2),reinterpret_cast<void*>(3),true);
  CHECK(LiveFollowerClock1::offered && LiveFollowerClock1::actor==2 && actor==originalActor);
- CHECK(LiveFollowerClock1::Start(25,true) && LiveFollowerClock1::active && !LiveFollowerClock2::active && !active && inputWeight==0.0f);
- CHECK(LiveFollowerClock1::RestoreGraph() && modeValue==3 && playingValue==0 && inputWeight==0.75f);
+ CHECK(LiveFollowerClock1::Start(25,true) && LiveFollowerClock1::active && !LiveFollowerClock2::active && !active && !inputConnected);
+ CHECK(LiveFollowerClock1::RestoreGraph() && modeValue==3 && playingValue==0 && inputConnected && inputWeight==0.75f);
  modeValue=3;playingValue=0;
  LiveFollowerClock2::Offer(LiveFollowerClock2::graph.data(),reinterpret_cast<void*>(1),reinterpret_cast<void*>(2),reinterpret_cast<void*>(3),true);
  CHECK(LiveFollowerClock2::offered && LiveFollowerClock2::Start(26,true));

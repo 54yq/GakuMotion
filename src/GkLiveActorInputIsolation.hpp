@@ -15,12 +15,14 @@ class LiveActorInputIsolation
     struct Input {
         Handle job, source;
         int port{};
+        int sourcePort{-1};
         float weight{};
         bool changed{};
     };
 
     const void *getOutput{}, *getSource{}, *isNull{}, *valid{}, *getType{}, *getJobType{},
-        *countInputs{}, *getInput{}, *readWeight{}, *writeWeight{};
+        *countInputs{}, *getInput{}, *countOutputs{}, *getOutputHandle{}, *connect{}, *disconnect{},
+        *readWeight{}, *writeWeight{};
     using ClassFromSystemType = void*(*)(void*);
     ClassFromSystemType classFromType{};
     void *scriptClass{}, *physicsClass{}, *mixerClass{}, *layerMixerClass{};
@@ -106,15 +108,47 @@ class LiveActorInputIsolation
         float actual{};
         return !ex && Weight(input, actual) && actual == weight;
     }
-    bool SameInput(Input& input) const
+    bool InspectInput(Input& input, Handle& source, unsigned char& empty) const
     {
         unsigned char current{};
         int count{};
-        Handle source;
         void* args[]{&input.port};
         auto* job = input.job.data.data();
         return Read(valid, job, current) && current && Read(countInputs, job, count) &&
-            input.port < count && Read(getInput, job, source, args) && source == input.source;
+            input.port < count && Read(getInput, job, source, args) &&
+            Read(isNull, source.data.data(), empty);
+    }
+
+    bool FindSourcePort(Input& input) const
+    {
+        unsigned char present{};
+        int count{};
+        auto* source = input.source.data.data();
+        if (!Read(valid, source, present) || !present ||
+            !Read(countOutputs, source, count) || count <= 0 || count > 32) return false;
+        for (int port = 0; port < count; ++port) {
+            Handle destination;
+            void* args[]{&port};
+            if (!Read(getOutputHandle, source, destination, args)) return false;
+            if (!(destination == input.job)) continue;
+            if (input.sourcePort >= 0) return false; // Ambiguous connection.
+            input.sourcePort = port;
+        }
+        return input.sourcePort >= 0;
+    }
+
+    bool RestoreInput(void* graph, Input& input) const
+    {
+        Handle source;
+        unsigned char empty{}, present{}, connected{};
+        if (!InspectInput(input, source, empty)) return false;
+        if (empty) {
+            if (!Read(valid, input.source.data.data(), present) || !present) return false;
+            void* args[]{input.source.data.data(), &input.sourcePort, input.job.data.data(), &input.port};
+            if (!Read(connect, graph, connected, args) || !connected ||
+                !InspectInput(input, source, empty)) return false;
+        }
+        return !empty && source == input.source && SetWeight(input, input.weight);
     }
 
 public:
@@ -151,10 +185,16 @@ public:
         getJobType = metadata.Find(handle, "GetJobType", false, {0x12}, {});
         countInputs = metadata.Find(handle, "GetInputCount", false, {0x08}, {});
         getInput = metadata.Find(handle, "GetInputHandle", false, {0x11, handle}, {{0x08}});
+        countOutputs = metadata.Find(handle, "GetOutputCount", false, {0x08}, {});
+        getOutputHandle = metadata.Find(handle, "GetOutputHandle", false, {0x11, handle}, {{0x08}});
+        connect = metadata.Find(graphClass, "ConnectInternal", false, {0x02},
+            {{0x11, handle}, {0x08}, {0x11, handle}, {0x08}});
+        disconnect = metadata.Find(graphClass, "DisconnectInternal", false, {0x01}, {{0x11, handle}, {0x08}});
         readWeight = metadata.Find(handle, "GetInputWeightFromIndex", false, {0x0c}, {{0x08}});
         writeWeight = metadata.Find(handle, "SetInputWeightFromIndex", false, {0x01}, {{0x08}, {0x0c}});
         if (!getOutput || !getSource || !isNull || !valid || !getType || !getJobType ||
-            !countInputs || !getInput || !readWeight || !writeWeight || !actorOutputCount) return false;
+            !countInputs || !getInput || !countOutputs || !getOutputHandle || !connect || !disconnect ||
+            !readWeight || !writeWeight || !actorOutputCount) return false;
 
         unsigned visited = 0;
         for (unsigned index = 0; index < actorOutputCount; ++index) {
@@ -168,8 +208,9 @@ public:
             if (!Read(countInputs, job.data.data(), count) || count < 0 || count > 32) return false;
             for (int port = 0; port < count; ++port) {
                 Input input{job, {}, port};
-                void* args[]{&port};
-                if (!Read(getInput, job.data.data(), input.source, args) || !Weight(input, input.weight))
+                unsigned char empty{};
+                if (!InspectInput(input, input.source, empty) ||
+                    (!empty && (!FindSourcePort(input) || !Weight(input, input.weight))))
                     return false;
                 inputs.push_back(input);
             }
@@ -177,14 +218,20 @@ public:
         return !jobs.empty();
     }
 
-    bool Mute(double now)
+    bool Detach(void* graph, double now)
     {
         nextCheck = now + 0.25;
         for (auto& input : inputs) {
-            if (input.weight == 0.0f) continue;
-            // Mark before mutating so a failed read-back can still be undone.
+            if (input.sourcePort < 0) continue;
+            // A script playable can process a weight-zero input. Disconnect the
+            // verified edge itself, including inputs already at zero weight.
             input.changed = true;
-            if (!SetWeight(input, 0.0f)) return false;
+            void* args[]{input.job.data.data(), &input.port};
+            void* ex = nullptr;
+            g_faceRuntime.invoke(disconnect, graph, args, &ex);
+            Handle source;
+            unsigned char empty{};
+            if (ex || !InspectInput(input, source, empty) || !empty) return false;
         }
         return true;
     }
@@ -215,22 +262,26 @@ public:
         }
         if (portCount != inputs.size()) return false;
         for (auto& input : inputs) {
-            float weight{};
-            if (!SameInput(input) || !Weight(input, weight) || weight != 0.0f) return false;
+            Handle source;
+            unsigned char empty{};
+            if (!InspectInput(input, source, empty) || !empty) return false;
         }
         return true;
     }
 
-    bool Restore()
+    bool Restore(void* graph)
     {
         bool restored = true;
         for (auto& input : inputs) {
-            if (input.changed && (!SameInput(input) || !SetWeight(input, input.weight))) restored = false;
+            if (input.changed && !RestoreInput(graph, input)) restored = false;
         }
         *this = {};
         return restored;
     }
 
     size_t JobCount() const { return jobs.size(); }
-    size_t InputCount() const { return inputs.size(); }
+    size_t DetachedCount() const
+    {
+        return std::count_if(inputs.begin(), inputs.end(), [](const Input& input) { return input.changed; });
+    }
 };

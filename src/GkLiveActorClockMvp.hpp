@@ -211,11 +211,11 @@ template <int Slot> struct LiveActorClockState {
         rootSampled=RootTime(rootStart);rootAdvancedKnown=false;rootDelta=0;
         // Mark before writes so every partial start takes the restoration path.
         active=true;mmdSession=forMmd;started=now;if(forMmd){loops=0;nodes.clear();loopError=nullptr;}
-        if(forMmd && !inputIsolation.Mute(now)) {
-            loopError = "original_animation_input_mute_failed";
+        if(forMmd && !inputIsolation.Detach(graph.data(), now)) {
+            loopError = "original_animation_input_detach_failed";
             return false;
         }
-        if(alreadyRunning)return true; // Only the input weights are leased.
+        if(alreadyRunning)return true; // Only the verified input connections are leased.
         int gameTime=1;void* args[]{&gameTime};
         return InvokeVoid(setMode,args)&&InvokeVoid(play)&&Read(mode)==1&&Read(playing,true)==1;
     }
@@ -224,7 +224,7 @@ template <int Slot> struct LiveActorClockState {
         if(!SameOwner()||Read(valid,true)!=1){inputIsolation={};active=false;offered=false;return false;}
         double rootEnd{};rootAdvancedKnown=rootSampled&&RootTime(rootEnd);rootDelta=rootAdvancedKnown?rootEnd-rootStart:0;
         bool ok=borrowedRunningGraph || InvokeVoid(stop);
-        ok=inputIsolation.Restore() && ok;
+        ok=inputIsolation.Restore(graph.data()) && ok;
         if(!borrowedRunningGraph) {
             void* args[]{&originalMode};ok=InvokeVoid(setMode,args)&&ok;
             if(originalPlaying)ok=InvokeVoid(play)&&ok;
@@ -435,8 +435,8 @@ struct LiveDynamicFollowerClock {
         rootSampled=RootTime(rootStart);rootAdvancedKnown=false;rootDelta=0;
         // Mark before writes so every partial start takes the restoration path.
         active=true;mmdSession=forMmd;started=now;if(forMmd){loops=0;nodes.clear();loopError=nullptr;}int gameTime=1;void* args[]{&gameTime};
-        if(forMmd && !inputIsolation.Mute(now)) {
-            loopError = "original_animation_input_mute_failed";
+        if(forMmd && !inputIsolation.Detach(graph.data(), now)) {
+            loopError = "original_animation_input_detach_failed";
             return false;
         }
         return InvokeVoid(setMode,args)&&InvokeVoid(play)&&Read(mode)==1&&Read(playing,true)==1;
@@ -446,7 +446,7 @@ struct LiveDynamicFollowerClock {
         if(!SameOwner()||Read(valid,true)!=1){inputIsolation={};active=false;offered=false;return false;}
         double rootEnd{};rootAdvancedKnown=rootSampled&&RootTime(rootEnd);rootDelta=rootAdvancedKnown?rootEnd-rootStart:0;
         bool ok=InvokeVoid(stop);
-        ok=inputIsolation.Restore() && ok;
+        ok=inputIsolation.Restore(graph.data()) && ok;
         void* args[]{&originalMode};ok=InvokeVoid(setMode,args)&&ok;
         if(originalPlaying)ok=InvokeVoid(play)&&ok;
         ok=Read(mode)==originalMode&&Read(playing,true)==originalPlaying&&ok;

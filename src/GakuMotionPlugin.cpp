@@ -4643,8 +4643,8 @@ void MotionTick(void*, float)
 				if(g_hostContext.logInfo)g_hostContext.logInfo("[GakuMotion][ActorClockMVP] start=%d origin=%.3f",int(started),core.liveActorClockOrigin);
 				if(g_hostContext.logInfo)g_hostContext.logInfo("[GakuMotion][ActorClockLoop] mmd=%d prepared=%d nodes=%zu window=%.3f error=%s",int(mmdWanted),int(prepared),LiveActorClockMvp::nodes.size(),LiveActorClockMvp::loopWindow,LiveActorClockMvp::loopError?LiveActorClockMvp::loopError:"none");
 				if(started && mmdWanted && g_hostContext.logInfo)
-					g_hostContext.logInfo("[GakuMotion][LiveActorIsolation] slot=1 jobs=%zu muted_ports=%zu",
-						LiveActorClockMvp::inputIsolation.JobCount(), LiveActorClockMvp::inputIsolation.InputCount());
+					g_hostContext.logInfo("[GakuMotion][LiveActorIsolation] slot=1 jobs=%zu detached_ports=%zu",
+						LiveActorClockMvp::inputIsolation.JobCount(), LiveActorClockMvp::inputIsolation.DetachedCount());
 			}
 			if(LiveActorClockMvp::active&&now>=g_clockNextLog)RecordActorClockPhysics(false,now);
 			// Each bound follower must own an independently verified animation
@@ -4671,9 +4671,9 @@ void MotionTick(void*, float)
                 const bool prepared = clock.offered && clock.SameOwner() && clock.actor == reinterpret_cast<uintptr_t>(actor) && !samePrimary && !sameOther;
                 const bool started = prepared && clock.Start(now, true);
                 if (!started && clock.active && !RestoreFollowerClock(index)) core.ensembleRestoreUnconfirmed = true;
-                if (g_hostContext.logInfo) g_hostContext.logInfo("[GakuMotion][FollowerClock] slot=%zu prepared=%d started=%d same_primary=%d same_other=%d physics_jobs=%zu muted_ports=%zu error=%s",
+                if (g_hostContext.logInfo) g_hostContext.logInfo("[GakuMotion][FollowerClock] slot=%zu prepared=%d started=%d same_primary=%d same_other=%d physics_jobs=%zu detached_ports=%zu error=%s",
                     index + 2, int(prepared), int(started), int(samePrimary), int(sameOther), clock.inputIsolation.JobCount(),
-                    clock.inputIsolation.InputCount(), clock.loopError ? clock.loopError : "none");
+                    clock.inputIsolation.DetachedCount(), clock.loopError ? clock.loopError : "none");
             }
 		}
 		if (core.liveLoopEnabled && (core.liveLoopOwner != core.liveOwnerToken || core.liveLoopScene != core.liveOwnerScene || !core.liveViewingConfirmed))
