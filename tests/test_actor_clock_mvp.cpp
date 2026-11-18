@@ -23,7 +23,14 @@ HMODULE g_gameAssembly{};
 bool internalMissing{},internalThrows{},publicThrows{},throwPastEnd{},invalidOutput{};int publicReads{},outputCount=1,foreignIndex=-1,nonAnimationIndex=-1;
 void* g_animatorKlass=reinterpret_cast<void*>(99);
 void* HelperGetActorAnimator(void*){return reinterpret_cast<void*>(2);}
-void* FindClass(const char*,const char*,const char* name){return reinterpret_cast<void*>(uintptr_t(!std::strcmp(name,"PlayableOutputHandle")?33:1));}
+void* FindClass(const char*,const char*,const char* name){
+ if(!std::strcmp(name,"PlayableOutputHandle"))return reinterpret_cast<void*>(33);
+ if(!std::strcmp(name,"AnimationScriptPlayable"))return reinterpret_cast<void*>(34);
+ if(!std::strcmp(name,"CampusActorAnimationJob"))return reinterpret_cast<void*>(35);
+ if(!std::strcmp(name,"AnimationMixerPlayable"))return reinterpret_cast<void*>(36);
+ if(!std::strcmp(name,"AnimationLayerMixerPlayable"))return reinterpret_cast<void*>(37);
+ return reinterpret_cast<void*>(1);
+}
 namespace GroundShadowProbeBootstrap {
 struct Metadata {
  const void* Find(void* owner,const char* name,bool,GakuMotion::ExactMethodMetadata::Type,std::initializer_list<GakuMotion::ExactMethodMetadata::Type>) const {
@@ -32,15 +39,25 @@ struct Metadata {
   if(!std::strcmp(name,"GetTarget"))return reinterpret_cast<void*>(13);
   const char* loopNames[]{"GetRootPlayableCount","GetTime","GetRootPlayableInternal","GetInputCount","GetInputHandle","SetTime","SetDone"};
   for(uintptr_t i=0;i<7;++i)if(!std::strcmp(name,loopNames[i]))return reinterpret_cast<void*>(i+14);
+  const char* isolationNames[]{"GetSourcePlayable","GetPlayableType","GetJobType","GetInputWeightFromIndex","SetInputWeightFromIndex"};
+  for(uintptr_t i=0;i<5;++i)if(!std::strcmp(name,isolationNames[i]))return reinterpret_cast<void*>(i+21);
   const char* names[]{"IsValid","IsPlaying","GetTimeUpdateMode","SetTimeUpdateMode","Play","Stop","GetOutputInternal","GetOutput","GetHandle","IsNull"};
   for(uintptr_t i=0;i<10;++i)if(!std::strcmp(name,names[i]))return i==6&&internalMissing?nullptr:reinterpret_cast<void*>(i+1);
   return nullptr;
  }
 };struct Api {Metadata method;};inline Api Resolve(HMODULE){return {};}}
 int FakeValueSize(void*,uint32_t* align){*align=8;return 16;}
-FARPROC FakeGetProcAddress(HMODULE,const char* name){return !std::strcmp(name,"il2cpp_class_value_size")?reinterpret_cast<FARPROC>(&FakeValueSize):nullptr;}
+void* FakeClassFromType(void* type){return type;}
+FARPROC FakeGetProcAddress(HMODULE,const char* name){
+ if(!std::strcmp(name,"il2cpp_class_value_size"))return reinterpret_cast<FARPROC>(&FakeValueSize);
+ if(!std::strcmp(name,"il2cpp_class_from_system_type"))return reinterpret_cast<FARPROC>(&FakeClassFromType);
+ return nullptr;
+}
 int modeValue=3,playingValue=0,validValue=1,reply{};bool failPlay{},failStop{};int writes{};
 double times[]{145.0,145.0}; bool failNodeRead{},failNodeWrite{};int nodeWrites{};
+float inputWeight=0.75f;
+int isolationWrites{};
+bool wrongJobType{}, failWeightReadback{};
 void* Invoke(const void* m,void* self,void** args,void** ex){
  *ex=nullptr;
  switch(reinterpret_cast<uintptr_t>(m)){
@@ -50,7 +67,7 @@ void* Invoke(const void* m,void* self,void** args,void** ex){
  case 4:++writes;modeValue=*static_cast<int*>(args[0]);break;
  case 5:++writes;if(failPlay){*ex=reinterpret_cast<void*>(1);break;}playingValue=1;break;
  case 6:++writes;if(failStop){*ex=reinterpret_cast<void*>(1);break;}playingValue=0;break;
- case 7:if(internalThrows){*ex=reinterpret_cast<void*>(1);break;}reply=*static_cast<int*>(args[0])<outputCount;return &reply;
+ case 7:if(internalThrows){*ex=reinterpret_cast<void*>(1);break;}reply=*static_cast<int*>(args[0])<outputCount;if(reply)std::memcpy(args[1],args[0],sizeof(int));return &reply;
  case 8:{++publicReads;const int i=*static_cast<int*>(args[0]);if(publicThrows||(throwPastEnd&&i>=outputCount)){*ex=reinterpret_cast<void*>(1);break;}static std::array<unsigned char,16> output{};std::memcpy(output.data(),&i,sizeof(i));return output.data();}
  case 9:return self;
  case 10:{int i{};std::memcpy(&i,self,sizeof(i));reply=i>=outputCount;return &reply;}
@@ -64,6 +81,11 @@ void* Invoke(const void* m,void* self,void** args,void** ex){
  case 18:{static std::array<unsigned char,16> h{};h[0]=1;return h.data();}
  case 19:{++nodeWrites;if(failNodeWrite){*ex=reinterpret_cast<void*>(1);break;}int i{};std::memcpy(&i,self,4);times[i]=*static_cast<double*>(args[0]);break;}
  case 20:++nodeWrites;break;
+ case 21:{static std::array<unsigned char,16> job{};return job.data();}
+ case 22:return reinterpret_cast<void*>(34);
+ case 23:return reinterpret_cast<void*>(uintptr_t(wrongJobType?36:35));
+ case 24:if(failWeightReadback && inputWeight==0.0f)return nullptr;return &inputWeight;
+ case 25:++isolationWrites;inputWeight=*static_cast<float*>(args[1]);break;
  }return nullptr;
 }
 struct {void*(*invoke)(const void*,void*,void**,void**)=Invoke;} g_faceRuntime;
@@ -140,16 +162,26 @@ struct ClockTest : LiveActorClockMvp { static int Run(){
  outputCount=0;offer();CHECK(!offered);
  outputCount=2;offer();CHECK(offered&&c.liveActorClockNotice.find("不可用")==std::string::npos);
  CHECK(CaptureLoop(10,2.0)&&nodes.size()==2&&std::abs(loopWindow-1.85)<0.001);
- c.liveTakeoverActive=true;CHECK(Start(10,true)&&mmdSession);
+ c.liveTakeoverActive=true;wrongJobType=true;
+ CHECK(!Start(10,true) && !active && inputWeight==0.75f && isolationWrites==0);
+ wrongJobType=false;failWeightReadback=true;
+ CHECK(!Start(10,true) && active && playingValue==0 && inputWeight==0.0f);
+ CHECK(RestoreGraph() && inputWeight==0.75f);
+ failWeightReadback=false;offer();
+ CHECK(Start(10,true)&&mmdSession && inputWeight==0.0f && inputIsolation.JobCount()==1);
  times[0]+=1.9;times[1]+=1.9;CHECK(TickLoop(11.9)&&loops==0&&nodeWrites==0);
  CHECK(TickLoop(200)&&loops==0&&nodeWrites==0); // no graph rewind even far beyond Live duration
- CHECK(RestoreGraph());
+ CHECK(RestoreGraph() && inputWeight==0.75f);
+ offer();CHECK(Start(18,true) && inputWeight==0.0f);
+ inputWeight=0.25f;CHECK(!TickLoop(18.5) && RestoreGraph() && inputWeight==0.75f);
  modeValue=1; playingValue=1; c.liveTakeoverActive=true; offer();
  const int borrowedWrites=writes;
- CHECK(offered && Start(19,true) && active && borrowedRunningGraph && writes==borrowedWrites);
- CHECK(TickLoop(19.1) && RestoreGraph() && modeValue==1 && playingValue==1 && writes==borrowedWrites);
+ CHECK(offered && Start(19,true) && active && borrowedRunningGraph && writes==borrowedWrites && inputWeight==0.0f);
+ CHECK(TickLoop(19.1) && RestoreGraph() && modeValue==1 && playingValue==1 && writes==borrowedWrites && inputWeight==0.75f);
  offer(); CHECK(Start(19.2,true) && borrowedRunningGraph);
- c.liveOwnerToken=99; CHECK(!RestoreGraph() && writes==borrowedWrites); c.liveOwnerToken=42;
+ const int beforeIsolationLoss=isolationWrites;
+ c.liveOwnerToken=99; CHECK(!RestoreGraph() && writes==borrowedWrites && isolationWrites==beforeIsolationLoss); c.liveOwnerToken=42;
+ inputWeight=0.75f;
  c.liveTakeoverActive=false; offer(); CHECK(!offered); // Never borrow for the manual experiment.
  modeValue=3; playingValue=0;
  c.liveTakeoverActive=false;offer();failNodeRead=true;const int oldWrites=nodeWrites;
@@ -162,8 +194,8 @@ struct ClockTest : LiveActorClockMvp { static int Run(){
  auto originalActor=actor;
  LiveFollowerClock1::Offer(LiveFollowerClock1::graph.data(),reinterpret_cast<void*>(1),reinterpret_cast<void*>(2),reinterpret_cast<void*>(3),true);
  CHECK(LiveFollowerClock1::offered && LiveFollowerClock1::actor==2 && actor==originalActor);
- CHECK(LiveFollowerClock1::Start(25,true) && LiveFollowerClock1::active && !LiveFollowerClock2::active && !active);
- CHECK(LiveFollowerClock1::RestoreGraph() && modeValue==3 && playingValue==0);
+ CHECK(LiveFollowerClock1::Start(25,true) && LiveFollowerClock1::active && !LiveFollowerClock2::active && !active && inputWeight==0.0f);
+ CHECK(LiveFollowerClock1::RestoreGraph() && modeValue==3 && playingValue==0 && inputWeight==0.75f);
  modeValue=3;playingValue=0;
  LiveFollowerClock2::Offer(LiveFollowerClock2::graph.data(),reinterpret_cast<void*>(1),reinterpret_cast<void*>(2),reinterpret_cast<void*>(3),true);
  CHECK(LiveFollowerClock2::offered && LiveFollowerClock2::Start(26,true));

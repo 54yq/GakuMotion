@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <vector>
 #include <type_traits>
+#include "GkLiveActorInputIsolation.hpp"
 // Engine-owned graph clock trial. Never copies job payloads, calls Evaluate,
 // modifies streams, or claims to provide a Swing checkpoint.
 template <int Slot> struct LiveActorClockState {
@@ -14,6 +15,7 @@ template <int Slot> struct LiveActorClockState {
     static inline void* graphClass{};
     static inline unsigned verifiedOutputs{};
     static inline bool mmdSession{}, borrowedRunningGraph{};
+    static inline LiveActorInputIsolation inputIsolation;
     struct Node { alignas(16) std::array<unsigned char,16> handle{}; double time{}; };
     static inline std::vector<Node> nodes;
     static inline const void *nodeValid{},*nodeTime{},*nodeSetTime{},*nodeSetDone{},*nodeInputs{},*nodeInput{},*rootCount{},*rootGet{};
@@ -62,8 +64,8 @@ template <int Slot> struct LiveActorClockState {
     }
     static inline bool TickLoop(double now) {
         if(!active||!SameOwner()||Read(valid,true)!=1)return false;
-        // MMD takeover runs the actor graph continuously; never seek its nodes.
-        if(mmdSession)return Read(mode,false)==1 && Read(playing,true)==1;
+        if(mmdSession)return Read(mode,false)==1 && Read(playing,true)==1 &&
+            inputIsolation.Check(graph.data(), now);
         if(now-loopStarted<loopWindow)return true;
         // Reset only this actor's graph. Never seek the paused stage Director.
         for(auto& n:nodes){bool ok{};void* b=NodeCall(nodeValid,n.handle.data(),nullptr,ok);void* raw=ok&&b?g_safeBones.unbox(b):nullptr;if(!raw||!*static_cast<unsigned char*>(raw))return false;}
@@ -200,24 +202,35 @@ template <int Slot> struct LiveActorClockState {
         const int currentMode=Read(mode), currentPlaying=Read(playing,true);
         const bool alreadyRunning = Slot==0 && forMmd && currentMode==1 && currentPlaying==1;
         if(!alreadyRunning && (currentMode!=3 || currentPlaying!=0))return false;
+        if(forMmd && !inputIsolation.Prepare(graphClass, graph.data(), verifiedOutputs)) {
+            loopError = "physics_job_or_input_ports_unverified";
+            return false;
+        }
         originalMode=currentMode;originalPlaying=currentPlaying;
         borrowedRunningGraph=alreadyRunning;
         rootSampled=RootTime(rootStart);rootAdvancedKnown=false;rootDelta=0;
         // Mark before writes so every partial start takes the restoration path.
         active=true;mmdSession=forMmd;started=now;if(forMmd){loops=0;nodes.clear();loopError=nullptr;}
-        if(alreadyRunning)return true; // Observe it, but never claim ownership or change its state.
+        if(forMmd && !inputIsolation.Mute(now)) {
+            loopError = "original_animation_input_mute_failed";
+            return false;
+        }
+        if(alreadyRunning)return true; // Only the input weights are leased.
         int gameTime=1;void* args[]{&gameTime};
         return InvokeVoid(setMode,args)&&InvokeVoid(play)&&Read(mode)==1&&Read(playing,true)==1;
     }
     static inline bool RestoreGraph() {
         if(!active)return true;
-        if(!SameOwner()||Read(valid,true)!=1){active=false;offered=false;return false;}
+        if(!SameOwner()||Read(valid,true)!=1){inputIsolation={};active=false;offered=false;return false;}
         double rootEnd{};rootAdvancedKnown=rootSampled&&RootTime(rootEnd);rootDelta=rootAdvancedKnown?rootEnd-rootStart:0;
-        if(borrowedRunningGraph) { active=false; offered=false; borrowedRunningGraph=false; return true; }
-        bool ok=InvokeVoid(stop);void* args[]{&originalMode};ok=InvokeVoid(setMode,args)&&ok;
-        if(originalPlaying)ok=InvokeVoid(play)&&ok;
+        bool ok=borrowedRunningGraph || InvokeVoid(stop);
+        ok=inputIsolation.Restore() && ok;
+        if(!borrowedRunningGraph) {
+            void* args[]{&originalMode};ok=InvokeVoid(setMode,args)&&ok;
+            if(originalPlaying)ok=InvokeVoid(play)&&ok;
+        }
         ok=Read(mode)==originalMode&&Read(playing,true)==originalPlaying&&ok;
-        active=false;offered=false;return ok;
+        active=false;offered=false;borrowedRunningGraph=false;return ok;
     }
 };
 struct LiveDynamicFollowerClock {
@@ -230,6 +243,7 @@ struct LiveDynamicFollowerClock {
     void* graphClass{};
     unsigned verifiedOutputs{};
     bool mmdSession{};
+    LiveActorInputIsolation inputIsolation;
     struct Node { alignas(16) std::array<unsigned char,16> handle{}; double time{}; };
     std::vector<Node> nodes;
     const void *nodeValid{},*nodeTime{},*nodeSetTime{},*nodeSetDone{},*nodeInputs{},*nodeInput{},*rootCount{},*rootGet{};
@@ -278,8 +292,8 @@ struct LiveDynamicFollowerClock {
     }
     bool TickLoop(double now) {
         if(!active||!SameOwner()||Read(valid,true)!=1)return false;
-        // MMD takeover runs the actor graph continuously; never seek its nodes.
-        if(mmdSession)return Read(mode,false)==1 && Read(playing,true)==1;
+        if(mmdSession)return Read(mode,false)==1 && Read(playing,true)==1 &&
+            inputIsolation.Check(graph.data(), now);
         if(now-loopStarted<loopWindow)return true;
         // Reset only this actor's graph. Never seek the paused stage Director.
         for(auto& n:nodes){bool ok{};void* b=NodeCall(nodeValid,n.handle.data(),nullptr,ok);void* raw=ok&&b?g_safeBones.unbox(b):nullptr;if(!raw||!*static_cast<unsigned char*>(raw))return false;}
@@ -413,17 +427,27 @@ struct LiveDynamicFollowerClock {
         auto& c=GakuMotion::Core::Instance();
         if(active||c.liveActorClockFault||!offered||!SameOwner()||!c.liveObservation.confirmed||!c.liveObservation.paused||c.liveTakeoverActive!=forMmd||c.liveTakeoverFault||
             Read(valid,true)!=1||Read(mode)!=3||Read(playing,true)!=0)return false;
+        if(forMmd && !inputIsolation.Prepare(graphClass, graph.data(), verifiedOutputs)) {
+            loopError = "physics_job_or_input_ports_unverified";
+            return false;
+        }
         originalMode=3;originalPlaying=0;
         rootSampled=RootTime(rootStart);rootAdvancedKnown=false;rootDelta=0;
         // Mark before writes so every partial start takes the restoration path.
         active=true;mmdSession=forMmd;started=now;if(forMmd){loops=0;nodes.clear();loopError=nullptr;}int gameTime=1;void* args[]{&gameTime};
+        if(forMmd && !inputIsolation.Mute(now)) {
+            loopError = "original_animation_input_mute_failed";
+            return false;
+        }
         return InvokeVoid(setMode,args)&&InvokeVoid(play)&&Read(mode)==1&&Read(playing,true)==1;
     }
     bool RestoreGraph() {
         if(!active)return true;
-        if(!SameOwner()||Read(valid,true)!=1){active=false;offered=false;return false;}
+        if(!SameOwner()||Read(valid,true)!=1){inputIsolation={};active=false;offered=false;return false;}
         double rootEnd{};rootAdvancedKnown=rootSampled&&RootTime(rootEnd);rootDelta=rootAdvancedKnown?rootEnd-rootStart:0;
-        bool ok=InvokeVoid(stop);void* args[]{&originalMode};ok=InvokeVoid(setMode,args)&&ok;
+        bool ok=InvokeVoid(stop);
+        ok=inputIsolation.Restore() && ok;
+        void* args[]{&originalMode};ok=InvokeVoid(setMode,args)&&ok;
         if(originalPlaying)ok=InvokeVoid(play)&&ok;
         ok=Read(mode)==originalMode&&Read(playing,true)==originalPlaying&&ok;
         active=false;offered=false;return ok;
