@@ -67,15 +67,26 @@ int wmain(int argc, wchar_t** argv)
     const std::string open = "open \"" + GakuMotion::MotionPathToUtf8(wav) +
         "\" type waveaudio alias gkmotion_unicode_test";
     const auto openError = paths::SendMciUtf8(open.c_str(), nullptr, 0, nullptr);
-    if (openError) std::printf("MCI open OS error: %lu\n", static_cast<unsigned long>(openError));
-    Check(openError == 0, "MCI opens Unicode WAV using wide API");
-    char reply[64]{};
-    Check(paths::SendMciUtf8("set gkmotion_unicode_test time format milliseconds", nullptr, 0, nullptr) == 0,
-        "MCI selects milliseconds");
-    Check(paths::SendMciUtf8("status gkmotion_unicode_test length", reply, sizeof(reply), nullptr) == 0 &&
-        std::atoi(reply) == 100, "MCI bounded UTF-8 status return");
-    Check(paths::SendMciUtf8("close gkmotion_unicode_test", nullptr, 0, nullptr) == 0,
-        "MCI closes synthetic file without playback");
+    if (waveOutGetNumDevs() == 0)
+    {
+        if (openError == 0) paths::SendMciUtf8("close gkmotion_unicode_test", nullptr, 0, nullptr);
+        Check(openError != MCIERR_INVALID_FILE && openError != MCIERR_FILENAME_REQUIRED &&
+            openError != MCIERR_FILE_NOT_FOUND, "MCI dispatches Unicode WAV path to OS wide API");
+        std::printf("SKIP: waveaudio MCI playback checks unavailable (waveOutGetNumDevs() == 0, error=%lu)\n",
+            static_cast<unsigned long>(openError));
+    }
+    else
+    {
+        if (openError) std::printf("MCI open OS error: %lu\n", static_cast<unsigned long>(openError));
+        Check(openError == 0, "MCI opens Unicode WAV using wide API");
+        char reply[64]{};
+        Check(paths::SendMciUtf8("set gkmotion_unicode_test time format milliseconds", nullptr, 0, nullptr) == 0,
+            "MCI selects milliseconds");
+        Check(paths::SendMciUtf8("status gkmotion_unicode_test length", reply, sizeof(reply), nullptr) == 0 &&
+            std::atoi(reply) == 100, "MCI bounded UTF-8 status return");
+        Check(paths::SendMciUtf8("close gkmotion_unicode_test", nullptr, 0, nullptr) == 0,
+            "MCI closes synthetic file without playback");
+    }
     Check(paths::SendMciUtf8("\xFF", nullptr, 0, nullptr) == MCIERR_INVALID_FILE,
         "MCI rejects malformed UTF-8");
 
