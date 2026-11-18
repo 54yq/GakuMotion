@@ -18,6 +18,8 @@ internal sealed class ImportRequest
     public string Subtitle { get; init; } = string.Empty;
     public bool HasSubtitle { get; init; }
     public float Fps { get; init; }
+    public float SourceFps { get; init; }
+    public bool RebakeOutput { get; init; }
     public string Audio { get; init; } = string.Empty;
     public bool ClearAudio { get; init; }
     public string CameraVmd { get; init; } = string.Empty;
@@ -79,6 +81,8 @@ internal sealed class ImportRequest
             Subtitle = hasSubtitle ? (subtitleVal.GetString() ?? string.Empty) : string.Empty,
             HasSubtitle = hasSubtitle,
             Fps = OptionalFloat("fps"),
+            SourceFps = OptionalFloat("source_fps"),
+            RebakeOutput = OptionalBool("rebake_output"),
             Audio = Optional("audio"),
             ClearAudio = OptionalBool("clear_audio"),
             CameraVmd = Optional("camera_vmd"),

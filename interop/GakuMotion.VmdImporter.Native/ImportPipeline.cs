@@ -46,6 +46,8 @@ internal static class ImportPipeline
 
     public static ImportOutcome Run(ImportRequest request, ImportLog log)
     {
+        if (request.SourceFps != 0 && request.SourceFps is not (25.0f or 30.0f or 60.0f))
+            return new ImportOutcome { Ok = false, Error = "源动作帧率只支持自动、25、30 或 60 fps", ErrorCode = "invalid_source_fps" };
         if (!string.IsNullOrEmpty(request.EditDir)) return RunEdit(request, log);
         var timing = new ImportTiming();
         var total = Stopwatch.StartNew();
@@ -136,7 +138,10 @@ internal static class ImportPipeline
             // the "60 fps" stem). request.Fps selects the rate the clip is
             // *stored* at, not how fast the source ticks advance: 0 keeps the
             // source clock, which is the historical 1 tick = 1 frame behaviour.
-            float sourceFps = DetectSourceFps(vmdPath, motion, wavPath);
+            float sourceFps = request.SourceFps > 0 ? request.SourceFps : DetectSourceFps(vmdPath, motion, wavPath);
+            log.Line($"源动作帧率: {sourceFps:g} fps ({(request.SourceFps > 0 ? "手动指定" : "自动识别")}); 身体末帧={BodyEndFrame(motion)}, 全部轨道末帧={motion.MaxFrame}");
+            if (BodyEndFrame(motion) > 0 && motion.MaxFrame > BodyEndFrame(motion) * 1.25)
+                log.Line("注意：表情或其他轨道明显长于身体动作；全部关键帧仍会保留，请检查同步。");
             float outputFps = request.Fps > 0.0f ? request.Fps : sourceFps;
             timing.Fps = outputFps;
 
@@ -261,7 +266,7 @@ internal static class ImportPipeline
 
             bool replaceBody = !string.IsNullOrEmpty(request.MotionVmd);
             bool replaceMorph = !string.IsNullOrEmpty(request.MorphVmd);
-            bool rebake = replaceBody || replaceMorph || request.DisableMorph;
+            bool rebake = replaceBody || replaceMorph || request.DisableMorph || request.SourceFps > 0 || request.RebakeOutput;
             if (rebake)
             {
                 // Existing target geometry is part of the authored track's
@@ -274,7 +279,7 @@ internal static class ImportPipeline
                 string morph = request.DisableMorph ? string.Empty
                     : replaceMorph ? Path.GetFullPath(request.MorphVmd)
                     : File.Exists(Path.Combine(stage, "source_morph.vmd")) ? Path.Combine(stage, "source_morph.vmd") : string.Empty;
-                float fps = request.Fps > 0 ? request.Fps : EditFps(info);
+                float fps = request.Fps > 0 ? request.Fps : (info["fps"]?.GetValue<float>() ?? 0);
                 string existingAudio = Path.Combine(stage, "song.wav");
                 // Audio changes are applied after conversion, matching edit mode:
                 // no discovery or replacement of the track's audio is implied.
@@ -286,6 +291,7 @@ internal static class ImportPipeline
                     MotionsRoot = Path.Combine(work, "converted"),
                     Title = "edit-body",
                     Fps = fps,
+                    SourceFps = request.SourceFps > 0 ? request.SourceFps : (!replaceBody ? EditFps(info) : 0),
                     Audio = File.Exists(existingAudio) ? existingAudio : string.Empty,
                     ClearAudio = !File.Exists(existingAudio),
                     ToothChannel = request.ToothChannel
@@ -323,9 +329,11 @@ internal static class ImportPipeline
                 info["source_camera_vmd"] = string.Empty;
                 info.Remove("camera_root_registration");
             }
-            else if (!string.IsNullOrEmpty(request.CameraVmd))
+            else if (!string.IsNullOrEmpty(request.CameraVmd) ||
+                     (request.SourceFps > 0 && File.Exists(Path.Combine(stage, "source_camera.vmd"))))
             {
-                string camera = Path.GetFullPath(request.CameraVmd);
+                string camera = !string.IsNullOrEmpty(request.CameraVmd) ? Path.GetFullPath(request.CameraVmd)
+                    : Path.Combine(stage, "source_camera.vmd");
                 ImportOutcome imported = CameraImportPipeline.Run(new CameraImportRequest
                 {
                     Source = camera, MotionDirectory = stage,
@@ -338,9 +346,13 @@ internal static class ImportPipeline
                     return new ImportOutcome { Ok = false, Error = imported.Error, ErrorCode = imported.ErrorCode, Timing = timing };
                 timing.CameraMs = imported.Timing.CameraMs;
                 if (Path.GetExtension(camera).Equals(".vmd", StringComparison.OrdinalIgnoreCase))
-                    File.Copy(camera, Path.Combine(stage, "source_camera.vmd"), overwrite: true);
+                {
+                    string cameraBackup = Path.Combine(stage, "source_camera.vmd");
+                    if (!string.Equals(Path.GetFullPath(camera), Path.GetFullPath(cameraBackup), StringComparison.OrdinalIgnoreCase))
+                        File.Copy(camera, cameraBackup, overwrite: true);
+                }
                 else File.Delete(Path.Combine(stage, "source_camera.vmd"));
-                info["source_camera_vmd"] = camera;
+                if (!string.IsNullOrEmpty(request.CameraVmd)) info["source_camera_vmd"] = camera;
                 // A previous camera's registration receipt cannot describe this one.
                 info.Remove("camera_root_registration");
             }
@@ -530,7 +542,7 @@ internal static class ImportPipeline
     /// the clip should be stored. A re-baked 60-tick VMD (e.g. Motion-60FPS.vmd,
     /// 9443 ticks against a 157.35 s song) reports 60 here and needs no resample.
     /// </summary>
-    private static float DetectSourceFps(string vmdPath, VmdMotion motion, string? wavPath)
+    internal static float DetectSourceFps(string vmdPath, VmdMotion motion, string? wavPath)
     {
         string infoPath = Path.Combine(Path.GetDirectoryName(vmdPath)!, "info.json");
         if (string.Equals(Path.GetFileName(vmdPath), "source.vmd", StringComparison.OrdinalIgnoreCase) &&
@@ -561,7 +573,7 @@ internal static class ImportPipeline
 
         if (wavPath != null && TryValidatePcmWav(wavPath, out double seconds, out _) && seconds > 0.0)
         {
-            double ratio = (motion.MaxFrame + 1) / seconds;
+            double ratio = (BodyEndFrame(motion) + 1) / seconds;
             if (ratio is >= 54.0 and <= 66.0) return 60.0f;
             if (ratio is >= 24.0 and <= 36.0) return 30.0f;
             if (ratio >= 45.0) return 60.0f;
@@ -571,6 +583,21 @@ internal static class ImportPipeline
         if (Regex.IsMatch(Path.GetFileNameWithoutExtension(vmdPath), @"60\s*fps", RegexOptions.IgnoreCase))
             return 60.0f;
         return 30.0f;
+    }
+
+    // A few late facial, camera, IK or isolated bone keys must not set the
+    // body clock. Use the upper quartile of animated body-track endpoints;
+    // sparse files fall back to their latest body key instead of morphology.
+    internal static uint BodyEndFrame(VmdMotion motion)
+    {
+        var tracks = motion.BoneKeyframes
+            .Where(pair => !EyeOnlyBones.Contains(pair.Key) && pair.Value.Count > 0)
+            .Select(pair => pair.Value)
+            .ToArray();
+        if (tracks.Length == 0) return 0;
+        var animated = tracks.Where(keys => keys.Count > 1 && keys[^1].Frame > keys[0].Frame)
+            .Select(keys => keys[^1].Frame).OrderBy(frame => frame).ToArray();
+        return animated.Length >= 4 ? animated[(animated.Length - 1) * 3 / 4] : tracks.Max(keys => keys[^1].Frame);
     }
 
     /// <summary>import_motion's audio resolution: explicit file, else adjacent WAV.</summary>

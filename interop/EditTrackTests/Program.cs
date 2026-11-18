@@ -8,6 +8,7 @@ using System.Text.Json.Nodes;
 using GakuMotion.TimebaseTests;
 using GakuMotion.VmdImporter.Native;
 using GakuMotion.VmdImporter.Output;
+using GakuMotion.VmdImporter.Vmd;
 
 internal static unsafe class Program
 {
@@ -27,6 +28,39 @@ internal static unsafe class Program
         _root = Fixtures.NewTempRoot("edit-track");
         try
         {
+            Case("body clock detection ignores a late facial tail", () =>
+            {
+                string dir = Path.Combine(_root, "clock-detection");
+                string source = Fixtures.WriteSyntheticVmd(dir, frames: 61);
+                string wav = Path.Combine(dir, "two.wav");
+                using (var w = new BinaryWriter(File.Create(wav))) {
+                    const int rate = 8000, length = rate * 2 * 2;
+                    w.Write(Encoding.ASCII.GetBytes("RIFF")); w.Write(36 + length); w.Write(Encoding.ASCII.GetBytes("WAVEfmt "));
+                    w.Write(16); w.Write((short)1); w.Write((short)1); w.Write(rate); w.Write(rate * 2);
+                    w.Write((short)2); w.Write((short)16); w.Write(Encoding.ASCII.GetBytes("data")); w.Write(length); w.Write(new byte[length]);
+                }
+                var parsed = VmdReader.Parse(source);
+                var longTail = new VmdMotion { Version = parsed.Version, ModelName = parsed.ModelName,
+                    BoneKeyframes = parsed.BoneKeyframes, MorphKeyframes = parsed.MorphKeyframes,
+                    CameraKeyframes = parsed.CameraKeyframes, PropertyKeyframes = parsed.PropertyKeyframes, MaxFrame = 120 };
+                Require(ImportPipeline.DetectSourceFps(source, longTail, wav) == 30, "facial tail changed body clock");
+                string sixty = Fixtures.WriteSyntheticVmd(Path.Combine(dir, "sixty"), frames: 121);
+                Require(ImportPipeline.DetectSourceFps(sixty, VmdReader.Parse(sixty), wav) == 60, "60 fps body was not detected");
+                Require(ImportPipeline.DetectSourceFps(source, longTail, null) == 30, "missing audio should use the default clock");
+            });
+            Case("explicit source clock rebakes without changing output sampling semantics", () =>
+            {
+                string track = Track();
+                File.Delete(Path.Combine(track, "source_camera.vmd")); // This fixture's placeholder is not a VMD.
+                var result = Edit(track, ("source_fps", 60), ("fps", 30));
+                Require(result.Ok, "source override failed: " + result.Error);
+                Require(Info(track)["source_fps"]!.GetValue<float>() == 60 && Info(track)["fps"]!.GetValue<float>() == 30,
+                    "source and output clocks were not stored independently");
+                var before = Snapshot(track);
+                Require(!Edit(track, ("source_fps", 42)).Ok, "unsupported source clock accepted");
+                var after = Snapshot(track);
+                foreach (string path in before.Keys) Require(before[path] == after[path], "invalid clock changed " + path);
+            });
             Case("edit-only JSON permits omitted body/library fields", () =>
             {
                 string track = Track();

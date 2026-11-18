@@ -26,7 +26,7 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     repo = Path(__file__).resolve().parents[1]
     source = (repo / "src/GkCsharpImport.hpp").read_text("utf-8")
-    assert re.search(r"abi\(\)\s*<\s*3", source), "Runtime bridge must require body ABI 3"
+    assert re.search(r"abi\(\)\s*<\s*4", source), "Runtime bridge must require body ABI 4"
     module = ctypes.CDLL(str(args.native_dll.resolve()))
     versions = {}
     for name in ("GkVmdImporter_AbiVersion", "GkCameraImporter_AbiVersion"):
@@ -34,7 +34,7 @@ def main():
         fn.restype = ctypes.c_int32
         fn.argtypes = []
         versions[name] = fn()
-    assert list(versions.values()) == [3, 1], versions
+    assert list(versions.values()) == [4, 1], versions
     cases = [
         ("native-bridge-e2e", [str(args.bridge_exe.resolve()), str(args.native_dll.resolve().parent),
                                str(args.old_abi_dir.resolve()), str(output / "bridge-work")]),
