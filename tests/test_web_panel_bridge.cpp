@@ -6,6 +6,7 @@
 // Build/run: tests/run_web_panel_tests.ps1 (MSVC, /std:c++20 /utf-8).
 
 #include "GkWebPanelBridge.hpp"
+#include "GkAudioPluginClient.hpp"
 
 #include <cstdio>
 #include <fstream>
@@ -1326,6 +1327,60 @@ static void TestClockAudioEffectsAndCovers()
 	fs::remove_all(root, ec);
 }
 
+static void TestAudioPluginClientQueryCopiesStruct()
+{
+	BeginTest("audio_plugin_client_query_copies_struct");
+	struct FakeHost
+	{
+		GakuAudioServiceV1 svc{};
+		bool volumeCalled{false};
+		std::string lastPreset;
+	} fake{};
+	fake.svc.abiVersion = GAKU_AUDIO_VERSION;
+	fake.svc.structSize = sizeof(GakuAudioServiceV1);
+	fake.svc.context = &fake;
+	fake.svc.openAndPlay = [](void*, const char*, double) -> GakuStatus { return GAKU_OK; };
+	fake.svc.pause = [](void*) -> GakuStatus { return GAKU_OK; };
+	fake.svc.resumeAt = [](void*, double) -> GakuStatus { return GAKU_OK; };
+	fake.svc.seek = [](void*, double, uint32_t) -> GakuStatus { return GAKU_OK; };
+	fake.svc.stop = [](void*) -> GakuStatus { return GAKU_OK; };
+	fake.svc.observe = [](void*, GakuAudioObservationV1* out) -> GakuStatus {
+		if (!out) return GAKU_E_INVALID_ARGUMENT;
+		*out = GakuAudioObservationV1{};
+		out->structSize = sizeof(*out);
+		return GAKU_OK;
+	};
+	fake.svc.setVolume = [](void* c, float) -> GakuStatus {
+		static_cast<FakeHost*>(c)->volumeCalled = true;
+		return GAKU_OK;
+	};
+	fake.svc.setPlaybackRate = [](void*, float) -> GakuStatus { return GAKU_OK; };
+	fake.svc.setActivePreset = [](void* c, const char* id) -> GakuStatus {
+		static_cast<FakeHost*>(c)->lastPreset = id ? id : "";
+		return GAKU_OK;
+	};
+
+	GakuHostApi host{};
+	host.abiVersion = GAKU_ABI_VERSION;
+	host.structSize = sizeof(GakuHostApi);
+	host.hostContext = &fake;
+	host.queryService = [](void* hctx, const char* name, uint32_t reqVer, uint32_t outSize, void* outBuf) -> GakuStatus {
+		auto* fh = static_cast<FakeHost*>(hctx);
+		if (!fh || !name || std::string_view(name) != GAKU_SERVICE_AUDIO_CORE) return GAKU_E_UNAVAILABLE;
+		if (reqVer != GAKU_AUDIO_VERSION) return GAKU_E_VERSION;
+		if (!outBuf || outSize < sizeof(GakuAudioServiceV1)) return GAKU_E_SIZE;
+		std::memcpy(outBuf, &fh->svc, sizeof(GakuAudioServiceV1));
+		return GAKU_OK;
+	};
+
+	GakuMotion::audio::AudioPluginClient client;
+	client.BindHost(&host);
+	Check(client.Available(), "Available queries and copies GakuAudioServiceV1");
+	Check(client.SetVolume(0.5f) && fake.volumeCalled, "SetVolume invokes queried service");
+	Check(client.SetActivePreset("concert_arena") && fake.lastPreset == "concert_arena",
+		"SetActivePreset forwards to copied service table");
+}
+
 int main()
 {
 	std::setvbuf(stdout, nullptr, _IONBF, 0);
@@ -1353,6 +1408,7 @@ int main()
 	TestExperimentsTelemetry();
 	TestDropPeek();
 	TestClockAudioEffectsAndCovers();
+	TestAudioPluginClientQueryCopiesStruct();
 	std::printf("\nweb-panel bridge contracts: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail == 0 ? 0 : 1;
 }

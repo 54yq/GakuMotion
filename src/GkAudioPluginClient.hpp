@@ -53,6 +53,7 @@ namespace GakuMotion::audio
 			hostApi_ = hostApi;
 			directService_ = nullptr;
 			cachedService_ = nullptr;
+			queriedService_ = GakuAudioServiceV1{};
 		}
 
 		void BindDirectService(const GakuAudioServiceV1* service)
@@ -60,6 +61,7 @@ namespace GakuMotion::audio
 			std::lock_guard<std::mutex> lock(mutex_);
 			directService_ = IsValidService(service) ? service : nullptr;
 			cachedService_ = directService_;
+			queriedService_ = GakuAudioServiceV1{};
 		}
 
 		void SetConfigRoot(const std::filesystem::path& configRoot)
@@ -309,16 +311,17 @@ namespace GakuMotion::audio
 			if (cachedService_) return cachedService_;
 			if (!hostApi_ || !hostApi_->queryService || !hostApi_->hostContext) return nullptr;
 
-			const void* svcPtr = nullptr;
+			GakuAudioServiceV1 candidate{};
 			const GakuStatus st = hostApi_->queryService(
 				hostApi_->hostContext,
 				GAKU_SERVICE_AUDIO_CORE,
 				GAKU_AUDIO_VERSION,
-				sizeof(GakuAudioServiceV1),
-				&svcPtr);
-			if (st == GAKU_OK && IsValidService(static_cast<const GakuAudioServiceV1*>(svcPtr)))
+				sizeof(candidate),
+				&candidate);
+			if (st == GAKU_OK && IsValidService(&candidate))
 			{
-				cachedService_ = static_cast<const GakuAudioServiceV1*>(svcPtr);
+				queriedService_ = candidate;
+				cachedService_ = &queriedService_;
 				if (hasPendingOverride_ && !desiredPresetId_.empty() && cachedService_->setActivePreset)
 				{
 					cachedService_->setActivePreset(cachedService_->context, desiredPresetId_.c_str());
@@ -379,6 +382,7 @@ namespace GakuMotion::audio
 		const GakuHostApi* hostApi_{nullptr};
 		const GakuAudioServiceV1* directService_{nullptr};
 		const GakuAudioServiceV1* cachedService_{nullptr};
+		GakuAudioServiceV1 queriedService_{};
 		std::filesystem::path configRoot_;
 		std::string desiredPresetId_{"flat"};
 		bool hasPendingOverride_{false};
