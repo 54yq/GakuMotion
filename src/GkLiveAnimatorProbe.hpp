@@ -1,4 +1,5 @@
 #pragma once
+#include "GkLiveIndependentGraphProbe.hpp"
 // Included inside the plugin's anonymous namespace. Read-only snapshots on the
 // Unity thread; no Animator/graph mutations or cached managed instances.
 namespace LiveAnimatorProbe
@@ -137,6 +138,9 @@ namespace LiveAnimatorProbe
 					if (phase>=0) {
 						alignas(16) std::array<unsigned char, 16> actorGraph{};
 						std::memcpy(actorGraph.data(), graph, actorGraph.size());
+						if (targetMatches == 1)
+							LiveIndependentGraphProbe::Sample(actor, component, player, playerBase, graphClass,
+							                                  actorGraph, phase, clockSlot, metadata);
 						if (followerClock) followerClock->Offer(actorGraph.data(),graphClass,actor,player,targetMatches==1);
 						else if (!GakuMotion::Core::Instance().player.controller.targetActor || GakuMotion::Core::Instance().player.controller.targetActor == actor)
 							LiveActorClockMvp::Offer(actorGraph.data(),graphClass,actor,player,targetMatches==1);
