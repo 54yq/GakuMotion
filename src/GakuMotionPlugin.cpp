@@ -1558,9 +1558,7 @@ static void ResetPlacementDynamicBone(void* actor)
 		return ok;
 	}
 #include "GkLiveAnimatorProbe.hpp"
-#ifdef GKMOTION_ENABLE_SHOE_MESH_PROBE
 #include "GkShoeMeshProbe.hpp"
-#endif
 
 #include "GkStageRuntime.hpp"
 #include "GkLiveLetterboxProbe.hpp"
@@ -1583,6 +1581,7 @@ static void ResetPlacementDynamicBone(void* actor)
 			GakuMotion::host::mainThread.isMainThread(GakuMotion::host::mainThread.context);
 	}
 
+#include "GkLiveSleeveProbe.hpp"
 #include "GkSceneOwnerRuntime.hpp"
 #include "GkStageLoadOverride.hpp"
 #include "GkPageObservation.hpp"
@@ -2369,6 +2368,7 @@ bool InitializeMotion()
 	core.fnLogWarn = g_hostCaps.hasLogWarn ? g_hostContext.logWarn : nullptr;
 	core.fnNotifyMotionPlaying = NotifyHostMotionPlaying;
 	core.fnReadFormationOrigin = GakuMotion::csharp_import::ReadFormationOrigin;
+	core.fnObserveLivePlacement = LiveSleeveProbe::Placement;
 	core.fnStartImport = StartMotionImport;
 	core.fnPollImport = PollMotionImport;
 	core.fnPollImportProgress = PollMotionImportWithProgress;
@@ -3481,7 +3481,9 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 		core.IsTargetActor(activeActor) && player.state == GakuMotion::PlaybackState::Playing)
 		LiveAnimatorProbe::SamplePhotography(activeActor);
 	StageLoader::BindContext(sceneHandle, activeActor);
+	LiveSleeveProbe::Frame(core, unityFrame >= 0 ? unityFrame : s_fallbackFrame);
 	if (isNewPhysicalFrame) core.ProcessPendingGuiCommands();
+	LiveSleeveProbe::Actor(core, activeActor, false);
 	void* anim = g_motionSceneAllowed && player.state != GakuMotion::PlaybackState::Stopped
 		             ? HelperGetActorAnimator(activeActor)
 		             : nullptr;
@@ -3731,6 +3733,12 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	if (player.controller.targetActor)
 		GakuMotion::OnLateUpdate(activeActor, anim, nullptr, dtToPass, isNewPhysicalFrame,
 		                        s_cameraFrameDelta, s_cameraPhysicalFrame);
+	if (LiveSleeveProbe::event) {
+		const auto* afterBody = ActorGroundShadow::PlayerForActor(activeActor);
+		LiveSleeveProbe::Actor(core, activeActor, true, afterBody && afterBody == posePlayer &&
+			afterBody->controller.footPoseWriteStamp.actor == activeActor &&
+			afterBody->controller.footPoseWriteStamp.serial != poseSerialBefore);
+	}
 	EyeGazeProbe::After(activeActor);
     // Only observed Motion-owned actors can trigger this. Each role has its own
     // identity, scene epoch and follower generation; never retain managed rigs.

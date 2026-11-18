@@ -44,6 +44,13 @@ namespace
 	std::map<void*, Vector3> formationPositions;
 	std::map<void*, Quaternion> formationRotations;
 	bool formationSourceUnavailable = false;
+	struct FormationObservation { std::string operation; bool before; float mainX, followerYaw; };
+	std::vector<FormationObservation> formationObservations;
+	void ObserveFormation(Core& core, const char* operation, bool before)
+	{
+		formationObservations.push_back({operation, before, core.player.controller.initialPositionOffset.x,
+			core.ensemble.Followers().front().player->controller.initialYawDegrees});
+	}
 	void FormationPosition(void* actor, float* out)
 	{ const auto p = formationPositions[actor]; out[0] = p.x; out[1] = p.y; out[2] = p.z; }
 	void FormationRotation(void* actor, float* out)
@@ -836,6 +843,30 @@ namespace
 		app.Settle();
 		if (!app.ItemWithLabel("以主角色对齐原曲队形")) app.Click("多人同步播放");
 		app.Settle();
+		formationObservations.clear();
+		app.core.liveTakeoverActive = true;
+		app.core.fnObserveLivePlacement = ObserveFormation;
+		app.core.QueueInitialPosition({0.75f, 0.f, 0.f});
+		app.core.ProcessPendingGuiCommands();
+		Check(formationObservations.size() == 2 && formationObservations[0].operation == "main_position" &&
+			formationObservations[0].before && !formationObservations[1].before &&
+			formationObservations[0].mainX == 0.f && formationObservations[1].mainX == 0.75f,
+			"Live placement probe brackets the manual position edit");
+		app.core.player.controller.SetInitialPositionOffset({});
+		formationObservations.clear();
+		app.core.QueueAlignEnsemble();
+		app.core.ProcessPendingGuiCommands();
+		Check(formationObservations.size() == 2 && formationObservations[0].operation == "align_formation" &&
+			formationObservations[0].before && !formationObservations[1].before &&
+			formationObservations[0].followerYaw == 0.f && std::fabs(formationObservations[1].followerYaw - 90.f) < 1e-4f,
+			"Live placement probe brackets the validated formation commit");
+		formationSourceUnavailable = true;
+		formationObservations.clear();
+		app.core.QueueAlignEnsemble();
+		app.core.ProcessPendingGuiCommands();
+		Check(formationObservations.empty(), "rejected formation does not start the Live placement probe");
+		formationSourceUnavailable = false;
+		app.core.liveTakeoverActive = false;
 		app.Click("以主角色对齐原曲队形"); app.Settle();
 		const Quaternion basis = Quaternion::FromEulerDegreesXYZ(0,50,0);
 		const Vector3 expected = formationPositions[a] + basis.Rotate({1,0,0});
