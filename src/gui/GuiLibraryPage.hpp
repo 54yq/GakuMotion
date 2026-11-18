@@ -170,6 +170,7 @@ namespace GakuMotion
 
 		char titleInput[256]{};
 		PerformanceTiming timing;
+		int sourceFpsIndex{0}, outputFpsIndex{0};
 		std::vector<std::string> motionCandidates;
 		std::vector<std::string> facialCandidates;
 		std::vector<std::string> cameraCandidates;
@@ -205,6 +206,7 @@ namespace GakuMotion
 			isEditMode = false;
 			editTargetKey.clear();
 			timing = {};
+			sourceFpsIndex = outputFpsIndex = 0;
 			titleInput[0] = '\0';
 			motionCandidates.clear();
 			facialCandidates.clear();
@@ -831,6 +833,12 @@ namespace GakuMotion
 				ImGui::EndTable();
 			}
 			ImGui::TextDisabled("速度与播放栏倍速相乘；偏移正数后移，负数前移。");
+			ImGui::SetNextItemWidth(160.0f);
+			ImGui::Combo("源动作帧率", &g_libraryModal.sourceFpsIndex, "自动检测\0 30 fps\0 60 fps\0");
+			if (ImGui::IsItemHovered()) ImGui::SetTooltip("素材的时间基准；动作过快或过慢时可指定。修改已有曲目的源帧率会重新烘焙动作。");
+			ImGui::SetNextItemWidth(160.0f);
+			ImGui::Combo("输出采样帧率", &g_libraryModal.outputFpsIndex, "自动（保持原有）\0 30 fps\0 60 fps\0");
+			ImGui::TextDisabled("自动检测依据身体骨骼与音频，素材长度不一致时请检查结果。");
 
 			if (g_libraryModal.unsupportedAudio > 0)
 			{
@@ -994,7 +1002,9 @@ namespace GakuMotion
 			{
 				MotionImportRequest req{};
 				req.title = g_libraryModal.titleInput[0] ? g_libraryModal.titleInput : "未命名演出";
-				req.fps = 0.0f;
+				req.fps = g_libraryModal.outputFpsIndex == 1 ? 30.f : g_libraryModal.outputFpsIndex == 2 ? 60.f : 0.f;
+				req.rebakeOutput = g_libraryModal.isEditMode && req.fps > 0;
+				req.sourceFps = g_libraryModal.sourceFpsIndex == 1 ? 30.f : g_libraryModal.sourceFpsIndex == 2 ? 60.f : 0.f;
 				req.timing = g_libraryModal.timing;
 
 				if (g_libraryModal.isEditMode)

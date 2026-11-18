@@ -11,6 +11,8 @@
 #include <string>
 #include <vector>
 
+namespace GakuMotion::Log { void Write(Level, const char*, ...) {} }
+
 using namespace GakuMotion;
 
 namespace
@@ -438,12 +440,28 @@ namespace
 	void TestUnifiedCameraModeControls(const std::filesystem::path& root)
 	{
 		Harness app(root);
+		app.core.configRoot = (app.fixture / "config").string();
 		app.core.gui.activePage = GuiPage::Camera;
 		app.core.camera.settings.enabled = true;
 		app.core.camera.settings.mode = CameraMode::Track;
 		app.core.camera.settings.transformTrack.position = {0.2f, 0.3f, 0.4f};
 		app.core.camera.Publish();
 		app.Settle();
+		ImRect rangeRect;
+		if (app.Find("VMD 运镜范围", rangeRect))
+		{
+			auto& io = ImGui::GetIO();
+			io.AddMousePosEvent(rangeRect.Min.x + 90.0f, rangeRect.GetCenter().y); app.Frame();
+			io.AddMouseButtonEvent(0, true); app.Frame();
+			io.AddMouseButtonEvent(0, false); app.Settle();
+			Check(app.core.camera.settings.vmdRangeScale < .95f && app.core.camera.settings.vmdRangeScale >= .3f,
+				"VMD camera range slider updates the actual camera settings");
+			app.Click("保存镜头设置"); app.Settle();
+			Core restored;
+			restored.configRoot = app.core.configRoot;
+			Check(restored.LoadCameraSettings() && std::fabs(restored.camera.settings.vmdRangeScale - app.core.camera.settings.vmdRangeScale) < 1e-5f,
+				"VMD camera range slider persists through the camera settings save button");
+		}
 		Check(!app.ItemWithLabel("启用 GakuMotion 镜头接管") && !app.ItemWithLabel("启用 MMD 镜头接管"),
 			"camera page has no separate takeover checkbox");
 		app.Click("##camera_mode");
@@ -579,14 +597,14 @@ int main(int argc, char** argv)
 		const auto ordinaryText = app.Text();
 		Check(!app.ItemWithLabel("只驱动当前绑定角色") && !app.ItemWithLabel("下一个场景角色") &&
 			!app.ItemWithLabel("驱动全部场景角色") && !app.ItemWithLabel("##facial_actor_combo") &&
-			!app.ItemWithLabel("实验：四角色 Miku 嘴形拟合") && ordinaryText.find("表情适配角色") == std::string::npos &&
-			ordinaryText.find("视线") == std::string::npos && ordinaryText.find("表情随驱动角色自动适配") != std::string::npos,
+			!app.ItemWithLabel("实验：Miku 嘴形拟合") && ordinaryText.find("表情适配角色") == std::string::npos &&
+			ordinaryText.find("实验：视线") == std::string::npos && ordinaryText.find("表情随驱动角色自动适配") != std::string::npos,
 			"ordinary Motion page exposes one actor selector and automatic facial adaptation without experimental controls");
 
 		app.core.gui.activePage = GuiPage::Developer;
 		app.core.gui.developerMode = false;
 		app.Settle();
-		Check(!app.ItemWithLabel("实验：四角色 Miku 嘴形拟合") && !app.ItemWithLabel("DesktopOn（强制桌面追焦）"),
+		Check(!app.ItemWithLabel("实验：Miku 嘴形拟合") && !app.ItemWithLabel("DesktopOn（强制桌面追焦）"),
 			"developer motion experiments stay hidden while developer mode is off");
 		app.core.gui.developerMode = true;
 		app.Settle(); app.Click("动作", 1); app.Settle();
@@ -596,12 +614,12 @@ int main(int argc, char** argv)
 		Check(!app.core.player.controller.IsExperimentalWaistSupportEnabled(), "developer waist checkbox disables support");
 		app.Click("实验：腰部支撑（默认开启）");
 		Check(app.core.player.controller.IsExperimentalWaistSupportEnabled(), "developer waist checkbox reenables support");
-		const auto* fitCheckbox = app.ItemWithLabel("实验：四角色 Miku 嘴形拟合");
+		const auto* fitCheckbox = app.ItemWithLabel("实验：Miku 嘴形拟合");
 		Check(fitCheckbox && (fitCheckbox->status & ImGuiItemStatusFlags_Checked) && app.core.player.controller.facialMikuMouthFit,
 			"developer Motion tab exposes the Miku experiment checked by default");
-		app.Click("实验：四角色 Miku 嘴形拟合");
+		app.Click("实验：Miku 嘴形拟合");
 		Check(app.core.config.facialMikuMouthFit == 0, "developer Miku experiment checkbox actually disables the configured fit");
-		app.Click("实验：四角色 Miku 嘴形拟合");
+		app.Click("实验：Miku 嘴形拟合");
 		Check(app.core.config.facialMikuMouthFit == 1, "developer Miku experiment checkbox can reenable the configured fit");
 		const auto gazeText = app.Text();
 		const auto* gazeControl = app.ItemWithLabel("DesktopOn（强制桌面追焦）");
@@ -619,6 +637,27 @@ int main(int argc, char** argv)
 	{
 		Harness app(root);
 		app.Frame(); app.Frame();
+		app.core.configRoot = (app.fixture / "config").string();
+		app.Settle();
+		ImRect volumeRect;
+		if (app.Find("音乐音量", volumeRect))
+		{
+			auto& input = ImGui::GetIO();
+			input.AddMousePosEvent(volumeRect.Min.x + 35.0f, volumeRect.GetCenter().y); app.Frame();
+			input.AddMouseButtonEvent(0, true); app.Frame();
+			input.AddMouseButtonEvent(0, false); app.Frame(); app.Frame();
+			Check(app.core.player.musicVolume < 0.5f &&
+				std::filesystem::exists(app.fixture / "config" / "music_volume.json"),
+				"actual music volume slider changes the player and saves on release");
+			Core restored; restored.configRoot = app.core.configRoot;
+			Check(restored.LoadMusicVolume() && std::fabs(restored.player.musicVolume - app.core.player.musicVolume) < .001f,
+				"actual slider value is restored by a fresh player");
+		}
+		app.contextPatch = [](GuiContext& context) { context.musicVolumeSupport = -1; };
+		app.Settle();
+		Check(app.Text().find("当前音乐后端不支持独立音量") != std::string::npos,
+			"unavailable audio volume control is disclosed in the player");
+		app.contextPatch = {};
 		app.Click("##row", 1);
 		Check(app.core.gui.selectedLibraryKey == "B", "actual library single click browses B");
 		Check(app.core.currentMotionIndex == 0 && app.core.loadedMotionKey == "A" &&

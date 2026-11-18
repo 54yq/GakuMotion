@@ -7,6 +7,7 @@ param(
     [string]$Target = 'All',
     [string]$OutputRoot = '',
     [string]$WindowsSdkRoot = '',
+    [string]$PortableVisualStudio = '',
     [string]$DotNet = 'dotnet'
 )
 $ErrorActionPreference = 'Stop'
@@ -35,7 +36,10 @@ if ($Target -in @('NativeAOT', 'All', 'Preflight') -and -not (Get-Command $DotNe
 New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
 if (-not (Test-Path -LiteralPath $vswhere)) { throw 'Install Visual Studio with Desktop development with C++.' }
-$vs = & $vswhere -latest -prerelease -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+$vs = $PortableVisualStudio
+if ([string]::IsNullOrWhiteSpace($vs)) {
+    $vs = & $vswhere -latest -prerelease -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+}
 if ([string]::IsNullOrWhiteSpace($vs)) { throw 'MSVC x64 toolset not found.' }
 $msvc = Get-ChildItem -LiteralPath (Join-Path $vs 'VC\Tools\MSVC') -Directory | Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
 if (-not $msvc) { throw 'MSVC compiler directory not found.' }
@@ -48,8 +52,14 @@ if ([string]::IsNullOrWhiteSpace($sdk)) {
         Where-Object { Test-Path -LiteralPath (Join-Path $_ 'Include') } | Select-Object -First 1
 }
 if ([string]::IsNullOrWhiteSpace($sdk)) { throw 'Windows SDK not found; pass -WindowsSdkRoot.' }
-$sdkVersion = Get-ChildItem -LiteralPath (Join-Path $sdk 'Include') -Directory | Sort-Object Name -Descending | Select-Object -First 1
-if (-not $sdkVersion) { throw 'Windows SDK Include directory not found.' }
+$sdkVersion = Get-ChildItem -LiteralPath (Join-Path $sdk 'Include') -Directory |
+    Where-Object {
+        $_.Name -match '^\d+\.\d+\.\d+\.\d+$' -and
+        (Test-Path -LiteralPath (Join-Path $_.FullName 'ucrt\stddef.h') -PathType Leaf) -and
+        (Test-Path -LiteralPath (Join-Path $sdk "Lib\$($_.Name)\um\x64\advapi32.lib") -PathType Leaf)
+    } |
+    Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
+if (-not $sdkVersion) { throw 'Complete Windows SDK (ucrt headers and um/x64 libs) not found.' }
 if ($Target -eq 'Preflight') { Write-Host 'Build inputs, MSVC and Windows SDK found.'; exit 0 }
 if ($Target -eq 'Runtime' -or $Target -eq 'All') {
     # Some hosts expose PATH / Path / path as three separate process environment
@@ -59,6 +69,24 @@ if ($Target -eq 'Runtime' -or $Target -eq 'All') {
     $pathValue = (($env:Path -split ';') | Where-Object { $_ } | Select-Object -Unique) -join ';'
     foreach ($key in @('PATH', 'Path', 'path')) { [Environment]::SetEnvironmentVariable($key, $null, 'Process') }
     $env:Path = $pathValue
+    if ($PortableVisualStudio) {
+        $nativeOutput = Join-Path $OutputRoot 'native'
+        $nativeObjects = Join-Path $OutputRoot 'obj\native'
+        New-Item -ItemType Directory -Path $nativeOutput,$nativeObjects -Force | Out-Null
+        $compiler = Join-Path $msvc.FullName 'bin\Hostx64\x64\cl.exe'
+        $sources = @('src/GakuMotionPlugin.cpp', 'deps/imgui/imgui.cpp', 'deps/imgui/imgui_draw.cpp',
+            'deps/imgui/imgui_widgets.cpp', 'deps/imgui/imgui_tables.cpp', 'include/minhook/src/buffer.c',
+            'include/minhook/src/hook.c', 'include/minhook/src/trampoline.c',
+            'include/minhook/src/hde/hde32.c', 'include/minhook/src/hde/hde64.c') | ForEach-Object { Join-Path $repo $_ }
+        $args = @('/nologo', '/LD', '/std:c++20', '/utf-8', '/O2', '/EHsc', '/MT', '/W3',
+            '/DWIN32', '/DNDEBUG', '/D_WINDOWS', '/D_USRDLL', '/DGKMOTION_ENABLE_IMGUI',
+            "/I$(Join-Path $repo 'include')", "/I$(Join-Path $repo 'src')",
+            "/I$(Join-Path $repo 'deps/KineTexture/src')", "/I$(Join-Path $repo 'deps/imgui')",
+            "/Fo$nativeObjects\") + $sources + @('winmm.lib', 'user32.lib', 'comdlg32.lib',
+            '/link', "/OUT:$(Join-Path $nativeOutput 'GakuMotion.dll')", '/SUBSYSTEM:WINDOWS', '/OPT:REF', '/OPT:ICF')
+        & $compiler @args
+        if ($LASTEXITCODE -ne 0) { throw ('Portable runtime build failed: ' + $LASTEXITCODE) }
+    } else {
     $msbuild = Join-Path $vs 'MSBuild\Current\Bin\MSBuild.exe'
     $toolset = if ([IO.File]::Exists((Join-Path $vs 'MSBuild\Microsoft\VC\v180\Platforms\x64\PlatformToolsets\v145\Toolset.props'))) { 'v145' } else { 'v143' }
     $nativeOutput = Join-Path $OutputRoot 'native'
@@ -72,6 +100,7 @@ if ($Target -eq 'Runtime' -or $Target -eq 'All') {
         "/p:OutDir=$nativeOutput/" "/p:IntDir=$nativeObjects/" "/p:ImGuiIncludeDir=$(Join-Path $repo 'deps\imgui')" `
         "/p:KineTextureIncludeDir=$(Join-Path $repo 'deps\KineTexture\src')" '/p:GkCaptureDiagnostics=false' '/nologo' '/verbosity:minimal'
     if ($LASTEXITCODE -ne 0) { throw ('Runtime build failed: ' + $LASTEXITCODE) }
+    }
 }
 if ($Target -eq 'NativeAOT' -or $Target -eq 'All') {
     $aotOutput = Join-Path $OutputRoot 'nativeaot'
@@ -79,13 +108,19 @@ if ($Target -eq 'NativeAOT' -or $Target -eq 'All') {
     New-Item -ItemType Directory -Path $aotOutput,$aotObjects -Force | Out-Null
     $linker = Join-Path $msvc.FullName 'bin\Hostx64\x64\link.exe'
     $libCreator = Join-Path $msvc.FullName 'bin\Hostx64\x64\lib.exe'
+    $prevLib = $env:LIB
+    $env:LIB = @((Join-Path $msvc.FullName 'lib\x64'), (Join-Path $sdk "Lib\$($sdkVersion.Name)\ucrt\x64"),
+        (Join-Path $sdk "Lib\$($sdkVersion.Name)\um\x64")) -join ';'
     Push-Location -LiteralPath $repo
     try {
         & $DotNet publish (Join-Path $repo 'interop\GakuMotion.VmdImporter.Native\GakuMotion.VmdImporter.Native.csproj') `
             -c Release -r win-x64 -o $aotOutput "-p:ArtifactsPath=$aotObjects" -p:IlcUseEnvironmentalTools=true `
             "-p:CppLinker=$linker" "-p:CppLibCreator=$libCreator"
         if ($LASTEXITCODE -ne 0) { throw ('NativeAOT build failed: ' + $LASTEXITCODE) }
-    } finally { Pop-Location }
+    } finally {
+        $env:LIB = $prevLib
+        Pop-Location
+    }
 }
 if ($Target -ne 'Contracts') { Write-Host 'Requested product build completed locally.'; exit 0 }
 # The CL/LIB/PATH defaults are only needed by the manual contracts compile below.

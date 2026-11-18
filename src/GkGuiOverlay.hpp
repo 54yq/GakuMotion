@@ -91,6 +91,8 @@ namespace GakuMotion
 		bool libraryRefreshing{false}, loadedSourceMissing{false}, loadedSourceChanged{false};
 		std::string boundActorLabel, targetActorLabel;
 		std::string initialPositionNotice;
+		std::string facialWeightsNotice;
+		void (*fnSaveFacialWeights)(void*){nullptr};
 		SoleMeasurementSettings soleSettings;
 		SoleMeasurementSnapshot soleSnapshot;
 		sole_pitch::Settings experimentalSolePitchSettings;
@@ -110,6 +112,10 @@ namespace GakuMotion
 		int (*fnPollPickFile)(std::string&, std::string&){nullptr};
 		void (*fnSetMuted)(void*, bool){nullptr};
 		void (*fnSetSpeed)(void*, float){nullptr};
+		void (*fnSetMusicVolume)(void*, float){nullptr};
+		void (*fnSaveMusicVolume)(void*){nullptr};
+		int musicVolumeSupport{0};
+		std::string musicVolumeNotice;
 		void (*fnSetInitialPosition)(void*, const Vector3&){nullptr};
 		void (*fnSaveInitialPosition)(void*){nullptr};
 

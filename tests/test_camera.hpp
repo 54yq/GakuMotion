@@ -203,6 +203,21 @@ static void TestCameraController(const std::string& repoRoot)
 		anchored.Tick(true, 0, .016f, actor);
 		Check(std::fabs(actual.position.x - 10.4f) < 1e-5f && std::fabs(actual.position.y - 2.23f) < 1e-5f,
 		      "VMD path captures the same XYZ placement anchor as the actor");
+		Check(anchored.settings.vmdRangeScale == 1.0f && actual.orthographicSize == local.orthographicSize,
+		      "default VMD range leaves the original camera path and focus size unchanged");
+		anchored.settings.vmdRangeScale = 0.5f;
+		anchored.Tick(true, 0, .016f, actor);
+		Check(std::fabs(actual.position.x - 10.4f) < 1e-5f &&
+		      std::fabs(actual.position.y - 1.73f) < 1e-5f && std::fabs(actual.position.z - 17.38f) < 1e-5f &&
+		      std::fabs(actual.orthographicSize - local.orthographicSize * 0.5f) < 1e-5f &&
+		      actual.fov == local.fov && std::fabs(Quaternion::Dot(actual.rotation, local.rotation)) > .99999f,
+		      "VMD range scales around a fixed actor-local pivot and scales focus distance without changing rotation or FOV");
+		anchored.settings.vmdOffset = {0.5f, -0.2f, 1.0f};
+		anchored.Tick(true, 0, .016f, actor);
+		Check(std::fabs(actual.position.x - 10.9f) < 1e-5f && std::fabs(actual.position.y - 1.53f) < 1e-5f &&
+		      std::fabs(actual.position.z - 18.38f) < 1e-5f,
+		      "VMD manual position offsets are not scaled with the track");
+		anchored.settings.vmdRangeScale = 1.0f;
 		anchored.settings.vmdOffset = {0.5f, -0.2f, 1.0f};
 		anchored.Tick(true, 0, .016f, actor);
 		Check(std::fabs(actual.position.x - 10.9f) < 1e-5f &&

@@ -82,8 +82,13 @@ foreach ($candidate in @($WindowsSdkRoot, 'D:\Windows Kits\10',
 }
 if (-not $sdkRoot) { throw "No Windows 10/11 SDK found." }
 $sdkVer = Get-ChildItem -Path (Join-Path $sdkRoot 'Include') -Directory -ErrorAction SilentlyContinue |
-          Sort-Object Name | Select-Object -Last 1
-if (-not $sdkVer) { throw "No SDK version found under: $sdkRoot\Include" }
+          Where-Object {
+              $_.Name -match '^\d+\.\d+\.\d+\.\d+$' -and
+              (Test-Path -LiteralPath (Join-Path $_.FullName 'ucrt\stddef.h') -PathType Leaf) -and
+              (Test-Path -LiteralPath (Join-Path $sdkRoot "Lib\$($_.Name)\um\x64\advapi32.lib") -PathType Leaf)
+          } |
+          Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
+if (-not $sdkVer) { throw "No complete SDK version found under: $sdkRoot\Include" }
 $sdkVersion = $sdkVer.Name
 
 $incDirs = @(

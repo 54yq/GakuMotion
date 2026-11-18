@@ -37,6 +37,8 @@ namespace GakuMotion
 		std::string motionsRoot, script, log;
 		std::string transactionRoot; // Optional managed scratch; same volume as library.
 		float fps{0.0f}; // 0 = auto-detect
+		float sourceFps{0.0f}; // 0 = auto-detect source timeline
+		bool rebakeOutput{false};
 		PerformanceTiming timing;
 		// 兼容旧请求结构；产品始终使用 NativeAOT，不再回落解释器。
 		bool useCsharp{true};

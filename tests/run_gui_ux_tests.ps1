@@ -1,15 +1,16 @@
 #Requires -Version 5.1
 [CmdletBinding()]
-param([string]$RepoRoot = '', [string]$OutputRoot = '')
+param([string]$RepoRoot = '', [string]$OutputRoot = '', [string]$VisualStudioPath = '', [string]$WindowsSdkRoot = '')
 $ErrorActionPreference = 'Stop'
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = Split-Path -Parent $PSScriptRoot }
 $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
 $taskVswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-$taskVs = & $taskVswhere -latest -prerelease -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+$taskVs = $VisualStudioPath
+if ([string]::IsNullOrWhiteSpace($taskVs)) { $taskVs = & $taskVswhere -latest -prerelease -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath }
 if ([string]::IsNullOrWhiteSpace($taskVs)) { throw 'Visual Studio MSVC x64 was not found.' }
 $taskMsvc = (Get-ChildItem -LiteralPath (Join-Path $taskVs 'VC\Tools\MSVC') -Directory | Sort-Object Name | Select-Object -Last 1).FullName
-$taskSdk = @('D:\Windows Kits\10', "${env:ProgramFiles(x86)}\Windows Kits\10", "${env:ProgramFiles}\Windows Kits\10") |
-    Where-Object { Test-Path -LiteralPath (Join-Path $_ 'Include') } | Select-Object -First 1
+$taskSdk = @($WindowsSdkRoot, 'D:\Windows Kits\10', "${env:ProgramFiles(x86)}\Windows Kits\10", "${env:ProgramFiles}\Windows Kits\10") |
+    Where-Object { $_ -and (Test-Path -LiteralPath (Join-Path $_ 'Include')) } | Select-Object -First 1
 if (-not $taskSdk) { throw 'Windows SDK was not found.' }
 $taskSdkVersion = (Get-ChildItem -LiteralPath (Join-Path $taskSdk 'Include') -Directory | Sort-Object Name | Select-Object -Last 1).Name
 $env:INCLUDE = @("$taskMsvc\include", "$taskSdk\Include\$taskSdkVersion\ucrt", "$taskSdk\Include\$taskSdkVersion\um", "$taskSdk\Include\$taskSdkVersion\shared", "$taskSdk\Include\$taskSdkVersion\winrt") -join ';'

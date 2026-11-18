@@ -16,6 +16,8 @@ internal sealed class ImportRequest
     public required string MotionsRoot { get; init; }
     public string Title { get; init; } = string.Empty;
     public float Fps { get; init; }
+    public float SourceFps { get; init; }
+    public bool RebakeOutput { get; init; }
     public string Audio { get; init; } = string.Empty;
     public bool ClearAudio { get; init; }
     public string CameraVmd { get; init; } = string.Empty;
@@ -72,6 +74,8 @@ internal sealed class ImportRequest
             MotionsRoot = editDir.Length == 0 ? Require("motions_root") : Optional("motions_root"),
             Title = Optional("title"),
             Fps = OptionalFloat("fps"),
+            SourceFps = OptionalFloat("source_fps"),
+            RebakeOutput = OptionalBool("rebake_output"),
             Audio = Optional("audio"),
             ClearAudio = OptionalBool("clear_audio"),
             CameraVmd = Optional("camera_vmd"),

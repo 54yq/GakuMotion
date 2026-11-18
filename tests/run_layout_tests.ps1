@@ -16,7 +16,14 @@ if (-not $msvc) { throw 'MSVC x64 toolset not found.' }
 $sdk = @($WindowsSdkRoot, 'D:/Windows Kits/10', "${env:ProgramFiles(x86)}/Windows Kits/10") |
     Where-Object { $_ -and (Test-Path -LiteralPath (Join-Path $_ 'Include')) } | Select-Object -First 1
 if (-not $sdk) { throw 'Windows SDK not found.' }
-$version = Get-ChildItem -LiteralPath (Join-Path $sdk 'Include') -Directory | Sort-Object Name | Select-Object -Last 1
+$version = Get-ChildItem -LiteralPath (Join-Path $sdk 'Include') -Directory |
+    Where-Object {
+        $_.Name -match '^\d+\.\d+\.\d+\.\d+$' -and
+        (Test-Path -LiteralPath (Join-Path $_.FullName 'ucrt\stddef.h') -PathType Leaf) -and
+        (Test-Path -LiteralPath (Join-Path $sdk "Lib/$($_.Name)/um/x64/advapi32.lib") -PathType Leaf)
+    } |
+    Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
+if (-not $version) { throw 'Complete Windows SDK not found.' }
 $env:INCLUDE = @((Join-Path $msvc.FullName 'include'), (Join-Path $sdk "Include/$($version.Name)/ucrt"),
     (Join-Path $sdk "Include/$($version.Name)/um"), (Join-Path $sdk "Include/$($version.Name)/shared")) -join ';'
 $env:LIB = @((Join-Path $msvc.FullName 'lib/x64'), (Join-Path $sdk "Lib/$($version.Name)/ucrt/x64"),
