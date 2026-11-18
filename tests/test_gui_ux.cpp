@@ -11,6 +11,8 @@
 #include <string>
 #include <vector>
 
+namespace GakuMotion::Log { void Write(Level, const char*, ...) {} }
+
 using namespace GakuMotion;
 
 namespace
