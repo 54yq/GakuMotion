@@ -102,6 +102,11 @@ namespace GakuMotion
 			return false;
 		}
 
+		static bool IsGarmentBone(const std::string& name)
+		{
+			return EndsWith(name, "_S") && CostumeName(name, true);
+		}
+
 		// No dereferences: safe after the old Unity objects have been destroyed.
 		void Clear() noexcept
 		{
@@ -112,15 +117,41 @@ namespace GakuMotion
 			stats_.boundBones = stats_.solvedBones = 0;
 		}
 
-		// Optional live-object cleanup before switching modes/Stop. Never use it
-		// after scene destruction; Clear is the lifecycle escape hatch then.
-		void Restore(const IdolController& controller)
+		struct NativeHandoff
 		{
-			if (controller.fnSetLocalRotation)
+			size_t restored{}, preserved{}, unreadable{};
+		};
+
+		NativeHandoff ReleaseToNative(const IdolBoneBinding& binding, const IdolController& controller)
+		{
+			NativeHandoff result;
+			if (SameBinding(binding) && controller.CanDriveActor(binding.actor))
 			{
-				for (const Bone& b : bones_) Write(controller, b.transform, b.rest);
+				for (const Bone& b : bones_)
+				{
+					if (!b.written) continue;
+					Quaternion current;
+					if (!controller.fnGetLocalRotation ||
+						!CaptureRotation(controller.fnGetLocalRotation, b.transform, current))
+					{
+						++result.unreadable;
+						continue;
+					}
+					// The game can already have published this frame's output
+					// before we receive confirmation of native ownership.
+					if (1.f - std::fabs(Quaternion::Dot(current, b.lastWritten)) > 1e-6f)
+					{
+						++result.preserved;
+						continue;
+					}
+					if (!controller.fnSetLocalRotation || !CaptureWrite(controller, b.transform, b.rest))
+						++result.unreadable;
+					else
+						++result.restored;
+				}
 			}
 			Clear();
+			return result;
 		}
 
 		bool RestoreForCapture(const IdolController& controller)
@@ -525,7 +556,7 @@ namespace GakuMotion
 					}
 					Bone b;
 					b.name = name;
-					b.garment = CostumeName(name, true);
+					b.garment = IsGarmentBone(name);
 					b.transform = e.t;
 					b.parent = e.parent;
 					Quaternion world;

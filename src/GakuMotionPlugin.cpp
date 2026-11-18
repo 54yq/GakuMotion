@@ -225,6 +225,15 @@ namespace
 		g_costumeCapture.Record(slot, binding.actor, frame, player.currentTime, dt, static_cast<int>(core.player.state),
 			core.player.SeekCount(), core.player.scrubbing, solver, costume);
 	}
+
+	void ReleaseFallbackToNative(GakuMotion::FallbackPhysics& solver,
+		const GakuMotion::IdolBoneBinding& binding, const GakuMotion::IdolController& controller, unsigned role)
+	{
+		const auto result = solver.ReleaseToNative(binding, controller);
+		if (g_hostContext.logInfo && (result.restored || result.preserved || result.unreadable))
+			g_hostContext.logInfo("[GakuMotion][PhysicsHandoff] slot=%u actor=%p restored=%zu preserved=%zu unverified=%zu",
+				role, binding.actor, result.restored, result.preserved, result.unreadable);
+	}
 	GakuPhysicsDiagnosticSnapshot g_physicsDiagnostic{};
 	int g_physicsBackend = -1, g_physicsActual = 0, g_physicsFrame = -1, g_physicsMotion = -1;
 	int g_physicsSeeks = -1;
@@ -332,7 +341,8 @@ namespace
 			slot.lastTick = now;
 			const bool started = core.player.state == GakuMotion::PlaybackState::Playing || g_followerBridge.State(i).outstanding;
 			const bool native = requested == 2 && started && g_followerBridge.Publish(i, binding->second, ctrl, player.currentTime, frame, slot.quartz, slot.diagnostics);
-			if (native && slot.actual == 1) { slot.fallback.Restore(ctrl); slot.fallback.Clear(); }
+			if (native && slot.actual == 1)
+				ReleaseFallbackToNative(slot.fallback, binding->second, ctrl, static_cast<unsigned>(i + 2));
 			slot.actual = requested == 0 ? 0 : native ? 2 : 1;
 			if (slot.actual == 1) PublishFallbackPhysics(core, slot.fallback, binding->second, player, static_cast<unsigned>(i + 2), dt, frame);
 			const std::string reason = requested == 0 ? "off" : requested == 1 ? "fallback" :
@@ -3692,8 +3702,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 			                                                      core.config.sleeveMuscleDiagnostics);
 			if (native && g_physicsActual == 1)
 			{
-				g_fallbackPhysics.Restore(player.controller);
-				g_fallbackPhysics.Clear();
+				ReleaseFallbackToNative(g_fallbackPhysics, binding->second, player.controller, 1);
 			}
 			g_physicsActual = requested == 0 ? 0 : native ? 2 : 1;
 			if (g_physicsActual == 1)

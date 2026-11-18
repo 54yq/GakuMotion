@@ -2,18 +2,89 @@
 // A requested, Unity-thread-only observation. It does not bind or move bones.
 namespace LiveArmSnapshot
 {
+    inline void RecordGarment(void* root, void* actor, uint64_t sequence, const char* phase,
+                              unsigned slot, int actual, int dispatchFrame, const GbbStatus* status)
+    {
+        if (!root || !g_getChildCountNative || !g_getChildNative) return;
+        // Breadth-first samples favor the attachment end of the cloth chains.
+        constexpr size_t maxTransforms = 1024;
+        constexpr size_t maxSamples = 32;
+        std::vector<void*> queue{root};
+        size_t recorded = 0;
+        for (size_t i = 0; i < queue.size() && recorded < maxSamples; ++i)
+        {
+            void* node = queue[i];
+            const auto name = HelperGetTransformName(node);
+            if (GakuMotion::FallbackPhysics::IsGarmentBone(name))
+            {
+                void* parent = g_getParentNative(node);
+                if (parent)
+                {
+                    float anchor[3]{}, local[4]{}, parentWorld[4]{};
+                    HelperGetWorldPos(node, anchor);
+                    HelperGetLocalRot(node, local);
+                    HelperGetWorldRot(parent, parentWorld);
+                    const auto parentName = HelperGetTransformName(parent);
+                    g_hostContext.logInfo(
+                        "[GakuMotion][LiveGarmentBone] seq=%llu phase=%s actor=%p transform=%p bone=%s parent=%s anchor=%.6f,%.6f,%.6f local=%.6f,%.6f,%.6f,%.6f parent_world=%.6f,%.6f,%.6f,%.6f",
+                        static_cast<unsigned long long>(sequence), phase, actor, node, name.c_str(), parentName.c_str(),
+                        anchor[0], anchor[1], anchor[2], local[0], local[1], local[2], local[3],
+                        parentWorld[0], parentWorld[1], parentWorld[2], parentWorld[3]);
+                    ++recorded;
+                }
+            }
+            const int count = HelperGetChildCount(node);
+            if (count < 0 || count > 256) continue;
+            for (int j = 0; j < count && queue.size() < maxTransforms; ++j)
+                if (void* child = HelperGetChild(node, j)) queue.push_back(child);
+        }
+        const bool native = actual == 2 && status && status->actor == actor && status->injected;
+        g_hostContext.logInfo("[GakuMotion][LiveGarmentSample] seq=%llu phase=%s actor=%p slot=%u actual=%d dispatch_frame=%d native_source_frame=%d bones=%zu limited=%d",
+            static_cast<unsigned long long>(sequence), phase, actor, slot, actual, dispatchFrame,
+            native ? status->source_frame : -1, recorded,
+            int(recorded == maxSamples || queue.size() == maxTransforms));
+    }
+
     inline void Record(void* actor, uint64_t sequence, const char* phase, const GakuMotion::Core& core)
     {
         if (!actor || !sequence || !phase || !g_hostContext.logInfo || !g_getPosNative || !g_getRotNative ||
             !g_getWorldPosNative || !g_getWorldRotNative || !g_getParentNative || !g_getNameNative) return;
         const auto* entry=core.sceneActorRegistry.Find(actor);
         const GakuMotion::MotionPlayer* observedPlayer=nullptr;
+        unsigned role = 0;
+        int actual = -1, dispatchFrame = -1;
+        const GbbStatus* physicsStatus = nullptr;
         void* mainTarget=core.player.controller.targetActor ? core.player.controller.targetActor : core.player.controller.currentBinding.actor;
-        if (mainTarget==actor) observedPlayer=&core.player;
-        for (const auto& follower:core.ensemble.Followers())
+        if (mainTarget==actor)
+        {
+            observedPlayer=&core.player;
+            role = 1;
+            if (g_physicsActor == actor)
+            {
+                actual = g_physicsActual;
+                dispatchFrame = g_physicsFrame;
+                physicsStatus = &g_burstBridge.status;
+            }
+        }
+        const auto& followers = core.ensemble.Followers();
+        for (size_t i = 0; i < followers.size(); ++i)
+        {
+            const auto& follower = followers[i];
             if (follower.player && follower.player->controller.targetActor==actor &&
                 core.sceneActorRegistry.Resolve(follower.actorToken,core.sceneActorRegistry.Epoch())==actor)
+            {
                 observedPlayer=follower.player.get();
+                role = static_cast<unsigned>(i + 2);
+                if (i < g_followerPhysics.size() && g_followerPhysics[i].actor == actor &&
+                    g_followerPhysics[i].bindingGeneration == follower.bindingGeneration)
+                {
+                    actual = g_followerPhysics[i].actual;
+                    dispatchFrame = g_followerPhysics[i].frame;
+                    if (actual == 2) physicsStatus = &g_followerBridge.State(i).status;
+                }
+                break;
+            }
+        }
         g_hostContext.logInfo("[GakuMotion][LiveArmSnapshot] seq=%llu phase=%s actor=%p actor_token=%llu character=%s scene=%d live_time=%.4f motion_time=%.4f state=%d takeover=%d",
             static_cast<unsigned long long>(sequence),phase,actor,static_cast<unsigned long long>(entry?entry->token:0),
             entry?entry->character.c_str():"unknown",core.liveOwnerScene,core.liveObservation.time,observedPlayer?observedPlayer->currentTime:-1.0,
@@ -45,6 +116,8 @@ namespace LiveArmSnapshot
                         g_hostContext.logInfo("[GakuMotion][LiveArmBindBone] seq=%llu phase=%s actor=%p hid=%u local_rot=%.6f,%.6f,%.6f,%.6f",
                             static_cast<unsigned long long>(sequence),phase,actor,unsigned(captured->boneHids[i]),q.x,q.y,q.z,q.w);
                     }
+                if (core.liveTakeoverActive && core.config.secondaryPhysicsBackend == 2)
+                    RecordGarment(captured->actorTransform, actor, sequence, phase, role, actual, dispatchFrame, physicsStatus);
             }
             if (std::strcmp(phase,"after_mmd_pose")==0 && observedPlayer->clip.total_frames) {
                 GakuMotion::Vector3 root; std::vector<GakuMotion::Quaternion> sampled;

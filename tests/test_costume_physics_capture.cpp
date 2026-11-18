@@ -84,5 +84,25 @@ int main()
 	capture.Record(2, sampled.binding.actor, 3, 103.126f, .02f, 2, 0, false, sampled.solver, jumped);
 	assert(capture.Close("synthetic") && capture.Frames() == 2);
 	assert(!capture.Open(path, "must not overwrite", 43));
+
+	Rig handoff;
+	assert(handoff.solver.Publish(handoff.binding, handoff.controller, 0.f, 1));
+	handoff.skirt.position = handoff.hair.position = {.03f, 0.f, 0.f};
+	assert(handoff.solver.Publish(handoff.binding, handoff.controller, .02f, 2));
+	handoff.skirt.rotation = external;
+	const auto released = handoff.solver.ReleaseToNative(handoff.binding, handoff.controller);
+	assert(released.restored == 1 && released.preserved == 1 && released.unreadable == 0);
+	assert(handoff.skirt.rotation.x == external.x && handoff.skirt.rotation.w == external.w);
+	assert(handoff.hair.rotation.x == 0 && handoff.hair.rotation.z == 0 && handoff.hair.rotation.w == 1);
+	assert(!handoff.solver.HasCaptureWrites());
+
+	Rig stale;
+	assert(stale.solver.Publish(stale.binding, stale.controller, 0.f, 1));
+	stale.skirt.rotation = external;
+	auto otherBinding = stale.binding;
+	otherBinding.actor = &handoff.root;
+	const auto discarded = stale.solver.ReleaseToNative(otherBinding, stale.controller);
+	assert(!discarded.restored && !discarded.preserved && !discarded.unreadable);
+	assert(stale.skirt.rotation.x == external.x && stale.skirt.rotation.w == external.w);
 	std::cout << "Costume capture contracts passed. Trace: " << path.filename().string() << '\n';
 }

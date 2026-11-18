@@ -485,7 +485,7 @@ namespace GakuMotion
                             ImGui::EndDisabled();
                             bool continuousArmDiagnostics = ctx.liveContinuousArmDiagnostics;
                             ImGui::BeginDisabled(!ctx.fnSetContinuousArmDiagnostics);
-                            if (ImGui::Checkbox("连续记录手臂诊断（影响性能）", &continuousArmDiagnostics) && ctx.fnSetContinuousArmDiagnostics)
+                            if (ImGui::Checkbox("连续记录手臂与服装骨（影响性能）", &continuousArmDiagnostics) && ctx.fnSetContinuousArmDiagnostics)
                                 ctx.fnSetContinuousArmDiagnostics(ctx.self, continuousArmDiagnostics);
                             ImGui::EndDisabled();
                             ImGui::BeginDisabled(!ctx.fnActorClockTrial||ctx.liveTakeoverActive||(!ctx.liveActorClockActive&&(!ctx.liveActorClockAvailable||!ctx.livePaused)));
