@@ -372,6 +372,7 @@ namespace GakuMotion
 			int overridesEnabled{-1};
 			int auxMode{-1};
 			int experimentalWaistSupport{-1};
+			int muteNativeSoundEffects{-1};
 			std::string globalFile;
 			std::string motionFile;
 			float playbackSpeed{-1.0f};
@@ -398,6 +399,7 @@ namespace GakuMotion
 			CameraSettings, SaveCameraSettings, CameraImport, ReloadCamera,
 			SoleSettings, SaveSoleSettings, LoadSoleSettings, ExperimentalSolePitch, ExperimentalWaistSupport,
 			BeforeQuartzExperiment,
+			MuteNativeSoundEffects,
 			StageSettings, StagePreset, ToggleStageCandidate, ScanStageCandidates,
 			MountCustomStage, UnloadCustomStage, RestoreCameraSkybox,
 			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, StageLoadReplacement, SelectTarget,
@@ -408,6 +410,7 @@ namespace GakuMotion
 		std::atomic_bool guiTextInputActive{false};
 		std::atomic<bool> guiBeforeQuartzExperiment{false};
 		std::atomic<bool> guiExperimentalWaistSupport{true};
+		std::atomic<bool> guiMuteNativeSoundEffects{true};
 
 		struct GuiCommand
 		{
@@ -564,6 +567,11 @@ namespace GakuMotion
 		void QueueBeforeQuartzExperiment(bool enabled)
 		{
 			QueueGui({GuiAction::BeforeQuartzExperiment, 0, enabled});
+		}
+
+		void QueueMuteNativeSoundEffects(bool enabled)
+		{
+			QueueGui({GuiAction::MuteNativeSoundEffects, 0, enabled});
 		}
 
 		void QueueStageSettings(const StageSettings& settings)
@@ -836,6 +844,12 @@ namespace GakuMotion
 					config.beforeQuartzExperiment = cmd.flag && config.secondaryPhysicsBackend == 2;
 					ApplyDeclarativeConfig();
 					break;
+				case GuiAction::MuteNativeSoundEffects:
+					guiMuteNativeSoundEffects.store(cmd.flag, std::memory_order_release);
+					config.muteNativeSoundEffects = cmd.flag ? 1 : 0;
+					applied.muteNativeSoundEffects = config.muteNativeSoundEffects;
+					SaveNativeAudioSettings();
+					break;
 				case GuiAction::SelectTarget:
 					if (void* actor = sceneActorRegistry.Resolve(cmd.actorToken, cmd.actorEpoch)) SetTargetActor(actor);
 					break;
@@ -1016,6 +1030,7 @@ namespace GakuMotion
 			ApplyDeclarativeConfig();
 			LoadCameraSettings();
 			LoadSoleSettings();
+			LoadNativeAudioSettings();
 			LoadOverrides(true);
 
 			// Loading the persisted selection is not a request to take over the
@@ -2112,6 +2127,44 @@ namespace GakuMotion
 			return true;
 		}
 
+		bool LoadNativeAudioSettings()
+		{
+			const auto path = configRoot + "/native_audio.json";
+			std::error_code ec;
+			if (!std::filesystem::exists(MotionPathFromUtf8(path), ec)) return false;
+			jsonlite::Value root;
+			std::string error;
+			if (!jsonlite::ParseFile(path, root, error) || root.IntPath("version", 0) != 1)
+				return false;
+			const auto* value = root.Find("mute_sound_effects");
+			if (!value || !value->IsBool()) return false;
+			const bool enabled = value->boolValue;
+			guiMuteNativeSoundEffects.store(enabled, std::memory_order_release);
+			config.muteNativeSoundEffects = enabled ? 1 : 0;
+			applied.muteNativeSoundEffects = config.muteNativeSoundEffects;
+			return true;
+		}
+
+		bool SaveNativeAudioSettings()
+		{
+			if (configRoot.empty()) return false;
+			std::error_code ec;
+			std::filesystem::create_directories(MotionPathFromUtf8(configRoot), ec);
+			if (ec) return false;
+			const auto path = configRoot + "/native_audio.json", temporary = path + ".tmp";
+			std::ofstream out(MotionPathFromUtf8(temporary), std::ios::binary | std::ios::trunc);
+			out << "{\n  \"version\": 1,\n  \"mute_sound_effects\": "
+			    << (guiMuteNativeSoundEffects.load(std::memory_order_acquire) ? "true" : "false")
+			    << "\n}\n";
+			out.close();
+			if (!out) return false;
+			std::filesystem::copy_file(MotionPathFromUtf8(temporary), MotionPathFromUtf8(path),
+			                           std::filesystem::copy_options::overwrite_existing, ec);
+			if (ec) return false;
+			std::filesystem::remove(MotionPathFromUtf8(temporary), ec);
+			return true;
+		}
+
 		bool LoadFacialWeights()
 		{
 			const auto path = configRoot + "/facial_weights.json";
@@ -2478,6 +2531,13 @@ namespace GakuMotion
 						 : "off"));
 			}
 			guiExperimentalWaistSupport.store(player.controller.IsExperimentalWaistSupportEnabled());
+
+			if (config.muteNativeSoundEffects >= 0 &&
+				config.muteNativeSoundEffects != applied.muteNativeSoundEffects)
+			{
+				applied.muteNativeSoundEffects = config.muteNativeSoundEffects;
+				guiMuteNativeSoundEffects.store(config.muteNativeSoundEffects != 0, std::memory_order_release);
+			}
 
 			// ---- Character facial default prior (adapter v2) ----
 			if (config.facialMikuMouthFit >= 0 && config.facialMikuMouthFit != applied.facialMikuMouthFit)
@@ -3111,6 +3171,11 @@ namespace GakuMotion
 			ctx.fnSetExperimentalWaistSupport = [](void* self, bool enabled)
 			{
 				static_cast<Core*>(self)->QueueExperimentalWaistSupport(enabled);
+			};
+			ctx.muteNativeSoundEffects = guiMuteNativeSoundEffects.load();
+			ctx.fnSetMuteNativeSoundEffects = [](void* self, bool enabled)
+			{
+				static_cast<Core*>(self)->QueueMuteNativeSoundEffects(enabled);
 			};
 			ctx.playlistMode = EnsembleActive() ? (player.loop ? 1 : 0) : static_cast<int>(playlist.mode);
 			ctx.importBusy = importBusy;

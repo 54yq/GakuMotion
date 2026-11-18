@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CameraPage } from '@/motion/pages/CameraPage'
+import { DeveloperPage } from '@/motion/pages/DeveloperPage'
 import { StagePage } from '@/motion/pages/StagePage'
 import { SettingsPage } from '@/motion/pages/SettingsPage'
 import { MotionPage } from '@/motion/pages/MotionPage'
@@ -65,12 +66,16 @@ describe('StagePage', () => {
     expect(settings.greenScreenActive).toBe(true)
     expect(settings.overrideCameraClear).toBe(true)
   })
+})
 
-  it('toggles native sound-effect mute independently via stage.set', async () => {
+describe('DeveloperPage', () => {
+  it('defaults muteNativeSoundEffects on and toggles it via experiments.set', async () => {
     const user = userEvent.setup()
-    render(<StagePage />)
-    await user.click(screen.getByRole('checkbox', { name: '屏蔽游戏音效' }))
-    await waitFor(() => expect(motionStore.getState().stage.settings.muteNativeSoundEffects).toBe(true))
+    render(<DeveloperPage />)
+    const checkbox = screen.getByRole('checkbox', { name: '播放 MMD 时屏蔽游戏音效（默认开启）' })
+    expect(checkbox).toBeChecked()
+    await user.click(checkbox)
+    await waitFor(() => expect(motionStore.getState().experiments.settings.muteNativeSoundEffects).toBe(false))
   })
 })
 

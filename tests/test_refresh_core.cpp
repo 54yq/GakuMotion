@@ -2633,6 +2633,31 @@ static void TestInjectionRuntimeBoundary()
 #include "test_ensemble_placement.hpp"
 #include "test_photography_ensemble_probe.hpp"
 
+static void TestNativeAudioSettingsPersistence()
+{
+	BeginTest("native audio sound-effect mute defaults on and persists across restarts");
+	namespace fs = std::filesystem;
+	const fs::path root = fs::temp_directory_path() / "gaku_native_audio_persist";
+	std::error_code ec;
+	fs::remove_all(root, ec);
+	fs::create_directories(root, ec);
+	{
+		Core core;
+		core.Initialize(root.string());
+		Check(core.guiMuteNativeSoundEffects.load(), "muteNativeSoundEffects defaults to enabled");
+		core.QueueMuteNativeSoundEffects(false);
+		core.ProcessPendingGuiCommands();
+		Check(!core.guiMuteNativeSoundEffects.load(), "queued disable updates active setting");
+	}
+	{
+		Core reloaded;
+		reloaded.Initialize(root.string());
+		Check(!reloaded.guiMuteNativeSoundEffects.load(),
+			"disabled muteNativeSoundEffects persists across Core restart");
+	}
+	fs::remove_all(root, ec);
+}
+
 int main(int argc, char** argv)
 {
  std::setvbuf(stdout, nullptr, _IONBF, 0);
@@ -2688,6 +2713,7 @@ int main(int argc, char** argv)
  TestClipSwitchKeepsActorRest();
  TestPreviewWaitsForHumanoid();
  TestSceneIsolation();
+ TestNativeAudioSettingsPersistence();
  std::printf("Synthetic core: %d passed, %d failed\n", g_pass, g_fail);
  return g_fail == 0 ? 0 : 1;
 }

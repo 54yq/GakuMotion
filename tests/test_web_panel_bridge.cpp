@@ -411,17 +411,6 @@ static void TestCameraStage()
 	Check(shown && !shown->stageSettings.greenScreenActive && !shown->stageSettings.overrideCameraClear,
 		"show background clears green screen");
 	Check(f.FindCommand(Core::GuiAction::RestoreCameraSkybox) != nullptr, "skybox restore queued");
-
-	f.ClearCommands();
-	Check(f.Ok(f.Req("stage.set", "{\"settings\":{\"muteNativeSoundEffects\":true}}")),
-		"muteNativeSoundEffects accepted");
-	const auto* seMuted = f.FindCommand(Core::GuiAction::StageSettings);
-	Check(seMuted && seMuted->stageSettings.muteNativeSoundEffects, "muteNativeSoundEffects queued");
-	f.core.stageManager.settings.muteNativeSoundEffects = true;
-	const auto seSnapshot = f.ReqJson("state.get");
-	const auto* stageSettingsJson = seSnapshot.Find("result")->Find("stage")->Find("settings");
-	Check(stageSettingsJson && stageSettingsJson->Find("muteNativeSoundEffects")->boolValue,
-		"muteNativeSoundEffects exposed in state snapshot");
 }
 
 static void TestFacialPositionSettings()
@@ -1127,8 +1116,19 @@ static void TestExperimentsTelemetry()
 	const auto experiments = f.ReqJson("experiments.get");
 	const auto* expResult = experiments.Find("result");
 	Check(expResult && expResult->Find("settings")->Find("mikuMouthFit") != nullptr &&
+		expResult->Find("settings")->Find("muteNativeSoundEffects")->boolValue &&
 		expResult->Find("mouthFitStatus")->IsString() && expResult->Find("eyeFitStatus")->IsString(),
-		"experiments.get exposes ExperimentsState shape");
+		"experiments.get exposes ExperimentsState shape with default-on muteNativeSoundEffects");
+
+	f.ClearCommands();
+	Check(f.Ok(f.Req("experiments.set", "{\"patch\":{\"muteNativeSoundEffects\":false}}")),
+		"muteNativeSoundEffects false accepted");
+	const auto* muteSeCmd = f.FindCommand(Core::GuiAction::MuteNativeSoundEffects);
+	Check(muteSeCmd && !muteSeCmd->flag && !f.core.guiMuteNativeSoundEffects.load(),
+		"muteNativeSoundEffects false queued and reflected");
+	const auto updatedExperiments = f.ReqJson("experiments.get");
+	Check(!updatedExperiments.Find("result")->Find("settings")->Find("muteNativeSoundEffects")->boolValue,
+		"experiments.get reflects updated muteNativeSoundEffects");
 }
 
 static void TestDropPeek()

@@ -2,8 +2,9 @@
 #include "GkLog.hpp"
 
 // Included in the plugin's private namespace, after ActorGroundShadow.
-// Custom.acf's CategoryName table contains Bgm / Se / Voice. Bgm and
-// Voice follow playback; Se is an explicit scene switch. MCI songs are independent.
+// Custom.acf's CategoryName table contains Bgm / Se / Voice. Bgm, Voice, and
+// Se (when enabled in Developer Options, default on) follow performance state;
+// MCI songs are independent.
 namespace NativeAudio
 {
 	using namespace GakuMotion::bgm;
@@ -127,11 +128,11 @@ namespace NativeAudio
 		// muted songs and clips without song.wav. Stop/scene loss releases it.
 		const Status bgmStatus = g_bgmLease.Sync(BackendFor(bgm), active, 1);
 		const Status voiceStatus = g_voiceLease.Sync(BackendFor(voice), active, 1);
-		const bool muteSe = g_motionSceneAllowed && GakuMotion::Core::Instance().InjectionAllowed() &&
-			GakuMotion::Core::Instance().stageManager.settings.muteNativeSoundEffects;
+		const bool muteSe = active &&
+			GakuMotion::Core::Instance().guiMuteNativeSoundEffects.load(std::memory_order_acquire);
 		const Status seStatus = g_seLease.Sync(BackendFor(se), muteSe, 1);
 		static Status previousSe = Status::Idle;
-		if (previousSe != seStatus) GM_DEBUG("[GakuMotion][NativeAudio] Se=%s switch=%d", StatusName(seStatus), muteSe);
+		if (previousSe != seStatus) GM_DEBUG("[GakuMotion][NativeAudio] Se=%s performance=%d", StatusName(seStatus), muteSe);
 		previousSe = seStatus;
 		static Status previousBgm = Status::Idle, previousVoice = Status::Idle;
 		if (previousBgm != bgmStatus || previousVoice != voiceStatus)

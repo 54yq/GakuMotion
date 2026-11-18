@@ -280,6 +280,10 @@ function normalizeExperimentsState(raw: unknown): ExperimentsState {
       ),
       waistSupport: asBool(s.waistSupport, DEFAULT_EXPERIMENT_SETTINGS.waistSupport),
       beforeQuartz: asBool(s.beforeQuartz, DEFAULT_EXPERIMENT_SETTINGS.beforeQuartz),
+      muteNativeSoundEffects: asBool(
+        s.muteNativeSoundEffects,
+        DEFAULT_EXPERIMENT_SETTINGS.muteNativeSoundEffects,
+      ),
     },
     mouthFitStatus: asStr(obj.mouthFitStatus, '尚未接管'),
     eyeFitStatus: asStr(obj.eyeFitStatus, '尚未接管'),

@@ -2101,6 +2101,10 @@ namespace GakuMotion::webpanel
 				return CmdResult::Err("invalid_params", "beforeQuartz must be a boolean");
 			if (hasBeforeQuartz && beforeQuartz && core_.guiPhysicsBackend.load() != 2)
 				return CmdResult::Err("invalid_params", "BeforeQuartz 仅在原生注入后端可用");
+			bool hasMuteSe = patch->Find("muteNativeSoundEffects") != nullptr;
+			bool muteSe = core_.guiMuteNativeSoundEffects.load();
+			if (hasMuteSe && !BoolParam(*patch, "muteNativeSoundEffects", muteSe))
+				return CmdResult::Err("invalid_params", "muteNativeSoundEffects must be a boolean");
 			core_.config.facialMikuMouthFit = mouth;
 			core_.config.facialMikuEyeFit = eye;
 			core_.config.facialMikuFitAllowUnverified = allow;
@@ -2113,6 +2117,11 @@ namespace GakuMotion::webpanel
 			{
 				core_.guiBeforeQuartzExperiment.store(beforeQuartz);
 				core_.QueueBeforeQuartzExperiment(beforeQuartz);
+			}
+			if (hasMuteSe)
+			{
+				core_.guiMuteNativeSoundEffects.store(muteSe);
+				core_.QueueMuteNativeSoundEffects(muteSe);
 			}
 			return CmdResult::Ok();
 		}
@@ -2291,8 +2300,7 @@ namespace GakuMotion::webpanel
 				target = field->stringValue;
 				return true;
 			};
-			return boolField("muteNativeSoundEffects", settings.muteNativeSoundEffects) &&
-				boolField("hideBackground", settings.hideBackground) &&
+			return boolField("hideBackground", settings.hideBackground) &&
 				boolField("greenScreenActive", settings.greenScreenActive) &&
 				floatField("screenDistance", settings.screenDistance) &&
 				floatField("screenScale", settings.screenScale) &&
@@ -2482,8 +2490,7 @@ namespace GakuMotion::webpanel
 				color += JNum(settings.greenScreenColor[i]);
 			}
 			color += "]";
-			return "{\"muteNativeSoundEffects\":" + JBool(settings.muteNativeSoundEffects) +
-				",\"hideBackground\":" + JBool(settings.hideBackground) +
+			return "{\"hideBackground\":" + JBool(settings.hideBackground) +
 				",\"greenScreenActive\":" + JBool(settings.greenScreenActive) +
 				",\"greenScreenColor\":" + color +
 				",\"screenDistance\":" + JNum(settings.screenDistance) +
@@ -2851,7 +2858,8 @@ namespace GakuMotion::webpanel
 				",\"mikuEyeFit\":" + JBool(eye) +
 				",\"mikuFitAllowUnverified\":" + JBool(allow) +
 				",\"waistSupport\":" + JBool(core_.guiExperimentalWaistSupport.load()) +
-				",\"beforeQuartz\":" + JBool(core_.guiBeforeQuartzExperiment.load()) + "}";
+				",\"beforeQuartz\":" + JBool(core_.guiBeforeQuartzExperiment.load()) +
+				",\"muteNativeSoundEffects\":" + JBool(core_.guiMuteNativeSoundEffects.load()) + "}";
 			return "{\"settings\":" + settingsJson +
 				",\"mouthFitStatus\":" + JString(mouthFitStatus) +
 				",\"eyeFitStatus\":" + JString(eyeFitStatus) +

@@ -28,6 +28,13 @@ namespace GakuMotion
 				}
 				ImGui::TextWrapped("驱动 Waist_H 腰部辅助骨；关闭时恢复原姿态。开关在本次运行中生效，重启后读取 control.json。");
 				ImGui::Spacing();
+				bool muteSe = ctx.muteNativeSoundEffects;
+				if (ImGui::Checkbox("播放 MMD 时屏蔽游戏音效（默认开启）", &muteSe))
+				{
+					if (ctx.fnSetMuteNativeSoundEffects) ctx.fnSetMuteNativeSoundEffects(ctx.self, muteSe);
+				}
+				ImGui::TextWrapped("仅在 MMD 表演期间静音游戏 Se 音效（含界面音效），不影响动作歌曲；停止播放、离开场景或受保护拍照时自动恢复，修改会持久化保存。");
+				ImGui::Spacing();
 				ImGui::Separator();
 				ImGui::Spacing();
 				overlay.DrawGazeTab(ctx);

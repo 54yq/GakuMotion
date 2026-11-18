@@ -113,7 +113,6 @@ export interface CameraState {
 }
 
 export interface StageSettings {
-  muteNativeSoundEffects: boolean
   hideBackground: boolean
   greenScreenActive: boolean
   greenScreenColor: [number, number, number, number]
@@ -352,6 +351,7 @@ export interface ExperimentSettings {
   mikuFitAllowUnverified: boolean
   waistSupport: boolean
   beforeQuartz: boolean
+  muteNativeSoundEffects: boolean
 }
 
 export interface ExperimentsState {
@@ -688,7 +688,6 @@ export const DEFAULT_CAMERA_SETTINGS: CameraSettings = {
 }
 
 export const DEFAULT_STAGE_SETTINGS: StageSettings = {
-  muteNativeSoundEffects: false,
   hideBackground: false,
   greenScreenActive: false,
   greenScreenColor: [0, 1, 0, 1],
@@ -826,6 +825,7 @@ export const DEFAULT_EXPERIMENT_SETTINGS: ExperimentSettings = {
   mikuFitAllowUnverified: false,
   waistSupport: true,
   beforeQuartz: false,
+  muteNativeSoundEffects: true,
 }
 
 export function defaultSoleSettings(): SoleSettings {

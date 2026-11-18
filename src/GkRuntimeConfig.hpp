@@ -454,6 +454,7 @@ namespace GakuMotion
 		int overridesEnabled{-1}; // 三态
 		int auxMode{-1}; // 三态：辅助骨驱动模式 0=normal 1=silence 2=identity 3=replay
 		int experimentalWaistSupport{1}; // default-on Waist_H geometry; missing preserves session state
+		int muteNativeSoundEffects{-1}; // 三态：-1 未设置(默认开启), 0 关, 1 开
 		std::string overrideGlobalFile; // 可选自定义全局覆盖文件
 		std::string overrideMotionFile; // 可选自定义曲目覆盖文件
 
@@ -554,6 +555,7 @@ namespace GakuMotion
 				"  // Experimental: keep the native animation graph for hair/cloth; needs device acceptance.\n"
 				"  \"secondary_physics\": { \"backend\": \"native\", \"preserve_animator\": false, \"before_quartz_experiment\": false, \"sleeve_muscle_diagnostics\": false },\n"
 				"  \"experimental_waist_support\": { \"enabled\": true },\n"
+				"  // 可选：\"native_audio\": { \"mute_sound_effects\": true }（默认开启；界面切换持久化于 native_audio.json）\n"
 				"\n"
 				"  // 面部默认表情基线与动态让位（Ducking）：\n"
 				"  //   enable_baseline: 无明确表情时使用角色官方默认；明确开口时让位（默认 true）\n"
@@ -882,6 +884,10 @@ namespace GakuMotion
 			if (const jsonlite::Value* v = root.FindPath("experimental_waist_support.enabled"))
 			{
 				if (v->IsBool()) experimentalWaistSupport = v->AsBool(false) ? 1 : 0;
+			}
+			if (const jsonlite::Value* v = root.FindPath("native_audio.mute_sound_effects"))
+			{
+				if (v->IsBool()) muteNativeSoundEffects = v->AsBool(true) ? 1 : 0;
 			}
 			if (const jsonlite::Value* v = root.FindPath("secondary_physics.backend"))
 			{

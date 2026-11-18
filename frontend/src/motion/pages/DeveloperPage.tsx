@@ -92,6 +92,21 @@ function ExperimentsTab() {
             />
             BeforeQuartz
           </label>
+          <div className="space-y-1 pt-1">
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={settings.muteNativeSoundEffects}
+                disabled={!supports('experiments.set')}
+                onCheckedChange={(checked) =>
+                  void motionStore.setExperiment({ muteNativeSoundEffects: checked === true })
+                }
+              />
+              播放 MMD 时屏蔽游戏音效（默认开启）
+            </label>
+            <p className="pl-6 text-xs text-muted-foreground">
+              仅在 MMD 表演期间静音游戏 Se 音效（含界面音效），停止播放、离开场景或受保护拍照时自动恢复，修改会持久化保存。
+            </p>
+          </div>
         </div>
         <Separator />
         <div className="space-y-3">

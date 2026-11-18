@@ -84,6 +84,8 @@ namespace GakuMotion
 		void (*fnSetBeforeQuartzExperiment)(void*, bool){nullptr};
 		bool experimentalWaistSupport{true};
 		void (*fnSetExperimentalWaistSupport)(void*, bool){nullptr};
+		bool muteNativeSoundEffects{true};
+		void (*fnSetMuteNativeSoundEffects)(void*, bool){nullptr};
 		int playlistMode{1};
 		bool importBusy{false};
 		const ImportProgressState* importProgress{nullptr};
