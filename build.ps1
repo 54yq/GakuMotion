@@ -70,8 +70,14 @@ if ([string]::IsNullOrWhiteSpace($sdk)) {
         Where-Object { Test-Path -LiteralPath (Join-Path $_ 'Include') } | Select-Object -First 1
 }
 if ([string]::IsNullOrWhiteSpace($sdk)) { throw 'Windows SDK not found; pass -WindowsSdkRoot.' }
-$sdkVersion = Get-ChildItem -LiteralPath (Join-Path $sdk 'Include') -Directory | Sort-Object Name -Descending | Select-Object -First 1
-if (-not $sdkVersion) { throw 'Windows SDK Include directory not found.' }
+$sdkVersion = Get-ChildItem -LiteralPath (Join-Path $sdk 'Include') -Directory |
+    Where-Object {
+        $_.Name -match '^\d+\.\d+\.\d+\.\d+$' -and
+        (Test-Path -LiteralPath (Join-Path $_.FullName 'ucrt\stddef.h') -PathType Leaf) -and
+        (Test-Path -LiteralPath (Join-Path $sdk "Lib\$($_.Name)\um\x64\advapi32.lib") -PathType Leaf)
+    } |
+    Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
+if (-not $sdkVersion) { throw 'Complete Windows SDK (ucrt headers and um/x64 libs) not found.' }
 if ($Target -eq 'Preflight') { Write-Host 'Build inputs, MSVC, Windows SDK, .NET, and Node/npm found.'; exit 0 }
 if ($Target -eq 'Runtime' -or $Target -eq 'All') {
     if ($PortableVisualStudio) {
@@ -132,13 +138,19 @@ if ($Target -eq 'NativeAOT' -or $Target -eq 'All') {
     New-Item -ItemType Directory -Path $aotOutput,$aotObjects -Force | Out-Null
     $linker = Join-Path $msvc.FullName 'bin\Hostx64\x64\link.exe'
     $libCreator = Join-Path $msvc.FullName 'bin\Hostx64\x64\lib.exe'
+    $prevLib = $env:LIB
+    $env:LIB = @((Join-Path $msvc.FullName 'lib\x64'), (Join-Path $sdk "Lib\$($sdkVersion.Name)\ucrt\x64"),
+        (Join-Path $sdk "Lib\$($sdkVersion.Name)\um\x64")) -join ';'
     Push-Location -LiteralPath $repo
     try {
         & $DotNet publish (Join-Path $repo 'interop\GakuMotion.VmdImporter.Native\GakuMotion.VmdImporter.Native.csproj') `
             -c Release -r win-x64 -o $aotOutput "-p:ArtifactsPath=$aotObjects" -p:IlcUseEnvironmentalTools=true `
             "-p:CppLinker=$linker" "-p:CppLibCreator=$libCreator"
         if ($LASTEXITCODE -ne 0) { throw ('NativeAOT build failed: ' + $LASTEXITCODE) }
-    } finally { Pop-Location }
+    } finally {
+        $env:LIB = $prevLib
+        Pop-Location
+    }
 }
 if ($Target -eq 'Frontend' -or $Target -eq 'All') {
     $resolvedDeps = $FrontendDependencies

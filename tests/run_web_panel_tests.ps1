@@ -35,8 +35,13 @@ if ([string]::IsNullOrWhiteSpace($sdk)) {
 }
 if ([string]::IsNullOrWhiteSpace($sdk)) { throw 'Windows SDK not found; pass -WindowsSdkRoot.' }
 $sdkVersion = Get-ChildItem -LiteralPath (Join-Path $sdk 'Include') -Directory |
-    Sort-Object Name -Descending | Select-Object -First 1
-if (-not $sdkVersion) { throw 'Windows SDK Include directory not found.' }
+    Where-Object {
+        $_.Name -match '^\d+\.\d+\.\d+\.\d+$' -and
+        (Test-Path -LiteralPath (Join-Path $_.FullName 'ucrt\stddef.h') -PathType Leaf) -and
+        (Test-Path -LiteralPath (Join-Path $sdk "Lib\$($_.Name)\um\x64\advapi32.lib") -PathType Leaf)
+    } |
+    Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
+if (-not $sdkVersion) { throw 'Complete Windows SDK (ucrt headers and um/x64 libs) not found.' }
 
 $env:INCLUDE = @((Join-Path $msvc.FullName 'include'), (Join-Path $sdk "Include\$($sdkVersion.Name)\ucrt"),
     (Join-Path $sdk "Include\$($sdkVersion.Name)\um"), (Join-Path $sdk "Include\$($sdkVersion.Name)\shared")) -join ';'
