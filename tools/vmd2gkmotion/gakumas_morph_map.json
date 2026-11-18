@@ -1,0 +1,305 @@
+{
+  "schema_version": 2,
+  "weight_unit": "0..1",
+  "provenance": {
+    "target": "Local cache revision 67: mdl_chr_hski-base-0000_face / VLActorFaceModel.blendShapes",
+    "asset_md5": "a9ed2ad08fcf084967688e091f7d7c87",
+    "semantics": "Adapter v2: empirical FMW/BBP native variant prior; preserve MMD semantics until runtime character binding. Strong original-key evidence for blink/brow/E/Wa/tooth; exact native names remain explicit. No family-sum baseline path.",
+    "reference": "MMDD v2.9.6 KKS chara_default_KKS.json: VMD aliases and one-to-many blend mapping only; KKS target names are not used."
+  },
+  "blendshapes": [
+    "b_brow.brow_001",
+    "b_brow.brow_002",
+    "b_brow.brow_003",
+    "b_brow.brow_004",
+    "b_brow.brow_005",
+    "b_brow.brow_006",
+    "b_brow.brow_007",
+    "b_brow.brow_008",
+    "b_brow.brow_009",
+    "b_brow.brow_010",
+    "b_brow.brow_011",
+    "b_brow.brow_012",
+    "b_brow.brow_013",
+    "b_brow.brow_014",
+    "b_brow.brow_101",
+    "b_brow.brow_102",
+    "b_brow.brow_201",
+    "b_brow.brow_202",
+    "b_brow.brow_203",
+    "b_brow.brow_204",
+    "b_eye.eye_001",
+    "b_eye.eye_002",
+    "b_eye.eye_003",
+    "b_eye.eye_004",
+    "b_eye.eye_005",
+    "b_eye.eye_006",
+    "b_eye.eye_007",
+    "b_eye.eye_008",
+    "b_eye.eye_009",
+    "b_eye.eye_010",
+    "b_eye.eye_011",
+    "b_eye.eye_012",
+    "b_eye.eye_013",
+    "b_eye.eye_014",
+    "b_eye.eye_101",
+    "b_eye.eye_201",
+    "b_eye.eye_202",
+    "b_eye.eye_203",
+    "b_eye.eye_204",
+    "b_iris.iris_001",
+    "b_iris.iris_002",
+    "b_mouth.mouth_001",
+    "b_mouth.mouth_002",
+    "b_mouth.mouth_003",
+    "b_mouth.mouth_004",
+    "b_mouth.mouth_005",
+    "b_mouth.mouth_006",
+    "b_mouth.mouth_007",
+    "b_mouth.mouth_008",
+    "b_mouth.mouth_009",
+    "b_mouth.mouth_010",
+    "b_mouth.mouth_011",
+    "b_mouth.mouth_012",
+    "b_mouth.mouth_013",
+    "b_mouth.mouth_014",
+    "b_mouth.mouth_015",
+    "b_mouth.mouth_016",
+    "b_mouth.mouth_017",
+    "b_mouth.mouth_018",
+    "b_mouth.mouth_019",
+    "b_mouth.mouth_020",
+    "b_mouth.mouth_021",
+    "b_mouth.mouth_022",
+    "b_mouth.mouth_023",
+    "b_mouth.mouth_024",
+    "b_mouth.mouth_025",
+    "b_mouth.mouth_026",
+    "b_mouth.mouth_027",
+    "b_mouth.mouth_028",
+    "b_mouth.mouth_029",
+    "b_mouth.mouth_030",
+    "b_mouth.mouth_031",
+    "b_mouth.mouth_032",
+    "b_mouth.mouth_033",
+    "b_mouth.mouth_101",
+    "b_mouth.mouth_102",
+    "b_mouth.mouth_103",
+    "b_mouth.mouth_104",
+    "b_mouth.mouth_105",
+    "b_mouth.mouth_106",
+    "b_mouth.mouth_201",
+    "b_mouth.mouth_202",
+    "b_mouth.mouth_203",
+    "b_mouth.mouth_204",
+    "under045",
+    "side090",
+    "side045r",
+    "side045l",
+    "custom_Geo_Brow_0",
+    "custom_Geo_Brow_1",
+    "custom_Geo_Brow_2",
+    "custom_Geo_Brow_3",
+    "custom_Geo_Eye_0",
+    "custom_Geo_Eye_1",
+    "custom_Geo_Eye_2",
+    "custom_Geo_Eye_3",
+    "custom_Geo_Head_0",
+    "custom_Geo_Head_1",
+    "custom_Geo_Head_2",
+    "custom_Geo_Head_3",
+    "custom_Geo_Iris_0",
+    "custom_Geo_Iris_1",
+    "custom_Geo_Iris_2",
+    "custom_Geo_Iris_3",
+    "custom_Geo_Mouth_0",
+    "custom_Geo_Mouth_1",
+    "custom_Geo_Mouth_2",
+    "custom_Geo_Mouth_3"
+  ],
+  "mappings": {
+    "まばたき": [
+      {
+        "name": "b_eye.eye_001"
+      }
+    ],
+    "笑い": [
+      {
+        "name": "mmd2.smile_eyes"
+      }
+    ],
+    "笑い２": [
+      {
+        "name": "mmd2.smile_eyes"
+      }
+    ],
+    "笑い目": [
+      {
+        "name": "mmd2.smile_eyes"
+      }
+    ],
+    "ウィンク": [
+      {
+        "name": "b_eye.eye_011"
+      }
+    ],
+    "ウィンク右": [
+      {
+        "name": "b_eye.eye_012"
+      }
+    ],
+    "ウィンク２": [
+      {
+        "name": "b_eye.eye_011"
+      }
+    ],
+    "ウィンク２右": [
+      {
+        "name": "b_eye.eye_012"
+      }
+    ],
+    "びっくり": [
+      {
+        "name": "b_eye.eye_006"
+      }
+    ],
+    "じと目": [
+      {
+        "name": "b_eye.eye_013"
+      }
+    ],
+    "あ": [
+      {
+        "name": "mmd2.a"
+      }
+    ],
+    "い": [
+      {
+        "name": "mmd2.i"
+      }
+    ],
+    "う": [
+      {
+        "name": "mmd2.u"
+      }
+    ],
+    "え": [
+      {
+        "name": "b_mouth.mouth_027"
+      }
+    ],
+    "お": [
+      {
+        "name": "mmd2.o"
+      }
+    ],
+    "ワ": [
+      {
+        "name": "b_mouth.mouth_003"
+      }
+    ],
+    "にやり": [
+      {
+        "name": "b_mouth.mouth_002"
+      }
+    ],
+    "にっこり": [
+      {
+        "name": "b_mouth.mouth_002"
+      }
+    ],
+    "真面目": [
+      {
+        "name": "b_brow.brow_003"
+      }
+    ],
+    "怒り": [
+      {
+        "name": "b_brow.brow_003"
+      }
+    ],
+    "困る": [
+      {
+        "name": "b_brow.brow_001"
+      }
+    ],
+    "にこり": [
+      {
+        "name": "b_brow.brow_009"
+      }
+    ],
+    "下": [
+      {
+        "name": "b_brow.brow_014"
+      }
+    ],
+    "a": [
+      {
+        "name": "mmd2.a"
+      }
+    ],
+    "A": [
+      {
+        "name": "mmd2.a"
+      }
+    ],
+    "i": [
+      {
+        "name": "mmd2.i"
+      }
+    ],
+    "I": [
+      {
+        "name": "mmd2.i"
+      }
+    ],
+    "u": [
+      {
+        "name": "mmd2.u"
+      }
+    ],
+    "U": [
+      {
+        "name": "mmd2.u"
+      }
+    ],
+    "o": [
+      {
+        "name": "mmd2.o"
+      }
+    ],
+    "O": [
+      {
+        "name": "mmd2.o"
+      }
+    ],
+    "e": [
+      {
+        "name": "b_mouth.mouth_027"
+      }
+    ],
+    "E": [
+      {
+        "name": "b_mouth.mouth_027"
+      }
+    ],
+    "tooth": [
+      {
+        "name": "b_mouth.mouth_026"
+      }
+    ],
+    "blink": [
+      {
+        "name": "b_eye.eye_001"
+      }
+    ]
+  },
+  "facial_adapter_version": 2,
+  "semantic_channels": [
+    "mmd2.a",
+    "mmd2.i",
+    "mmd2.u",
+    "mmd2.o",
+    "mmd2.smile_eyes"
+  ]
+}

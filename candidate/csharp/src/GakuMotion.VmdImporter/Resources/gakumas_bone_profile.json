@@ -1,0 +1,619 @@
+{
+  "profile_name": "Gakumas Standard Humanoid Profile (Tda Spec)",
+  "version": "1.2",
+  "general": {
+    "source_skeleton": "mmd_source_skeleton.json",
+    "rotation_interpolation": "normalized_component",
+    "interpolation_layout": "channel_blocks",
+    "fps": 30.0,
+    "axis_scale": 0.083,
+    "root_displacement_scale": 0.07795,
+    "center_y": 12.0,
+    "root_bones": [
+      "全ての親",
+      "センター",
+      "グルーブ"
+    ]
+  },
+  "ik": {
+    "left_leg": {
+      "ik_bone": "左足ＩＫ",
+      "thigh_bone": "左足",
+      "knee_bone": "左ひざ",
+      "foot_bone": "左足首",
+      "thigh_length": 5.3,
+      "shin_length": 5.1,
+      "thigh_rest_y": 11.8,
+      "foot_rest_y": 1.4,
+      "knee_min_angle": 0.0,
+      "knee_max_angle": 165.0
+    },
+    "right_leg": {
+      "ik_bone": "右足ＩＫ",
+      "thigh_bone": "右足",
+      "knee_bone": "右ひざ",
+      "foot_bone": "右足首",
+      "thigh_length": 5.3,
+      "shin_length": 5.1,
+      "thigh_rest_y": 11.8,
+      "foot_rest_y": 1.4,
+      "knee_min_angle": 0.0,
+      "knee_max_angle": 165.0
+    }
+  },
+  "bones": [
+    {
+      "name": "Hips",
+      "humanoid_id": 0,
+      "vmd_name": "下半身",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "Spine",
+      "humanoid_id": 7,
+      "vmd_name": "上半身",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "Chest",
+      "humanoid_id": 8,
+      "vmd_name": "上半身2",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "UpperChest",
+      "humanoid_id": 54,
+      "vmd_name": "上半身3",
+      "fallback_vmd_name": "上半身2",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "Neck",
+      "humanoid_id": 9,
+      "vmd_name": "首",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "Head",
+      "humanoid_id": 10,
+      "vmd_name": "頭",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "LeftShoulder",
+      "humanoid_id": 11,
+      "vmd_name": "左肩",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "RightShoulder",
+      "humanoid_id": 12,
+      "vmd_name": "右肩",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "LeftUpperArm",
+      "humanoid_id": 13,
+      "vmd_name": "左腕",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "RightUpperArm",
+      "humanoid_id": 14,
+      "vmd_name": "右腕",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "LeftLowerArm",
+      "humanoid_id": 15,
+      "vmd_name": "左ひじ",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "RightLowerArm",
+      "humanoid_id": 16,
+      "vmd_name": "右ひじ",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "LeftHand",
+      "humanoid_id": 17,
+      "vmd_name": "左手首",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "RightHand",
+      "humanoid_id": 18,
+      "vmd_name": "右手首",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "LeftUpperLeg",
+      "humanoid_id": 1,
+      "vmd_name": "左足",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "RightUpperLeg",
+      "humanoid_id": 2,
+      "vmd_name": "右足",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "LeftLowerLeg",
+      "humanoid_id": 3,
+      "vmd_name": "左ひざ",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "RightLowerLeg",
+      "humanoid_id": 4,
+      "vmd_name": "右ひざ",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "LeftFoot",
+      "humanoid_id": 5,
+      "vmd_name": "左足首",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "RightFoot",
+      "humanoid_id": 6,
+      "vmd_name": "右足首",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "LeftToes",
+      "humanoid_id": 19,
+      "vmd_name": "左つま先",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "RightToes",
+      "humanoid_id": 20,
+      "vmd_name": "右つま先",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "LeftThumbProximal",
+      "humanoid_id": 24,
+      "vmd_name": "左親指０",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "LeftThumbIntermediate",
+      "humanoid_id": 25,
+      "vmd_name": "左親指１",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "LeftThumbDistal",
+      "humanoid_id": 26,
+      "vmd_name": "左親指２",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "LeftIndexProximal",
+      "humanoid_id": 27,
+      "vmd_name": "左人指１",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "LeftIndexIntermediate",
+      "humanoid_id": 28,
+      "vmd_name": "左人指２",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "LeftIndexDistal",
+      "humanoid_id": 29,
+      "vmd_name": "左人指３",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "LeftMiddleProximal",
+      "humanoid_id": 30,
+      "vmd_name": "左中指１",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "LeftMiddleIntermediate",
+      "humanoid_id": 31,
+      "vmd_name": "左中指２",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "LeftMiddleDistal",
+      "humanoid_id": 32,
+      "vmd_name": "左中指３",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "LeftRingProximal",
+      "humanoid_id": 33,
+      "vmd_name": "左薬指１",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "LeftRingIntermediate",
+      "humanoid_id": 34,
+      "vmd_name": "左薬指２",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "LeftRingDistal",
+      "humanoid_id": 35,
+      "vmd_name": "左薬指３",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "LeftLittleProximal",
+      "humanoid_id": 36,
+      "vmd_name": "左小指１",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "LeftLittleIntermediate",
+      "humanoid_id": 37,
+      "vmd_name": "左小指２",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "LeftLittleDistal",
+      "humanoid_id": 38,
+      "vmd_name": "左小指３",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "RightThumbProximal",
+      "humanoid_id": 39,
+      "vmd_name": "右親指０",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "RightThumbIntermediate",
+      "humanoid_id": 40,
+      "vmd_name": "右親指１",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "RightThumbDistal",
+      "humanoid_id": 41,
+      "vmd_name": "右親指２",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "RightIndexProximal",
+      "humanoid_id": 42,
+      "vmd_name": "右人指１",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "RightIndexIntermediate",
+      "humanoid_id": 43,
+      "vmd_name": "右人指２",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "RightIndexDistal",
+      "humanoid_id": 44,
+      "vmd_name": "右人指３",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "RightMiddleProximal",
+      "humanoid_id": 45,
+      "vmd_name": "右中指１",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "RightMiddleIntermediate",
+      "humanoid_id": 46,
+      "vmd_name": "右中指２",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "RightMiddleDistal",
+      "humanoid_id": 47,
+      "vmd_name": "右中指３",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "RightRingProximal",
+      "humanoid_id": 48,
+      "vmd_name": "右薬指１",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "RightRingIntermediate",
+      "humanoid_id": 49,
+      "vmd_name": "右薬指２",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "RightRingDistal",
+      "humanoid_id": 50,
+      "vmd_name": "右薬指３",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "RightLittleProximal",
+      "humanoid_id": 51,
+      "vmd_name": "右小指１",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "RightLittleIntermediate",
+      "humanoid_id": 52,
+      "vmd_name": "右小指２",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    },
+    {
+      "name": "RightLittleDistal",
+      "humanoid_id": 53,
+      "vmd_name": "右小指３",
+      "offset_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rot_scale": 1.0
+    }
+  ]
+}

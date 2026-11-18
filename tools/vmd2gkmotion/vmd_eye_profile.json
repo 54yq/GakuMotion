@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "representation": "head-space-eye-delta-v1",
+  "source_tracks": ["両目", "左目", "右目"],
+  "composition": "full both-eye rotation grant multiplied before independent eye rotation",
+  "target_frame": "measured avatar neutral eye frame, applied by v5 runtime",
+  "bones": [
+    {"name": "LeftEye", "humanoid_id": 21, "vmd_name": "左目", "head_space_eye_delta": true},
+    {"name": "RightEye", "humanoid_id": 22, "vmd_name": "右目", "head_space_eye_delta": true}
+  ]
+}

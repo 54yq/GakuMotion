@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "profiles": {
+    "5aaba0878466cfd9a1020ef065e6d82e7ee6279f5990146b389287a190386f69": {
+      "version": 1,
+      "source_vmd_sha256": "5aaba0878466cfd9a1020ef065e6d82e7ee6279f5990146b389287a190386f69",
+      "source_clip_sha256": "cdc122ef157f85745e98393c6c99eefaffa4ac8eaf2fb4c752391f0523fcdd51",
+      "bone_profile_sha256": "a7344c472c2f1058a7c0cc78d060aa659dfe8ebe283fed3bd651d2f9ae0a195e",
+      "alignment_signature_sha256": "c1769ac330557a315cf8786ee200cf4d3c886887e144a27058b43be8eea96ea0",
+      "reference_geometry_sha256": "051c4ec8c45e8c7c9425d2d50d7c4870174eb1a1347af42d68279917d0798dac",
+      "reference_target_metadata": {
+        "version": 1,
+        "reference_target": "Saki / PROBE A9 offsets, checked against recorded localPosition",
+        "reference_recording": "F:\\Games\\gakumas\\gakumas-local\\recordings\\official_fmw_saki_face.json",
+        "reference_recording_sha256": "0027d302b746b3cfb02d403ce8c229204ea46237331df7612abe06e4d81f40a5"
+      },
+      "controller_bone": "グルーブ",
+      "requires_identity_bones": [
+        "腰",
+        "下半身"
+      ],
+      "root_displacement_scale": 0.07184202369724724,
+      "controller_to_hips_offset_mmd": [
+        0.022578290653026127,
+        4.088154737968737,
+        -0.527669720230385
+      ],
+      "calibration": {
+        "kind": "effective-retarget-calibration",
+        "source_pmx_geometry_confirmed": false,
+        "runtime_visual_acceptance": false,
+        "reference_geometry_scope": "Saki / PROBE A9 offsets, checked against recorded localPosition",
+        "proxy_label": "fixed foot world-orientation stability; not proven contact",
+        "proxy_threshold_deg_s": 20.0,
+        "proxy_erosion_window_frames": 7,
+        "training": "first 300 intervals of each 600-interval block",
+        "validation": "remaining 300 intervals; never used for parameter fitting",
+        "loss": "soft_l1",
+        "f_scale_m_s": 0.02,
+        "fit_axes": [
+          "x",
+          "y",
+          "z"
+        ],
+        "model": "root_ratio * original_root + R_groove * effective_lever_m; relative to frame zero",
+        "limitations": [
+          "stable orientation can occur during flight",
+          "target proportions differ from source proportions",
+          "joint-marker floor is not a shoe-sole measurement"
+        ]
+      }
+    }
+  }
+}
