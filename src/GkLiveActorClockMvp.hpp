@@ -2,12 +2,11 @@
 #include <algorithm>
 #include <vector>
 #include <type_traits>
-#include "GkLiveActorInputIsolation.hpp"
+#include "GkLiveActorClipEnd.hpp"
 // Engine-owned graph clock trial. Never copies job payloads, calls Evaluate,
 // modifies streams, or claims to provide a Swing checkpoint.
 template <int Slot> struct LiveActorClockState {
     alignas(16) static inline std::array<unsigned char,16> graph{};
-    alignas(16) static inline std::array<unsigned char,16> actorPhysicsPlayable{};
     static inline uintptr_t owner{}, actor{}, player{}; static inline int scene{};
     static inline bool offered{},active{}; static inline int originalMode{},originalPlaying{};
     static inline double started{};
@@ -16,7 +15,7 @@ template <int Slot> struct LiveActorClockState {
     static inline void* graphClass{};
     static inline unsigned verifiedOutputs{};
     static inline bool mmdSession{}, borrowedRunningGraph{};
-    static inline LiveActorInputIsolation inputIsolation;
+    static inline LiveActorClipEnd clipEnd;
     struct Node { alignas(16) std::array<unsigned char,16> handle{}; double time{}; };
     static inline std::vector<Node> nodes;
     static inline const void *nodeValid{},*nodeTime{},*nodeSetTime{},*nodeSetDone{},*nodeInputs{},*nodeInput{},*rootCount{},*rootGet{};
@@ -65,8 +64,12 @@ template <int Slot> struct LiveActorClockState {
     }
     static inline bool TickLoop(double now) {
         if(!active||!SameOwner()||Read(valid,true)!=1)return false;
-        if(mmdSession)return Read(mode,false)==1 && Read(playing,true)==1 &&
-            (!inputIsolation.JobCount() || inputIsolation.Check(graph.data(), now));
+        if (mmdSession) {
+            if (Read(mode) != 1 || Read(playing, true) != 1) return false;
+            if (!clipEnd.ClipCount() || clipEnd.Check(graph.data(), now)) return true;
+            loopError = "clip_end_lost_native_clock_continues";
+            return clipEnd.Restore();
+        }
         if(now-loopStarted<loopWindow)return true;
         // Reset only this actor's graph. Never seek the paused stage Director.
         for(auto& n:nodes){bool ok{};void* b=NodeCall(nodeValid,n.handle.data(),nullptr,ok);void* raw=ok&&b?g_safeBones.unbox(b):nullptr;if(!raw||!*static_cast<unsigned char*>(raw))return false;}
@@ -113,8 +116,7 @@ template <int Slot> struct LiveActorClockState {
         raw=boxed&&!ex?g_safeBones.unbox(boxed):nullptr;if(!raw)return false;
         time=*static_cast<double*>(raw);return std::isfinite(time);
     }
-    static inline void Offer(void* value,void* klass,void* actorValue,void* playerValue,bool targetMatches,
-                             const std::array<unsigned char,16>& physicsPlayable = {}) {
+    static inline void Offer(void* value,void* klass,void* actorValue,void* playerValue,bool targetMatches) {
         auto& c=GakuMotion::Core::Instance();
         if(active)return;
         if(c.liveActorClockFault){Reject("上次恢复未确认，请重新进入 Live");return;}
@@ -184,7 +186,7 @@ template <int Slot> struct LiveActorClockState {
         setMode=modeClass?metadata.Find(klass,"SetTimeUpdateMode",false,{0x01},{{0x11,modeClass}}):nullptr;
         play=metadata.Find(klass,"Play",false,{0x01},{});stop=metadata.Find(klass,"Stop",false,{0x01},{});
         if(!valid||!playing||!mode||!setMode||!play||!stop){Reject("图播放或恢复接口未全部解析");return;}
-        std::memcpy(graph.data(),value,graph.size());graphClass=klass;actorPhysicsPlayable=physicsPlayable;
+        std::memcpy(graph.data(),value,graph.size());graphClass=klass;
         owner=c.liveOwnerToken;scene=c.liveOwnerScene;actor=reinterpret_cast<uintptr_t>(actorValue);player=reinterpret_cast<uintptr_t>(playerValue);
         const int v=Read(valid,true),m=Read(mode),p=Read(playing,true);
         offered=v==1 && ((m==3 && p==0) || (Slot==0 && c.liveTakeoverActive && m==1 && p==1));
@@ -205,31 +207,30 @@ template <int Slot> struct LiveActorClockState {
         const bool alreadyRunning = Slot==0 && forMmd && currentMode==1 && currentPlaying==1;
         if(!alreadyRunning && (currentMode!=3 || currentPlaying!=0))return false;
         if(forMmd){loops=0;nodes.clear();loopError=nullptr;}
-        if(forMmd && !inputIsolation.Prepare(graphClass, graph.data(), verifiedOutputs, actorPhysicsPlayable.data())) {
-            // Preparation only reads the graph. Keep the established native
-            // clock available when this runtime cannot isolate its inputs.
-            inputIsolation = {};
-            loopError = "native_clock_without_animation_isolation";
+        if(forMmd && !clipEnd.Prepare(graphClass, graph.data(), verifiedOutputs)) {
+            clipEnd = {};
+            loopError = "native_clock_without_clip_end";
         }
         originalMode=currentMode;originalPlaying=currentPlaying;
         borrowedRunningGraph=alreadyRunning;
         rootSampled=RootTime(rootStart);rootAdvancedKnown=false;rootDelta=0;
         // Mark before writes so every partial start takes the restoration path.
         active=true;mmdSession=forMmd;started=now;
-        if(forMmd && inputIsolation.JobCount() && !inputIsolation.Detach(graph.data(), now)) {
-            loopError = "original_animation_input_detach_failed";
-            return false;
+        if(forMmd && clipEnd.ClipCount() && !clipEnd.Park(now)) {
+            loopError = "original_animation_clip_end_failed";
+            if (!clipEnd.Restore()) return false;
+            loopError = "native_clock_without_clip_end";
         }
-        if(alreadyRunning)return true; // Only the verified input connections are leased.
+        if(alreadyRunning)return true; // Only the animation clip clocks are leased.
         int gameTime=1;void* args[]{&gameTime};
         return InvokeVoid(setMode,args)&&InvokeVoid(play)&&Read(mode)==1&&Read(playing,true)==1;
     }
     static inline bool RestoreGraph() {
         if(!active)return true;
-        if(!SameOwner()||Read(valid,true)!=1){inputIsolation={};active=false;offered=false;return false;}
+        if(!SameOwner()||Read(valid,true)!=1){clipEnd={};active=false;offered=false;return false;}
         double rootEnd{};rootAdvancedKnown=rootSampled&&RootTime(rootEnd);rootDelta=rootAdvancedKnown?rootEnd-rootStart:0;
         bool ok=borrowedRunningGraph || InvokeVoid(stop);
-        ok=inputIsolation.Restore(graph.data()) && ok;
+        ok=clipEnd.Restore() && ok;
         if(!borrowedRunningGraph) {
             void* args[]{&originalMode};ok=InvokeVoid(setMode,args)&&ok;
             if(originalPlaying)ok=InvokeVoid(play)&&ok;
@@ -240,7 +241,6 @@ template <int Slot> struct LiveActorClockState {
 };
 struct LiveDynamicFollowerClock {
     alignas(16) std::array<unsigned char,16> graph{};
-    alignas(16) std::array<unsigned char,16> actorPhysicsPlayable{};
     uintptr_t owner{}, actor{}, player{}; int scene{};
     bool offered{},active{}; int originalMode{},originalPlaying{};
     double started{};
@@ -249,7 +249,7 @@ struct LiveDynamicFollowerClock {
     void* graphClass{};
     unsigned verifiedOutputs{};
     bool mmdSession{};
-    LiveActorInputIsolation inputIsolation;
+    LiveActorClipEnd clipEnd;
     struct Node { alignas(16) std::array<unsigned char,16> handle{}; double time{}; };
     std::vector<Node> nodes;
     const void *nodeValid{},*nodeTime{},*nodeSetTime{},*nodeSetDone{},*nodeInputs{},*nodeInput{},*rootCount{},*rootGet{};
@@ -298,8 +298,12 @@ struct LiveDynamicFollowerClock {
     }
     bool TickLoop(double now) {
         if(!active||!SameOwner()||Read(valid,true)!=1)return false;
-        if(mmdSession)return Read(mode,false)==1 && Read(playing,true)==1 &&
-            (!inputIsolation.JobCount() || inputIsolation.Check(graph.data(), now));
+        if (mmdSession) {
+            if (Read(mode) != 1 || Read(playing, true) != 1) return false;
+            if (!clipEnd.ClipCount() || clipEnd.Check(graph.data(), now)) return true;
+            loopError = "clip_end_lost_native_clock_continues";
+            return clipEnd.Restore();
+        }
         if(now-loopStarted<loopWindow)return true;
         // Reset only this actor's graph. Never seek the paused stage Director.
         for(auto& n:nodes){bool ok{};void* b=NodeCall(nodeValid,n.handle.data(),nullptr,ok);void* raw=ok&&b?g_safeBones.unbox(b):nullptr;if(!raw||!*static_cast<unsigned char*>(raw))return false;}
@@ -346,8 +350,7 @@ struct LiveDynamicFollowerClock {
         raw=boxed&&!ex?g_safeBones.unbox(boxed):nullptr;if(!raw)return false;
         time=*static_cast<double*>(raw);return std::isfinite(time);
     }
-    void Offer(void* value,void* klass,void* actorValue,void* playerValue,bool targetMatches,
-               const std::array<unsigned char,16>& physicsPlayable = {}) {
+    void Offer(void* value,void* klass,void* actorValue,void* playerValue,bool targetMatches) {
         auto& c=GakuMotion::Core::Instance();
         if(active)return;
         if(c.liveActorClockFault){Reject("上次恢复未确认，请重新进入 Live");return;}
@@ -417,7 +420,7 @@ struct LiveDynamicFollowerClock {
         setMode=modeClass?metadata.Find(klass,"SetTimeUpdateMode",false,{0x01},{{0x11,modeClass}}):nullptr;
         play=metadata.Find(klass,"Play",false,{0x01},{});stop=metadata.Find(klass,"Stop",false,{0x01},{});
         if(!valid||!playing||!mode||!setMode||!play||!stop){Reject("图播放或恢复接口未全部解析");return;}
-        std::memcpy(graph.data(),value,graph.size());graphClass=klass;actorPhysicsPlayable=physicsPlayable;
+        std::memcpy(graph.data(),value,graph.size());graphClass=klass;
         owner=c.liveOwnerToken;scene=c.liveOwnerScene;actor=reinterpret_cast<uintptr_t>(actorValue);player=reinterpret_cast<uintptr_t>(playerValue);
         const int v=Read(valid,true),m=Read(mode),p=Read(playing,true);
         offered=v==1 && m==3 && p==0;
@@ -435,26 +438,27 @@ struct LiveDynamicFollowerClock {
         if(active||c.liveActorClockFault||!offered||!SameOwner()||!c.liveObservation.confirmed||!c.liveObservation.paused||c.liveTakeoverActive!=forMmd||c.liveTakeoverFault||
             Read(valid,true)!=1||Read(mode)!=3||Read(playing,true)!=0)return false;
         if(forMmd){loops=0;nodes.clear();loopError=nullptr;}
-        if(forMmd && !inputIsolation.Prepare(graphClass, graph.data(), verifiedOutputs, actorPhysicsPlayable.data())) {
-            inputIsolation = {};
-            loopError = "native_clock_without_animation_isolation";
+        if(forMmd && !clipEnd.Prepare(graphClass, graph.data(), verifiedOutputs)) {
+            clipEnd = {};
+            loopError = "native_clock_without_clip_end";
         }
         originalMode=3;originalPlaying=0;
         rootSampled=RootTime(rootStart);rootAdvancedKnown=false;rootDelta=0;
         // Mark before writes so every partial start takes the restoration path.
         active=true;mmdSession=forMmd;started=now;int gameTime=1;void* args[]{&gameTime};
-        if(forMmd && inputIsolation.JobCount() && !inputIsolation.Detach(graph.data(), now)) {
-            loopError = "original_animation_input_detach_failed";
-            return false;
+        if(forMmd && clipEnd.ClipCount() && !clipEnd.Park(now)) {
+            loopError = "original_animation_clip_end_failed";
+            if (!clipEnd.Restore()) return false;
+            loopError = "native_clock_without_clip_end";
         }
         return InvokeVoid(setMode,args)&&InvokeVoid(play)&&Read(mode)==1&&Read(playing,true)==1;
     }
     bool RestoreGraph() {
         if(!active)return true;
-        if(!SameOwner()||Read(valid,true)!=1){inputIsolation={};active=false;offered=false;return false;}
+        if(!SameOwner()||Read(valid,true)!=1){clipEnd={};active=false;offered=false;return false;}
         double rootEnd{};rootAdvancedKnown=rootSampled&&RootTime(rootEnd);rootDelta=rootAdvancedKnown?rootEnd-rootStart:0;
         bool ok=InvokeVoid(stop);
-        ok=inputIsolation.Restore(graph.data()) && ok;
+        ok=clipEnd.Restore() && ok;
         void* args[]{&originalMode};ok=InvokeVoid(setMode,args)&&ok;
         if(originalPlaying)ok=InvokeVoid(play)&&ok;
         ok=Read(mode)==originalMode&&Read(playing,true)==originalPlaying&&ok;

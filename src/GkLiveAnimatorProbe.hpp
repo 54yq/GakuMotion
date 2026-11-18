@@ -31,56 +31,10 @@ namespace LiveAnimatorProbe
 		void* raw = boxed && !ex ? g_safeBones.unbox(boxed) : nullptr;
 		return raw ? int(*static_cast<bool*>(raw)) : -1;
 	}
-	inline std::array<unsigned char, 16> ActorPhysicsPlayable(
-		void* component, void* componentClass, const GakuMotion::ExactMethodMetadata& metadata)
-	{
-		std::array<unsigned char, 16> result{};
-		const auto unavailable = [&](const char* step) {
-			if (g_hostContext.logInfo)
-				g_hostContext.logInfo("[GakuMotion][LiveActorIsolation] builder_unavailable=%s", step);
-			return result;
-		};
-		if (!component || !componentClass || g_faceRuntime.objectClass(component) != componentClass ||
-			!metadata.classFromType) return unavailable("actor_animation_component");
-		void* builderClass = FindClass("campus-submodule.Runtime.dll", "ActorAnimation", "CampusActorAnimationBuilder");
-		void* playableClass = FindClass("UnityEngine.AnimationModule.dll", "UnityEngine.Animations", "AnimationScriptPlayable");
-		void* handleClass = FindClass("UnityEngine.CoreModule.dll", "UnityEngine.Playables", "PlayableHandle");
-		if (!handleClass) handleClass = FindClass("UnityEngine.DirectorModule.dll", "UnityEngine.Playables", "PlayableHandle");
-		void* field = g_faceRuntime.findField(componentClass, "_builder");
-		void* fieldType = field ? g_faceRuntime.fieldType(field) : nullptr;
-		if (!builderClass || !playableClass || !handleClass) return unavailable("actor_builder_types");
-		if (!fieldType ||
-			(g_faceRuntime.fieldFlags(field) & 0x10) || g_faceRuntime.typeCode(fieldType) != 0x12 ||
-			metadata.classFromType(fieldType) != builderClass) return unavailable("actor_builder_field");
-		using ValueSize = int(*)(void*, uint32_t*);
-		const auto size = reinterpret_cast<ValueSize>(GetProcAddress(g_gameAssembly, "il2cpp_class_value_size"));
-		uint32_t alignment{};
-		if (!size || size(playableClass, &alignment) != result.size() ||
-			size(handleClass, &alignment) != result.size()) return unavailable("actor_builder_handle_size");
-		const void* getPlayable = metadata.Find(builderClass, "get_playable", false, {0x11, playableClass}, {});
-		const void* getHandle = metadata.Find(playableClass, "GetHandle", false, {0x11, handleClass}, {});
-		if (!getPlayable || !getHandle) return unavailable("actor_builder_getters");
-		void* builder = nullptr;
-		g_faceRuntime.readField(component, field, &builder);
-		if (!builder || g_faceRuntime.objectClass(builder) != builderClass) return unavailable("actor_builder_instance");
-		void* ex = nullptr;
-		void* boxed = g_faceRuntime.invoke(getPlayable, builder, nullptr, &ex);
-		void* raw = boxed && !ex ? g_safeBones.unbox(boxed) : nullptr;
-		if (!raw) return unavailable("actor_builder_playable");
-		alignas(16) std::array<unsigned char, 16> playable{};
-		std::memcpy(playable.data(), raw, playable.size());
-		boxed = g_faceRuntime.invoke(getHandle, playable.data(), nullptr, &ex);
-		raw = boxed && !ex ? g_safeBones.unbox(boxed) : nullptr;
-		if (!raw) return unavailable("actor_builder_handle");
-		std::memcpy(result.data(), raw, result.size());
-		if (result == std::array<unsigned char, 16>{}) return unavailable("actor_builder_handle_empty");
-		return result;
-	}
 	// The actor's physics job is inserted into VL.Animation's separately owned
 	// graph. Animator.playableGraph alone does not describe this graph. Resolve
 	// the component and player afresh, without retaining scene objects or writes.
-	inline void SampleActorGraph(void* actor, int phase, int clockSlot = 0,
-		LiveDynamicFollowerClock* followerClock = nullptr, bool preparePhysics = false)
+	inline void SampleActorGraph(void* actor, int phase, int clockSlot = 0, LiveDynamicFollowerClock* followerClock = nullptr)
 	{
 		if (!actor || !g_getComponentInChildrenNative || !il2cpp_class_get_type ||
 			!il2cpp_type_get_object || !il2cpp_class_get_parent || !g_faceRuntime.objectClass ||
@@ -183,12 +137,9 @@ namespace LiveAnimatorProbe
 					if (phase>=0) {
 						alignas(16) std::array<unsigned char, 16> actorGraph{};
 						std::memcpy(actorGraph.data(), graph, actorGraph.size());
-						const bool active = followerClock ? followerClock->active : LiveActorClockMvp::active;
-						const auto physicsPlayable = preparePhysics && targetMatches == 1 && !active
-							? ActorPhysicsPlayable(component, componentClass, metadata) : std::array<unsigned char, 16>{};
-						if (followerClock) followerClock->Offer(actorGraph.data(),graphClass,actor,player,targetMatches==1,physicsPlayable);
+						if (followerClock) followerClock->Offer(actorGraph.data(),graphClass,actor,player,targetMatches==1);
 						else if (!GakuMotion::Core::Instance().player.controller.targetActor || GakuMotion::Core::Instance().player.controller.targetActor == actor)
-							LiveActorClockMvp::Offer(actorGraph.data(),graphClass,actor,player,targetMatches==1,physicsPlayable);
+							LiveActorClockMvp::Offer(actorGraph.data(),graphClass,actor,player,targetMatches==1);
 					}
 				}
 			}

@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <vector>
 #include <algorithm>
@@ -21,31 +22,29 @@ struct Core {
 }
 HMODULE g_gameAssembly{};
 bool internalMissing{},internalThrows{},publicThrows{},throwPastEnd{},invalidOutput{};int publicReads{},outputCount=1,foreignIndex=-1,nonAnimationIndex=-1;
-bool strippedHandleQueries{};
+bool gameClipFixture{};
 void* g_animatorKlass=reinterpret_cast<void*>(99);
 void* HelperGetActorAnimator(void*){return reinterpret_cast<void*>(2);}
 void* FindClass(const char*,const char*,const char* name){
  if(!std::strcmp(name,"PlayableOutputHandle"))return reinterpret_cast<void*>(33);
  if(!std::strcmp(name,"PlayableHandle"))return reinterpret_cast<void*>(31);
- if(!std::strcmp(name,"AnimationScriptPlayable"))return reinterpret_cast<void*>(34);
- if(!std::strcmp(name,"CampusActorAnimationJob"))return reinterpret_cast<void*>(35);
- if(!std::strcmp(name,"AnimationMixerPlayable"))return reinterpret_cast<void*>(36);
- if(!std::strcmp(name,"AnimationLayerMixerPlayable"))return reinterpret_cast<void*>(37);
+ if(!std::strcmp(name,"AnimationClipPlayable"))return reinterpret_cast<void*>(34);
+ if(!std::strcmp(name,"MotionClipPlayable"))return gameClipFixture?reinterpret_cast<void*>(37):nullptr;
+ if(!std::strcmp(name,"ClipParam"))return reinterpret_cast<void*>(38);
  return reinterpret_cast<void*>(1);
 }
 namespace GroundShadowProbeBootstrap {
 struct Metadata {
+ void* (*classFromType)(void*)=+[](void* type){return type;};
  const void* Find(void* owner,const char* name,bool,GakuMotion::ExactMethodMetadata::Type,std::initializer_list<GakuMotion::ExactMethodMetadata::Type>) const {
   if(owner==reinterpret_cast<void*>(33)&&!std::strcmp(name,"IsValid"))return reinterpret_cast<void*>(11);
-  if(owner==reinterpret_cast<void*>(31)&&!std::strcmp(name,"IsNull"))return strippedHandleQueries?nullptr:reinterpret_cast<void*>(30);
-  if(strippedHandleQueries&&!std::strcmp(name,"GetOutputCount"))return nullptr;
   if(!std::strcmp(name,"op_Explicit"))return reinterpret_cast<void*>(12);
   if(!std::strcmp(name,"GetTarget"))return reinterpret_cast<void*>(13);
   const char* loopNames[]{"GetRootPlayableCount","GetTime","GetRootPlayableInternal","GetInputCount","GetInputHandle","SetTime","SetDone"};
   for(uintptr_t i=0;i<7;++i)if(!std::strcmp(name,loopNames[i]))return reinterpret_cast<void*>(i+14);
-  const char* isolationNames[]{"GetSourcePlayable","GetPlayableType","GetJobType","GetInputWeightFromIndex","SetInputWeightFromIndex",
-   "GetOutputCount","GetOutputHandle","ConnectInternal","DisconnectInternal","PlayableHandle.IsNull","GetSourceOutputPort","SetSourcePlayable","GetGraph"};
-  for(uintptr_t i=0;i<13;++i)if(!std::strcmp(name,isolationNames[i]))return reinterpret_cast<void*>(i+21);
+  const char* clipNames[]{"GetSourcePlayable","GetPlayableType","GetDuration","GetSpeed","GetTimeWrapMode","IsDone","SetSpeed","SetTimeWrapMode",
+   "GetScriptInstance","get_length","get_animationLength"};
+  for(uintptr_t i=0;i<11;++i)if(!std::strcmp(name,clipNames[i]))return reinterpret_cast<void*>(i+21);
   const char* names[]{"IsValid","IsPlaying","GetTimeUpdateMode","SetTimeUpdateMode","Play","Stop","GetOutputInternal","GetOutput","GetHandle","IsNull"};
   for(uintptr_t i=0;i<10;++i)if(!std::strcmp(name,names[i]))return i==6&&internalMissing?nullptr:reinterpret_cast<void*>(i+1);
   return nullptr;
@@ -60,13 +59,12 @@ FARPROC FakeGetProcAddress(HMODULE,const char* name){
 }
 int modeValue=3,playingValue=0,validValue=1,reply{};bool failPlay{},failStop{};int writes{};
 double times[]{145.0,145.0}; bool failNodeRead{},failNodeWrite{};int nodeWrites{};
-float inputWeight=0.75f;
-int isolationWrites{};
-bool wrongJobType{}, failDisconnectReadback{}, inputConnected=true;
-int physicsInputCount=1;
-bool directPhysicsFixture{}, failRouteWrite{};
-bool physicsReachableFromOutput{true}, foreignBuilderGraph{};
-int outputSource=7, outputPort=2;
+double clipTime=1.0, clipDuration=4.0, clipSpeed=1.5;
+int clipWrap=1, clipDone=0, clipWrites=0;
+bool failParkTime{};
+double wrapperTime=2.0, wrapperSpeed=1.25, wrapperLength=8.0;
+float wrapperAnimationLength=9.0f;
+int wrapperWrap=1, wrapperDone=0;
 void* HandleReply(unsigned char id){
  static std::array<unsigned char,16> handle{};
  handle[0]=id;
@@ -89,32 +87,35 @@ void* Invoke(const void* m,void* self,void** args,void** ex){
  case 12:{int i{};std::memcpy(&i,args[0],sizeof(i));if(i==nonAnimationIndex){*ex=reinterpret_cast<void*>(1);break;}return args[0];}
  case 13:{int i{};std::memcpy(&i,self,sizeof(i));return reinterpret_cast<void*>(uintptr_t(i==foreignIndex?3:2));}
  case 14:reply=1;return &reply;
- case 15:{if(failNodeRead){*ex=reinterpret_cast<void*>(1);break;}int i{};std::memcpy(&i,self,4);return &times[i];}
+ case 15:{if(failNodeRead){*ex=reinterpret_cast<void*>(1);break;}int i{};std::memcpy(&i,self,4);return i<2?&times[i]:i==4?&wrapperTime:&clipTime;}
  case 16:{static std::array<unsigned char,16> h{};return h.data();}
- case 17:{int i{};std::memcpy(&i,self,4);
-          reply=directPhysicsFixture?(i==5||(i==7&&physicsReachableFromOutput)):i==0?physicsInputCount:0;return &reply;}
- case 18:{if(!inputConnected&&failDisconnectReadback){failDisconnectReadback=false;return nullptr;}
-          if(directPhysicsFixture)return HandleReply(*static_cast<unsigned char*>(self)==7?5:inputConnected?6:0);
-          return HandleReply(inputConnected?1:0);}
- case 19:{++nodeWrites;if(failNodeWrite){*ex=reinterpret_cast<void*>(1);break;}int i{};std::memcpy(&i,self,4);times[i]=*static_cast<double*>(args[0]);break;}
- case 20:++nodeWrites;break;
- case 21:return HandleReply(directPhysicsFixture?static_cast<unsigned char>(outputSource):0);
- case 22:return reinterpret_cast<void*>(uintptr_t(directPhysicsFixture&&*static_cast<unsigned char*>(self)!=5?38:34));
- case 23:return reinterpret_cast<void*>(uintptr_t(wrongJobType?36:35));
- case 24:return &inputWeight;
- case 25:++isolationWrites;inputWeight=*static_cast<float*>(args[1]);break;
- case 26:reply=1;return &reply;
- case 27:return HandleReply(directPhysicsFixture?(*static_cast<unsigned char*>(self)==5?7:5):0);
- case 28:++isolationWrites;inputConnected=true;inputWeight=0.0f;reply=1;return &reply;
- case 29:++isolationWrites;inputConnected=false;break;
- case 30:reply=*static_cast<unsigned char*>(self)==0;return &reply;
- case 31:reply=outputPort;return &reply;
- case 32:outputSource=*static_cast<unsigned char*>(args[0]);outputPort=*static_cast<int*>(args[1]);
-         if(failRouteWrite){failRouteWrite=false;*ex=reinterpret_cast<void*>(1);}break;
- case 33:return HandleReply(foreignBuilderGraph?99:0);
+ case 17:{const auto id=*static_cast<unsigned char*>(self);reply=id==0||id==2||id==4;return &reply;}
+ case 18:{const auto id=*static_cast<unsigned char*>(self);return HandleReply(id==2?(gameClipFixture?4:3):id==4?3:1);}
+ case 19:{const auto id=*static_cast<unsigned char*>(self);const double value=*static_cast<double*>(args[0]);
+          if(id==3||id==4){++clipWrites;if(failParkTime){failParkTime=false;*ex=reinterpret_cast<void*>(1);break;}(id==4?wrapperTime:clipTime)=value;}
+          else {++nodeWrites;if(failNodeWrite){*ex=reinterpret_cast<void*>(1);break;}times[id]=value;}break;}
+ case 20:{const auto id=*static_cast<unsigned char*>(self);if(id==3||id==4){++clipWrites;(id==4?wrapperDone:clipDone)=*static_cast<unsigned char*>(args[0]);}else ++nodeWrites;break;}
+ case 21:return HandleReply(2);
+ case 22:{const auto id=*static_cast<unsigned char*>(self);return reinterpret_cast<void*>(uintptr_t(id==3?34:id==4?37:36));}
+ case 23:return &clipDuration;
+ case 24:return *static_cast<unsigned char*>(self)==4?&wrapperSpeed:&clipSpeed;
+ case 25:return *static_cast<unsigned char*>(self)==4?&wrapperWrap:&clipWrap;
+ case 26:return *static_cast<unsigned char*>(self)==4?&wrapperDone:&clipDone;
+ case 27:(*static_cast<unsigned char*>(self)==4?wrapperSpeed:clipSpeed)=*static_cast<double*>(args[0]);++clipWrites;break;
+ case 28:(*static_cast<unsigned char*>(self)==4?wrapperWrap:clipWrap)=*static_cast<int*>(args[0]);++clipWrites;break;
+ case 29:return reinterpret_cast<void*>(37);
+ case 30:return &wrapperLength;
+ case 31:return &wrapperAnimationLength;
  }return nullptr;
 }
-struct {void*(*invoke)(const void*,void*,void**,void**)=Invoke;} g_faceRuntime;
+struct {
+ void*(*invoke)(const void*,void*,void**,void**)=Invoke;
+ void*(*findField)(void*,const char*)=+[](void*,const char*){return reinterpret_cast<void*>(1);};
+ void*(*fieldType)(void*)=+[](void*){return reinterpret_cast<void*>(38);};
+ uint32_t(*fieldFlags)(void*)=+[](void*){return uint32_t{0};};
+ void(*readField)(void*,void*,void*)=+[](void*,void*,void* out){*static_cast<void**>(out)=reinterpret_cast<void*>(38);};
+ void*(*objectClass)(void*)=+[](void* object){return object;};
+} g_faceRuntime;
 struct {void*(*unbox)(void*)=+[](void* p){return p;};}g_safeBones;
 struct {void(*logInfo)(const char*,...){};}g_hostContext;
 #define GetProcAddress FakeGetProcAddress
@@ -188,88 +189,50 @@ struct ClockTest : LiveActorClockMvp { static int Run(){
  outputCount=0;offer();CHECK(!offered);
  outputCount=2;offer();CHECK(offered&&c.liveActorClockNotice.find("不可用")==std::string::npos);
  CHECK(CaptureLoop(10,2.0)&&nodes.size()==2&&std::abs(loopWindow-1.85)<0.001);
- c.liveTakeoverActive=true;wrongJobType=true;
+ c.liveTakeoverActive=true;
  CHECK(Start(10,true) && mmdSession && playingValue==1 && modeValue==1);
- CHECK(inputIsolation.JobCount()==0 && inputConnected && inputWeight==0.75f && isolationWrites==0);
- CHECK(TickLoop(11) && RestoreGraph() && playingValue==0 && modeValue==3 && isolationWrites==0);
- offer();
- wrongJobType=false;failDisconnectReadback=true;
- CHECK(!Start(10,true) && active && playingValue==0 && !inputConnected);
- CHECK(RestoreGraph() && inputConnected && inputWeight==0.75f);
- offer();
- CHECK(Start(10,true)&&mmdSession && !inputConnected && inputIsolation.JobCount()==1);
- times[0]+=1.9;times[1]+=1.9;CHECK(TickLoop(11.9)&&loops==0&&nodeWrites==0);
- CHECK(TickLoop(200)&&loops==0&&nodeWrites==0); // no graph rewind even far beyond Live duration
- CHECK(RestoreGraph() && inputConnected && inputWeight==0.75f);
- offer();CHECK(Start(18,true) && !inputConnected);
- inputConnected=true;inputWeight=0.25f;CHECK(!TickLoop(18.5) && RestoreGraph() && inputWeight==0.75f);
- modeValue=1; playingValue=1; c.liveTakeoverActive=true; offer();
- const int borrowedWrites=writes;
- CHECK(offered && Start(19,true) && active && borrowedRunningGraph && writes==borrowedWrites && !inputConnected);
- CHECK(TickLoop(19.1) && RestoreGraph() && modeValue==1 && playingValue==1 && writes==borrowedWrites && inputConnected && inputWeight==0.75f);
- offer(); CHECK(Start(19.2,true) && borrowedRunningGraph);
- const int beforeIsolationLoss=isolationWrites;
- c.liveOwnerToken=99; CHECK(!RestoreGraph() && writes==borrowedWrites && isolationWrites==beforeIsolationLoss); c.liveOwnerToken=42;
- inputConnected=true;inputWeight=0.75f;
- c.liveTakeoverActive=false; offer(); CHECK(!offered); // Never borrow for the manual experiment.
- modeValue=3; playingValue=0;
- c.liveTakeoverActive=false;offer();failNodeRead=true;const int oldWrites=nodeWrites;
- CHECK(!CaptureLoop(20,1)&&nodeWrites==oldWrites);failNodeRead=false;
- CHECK(CaptureLoop(20,0.05)&&loopWindow==0.1);CHECK(Start(20));
+ CHECK(clipEnd.ClipCount()==1 && std::abs(clipTime-(4.0+1.0/60.0))<1e-8 && clipSpeed==0.0 && clipWrap==0);
+ times[0]+=1.9;times[1]+=1.9;
+ CHECK(TickLoop(11.9) && loops==0 && nodeWrites==0);
+ CHECK(TickLoop(200) && RestoreGraph() && clipTime==1.0 && clipSpeed==1.5 && clipWrap==1 && modeValue==3);
+ clipDuration=0.0;offer();const int writesBeforeUnsupported=clipWrites;
+ CHECK(Start(17,true) && clipEnd.ClipCount()==0 && TickLoop(18) && RestoreGraph());
+ CHECK(clipWrites==writesBeforeUnsupported && clipTime==1.0);
+ clipDuration=4.0;offer();failParkTime=true;
+ CHECK(Start(18,true) && clipEnd.ClipCount()==0 && clipTime==1.0 && clipSpeed==1.5 && clipWrap==1);
+ CHECK(RestoreGraph());
+ offer();CHECK(Start(18,true) && clipEnd.ClipCount()==1);
+ clipTime=2.0;CHECK(TickLoop(18.5) && clipEnd.ClipCount()==0 && playingValue==1 && clipTime==1.0);
+ CHECK(RestoreGraph());
+ modeValue=1;playingValue=1;offer();const int borrowedWrites=writes;
+ CHECK(offered && Start(19,true) && borrowedRunningGraph && clipEnd.ClipCount()==1 && writes==borrowedWrites);
+ CHECK(TickLoop(19.1) && RestoreGraph() && modeValue==1 && playingValue==1 && clipSpeed==1.5 && writes==borrowedWrites);
+ offer();CHECK(Start(19.2,true) && borrowedRunningGraph);
+ const int clipsBeforeLoss=clipWrites;
+ c.liveOwnerToken=99;CHECK(!RestoreGraph() && writes==borrowedWrites && clipWrites==clipsBeforeLoss);c.liveOwnerToken=42;
+ clipTime=1.0;clipSpeed=1.5;clipWrap=1;
+ c.liveTakeoverActive=false;offer();CHECK(!offered);
+ modeValue=3;playingValue=0;offer();failNodeRead=true;const int oldWrites=nodeWrites;
+ CHECK(!CaptureLoop(20,1) && nodeWrites==oldWrites);failNodeRead=false;
+ CHECK(CaptureLoop(20,0.05) && loopWindow==0.1 && Start(20));
  failNodeWrite=true;CHECK(!TickLoop(20.2));failNodeWrite=false;
  const int beforeLoss=nodeWrites;
- c.liveOwnerToken=99;CHECK(!TickLoop(21)&&nodeWrites==beforeLoss);CHECK(!RestoreGraph());c.liveOwnerToken=42;
+ c.liveOwnerToken=99;CHECK(!TickLoop(21) && nodeWrites==beforeLoss && !RestoreGraph());c.liveOwnerToken=42;
  modeValue=3;playingValue=0;c.liveTakeoverActive=true;c.liveActorClockFault=false;
  auto originalActor=actor;
  LiveFollowerClock1::Offer(LiveFollowerClock1::graph.data(),reinterpret_cast<void*>(1),reinterpret_cast<void*>(2),reinterpret_cast<void*>(3),true);
  CHECK(LiveFollowerClock1::offered && LiveFollowerClock1::actor==2 && actor==originalActor);
- CHECK(LiveFollowerClock1::Start(25,true) && LiveFollowerClock1::active && !LiveFollowerClock2::active && !active && !inputConnected);
- CHECK(LiveFollowerClock1::RestoreGraph() && modeValue==3 && playingValue==0 && inputConnected && inputWeight==0.75f);
- modeValue=3;playingValue=0;
- LiveFollowerClock2::Offer(LiveFollowerClock2::graph.data(),reinterpret_cast<void*>(1),reinterpret_cast<void*>(2),reinterpret_cast<void*>(3),true);
- CHECK(LiveFollowerClock2::offered && LiveFollowerClock2::Start(26,true));
- c.liveOwnerToken=99;const int followerWrites=writes;
- CHECK(!LiveFollowerClock2::RestoreGraph() && writes==followerWrites && !LiveFollowerClock2::active);
- c.liveOwnerToken=42;
- modeValue=3; playingValue=0; inputConnected=true; inputWeight=0.75f;
+ CHECK(LiveFollowerClock1::Start(25,true) && LiveFollowerClock1::active && !LiveFollowerClock2::active && !active);
+ CHECK(LiveFollowerClock1::RestoreGraph() && modeValue==3 && playingValue==0 && clipSpeed==1.5);
  LiveDynamicFollowerClock later;
  later.Offer(later.graph.data(),reinterpret_cast<void*>(1),reinterpret_cast<void*>(2),reinterpret_cast<void*>(3),true);
  CHECK(later.offered && later.Start(27,true) && later.active && !LiveFollowerClock1::active);
- CHECK(later.RestoreGraph() && !later.active && modeValue==3 && playingValue==0);
- later.Offer(later.graph.data(),reinterpret_cast<void*>(1),reinterpret_cast<void*>(2),reinterpret_cast<void*>(3),true);
- wrongJobType=true;
- const int writesBeforeFollowerFallback=isolationWrites;
- CHECK(later.Start(28,true) && later.TickLoop(29) && later.inputIsolation.JobCount()==0 && inputConnected);
- CHECK(later.RestoreGraph() && isolationWrites==writesBeforeFollowerFallback && inputWeight==0.75f);
- wrongJobType=false; strippedHandleQueries=true; offer();
- CHECK(Start(30,true) && inputIsolation.JobCount()==1 && !inputConnected && TickLoop(31));
- CHECK(RestoreGraph() && inputConnected && inputWeight==0.75f);
- physicsInputCount=2;offer();
- const int writesBeforeAmbiguousSource=isolationWrites;
- CHECK(Start(32,true) && inputIsolation.JobCount()==0 && inputConnected && TickLoop(33));
- CHECK(RestoreGraph() && isolationWrites==writesBeforeAmbiguousSource && inputWeight==0.75f);
- directPhysicsFixture=true; wrongJobType=true; outputCount=1;
- const std::array<unsigned char,16> actorPhysics{5};
- auto offerDirect=[&](){Offer(graph.data(),reinterpret_cast<void*>(1),reinterpret_cast<void*>(2),
-                             reinterpret_cast<void*>(3),true,actorPhysics);};
- offerDirect();
- CHECK(Start(34,true) && inputIsolation.BypassedPlaybackOutput() && !inputConnected &&
-       outputSource==5 && outputPort==0 && TickLoop(35));
- CHECK(RestoreGraph() && inputConnected && inputWeight==0.75f && outputSource==7 && outputPort==2);
- offerDirect();failRouteWrite=true;
- CHECK(!Start(36,true) && active && !inputConnected && outputSource==5 && !playingValue);
- CHECK(RestoreGraph() && inputConnected && outputSource==7 && outputPort==2);
- physicsReachableFromOutput=false;offerDirect();
- CHECK(Start(37,true) && inputIsolation.BypassedPlaybackOutput() && !inputConnected &&
-       outputSource==5 && outputPort==0 && TickLoop(38));
- CHECK(RestoreGraph() && inputConnected && outputSource==7 && outputPort==2);
- foreignBuilderGraph=true;offerDirect();
- const int writesBeforeForeignGraph=isolationWrites;
- CHECK(Start(39,true) && !inputIsolation.BypassedPlaybackOutput() && inputConnected && outputSource==7);
- CHECK(RestoreGraph() && isolationWrites==writesBeforeForeignGraph);
- foreignBuilderGraph=false;physicsReachableFromOutput=true;wrongJobType=false;offer();
- CHECK(Start(40,true) && inputIsolation.BypassedPlaybackOutput() && !inputConnected && outputSource==5);
- CHECK(RestoreGraph() && inputConnected && outputSource==7 && outputPort==2);
- std::puts("actor clock MVP: gating, per-actor isolation, restoration and owner loss passed");return 0;
+ CHECK(later.RestoreGraph() && !later.active && modeValue==3 && playingValue==0 && clipTime==1.0);
+ gameClipFixture=true;clipDuration=(std::numeric_limits<double>::max)();offer();
+ CHECK(Start(28,true) && clipEnd.ClipCount()==2);
+ CHECK(std::abs(wrapperTime-(8.0+1.0/60.0))<1e-8 && wrapperSpeed==0.0);
+ CHECK(std::abs(clipTime-(9.0+1.0/60.0))<1e-8 && clipSpeed==0.0 && TickLoop(29));
+ CHECK(RestoreGraph() && clipTime==1.0 && clipSpeed==1.5 && wrapperTime==2.0 && wrapperSpeed==1.25);
+ std::puts("actor clock MVP: gating, animation clip end, physics clock, restoration and owner loss passed");return 0;
 }};
 int main(){ return ClockTest::Run(); }

@@ -1849,9 +1849,9 @@ static void ResetPlacementDynamicBone(void* actor)
 			auto& c=GakuMotion::Core::Instance();
 			const char* clockMode = "3 秒角色图实验运行中";
 			if (LiveActorClockMvp::mmdSession)
-				clockMode = LiveActorClockMvp::inputIsolation.JobCount()
-					? "原 Live 动画输入已隔离，角色图为原生物理运行"
-					: "原生物理兼容模式，原 Live 动画输入未隔离";
+				clockMode = LiveActorClockMvp::clipEnd.ClipCount()
+					? "原 Live 动画停在片段末尾，原生物理时钟运行中"
+					: "原生物理兼容模式，原 Live 动画未停在末尾";
 			c.liveActorClockNotice=GakuMotion::detail::FormatMsg("%s；Swing 增量 %s；原生执行增量 %s；当前角色注入：%s。",
 				clockMode,
 				sd?std::to_string(s.swing_calls-g_clockStatusStart.swing_calls).c_str():"未知",
@@ -1872,7 +1872,7 @@ static void ResetPlacementDynamicBone(void* actor)
 			LiveActorClockMvp::borrowedRunningGraph = false;
 			LiveActorClockMvp::rootAdvancedKnown = false;
 			LiveActorClockMvp::nodes.clear();
-			LiveActorClockMvp::inputIsolation = {};
+			LiveActorClockMvp::clipEnd = {};
 		}
 		const bool graphRestored=detached||LiveActorClockMvp::RestoreGraph();
 		bool timelineRestored=false;
@@ -4624,7 +4624,7 @@ void MotionTick(void*, float)
 				!core.liveObservation.confirmed || !core.liveObservation.paused || std::abs(core.liveObservation.time-core.liveActorClockOrigin)>0.1f ||
 				core.injectionPolicy.Read().captureDepth!=0 || !GakuMotion::capture::LiveAutoPhotoIdle() || !loopOk)) {
 				RestoreActorClockMvp(loopOk?"stop_or_timeout_or_context":"actor_loop_failed");
-			if(!loopOk){core.liveActorClockFault=true;core.liveActorClockNotice="角色图状态或动画隔离验证失败，独立时钟已停止；请退出接管并重新进入 Live。";}
+			if(!loopOk){core.liveActorClockFault=true;core.liveActorClockNotice="角色图状态或片段恢复未确认，独立时钟已停止；请退出接管并重新进入 Live。";}
 			}
 			else if(!LiveActorClockMvp::active&&((request==1&&requestMatches&&!core.liveTakeoverActive)||mmdWanted)&&
 				!core.liveActorClockFault&&!core.liveTakeoverFault&&core.injectionPolicy.Read().captureDepth==0&&
@@ -4635,16 +4635,16 @@ void MotionTick(void*, float)
 				void* clockActor=mmdWanted?core.player.controller.targetActor:reinterpret_cast<void*>(LiveActorClockMvp::actor);
 				const bool actorValid=actorRecent&&clockActor&&CameraBridge::IsAlive(clockActor);
 				if(actorValid)
-					LiveAnimatorProbe::SampleActorGraph(clockActor,mmdWanted?3:1,0,nullptr,mmdWanted);
+					LiveAnimatorProbe::SampleActorGraph(clockActor,mmdWanted?3:1);
 				const bool prepared=actorValid&&LiveActorClockMvp::SameOwner()&&LiveActorClockMvp::actor==reinterpret_cast<uintptr_t>(clockActor)&&
 					LiveActorClockMvp::offered&&(mmdWanted||LiveActorClockMvp::CaptureLoop(now,core.liveObservation.duration-core.liveObservation.time));
 				const bool started=prepared&&LiveActorClockMvp::Start(now,mmdWanted);
 				core.liveActorClockActive=LiveActorClockMvp::active;
 				if (!started) core.liveActorClockNotice = "角色图归属或启动未确认，独立时钟未启动。";
 				else if (!mmdWanted) core.liveActorClockNotice = "角色图使用 Unity 时钟运行中（最多 3 秒），接近结尾会仅循环角色图。";
-				else core.liveActorClockNotice = LiveActorClockMvp::inputIsolation.JobCount()
-					? "原 Live 动画输入已隔离，角色图为原生物理运行。"
-					: "原生物理兼容模式，原 Live 动画输入未隔离。";
+				else core.liveActorClockNotice = LiveActorClockMvp::clipEnd.ClipCount()
+					? "原 Live 动画停在片段末尾，原生物理时钟运行中。"
+					: "原生物理兼容模式，原 Live 动画未停在末尾。";
 				if(started)RecordActorClockPhysics(true,now);
 				// Failed preparation must not be retried every tick without a user action.
 				if(!started&&LiveActorClockMvp::active)RestoreActorClockMvp("partial_start");
@@ -4652,10 +4652,9 @@ void MotionTick(void*, float)
 				if(g_hostContext.logInfo)g_hostContext.logInfo("[GakuMotion][ActorClockMVP] start=%d origin=%.3f",int(started),core.liveActorClockOrigin);
 				if(g_hostContext.logInfo)g_hostContext.logInfo("[GakuMotion][ActorClockLoop] mmd=%d prepared=%d nodes=%zu window=%.3f error=%s",int(mmdWanted),int(prepared),LiveActorClockMvp::nodes.size(),LiveActorClockMvp::loopWindow,LiveActorClockMvp::loopError?LiveActorClockMvp::loopError:"none");
 				if(started && mmdWanted && g_hostContext.logInfo)
-					g_hostContext.logInfo("[GakuMotion][LiveActorIsolation] slot=1 mode=%s jobs=%zu detached_ports=%zu direct_physics_output=%d",
-						LiveActorClockMvp::inputIsolation.JobCount() ? "isolated" : "native_compatibility",
-						LiveActorClockMvp::inputIsolation.JobCount(), LiveActorClockMvp::inputIsolation.DetachedCount(),
-						int(LiveActorClockMvp::inputIsolation.BypassedPlaybackOutput()));
+					g_hostContext.logInfo("[GakuMotion][LiveActorClipEnd] slot=1 mode=%s parked_clips=%zu outputs=%u",
+						LiveActorClockMvp::clipEnd.ClipCount() ? "past_last_frame" : "native_compatibility",
+						LiveActorClockMvp::clipEnd.ClipCount(), LiveActorClockMvp::verifiedOutputs);
 			}
 			if(LiveActorClockMvp::active&&now>=g_clockNextLog)RecordActorClockPhysics(false,now);
 			// Each bound follower must own an independently verified animation
@@ -4674,7 +4673,7 @@ void MotionTick(void*, float)
                 if (!wanted || clock.active || now < followerRetry[index]) continue;
                 followerRetry[index] = now + 2.0;
                 clock.offered = false;
-                LiveAnimatorProbe::SampleActorGraph(actor, 3, static_cast<int>(index + 1), &clock, true);
+                LiveAnimatorProbe::SampleActorGraph(actor, 3, static_cast<int>(index + 1), &clock);
                 const bool samePrimary = clock.graph == LiveActorClockMvp::graph;
                 bool sameOther = false;
                 for (size_t j=0; j<g_followerClocks.size(); ++j)
@@ -4682,9 +4681,9 @@ void MotionTick(void*, float)
                 const bool prepared = clock.offered && clock.SameOwner() && clock.actor == reinterpret_cast<uintptr_t>(actor) && !samePrimary && !sameOther;
                 const bool started = prepared && clock.Start(now, true);
                 if (!started && clock.active && !RestoreFollowerClock(index)) core.ensembleRestoreUnconfirmed = true;
-                if (g_hostContext.logInfo) g_hostContext.logInfo("[GakuMotion][FollowerClock] slot=%zu prepared=%d started=%d same_primary=%d same_other=%d physics_jobs=%zu detached_ports=%zu error=%s",
-                    index + 2, int(prepared), int(started), int(samePrimary), int(sameOther), clock.inputIsolation.JobCount(),
-                    clock.inputIsolation.DetachedCount(), clock.loopError ? clock.loopError : "none");
+                if (g_hostContext.logInfo) g_hostContext.logInfo("[GakuMotion][FollowerClock] slot=%zu prepared=%d started=%d same_primary=%d same_other=%d parked_clips=%zu error=%s",
+                    index + 2, int(prepared), int(started), int(samePrimary), int(sameOther), clock.clipEnd.ClipCount(),
+                    clock.loopError ? clock.loopError : "none");
             }
 		}
 		if (core.liveLoopEnabled && (core.liveLoopOwner != core.liveOwnerToken || core.liveLoopScene != core.liveOwnerScene || !core.liveViewingConfirmed))
