@@ -1,9 +1,27 @@
 #pragma once
 #include <cstdint>
+#include <string_view>
 #include "GkSwingCheckpointReport.hpp"
 #include "GkRealtimeCounter.hpp"
 namespace GakuMotion
 {
+    inline int SelectSecondaryPhysicsBackend(int requested, bool nativeConfirmed, bool liveTakeover,
+                                             std::string_view nativeReason)
+    {
+        if (requested != 2) return requested == 0 ? 0 : 1;
+        if (nativeConfirmed) return 2;
+        // Live still runs the game's actor physics while an injection packet
+        // is pending. Let that path keep the secondary bones across the retry.
+        if (liveTakeover &&
+            (nativeReason == "native_waiting_for_playback" || nativeReason == "native_pending" ||
+             nativeReason == "native_pending_stale" || nativeReason == "body_binding_pending" ||
+             nativeReason == "discovering"))
+            return 0;
+        return 1;
+    }
+
+    enum class CostumeCaptureStatus { Idle, Requested, Recording, Complete, Interrupted, NoSamples, FileError };
+
     struct PhysicsMonitor
     {
         unsigned codeCaptureFiles{}, codeCaptureFailures{};
@@ -12,7 +30,7 @@ namespace GakuMotion
         int liveTelemetryPhase{-1};double liveTelemetryTime{};
         SwingCheckpointReport checkpointReport;
         uint64_t checkpointReportOwner{};
-        bool observed{}, live{}, fault{};
+        bool observed{}, live{}, fault{}, beforeQuartzRequested{};
         uintptr_t actor{}; uint64_t session{};
         bool graphSampled{}, graphPlayerFound{}, graphGetterFound{};
         bool photoGraphSampled{}, photoGraphPlayerFound{}, photoGraphGetterFound{};

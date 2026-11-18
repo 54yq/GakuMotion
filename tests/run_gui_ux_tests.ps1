@@ -1,6 +1,6 @@
 #Requires -Version 5.1
 [CmdletBinding()]
-param([string]$RepoRoot = '', [string]$OutputRoot = '', [string]$VisualStudioPath = '', [string]$WindowsSdkRoot = '')
+param([string]$RepoRoot = '', [string]$OutputRoot = '', [string]$VisualStudioPath = '', [string]$WindowsSdkRoot = '', [string]$FixtureRoot = '')
 $ErrorActionPreference = 'Stop'
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot = Split-Path -Parent $PSScriptRoot }
 $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
@@ -29,6 +29,7 @@ Push-Location -LiteralPath $taskBuild
 try {
     & $taskCompiler @taskArgs
     if ($LASTEXITCODE -ne 0) { throw "GUI UX test build failed (exit=$LASTEXITCODE)." }
-    & $taskExe $RepoRoot
+    if ([string]::IsNullOrWhiteSpace($FixtureRoot)) { $FixtureRoot = $RepoRoot }
+    & $taskExe $FixtureRoot
     if ($LASTEXITCODE -ne 0) { throw "GUI UX interaction tests failed (exit=$LASTEXITCODE)." }
 } finally { Pop-Location }

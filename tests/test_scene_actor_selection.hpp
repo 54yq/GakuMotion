@@ -6,6 +6,38 @@ static void TestSceneActorSelection()
 		!live_actor_props::IsSupportedPair("Root_Body","Prop_Body") &&
 		!live_actor_props::IsSupportedPair("Root_Microphone","Prop_Body"),
 		"only matched prop roots, not protected actor body nodes, are supported");
+
+    {
+        struct Node { std::string name; std::vector<void*> children; };
+        Node microphone{"Prop_Microphone"};
+        Node suitcase{"Prop_Hknesuitcase"}, geometry{"Geo_Hknesuitcase"};
+        Node penlight{"Prop_Penlightklljduo"};
+        Node waterGun{"Prop_Water_Gun"}, candy{"Prop_CharacterCandy"}, pinwheel{"Prop_Pinwheel"};
+        Node body{"Prop_Body"}, duplicate{"Prop_Duplicate"}, duplicate2{"Prop_Duplicate"};
+        Node unrelated{"Prop_StageOnly"}, foreignProp{"Prop_Penlight"};
+        Node rootMic{"Root_Microphone", {&microphone}};
+        Node rootBag{"Root_Hknesuitcase", {&suitcase, &geometry}};
+        Node rootLight{"Root_Penlightklljduo", {&penlight}};
+        Node rootGun{"Root_Water_Gun", {&waterGun}}, rootCandy{"Root_CharacterCandy", {&candy}};
+        Node rootPinwheel{"Root_Pinwheel", {&pinwheel}};
+        Node rootBody{"Root_Body", {&body}}, rootDuplicate{"Root_Duplicate", {&duplicate, &duplicate2}};
+        Node rootForeign{"Root_Penlight", {&foreignProp}};
+        Node foreignActor{"Actor", {&rootForeign}}, wrapper{"Model", {&rootBag, &rootLight, &rootGun, &rootCandy, &rootPinwheel, &rootBody, &rootDuplicate}};
+        Node actor{"Actor", {&wrapper, &rootMic, &unrelated, &foreignActor}};
+        const auto props = live_actor_props::ScanActorProps(&actor,
+            [](void* node) { return static_cast<Node*>(node)->children; },
+            [](void* node) { return static_cast<Node*>(node)->name; },
+            [&](void* node) { return node == &foreignActor; });
+        const bool complete = props.size() == 6 && std::all_of(props.begin(), props.end(), [&](const auto& prop) {
+            return prop.object == &microphone || prop.object == &suitcase || prop.object == &penlight ||
+                prop.object == &waterGun || prop.object == &candy || prop.object == &pinwheel;
+        });
+        Check(complete, "find direct and nested character props, excluding protected, ambiguous and other-actor nodes");
+        Check(live_actor_props::DisplayName("Prop_Water_Gun") == "水枪（Water_Gun）" &&
+            live_actor_props::DisplayName("Prop_CharacterCandy") == "糖果（CharacterCandy）" &&
+            live_actor_props::DisplayName("Prop_Pinwheel") == "Prop_Pinwheel",
+            "known prop types are localized and other names remain identifiable");
+    }
 	Check(DetectIdolCharacterCode("MDL_CHR_KRNH-base-0000_face(Clone)") == "krnh" &&
 		FormatIdolDisplayName("krnh").find("贺阳燐羽") != std::string::npos,
 		"replacement identity and Chinese naming do not depend on a facial baseline existing");
@@ -57,24 +89,25 @@ static void TestSceneActorSelection()
 		nameCore.PublishSceneActors({{a,101,"hmsz","改名后"},{b,102,"hrnm"}});
 		Check(nameCore.sceneActorRegistry.Epoch()==unchangedEpoch && nameCore.BuildGuiContext().sceneActors[0].label.find("改名后")!=std::string::npos,
 			"renaming updates display without invalidating actor tokens");
-		nameCore.liveTakeoverActive=true;
-		nameCore.actorProps.push_back({named.sceneActors[1].token,"Root_Microphone","Prop_Microphone","姬崎莉波",false});
-		named.fnSetMicrophoneHidden(named.self,named.sceneActors[0].token,named.actorRosterEpoch,true);
+		nameCore.actorProps = {
+			{named.sceneActors[0].token,"Root_Microphone","Prop_Microphone","秦谷美铃",1010,true,true},
+			{named.sceneActors[1].token,"Root_Penlightklljduo","Prop_Penlightklljduo","姬崎莉波",1020,false,true}
+		};
+		auto propContext = nameCore.BuildGuiContext();
+		const auto micKey = ActorPropKey(propContext.actorProps[0]);
+		const auto lightKey = ActorPropKey(propContext.actorProps[1]);
+		propContext.fnSetActorPropHidden(propContext.self,named.sceneActors[1].token,named.actorRosterEpoch,lightKey.c_str(),true);
 		nameCore.ProcessPendingGuiCommands();
-		auto micContext=nameCore.BuildGuiContext();
-		Check(micContext.sceneActors[0].microphoneHidden && !micContext.sceneActors[1].microphoneHidden,
-			"microphone choice is isolated to its actor token");
-		const auto propKey=ActorPropKey(named.sceneActors[1].token,"Root_Microphone","Prop_Microphone");
-		micContext.fnSetActorPropHidden(micContext.self,named.sceneActors[1].token,named.actorRosterEpoch,propKey.c_str(),true);
-		nameCore.ProcessPendingGuiCommands(); micContext=nameCore.BuildGuiContext();
-		Check(micContext.sceneActors[1].microphoneHidden && micContext.actorProps[0].hidden,
-			"stage prop control and microphone switch share the same actor state");
-		const auto forbidden=ActorPropKey(named.sceneActors[1].token,"Root_Body","Prop_Body");
-		micContext.fnSetActorPropHidden(micContext.self,named.sceneActors[1].token,named.actorRosterEpoch,forbidden.c_str(),true);
-		micContext.fnSetMicrophoneHidden(micContext.self,named.sceneActors[1].token,named.actorRosterEpoch+1,false);
-		nameCore.ProcessPendingGuiCommands(); micContext=nameCore.BuildGuiContext();
-		Check(!nameCore.actorPropHidden.count(forbidden) && micContext.sceneActors[1].microphoneHidden,
-			"unknown props and stale roster commands cannot alter actor state");
+		propContext = nameCore.BuildGuiContext();
+		Check(!propContext.actorProps[0].hidden && propContext.actorProps[1].hidden,
+			"prop visibility is isolated to the discovered actor and object");
+		propContext.fnSetActorPropHidden(propContext.self,named.sceneActors[1].token,named.actorRosterEpoch+1,lightKey.c_str(),false);
+		propContext.fnSetActorPropHidden(propContext.self,named.sceneActors[0].token,named.actorRosterEpoch,micKey.c_str(),true);
+		nameCore.actorProps[0].instanceId = 1011;
+		nameCore.ProcessPendingGuiCommands();
+		propContext = nameCore.BuildGuiContext();
+		Check(!nameCore.actorPropHidden.contains(micKey) && propContext.actorProps[1].hidden,
+			"replacement props and stale actor roster commands cannot alter visibility");
 		nameCore.PublishSceneActors({{b, 102, "hrnm"}});
 		Check(nameCore.actorPropHidden.empty() && nameCore.actorProps.empty(), "actor roster changes discard stale prop choices");
 	}

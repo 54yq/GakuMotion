@@ -42,6 +42,21 @@ namespace GakuMotion
 		if (ctx.physicsBackend == 0)
 			ImGui::TextDisabled("配置文件当前关闭物理；选择任一后端即可开启。");
 		ImGui::TextWrapped("选择在本次运行中生效；重启或控制文件变更后读取 control.json 的设置。");
+		if (ctx.liveTakeoverActive)
+		{
+			const auto status = ctx.costumeCaptureStatus;
+			const bool recording = status == CostumeCaptureStatus::Recording || status == CostumeCaptureStatus::Requested;
+			ImGui::BeginDisabled(recording || ctx.physicsBackend != 1 || !ctx.injectionAllowed ||
+				!ctx.player || ctx.player->state == PlaybackState::Stopped || !ctx.fnCaptureCostumePhysics);
+			if (ImGui::Button("记录服装物理（15 秒）")) ctx.fnCaptureCostumePhysics(ctx.self);
+			ImGui::EndDisabled();
+			if (recording) ImGui::TextUnformatted("正在采集当前动作各槽位的服装骨。");
+			else if (status == CostumeCaptureStatus::Complete) ImGui::TextUnformatted("已保存 costume_physics_*.jsonl 到诊断日志目录。");
+			else if (status == CostumeCaptureStatus::Interrupted) ImGui::TextUnformatted("场景、动作或后端变化，采集已停止。");
+			else if (status == CostumeCaptureStatus::NoSamples) ImGui::TextUnformatted("没有采到角色物理帧。");
+			else if (status == CostumeCaptureStatus::FileError) ImGui::TextUnformatted("服装物理诊断文件写入失败。");
+			else ImGui::TextDisabled("选择内建 SpringBone 后可采集。");
+		}
 		ImGui::Separator();
 		if (ctx.config)
 		{

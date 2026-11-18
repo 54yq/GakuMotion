@@ -28,23 +28,31 @@ namespace GakuMotion
 		return label;
 	}
 	struct SceneActorEntry : SceneActorObservation { uint64_t token{0}; };
+	inline bool ObservedSceneActor(const std::vector<SceneActorObservation>& observations,
+		const SceneActorObservation& actor)
+	{
+		return std::any_of(observations.begin(), observations.end(), [&](const auto& current) {
+			return current.actor == actor.actor && current.instanceId == actor.instanceId;
+		});
+	}
 	struct GuiSceneActor
 	{
 		uint64_t token{0};
 		std::string label;
 		bool selected{false};
-		bool microphoneHidden{false};
 		bool modelHidden{false};
 	};
 	struct GuiActorProp
 	{
 		uint64_t actorToken{};
 		std::string rootName, propName, actorLabel;
-		bool hidden{};
+		int instanceId{};
+		bool active{}, controllable{}, hidden{};
 	};
-	inline std::string ActorPropKey(uint64_t token, const std::string& root, const std::string& prop)
+	inline std::string ActorPropKey(const GuiActorProp& prop)
 	{
-		return std::to_string(token) + "|" + root + "/" + prop;
+		return std::to_string(prop.actorToken) + "|" + std::to_string(prop.instanceId) +
+			"|" + prop.rootName + "/" + prop.propName;
 	}
 
 	class SceneActorRegistry

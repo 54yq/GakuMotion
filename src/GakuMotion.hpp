@@ -5,6 +5,8 @@
 #include "GkIdolController.hpp"
 #include "GkMotionPlayer.hpp"
 #include "GkEnsembleRuntime.hpp"
+#include "GkNumberedMotion.hpp"
+#include "GkFolderLibrary.hpp"
 #include "GkLookAtManager.hpp"
 #include "GkRuntimeConfig.hpp"
 #include "GkBoneOverride.hpp"
@@ -78,6 +80,10 @@ namespace GakuMotion
 		EnsembleRuntime ensemble;
 		bool ensembleRestoreUnconfirmed{false};
 		std::string ensembleNotice;
+        std::vector<uint64_t> ensembleAutoActors;
+        uint64_t ensembleAutoEpoch{0}, ensembleAutoGeneration{0};
+        bool ensembleAutoAlignPending{false};
+        uint64_t ensembleAutoAlignSession{0}, ensembleAutoAlignEpoch{0};
 		std::vector<std::string> followerPhysicsStatus = std::vector<std::string>(2);
 		struct EnsemblePresetRole { bool enabled{false}; Vector3 world{}; float heading{0}; };
 		struct EnsemblePreset { std::string name; std::array<EnsemblePresetRole, 3> roles{}; };
@@ -316,6 +322,14 @@ namespace GakuMotion
 		bool loadedSourceMissing{false}, loadedSourceChanged{false};
 		std::future<LibraryScanSnapshot> libraryScan;
 		uint64_t libraryScanGeneration{0};
+        std::vector<std::string> folderLibraryRoots;
+        std::vector<MotionEntry> folderCompiledMotions;
+        std::string folderLibraryPath, folderLibraryNotice, folderActiveSource;
+        bool folderLibraryConfigValid{true}, folderScanAgain{false}, folderImportActive{false};
+        size_t folderImported{0}, folderFailed{0};
+        uint64_t folderRootsRevision{0}, folderScanRevision{0};
+        std::future<FolderScanResult> folderScan;
+        std::deque<FolderMotionCandidate> folderQueue;
 		std::string playlistPath;
 		std::string initialPositionPath;
 		std::string initialPositionNotice;
@@ -352,7 +366,12 @@ namespace GakuMotion
 		// Fresh active actors in the admitted owner scene; managed reads stay on Unity thread.
 		std::vector<void*> sceneActors;
 		SceneActorRegistry sceneActorRegistry;
-		std::unordered_map<std::string, bool> actorPropHidden;
+		std::unordered_set<std::string> actorPropHidden;
+		bool CanControlActorProps() const
+		{
+			return InjectionAllowed() && injectionPolicy.Read().captureDepth == 0 &&
+				!visual_handoff::Requested() && !captureSuspended && !ensembleRestoreUnconfirmed;
+		}
 		std::unordered_map<uint64_t, bool> actorModelHidden;
 		bool (*fnApplyActorModelHidden)(uint64_t, uint64_t, bool){nullptr};
 		std::vector<GuiActorProp> actorProps;
@@ -429,15 +448,17 @@ namespace GakuMotion
 			InitialPosition, InitialYaw, LiveDofDisabled, SaveInitialPosition, SaveFacialWeights, MusicVolume, SaveMusicVolume, PhysicsBackend,
 			CameraSettings, SaveCameraSettings, CameraImport, ReloadCamera,
 			SoleSettings, SaveSoleSettings, LoadSoleSettings, ExperimentalSolePitch, ExperimentalWaistSupport,
-			BeforeQuartzExperiment, AuxDriveMode, WristDiagnostic, WristTwistShare, ForearmAxisAdjustment, ForearmAxisLock,
+			BeforeQuartzExperiment, CostumePhysicsCapture, AuxDriveMode, WristDiagnostic, WristTwistShare, ForearmAxisAdjustment, ForearmAxisLock,
 			StageSettings, StagePreset, ToggleStageCandidate, ScanStageCandidates,
 			MountCustomStage, UnloadCustomStage, RestoreCameraSkybox,
-			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, StageLoadReplacement, SelectTarget, SetMicrophoneHidden, SetActorPropHidden, SetActorModelHidden, InitializeBeforeMotion,
-			SetEnsembleFollower, ClearEnsembleFollower, EnsemblePosition, EnsembleYaw, FollowerArm, SceneArm, AlignEnsemble, SaveEnsemblePreset, ApplyEnsemblePreset
+			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, StageLoadReplacement, SelectTarget, SetActorPropHidden, SetActorModelHidden, InitializeBeforeMotion,
+			AddLibraryFolder, RemoveLibraryFolder, SetEnsembleFollower, ClearEnsembleFollower, EnsemblePosition, EnsembleYaw, FollowerArm, SceneArm, AlignEnsemble, AutoAssignEnsemble, SaveEnsemblePreset, ApplyEnsemblePreset
 		};
 
 		std::atomic<int> guiPhysicsBackend{2};
+		CostumeCaptureStatus costumeCaptureStatus{};
 		std::atomic_bool guiTextInputActive{false};
+		std::atomic<bool> placementResetExperiment{true};
 		std::atomic<bool> guiBeforeQuartzExperiment{false};
 		std::atomic<bool> guiExperimentalWaistSupport{true};
 
@@ -500,6 +521,13 @@ namespace GakuMotion
 		}
 
 		void QueueAlignEnsemble() { QueueEnsemblePresetCommand(GuiAction::AlignEnsemble); }
+        void QueueAutoAssignEnsemble() {
+            GuiCommand cmd{GuiAction::AutoAssignEnsemble};
+            cmd.actorEpoch=sceneActorRegistry.Epoch(); cmd.loadedGeneration=loadedMotionGeneration;
+            cmd.sceneSession=injectionSession; cmd.libraryRevision=libraryRevision;
+            if(const auto* actor=sceneActorRegistry.Find(player.controller.targetActor)) cmd.actorToken=actor->token;
+            QueueGui(std::move(cmd));
+        }
 
 		void QueueSelectMotion(int index, bool autoplay)
 		{
@@ -707,7 +735,7 @@ namespace GakuMotion
 				while (!guiCommands.empty())
 				{
 					const auto action = guiCommands.front().action;
-					if (action != GuiAction::Import && action != GuiAction::CameraImport && action != GuiAction::Refresh) break;
+					if (action != GuiAction::Import && action != GuiAction::CameraImport && action != GuiAction::Refresh && action != GuiAction::AddLibraryFolder && action != GuiAction::RemoveLibraryFolder) break;
 					commands.push_back(std::move(guiCommands.front()));
 					guiCommands.pop_front();
 				}
@@ -715,12 +743,15 @@ namespace GakuMotion
 			for (const auto& command : commands)
 			{
 				if (command.action == GuiAction::Import) StartImport(command.import);
+                else if (command.action == GuiAction::AddLibraryFolder) AddLibraryFolder(command.key);
+                else if (command.action == GuiAction::RemoveLibraryFolder) RemoveLibraryFolder(command.key);
 				else if (command.action == GuiAction::CameraImport) StartCameraImport(command.cameraImport);
 				else BeginLibraryRefresh();
 			}
 			PollImport();
 			PollCameraImport();
 			PollLibraryRefresh();
+            PollFolderLibrary();
 		}
 
 		void ProcessPendingGuiCommands()
@@ -732,8 +763,8 @@ namespace GakuMotion
 			}
 			for (const auto& cmd : commands)
 			{
-                if(visual_handoff::Requested() && (cmd.action==GuiAction::SetMicrophoneHidden ||
-                    cmd.action==GuiAction::SetActorModelHidden || cmd.action==GuiAction::SetActorPropHidden ||
+                if(visual_handoff::Requested() && (cmd.action==GuiAction::SetActorModelHidden ||
+                    cmd.action==GuiAction::SetActorPropHidden ||
                     cmd.action==GuiAction::StageSettings || cmd.action==GuiAction::StagePreset ||
                     cmd.action==GuiAction::ToggleStageCandidate || cmd.action==GuiAction::MountCustomStage ||
                     cmd.action==GuiAction::UnloadCustomStage || cmd.action==GuiAction::RestoreCameraSkybox)) {
@@ -741,7 +772,9 @@ namespace GakuMotion
                 }
 				// This command stores a future Photography-load preference only.
 				// It never touches Unity, playback or the current background.
-				if (cmd.action == GuiAction::StageLoadReplacement)
+				if (cmd.action == GuiAction::AddLibraryFolder) { AddLibraryFolder(cmd.key); continue; }
+                if (cmd.action == GuiAction::RemoveLibraryFolder) { RemoveLibraryFolder(cmd.key); continue; }
+                if (cmd.action == GuiAction::StageLoadReplacement)
 				{
 					SetStageLoadReplacement(cmd.key);
 					continue;
@@ -895,12 +928,12 @@ namespace GakuMotion
 					config.beforeQuartzExperiment = cmd.flag && config.secondaryPhysicsBackend == 2;
 					ApplyDeclarativeConfig();
 					break;
+				case GuiAction::CostumePhysicsCapture:
+					if (costumeCaptureStatus != CostumeCaptureStatus::Recording)
+						costumeCaptureStatus = CostumeCaptureStatus::Requested;
+					break;
 				case GuiAction::SelectTarget:
 					if (void* actor = sceneActorRegistry.Resolve(cmd.actorToken, cmd.actorEpoch)) SetTargetActor(actor);
-					break;
-				case GuiAction::SetMicrophoneHidden:
-					if (liveTakeoverActive && sceneActorRegistry.Resolve(cmd.actorToken, cmd.actorEpoch))
-						actorPropHidden[ActorPropKey(cmd.actorToken,"Root_Microphone","Prop_Microphone")] = cmd.flag;
 					break;
                 case GuiAction::SetActorModelHidden:
                     if (InjectionAllowed() && injectionPolicy.Read().captureDepth == 0 &&
@@ -912,10 +945,14 @@ namespace GakuMotion
                     } else ensembleNotice = "模型显隐未完成：角色、场景或原生渲染接口不可用";
                     break;
 				case GuiAction::SetActorPropHidden:
-					if (liveTakeoverActive && sceneActorRegistry.Resolve(cmd.actorToken, cmd.actorEpoch))
-						for (const auto& prop : actorProps)
-							if (prop.actorToken == cmd.actorToken && ActorPropKey(prop.actorToken, prop.rootName, prop.propName) == cmd.key)
-								{ actorPropHidden[cmd.key]=cmd.flag; break; }
+					if (CanControlActorProps() && sceneActorRegistry.Resolve(cmd.actorToken, cmd.actorEpoch) &&
+						std::any_of(actorProps.begin(), actorProps.end(), [&](const auto& prop) {
+							return prop.controllable && prop.actorToken == cmd.actorToken && ActorPropKey(prop) == cmd.key;
+						}))
+					{
+						if (cmd.flag) actorPropHidden.insert(cmd.key);
+						else actorPropHidden.erase(cmd.key);
+					}
 					break;
 				case GuiAction::SetEnsembleFollower:
 				{
@@ -964,6 +1001,13 @@ namespace GakuMotion
 					else ensemble.SetSceneArmCalibration(cmd.actorToken, cmd.actorEpoch, cmd.stagePresetIndex, cmd.value, sceneActorRegistry);
 					break;
 				}
+                case GuiAction::AutoAssignEnsemble:
+                    if (cmd.actorEpoch != sceneActorRegistry.Epoch() || cmd.loadedGeneration != loadedMotionGeneration ||
+                        cmd.sceneSession != injectionSession || cmd.libraryRevision != libraryRevision ||
+                        sceneActorRegistry.Resolve(cmd.actorToken,cmd.actorEpoch) != player.controller.targetActor) {
+                        ensembleNotice="自动分配取消：角色或曲目已变化"; break;
+                    }
+                    AutoAssignEnsemble(); break;
 				case GuiAction::AlignEnsemble:
 					AlignEnsembleFormation(cmd);
 					break;
@@ -979,11 +1023,13 @@ namespace GakuMotion
 						                           cmd.loadedGeneration, cmd.stagePresetIndex, cmd.value, sceneActorRegistry);
 					break;
 				case GuiAction::EnsemblePosition:
+                    ensembleAutoAlignPending=false;
 					if (!ensembleRestoreUnconfirmed && cmd.candidateIndex >= 0 && static_cast<size_t>(cmd.candidateIndex) < ensemble.Followers().size())
 						ensemble.SetPosition(static_cast<size_t>(cmd.candidateIndex), cmd.actorToken, cmd.actorEpoch,
 						                     cmd.loadedGeneration, cmd.position, sceneActorRegistry);
 					break;
 				case GuiAction::EnsembleYaw:
+                    ensembleAutoAlignPending=false;
 					if (!ensembleRestoreUnconfirmed && cmd.candidateIndex >= 0 && static_cast<size_t>(cmd.candidateIndex) < ensemble.Followers().size())
 						ensemble.SetYaw(static_cast<size_t>(cmd.candidateIndex), cmd.actorToken, cmd.actorEpoch,
 						                cmd.loadedGeneration, cmd.value, sceneActorRegistry);
@@ -995,6 +1041,7 @@ namespace GakuMotion
 				case GuiAction::PickTarget: PickBoundActorAsTarget();
 					break;
 				case GuiAction::InitialPosition:
+                    ensembleAutoAlignPending=false;
 					if (IsCurrentPlacementTarget(cmd) && player.controller.SetInitialPositionOffset(cmd.position)) RememberCurrentPlacement();
 					break;
 				case GuiAction::LiveDofDisabled:
@@ -1002,6 +1049,7 @@ namespace GakuMotion
 						liveDofDisabled = cmd.flag;
 					break;
 				case GuiAction::InitialYaw:
+                    ensembleAutoAlignPending=false;
 					if (IsCurrentPlacementTarget(cmd) && player.controller.SetInitialYawDegrees(cmd.value)) RememberCurrentPlacement();
 					break;
 				case GuiAction::SaveInitialPosition: SaveInitialPosition();
@@ -1052,6 +1100,7 @@ namespace GakuMotion
 			PollImport();
 			PollCameraImport();
 			PollLibraryRefresh();
+            PollFolderLibrary();
 			NotifyMotionPlaying(player.state == PlaybackState::Playing);
 		}
 
@@ -1067,6 +1116,7 @@ namespace GakuMotion
 				if (state != 0)
 				{
 					importBusy = false;
+                    if (folderImportActive) { if (state > 0) ++folderImported; else ++folderFailed; folderImportActive = false; folderActiveSource.clear(); }
 					importProgress.active = false;
 					importProgress.finished = true;
 					importProgress.succeeded = (state > 0);
@@ -1120,6 +1170,8 @@ namespace GakuMotion
 			diagnosticsRoot = dataLayout.managed ? logsRoot + "/diagnostics" : configRoot;
 			transactionRoot = dataLayout.managed ? dataLayout.temp + "/transactions" : "";
 			LoadStageLoadSettings();
+            folderLibraryPath = configRoot + "/folder_library.json";
+            LoadFolderLibrary();
 			playlistPath = dataLayout.Playlist();
 			initialPositionPath = configRoot + "/initial_position.json";
 			ensemblePresetPath = configRoot + "/ensemble_position_presets.json";
@@ -1149,6 +1201,7 @@ namespace GakuMotion
 			if (std::filesystem::exists(MotionPathFromUtf8(playlistPath))) playlist.Load(playlistPath, playlistNotice);
 			player.loop = playlist.mode == PlaylistMode::SingleLoop;
 			RefreshMotionLibrary();
+            BeginFolderLibraryScan();
 
 			// 4. 初始曲目：优先取控制文件声明，其次取列表第一个
 			if (!config.selectedMotion.empty())
@@ -1310,6 +1363,17 @@ namespace GakuMotion
 				NotifyMotionPlaying(false);
 				return;
 			}
+            if (advanceClock && ensembleAutoAlignPending) {
+                if (ensembleAutoAlignSession != injectionSession || ensembleAutoAlignEpoch != sceneActorRegistry.Epoch() ||
+                    player.state == PlaybackState::Stopped || !fnReadFormationOrigin) ensembleAutoAlignPending=false;
+                else {
+                    ActorStart start; bool ready=ReadActorStart(player,start); size_t bound=0;
+                    for(const auto& follower:ensemble.Followers()) if(follower.player) {
+                        ++bound; ActorStart other; ready=ready && ReadActorStart(*follower.player,other);
+                    }
+                    if(ready && bound) { ensembleAutoAlignPending=false; QueueAlignEnsemble(); }
+                }
+            }
 			ObserveSoles(actor); // Read-only Unity queries, on the same main-thread frame.
 			ApplyExperimentalSolePitch(actor); // Opt-in demo, separate from #078 evidence.
 			WriteRequestedSolePitchSnapshot(actor);
@@ -1409,6 +1473,12 @@ namespace GakuMotion
 			const std::string current = !loadedMotionKey.empty() ? loadedMotionKey :
 				(CurrentMotion() ? CurrentMotion()->name : "");
 			auto found = std::move(snapshot.result.motions);
+            for(const auto& external:folderCompiledMotions) {
+                const bool alreadyPresent=!external.sourceVmd.empty() && std::any_of(found.begin(),found.end(),[&](const auto& existing){
+                    return !existing.sourceVmd.empty() && MotionPathEqualsUtf8(existing.sourceVmd,external.sourceVmd);
+                });
+                if(!alreadyPresent && FindPlaylistIndex(found,external.name)<0) {found.push_back(external);snapshot.versions[external.name]=ReadMotionFileVersion(external.dir);}
+            }
 			const bool complete = snapshot.result.Complete();
 			if (!complete)
 			{
@@ -1452,10 +1522,96 @@ namespace GakuMotion
 			return true;
 		}
 
+        void LoadFolderLibrary() {
+            folderLibraryRoots.clear(); std::error_code ec;
+            if (!std::filesystem::exists(MotionPathFromUtf8(folderLibraryPath), ec)) { folderLibraryConfigValid = !ec; return; }
+            jsonlite::Value root; std::string error;
+            if (!jsonlite::ParseFile(folderLibraryPath,root,error) || !root.IsObject()) { folderLibraryConfigValid=false; folderLibraryNotice="文件夹配置无法读取，原文件已保留"; return; }
+            const auto* paths=root.Find("folders");
+            if (!paths || !paths->IsArray()) { folderLibraryConfigValid=false; folderLibraryNotice="文件夹配置无效，原文件已保留"; return; }
+            for (const auto& value: paths->arrayItems) if (value.IsString() && !value.stringValue.empty()) folderLibraryRoots.push_back(value.stringValue);
+        }
+        bool SaveFolderLibrary() {
+            if (!folderLibraryConfigValid) return false;
+            std::error_code ec; const auto dst=MotionPathFromUtf8(folderLibraryPath);
+            std::filesystem::create_directories(dst.parent_path(),ec); if(ec)return false;
+            static std::atomic<uint64_t> folderFileSequence{0};
+            auto tmp=dst; tmp += "." + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "." + std::to_string(++folderFileSequence) + ".tmp";
+            std::ofstream out(tmp,std::ios::binary|std::ios::trunc); if(!out)return false;
+            out << "{\n  \"folders\": [";
+            for(size_t i=0;i<folderLibraryRoots.size();++i) out << (i?", ":"") << '\"' << jsonlite::EscapeString(folderLibraryRoots[i]) << '\"';
+            out << "]\n}\n"; out.close(); if(!out)return false;
+#ifdef _WIN32
+            if (!MoveFileExW(tmp.c_str(),dst.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)) return false;
+#else
+            std::filesystem::rename(tmp,dst,ec); if(ec)return false;
+#endif
+            return true;
+        }
+        void BeginFolderLibraryScan() {
+            if (folderLibraryRoots.empty()) return;
+            if (folderScan.valid()) { folderScanAgain=true; return; }
+            const auto roots=folderLibraryRoots; const auto managed=motionsRoot; folderScanRevision=folderRootsRevision;
+            folderLibraryNotice="正在扫描文件夹…";
+            folderScan=std::async(std::launch::async,[roots,managed]{
+                try {return ScanFolderMotions(roots,managed);} catch (...) {FolderScanResult result; result.error="文件夹扫描失败"; return result;}
+            });
+        }
+        void AddLibraryFolder(const std::string& folder) {
+            std::error_code ec; auto p=std::filesystem::absolute(MotionPathFromUtf8(folder),ec).lexically_normal();
+            if(ec || !std::filesystem::is_directory(p,ec) || ec) { folderLibraryNotice="无法访问所选文件夹"; return; }
+            const auto value=MotionPathToUtf8(p);
+            if(!folderLibraryConfigValid) { folderLibraryNotice="文件夹配置无效，请先修复原配置"; return; }
+            for(const auto& old:folderLibraryRoots) if(MotionPathEqualsUtf8(old,value)) { BeginFolderLibraryScan(); return; }
+            folderLibraryRoots.push_back(value);
+            if(!SaveFolderLibrary()) {folderLibraryRoots.pop_back();folderLibraryNotice="无法保存文件夹配置";return;}
+            ++folderRootsRevision; BeginFolderLibraryScan();
+        }
+        void RemoveLibraryFolder(const std::string& folder) {
+            const auto old=folderLibraryRoots;
+            folderLibraryRoots.erase(std::remove_if(folderLibraryRoots.begin(),folderLibraryRoots.end(),
+                [&](const auto& value){return MotionPathEqualsUtf8(value,folder);}),folderLibraryRoots.end());
+            if(old.size()==folderLibraryRoots.size())return;
+            if(!SaveFolderLibrary()){folderLibraryRoots=old;folderLibraryNotice="无法保存文件夹配置";return;}
+            ++folderRootsRevision; folderQueue.clear();
+            if(folderLibraryRoots.empty()) {folderCompiledMotions.clear();RefreshMotionLibrary();}
+            else BeginFolderLibraryScan();
+            folderLibraryNotice="已移除文件夹，原文件和已转换缓存保留";
+        }
+        void PollFolderLibrary() {
+            if(folderScan.valid() && folderScan.wait_for(std::chrono::seconds(0))==std::future_status::ready) {
+                auto scan=folderScan.get();
+                if(folderScanRevision!=folderRootsRevision) { folderScanAgain=false; BeginFolderLibraryScan(); return; }
+                if(scan.error.empty()) { folderCompiledMotions=std::move(scan.compiled); RefreshMotionLibrary(); }
+                for(auto& file:scan.files) {
+                    bool imported=!folderActiveSource.empty() && MotionPathEqualsUtf8(folderActiveSource,file.source);
+                    for(const auto& m:motions) if(!m.sourceVmd.empty() && MotionPathEqualsUtf8(m.sourceVmd,file.source)) {imported=true;break;}
+                    if(!imported) for(const auto& pending:folderQueue) if(MotionPathEqualsUtf8(pending.source,file.source)){imported=true;break;}
+                    if(!imported && FindPlaylistIndex(motions,file.title)>=0) {++folderFailed;continue;}
+                    if(!imported) folderQueue.push_back(std::move(file));
+                }
+                folderLibraryNotice=scan.error.empty()?detail::FormatMsg("文件夹扫描完成：%zu 个动作等待转换",folderQueue.size()):scan.error;
+                if(folderScanAgain){folderScanAgain=false;BeginFolderLibraryScan();}
+            }
+            if(!importBusy && !cameraImportBusy && !folderQueue.empty()) {
+                const auto next=folderQueue.front();folderQueue.pop_front();
+                MotionImportRequest request;request.vmd=next.source;request.title=next.title;
+                request.audio=next.audio;request.cameraVmd=next.camera;
+                StartImport(std::move(request));
+                folderImportActive=importBusy;
+                if(importBusy) folderLibraryNotice=detail::FormatMsg("文件夹转换中：已完成 %zu，剩余 %zu，失败 %zu",folderImported,folderQueue.size(),folderFailed);
+                folderActiveSource=importBusy ? next.source : std::string{};
+                if(!importBusy) ++folderFailed;
+            }
+            if(!folderScan.valid() && folderQueue.empty() && !folderImportActive && (folderImported || folderFailed))
+                folderLibraryNotice=detail::FormatMsg("文件夹转换完成：成功 %zu，失败 %zu",folderImported,folderFailed);
+        }
+
 		bool RefreshMotionLibrary() { return ApplyLibrarySnapshot(ReadLibrarySnapshot(motionsRoot)); }
 
 		void BeginLibraryRefresh()
 		{
+            BeginFolderLibraryScan();
 			if (libraryScan.valid()) return;
 			if (importBusy || cameraImportBusy) { libraryNotice = "正在导入，请在完成后刷新"; return; }
 			libraryScanGeneration = libraryMutationGeneration;
@@ -1565,6 +1721,7 @@ namespace GakuMotion
 			if (importBusy || cameraImportBusy) { playlistNotice = "正在导入，完成后可删除曲目"; return false; }
 			const int index = FindPlaylistIndex(motions, key);
 			if (index < 0) return false;
+            if(motions[index].externalFolder) {playlistNotice="外部文件夹中的原文件不会由 Motion 删除";return false;}
 			const auto root = MotionPathFromUtf8(motionsRoot);
 			const auto source = MotionPathFromUtf8(motions[index].dir);
 			if (source.filename() != MotionPathFromUtf8(key).filename() || MotionPathFromUtf8(key).has_parent_path())
@@ -1666,6 +1823,11 @@ namespace GakuMotion
 					playlistNotice = importProgress.errorDetail;
 					return;
 				}
+                if (motions[idx].externalFolder) {
+                    importProgress.active=false; importProgress.finished=true; importProgress.succeeded=false;
+                    importProgress.statusText="外部文件夹为只读"; importProgress.errorDetail=importProgress.statusText;
+                    playlistNotice=importProgress.statusText; return;
+                }
 				request.editDir = motions[idx].dir;
 				activeImportEditDir = request.editDir;
 			}
@@ -1723,6 +1885,7 @@ namespace GakuMotion
 				cameraNotice = "目标曲目已不在列表中";
 				return;
 			}
+            if(motions[index].externalFolder) { cameraNotice="外部文件夹为只读，不能覆盖原镜头";return; }
 			if (!fnStartCameraImport || !fnPollCameraImport)
 			{
 				cameraNotice = "镜头导入服务未就绪";
@@ -2462,6 +2625,40 @@ namespace GakuMotion
 			player.controller.LoadAuxGroundTruth(auxPath);
 		}
 
+        void AutoAssignEnsemble()
+        {
+            if (player.state == PlaybackState::Playing || player.state == PlaybackState::Paused) {
+                ensembleNotice="请先停止播放再自动分配"; return;
+            }
+            if (ensembleRestoreUnconfirmed || !player.controller.targetActor ||
+                !sceneActorRegistry.Find(player.controller.targetActor)) {
+                ensembleNotice="自动分配失败：请先选择场上主角色"; return;
+            }
+            const auto ordered=MatchSortedMotions(motions,currentMotionIndex);
+            if (ordered.empty()) { ensembleNotice="自动分配失败：当前动作没有可用的原始 VMD 路径"; return; }
+            if (!PrepareInjection()) { ensembleNotice="自动分配失败：当前场景尚未就绪"; return; }
+            if (!ensemble.ClearAll(sceneActorRegistry)) {
+                ensembleRestoreUnconfirmed=true; ensembleNotice="自动分配失败：角色状态未能安全恢复"; return;
+            }
+            if (currentMotionIndex != ordered.front() && !SelectMotionByIndex(ordered.front(),false,true)) {
+                ensembleNotice="自动分配失败：首个动作无法载入"; return;
+            }
+            size_t role=1, matched=0;
+            ensembleAutoActors.clear(); ensembleAutoEpoch=sceneActorRegistry.Epoch();
+            for (const auto& actor:sceneActorRegistry.Entries()) {
+                if (actor.actor==player.controller.targetActor) continue;
+                if (role>=64) break;
+                ensembleAutoActors.push_back(actor.token);
+                if (role<ordered.size() && ensemble.Set(role-1,actor.token,sceneActorRegistry.Epoch(),
+                    motions[ordered[role]],0.0f,sceneActorRegistry,player,globalOverrides,masterOverridesEnabled)) ++matched;
+                ++role;
+            }
+            ensemble.EnsureSlots(role-1); ++ensembleAutoGeneration;
+            ensembleNotice=detail::FormatMsg("已按名称顺序分配：主角色 1 个，附加角色 %zu 个；不足的角色留空",matched);
+            ++injectionSession; ensembleAutoAlignPending=matched>0;
+            ensembleAutoAlignSession=injectionSession; ensembleAutoAlignEpoch=sceneActorRegistry.Epoch();
+        }
+
 		bool SelectMotionByIndex(int index, bool autoPlay = false, bool forcePreview = false)
 		{
 			if (index < 0 || index >= static_cast<int>(motions.size()))
@@ -2503,6 +2700,7 @@ namespace GakuMotion
 
 			// 若本曲目目录自带辅助骨官方真值（aux_replay.json）则顺带挂载，供 mode=3 直接对照
 			TryLoadAuxGroundTruth(entry.dir);
+
 
 			LogInfo(detail::FormatMsg("[GakuMotion][Config] selected: %s | %s | overrides: %s",
 			                          entry.name.c_str(),
@@ -3438,6 +3636,9 @@ namespace GakuMotion
 
 		bool SaveLiveOverridesToMotion()
 		{
+            if(const auto* entry=CurrentMotion();entry && entry->externalFolder) {
+                LogWarn("[GakuMotion] External source folder is read-only; motion overrides were not saved"); return false;
+            }
 			std::string targetFile = CurrentMotionOverridePath();
 			if (targetFile.empty())
 			{
@@ -3669,6 +3870,8 @@ namespace GakuMotion
 			ctx.loadedSourceMissing = loadedSourceMissing;
 			ctx.loadedSourceChanged = loadedSourceChanged;
 			ctx.actorRosterEpoch = sceneActorRegistry.Epoch();
+            ctx.ensembleAutoGeneration=ensembleAutoGeneration;
+            if(ensembleAutoEpoch==sceneActorRegistry.Epoch()) ctx.ensembleAutoActors=ensembleAutoActors;
 			ctx.ensembleFollowers.resize(ensemble.Followers().size());
 			for (size_t i = 0; i < ensemble.Followers().size(); ++i)
 			{
@@ -3692,6 +3895,7 @@ namespace GakuMotion
 			};
 			ctx.ensembleNotice = ensembleNotice;
 			ctx.fnAlignEnsemble = [](void* self) { static_cast<Core*>(self)->QueueAlignEnsemble(); };
+            ctx.fnAutoAssignEnsemble = [](void* self) { static_cast<Core*>(self)->QueueAutoAssignEnsemble(); };
 			for (const auto& preset : ensemblePresets) ctx.ensemblePresetNames.push_back(preset.name);
 			ctx.ensemblePresetNotice = ensemblePresetNotice;
 			ctx.fnSaveEnsemblePreset = [](void* self, const char* name) { static_cast<Core*>(self)->QueueEnsemblePresetCommand(GuiAction::SaveEnsemblePreset, name); };
@@ -3743,9 +3947,8 @@ namespace GakuMotion
 					if (follower.player && follower.actorToken == item.token) bound = true;
 				ctx.sceneArmCalibrations.push_back({item.token, arm.share, arm.degrees, arm.locked, bound, primary});
 				const std::string name = !item.displayName.empty() ? item.displayName : item.character.empty() ? "未识别角色" : FormatIdolDisplayName(item.character.c_str());
-				const auto mic = actorPropHidden.find(ActorPropKey(item.token,"Root_Microphone","Prop_Microphone"));
 				ctx.sceneActors.push_back({item.token, name + " · " + std::to_string(ctx.sceneActors.size() + 1),
-					item.actor == player.controller.targetActor, mic != actorPropHidden.end() && mic->second,
+					item.actor == player.controller.targetActor,
                     actorModelHidden.find(item.token) != actorModelHidden.end()});
 			}
 			auto actorLabel = [&](void* actor)
@@ -3768,24 +3971,26 @@ namespace GakuMotion
                 command.actorToken=token; command.actorEpoch=epoch; command.flag=hidden;
                 static_cast<Core*>(self)->QueueGui(std::move(command));
             };
-			ctx.fnSetMicrophoneHidden = [](void* self, uint64_t token, uint64_t epoch, bool hidden)
-			{
-				GuiCommand command{GuiAction::SetMicrophoneHidden};
-				command.actorToken=token; command.actorEpoch=epoch; command.flag=hidden;
-				static_cast<Core*>(self)->QueueGui(std::move(command));
-			};
+			ctx.actorPropsEditable = CanControlActorProps();
 			ctx.actorProps = actorProps;
-			for (auto& prop : ctx.actorProps) {
-				const auto found=actorPropHidden.find(ActorPropKey(prop.actorToken,prop.rootName,prop.propName));
-				prop.hidden=found!=actorPropHidden.end() && found->second;
-			}
+			for (auto& prop : ctx.actorProps)
+				prop.hidden = actorPropHidden.contains(ActorPropKey(prop));
 			ctx.fnSetActorPropHidden = [](void* self, uint64_t token, uint64_t epoch, const char* key, bool hidden)
 			{
 				GuiCommand command{GuiAction::SetActorPropHidden}; command.actorToken=token; command.actorEpoch=epoch;
 				command.key=key?key:""; command.flag=hidden; static_cast<Core*>(self)->QueueGui(std::move(command));
 			};
+            ctx.folderLibraryRoots = folderLibraryRoots;
+            ctx.folderLibraryNotice = folderLibraryNotice;
+            ctx.fnAddLibraryFolder = [](void* self, const char* path) { if(path) static_cast<Core*>(self)->QueueGui({GuiAction::AddLibraryFolder,0,false,path}); };
+            ctx.fnRemoveLibraryFolder = [](void* self, const char* path) { if(path) static_cast<Core*>(self)->QueueGui({GuiAction::RemoveLibraryFolder,0,false,path}); };
 			ctx.statusLine = StatusSummary();
 			ctx.physicsBackend = guiPhysicsBackend.load();
+			ctx.costumeCaptureStatus = costumeCaptureStatus;
+			ctx.fnCaptureCostumePhysics = [](void* self)
+			{
+				static_cast<Core*>(self)->QueueGui({GuiAction::CostumePhysicsCapture});
+			};
 			ctx.physicsMonitor = physicsMonitor;
 			ctx.physicsLiveObservationCurrent = liveViewingConfirmed && liveOwnerToken && physicsMonitor.liveObserveOwner == liveOwnerToken;
 			ctx.physicsMonitorFresh = physicsMonitor.observed && player.state == PlaybackState::Playing &&
@@ -3796,6 +4001,9 @@ namespace GakuMotion
 			ctx.physicsGraphCurrent = liveViewingConfirmed && liveObservation.confirmed && physicsMonitor.graphSampled &&
 				physicsMonitor.graphOwner == liveOwnerToken && physicsMonitor.graphSession == injectionSession &&
 				physicsMonitor.graphPhase == ((liveObservation.paused ? 1 : 0) | (liveTakeoverActive ? 2 : 0));
+			ctx.placementResetExperiment = placementResetExperiment.load();
+			ctx.fnSetPlacementResetExperiment = [](void* self, bool enabled)
+			{ static_cast<Core*>(self)->placementResetExperiment.store(enabled); };
 			ctx.beforeQuartzExperiment = guiBeforeQuartzExperiment.load();
 			ctx.fnSetBeforeQuartzExperiment = [](void* self, bool enabled)
 			{

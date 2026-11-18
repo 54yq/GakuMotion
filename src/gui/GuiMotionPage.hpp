@@ -9,6 +9,7 @@
 #include "../GkGuiOverlay.hpp"
 #include "../GkBoneOverride.hpp"
 #include "../GkIdolController.hpp"
+#include "../GkLiveActorPropPolicy.hpp"
 
 #ifdef GKMOTION_GUI_ACTIVE
 namespace GakuMotion
@@ -57,15 +58,31 @@ namespace GakuMotion
                 if (ImGui::Checkbox("隐藏角色模型##primary_model", &hidden))
                     ctx.fnSetActorModelHidden(ctx.self, actor.token, ctx.actorRosterEpoch, hidden);
             }
-		if (ctx.liveTakeoverActive && ctx.fnSetMicrophoneHidden)
-			for (const auto& actor : ctx.sceneActors) if (actor.selected) {
-				bool hidden=actor.microphoneHidden;
-				if (ImGui::Checkbox("隐藏麦克风##primary_mic", &hidden))
-					ctx.fnSetMicrophoneHidden(ctx.self,actor.token,ctx.actorRosterEpoch,hidden);
-			}
         if (ctx.ensembleNotice.rfind("模型显隐未完成", 0) == 0)
             ImGui::TextWrapped("%s", ctx.ensembleNotice.c_str());
 		ImGui::TextWrapped("表情随驱动角色自动适配。");
+
+		if (!ctx.actorProps.empty() && ImGui::CollapsingHeader("场景道具", ImGuiTreeNodeFlags_DefaultOpen))
+		{
+			if (!ctx.actorPropsEditable) ImGui::TextDisabled("可查看已识别的道具，当前场景暂不可调整显隐。");
+			for (const auto& prop : ctx.actorProps)
+			{
+				const auto key = ActorPropKey(prop);
+				const auto label = prop.actorLabel + " / " + live_actor_props::DisplayName(prop.propName) + "##" + key;
+				bool hidden = prop.hidden;
+				ImGui::BeginDisabled(!ctx.actorPropsEditable || !prop.controllable || !ctx.fnSetActorPropHidden);
+				if (ImGui::Checkbox(label.c_str(), &hidden))
+					ctx.fnSetActorPropHidden(ctx.self, prop.actorToken, ctx.actorRosterEpoch, key.c_str(), hidden);
+				ImGui::EndDisabled();
+				if (!prop.active && !prop.hidden)
+				{
+					ImGui::SameLine();
+					ImGui::TextDisabled("未启用");
+				}
+			}
+			if (ctx.actorPropsEditable) ImGui::TextDisabled("勾选可隐藏道具。");
+			ImGui::Spacing();
+		}
 
 		// =========================================================================
 		// 3. 初始角色位置偏移
@@ -179,10 +196,25 @@ namespace GakuMotion
 			ImGui::Separator();
 
 
-            if (ImGui::Button("新增角色")) ++overlay.ensembleVisibleSlots;
-            for (size_t i = 0; i < ctx.ensembleFollowers.size(); ++i)
-                if (ctx.ensembleFollowers[i].actorToken) overlay.ensembleVisibleSlots = (std::max)(overlay.ensembleVisibleSlots, i + 1);
+            ImGui::BeginDisabled(!ctx.fnAutoAssignEnsemble || player.state == PlaybackState::Playing || player.state == PlaybackState::Paused);
+            if (ImGui::Button("按名称自动分配")) ctx.fnAutoAssignEnsemble(ctx.self);
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("停止播放后，按当前动作同目录、同前缀的文件名顺序分配给场上角色");
+            ImGui::SameLine();
+            if (ImGui::Button("新增角色")) {
+                auto it = std::find(overlay.ensembleHiddenSlots.begin(), overlay.ensembleHiddenSlots.end(), true);
+                if (it != overlay.ensembleHiddenSlots.end()) *it = false;
+                else ++overlay.ensembleVisibleSlots;
+            }
+            for (size_t i=0;i<ctx.ensembleFollowers.size();++i)
+                if(ctx.ensembleFollowers[i].actorToken) overlay.ensembleVisibleSlots=(std::max)(overlay.ensembleVisibleSlots,i+1);
+            if (overlay.ensembleSeenAutoGeneration != ctx.ensembleAutoGeneration)
+                overlay.ensembleVisibleSlots=(std::max)(overlay.ensembleVisibleSlots,ctx.ensembleAutoActors.size());
             const size_t slots = overlay.ensembleVisibleSlots;
+            overlay.ensembleHiddenSlots.resize(slots, false);
+            overlay.ensembleRemovePending.resize(slots, false);
+            overlay.ensembleRemoveFrames.resize(slots, 0);
             overlay.ensembleDraftActor.resize(slots);
             overlay.ensembleDraftMotion.resize(slots);
             overlay.ensembleDraftOffset.resize(slots);
@@ -200,33 +232,68 @@ namespace GakuMotion
 					overlay.ensembleDraftOffset[i] = ctx.ensembleFollowers[i].offsetSeconds;
 				}
 			}
+            if (overlay.ensembleSeenAutoGeneration != ctx.ensembleAutoGeneration) {
+                overlay.ensembleSeenAutoGeneration=ctx.ensembleAutoGeneration;
+                for(size_t i=0;i<(std::min)(slots,ctx.ensembleAutoActors.size());++i) {
+                    overlay.ensembleHiddenSlots[i]=false; overlay.ensembleRemovePending[i]=false;
+                    overlay.ensembleDraftActor[i]=ctx.ensembleAutoActors[i];
+                    overlay.ensembleDraftMotion[i]=i<ctx.ensembleFollowers.size()?ctx.ensembleFollowers[i].motionKey:std::string{};
+                    overlay.ensembleDraftOffset[i]=0.0f;
+                }
+            }
+            const size_t displayedRoles = static_cast<size_t>(std::count(overlay.ensembleHiddenSlots.begin(), overlay.ensembleHiddenSlots.end(), false));
+            const bool scrollRoles = displayedRoles > 3;
+            if (scrollRoles) ImGui::BeginChild("##ensemble_roles", ImVec2(0, 340.0f), true);
 			for (size_t i = 0; i < slots; ++i)
 			{
                 const GuiEnsembleFollower emptyFollower{};
                 const auto& currentFollower = i < ctx.ensembleFollowers.size() ? ctx.ensembleFollowers[i] : emptyFollower;
+                if (overlay.ensembleRemovePending[i] && !currentFollower.actorToken) {
+                    overlay.ensembleRemovePending[i] = false;
+                    overlay.ensembleRemoveFrames[i] = 0;
+                    overlay.ensembleHiddenSlots[i] = true;
+                    overlay.ensembleDraftActor[i] = 0;
+                    overlay.ensembleDraftMotion[i].clear();
+                    overlay.ensembleDraftOffset[i] = 0.0f;
+                }
+                if (overlay.ensembleRemovePending[i] && currentFollower.actorToken && ++overlay.ensembleRemoveFrames[i] > 180) {
+                    overlay.ensembleRemovePending[i] = false;
+                    overlay.ensembleRemoveFrames[i] = 0;
+                }
+                if (overlay.ensembleHiddenSlots[i]) continue;
 				ImGui::PushID(static_cast<int>(i));
 				ImGui::Text("角色 %d", static_cast<int>(i) + 2);
 				const auto& physics = currentFollower;
 				const char* physicsLabel = !physics.actorToken ? "未绑定动作" :
 					physics.physicsStatus.empty() ? (player.state == PlaybackState::Stopped ? "等待播放" : "等待角色骨架") : physics.physicsStatus.c_str();
 				ImGui::SameLine(); ImGui::TextDisabled("物理：%s", physicsLabel);
+                ImGui::SameLine();
+                ImGui::BeginDisabled(player.state == PlaybackState::Playing || player.state == PlaybackState::Paused || overlay.ensembleRemovePending[i]);
+                if (ImGui::SmallButton("删除角色")) {
+                    if (currentFollower.actorToken && ctx.fnClearEnsembleFollower) {
+                        overlay.ensembleRemovePending[i] = true;
+                        ctx.fnClearEnsembleFollower(ctx.self, static_cast<int>(i), ctx.actorRosterEpoch);
+                    } else if (!currentFollower.actorToken) {
+                        overlay.ensembleHiddenSlots[i] = true;
+                        overlay.ensembleDraftActor[i] = 0;
+                        overlay.ensembleDraftMotion[i].clear();
+                        overlay.ensembleDraftOffset[i] = 0.0f;
+                    }
+                }
+                ImGui::EndDisabled();
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) && (player.state == PlaybackState::Playing || player.state == PlaybackState::Paused))
+                    ImGui::SetTooltip("请先停止播放，再删除角色槽位");
                 if (ctx.fnSetActorModelHidden && currentFollower.actorToken)
                     for (const auto& candidate : ctx.sceneActors) if (candidate.token == currentFollower.actorToken) {
                         bool hidden = candidate.modelHidden;
                         if (ImGui::Checkbox("隐藏角色模型##follower_model", &hidden))
                             ctx.fnSetActorModelHidden(ctx.self, candidate.token, ctx.actorRosterEpoch, hidden);
                     }
-				if (ctx.liveTakeoverActive && ctx.fnSetMicrophoneHidden)
-					for (const auto& candidate : ctx.sceneActors) if (candidate.token == overlay.ensembleDraftActor[i]) {
-						bool hidden=candidate.microphoneHidden;
-						if (ImGui::Checkbox("隐藏麦克风##follower_mic", &hidden))
-							ctx.fnSetMicrophoneHidden(ctx.self,candidate.token,ctx.actorRosterEpoch,hidden);
-					}
 				ImGui::BeginDisabled(player.state == PlaybackState::Playing || player.state == PlaybackState::Paused);
 				std::string actorLabel = "请选择角色";
 				for (const auto& candidate : ctx.sceneActors)
 					if (candidate.token == overlay.ensembleDraftActor[i]) actorLabel = candidate.label;
-				ImGui::SetNextItemWidth((std::min)(360.0f, ImGui::GetContentRegionAvail().x));
+				ImGui::SetNextItemWidth((std::max)(100.0f, (std::min)(260.0f, ImGui::GetContentRegionAvail().x * .42f)));
 				if (ImGui::BeginCombo("##ensemble_actor", actorLabel.c_str()))
 				{
 					for (const auto& candidate : ctx.sceneActors)
@@ -238,10 +305,11 @@ namespace GakuMotion
 					}
 					ImGui::EndCombo();
 				}
+                GuiIcons::SameLineIfRoom("动作", ImVec2(180, 0));
 				std::string motionLabel = "请选择动作";
 				if (ctx.motions) for (const auto& motion : *ctx.motions)
 					if (motion.name == overlay.ensembleDraftMotion[i]) motionLabel = motion.DisplayLabel();
-				ImGui::SetNextItemWidth((std::min)(360.0f, ImGui::GetContentRegionAvail().x));
+				ImGui::SetNextItemWidth((std::max)(100.0f, (std::min)(300.0f, ImGui::GetContentRegionAvail().x)));
 				if (ImGui::BeginCombo("##ensemble_motion", motionLabel.c_str()))
 				{
 					if (ctx.motions) for (const auto& motion : *ctx.motions)
@@ -252,8 +320,10 @@ namespace GakuMotion
 					}
 					ImGui::EndCombo();
 				}
-				ImGui::SetNextItemWidth(180.0f);
-				ImGui::DragFloat("动作延迟（秒）", &overlay.ensembleDraftOffset[i], 0.01f, -30.0f, 30.0f, "%.2f");
+                GuiIcons::SameLineIfRoom("延迟", ImVec2(150, 0));
+				ImGui::SetNextItemWidth(130.0f);
+				ImGui::DragFloat("##动作延迟（秒）", &overlay.ensembleDraftOffset[i], 0.01f, -30.0f, 30.0f, "%.2f");
+                GuiIcons::SameLineIfRoom("绑定动作", ImVec2(90, 0));
 				ImGui::BeginDisabled(!ctx.fnSetEnsembleFollower || !overlay.ensembleDraftActor[i] || overlay.ensembleDraftMotion[i].empty());
 				if (ImGui::Button("绑定动作"))
 					ctx.fnSetEnsembleFollower(ctx.self, static_cast<int>(i), overlay.ensembleDraftActor[i], ctx.actorRosterEpoch,
@@ -266,9 +336,7 @@ namespace GakuMotion
 				ImGui::EndDisabled();
 				if (!currentFollower.motionKey.empty())
 				{
-					ImGui::TextWrapped("当前动作：%s", currentFollower.motionKey.c_str());
-					ImGui::TextWrapped("状态：%s", currentFollower.active ? "角色已驱动" :
-					                   player.state == PlaybackState::Stopped ? "等待播放" : "等待可恢复的角色骨架");
+                    if (!ImGui::TreeNode("站位与朝向")) { ImGui::PopID(); continue; }
 					const auto& follower = currentFollower;
 					if (overlay.ensemblePositionGeneration[i] != follower.bindingGeneration)
 					{
@@ -283,7 +351,7 @@ namespace GakuMotion
 						overlay.ensembleYawDraft[i] = follower.yawDegrees;
 					}
 					auto& offset = overlay.ensemblePositionDraft[i];
-					const float width = (std::max)(40.0f, (std::min)(110.0f, (ImGui::GetContentRegionAvail().x - 16.0f) / 3.0f));
+					const float width = (std::max)(40.0f, (ImGui::GetContentRegionAvail().x - 16.0f) / 3.0f);
 					ImGui::TextUnformatted("角色站位偏移（世界坐标，米）");
 					ImGui::BeginDisabled(!ctx.fnSetEnsemblePosition || !follower.actorToken || !follower.bindingGeneration);
 					ImGui::SetNextItemWidth(width);
@@ -306,9 +374,11 @@ namespace GakuMotion
 						ctx.fnSetEnsembleYaw(ctx.self, static_cast<int>(i), follower.actorToken, ctx.actorRosterEpoch,
 						                     follower.bindingGeneration, overlay.ensembleYawDraft[i]);
 					ImGui::EndDisabled();
+                    ImGui::TreePop();
 				}
 				ImGui::PopID();
 			}
+            if (scrollRoles) ImGui::EndChild();
 			if (!ctx.ensembleNotice.empty()) ImGui::TextWrapped("%s", ctx.ensembleNotice.c_str());
 		}
 		ImGui::Spacing();
@@ -335,6 +405,10 @@ namespace GakuMotion
 		if (ImGui::CollapsingHeader("高级动作设置"))
 		{
 			ImGui::Indent(10.0f);
+			bool resetAfterPlacement = ctx.placementResetExperiment;
+			if (ImGui::Checkbox("站位调整后重置动态骨（实验）", &resetAfterPlacement) && ctx.fnSetPlacementResetExperiment)
+				ctx.fnSetPlacementResetExperiment(ctx.self, resetAfterPlacement);
+			ImGui::TextWrapped("站位停止变化约 0.5 秒后执行一次；动作播放继续。仅本次运行有效。");
 			ImGui::TextUnformatted("手臂辅助骨模式（对照实验）");
 			const char* auxLabels[] = {"正常：拟合模型", "静默：锁定初始姿态", "归零：单位旋转",
 			                           "回放：录制数据", "旧版：世界空间解算"};

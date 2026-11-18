@@ -55,6 +55,12 @@ namespace ActorModelVisibility
         return ok;
     }
     inline void Abandon() { for (auto& item:saved) Release(item.second); saved.clear(); }
+    inline void AbandonActor(uint64_t token) {
+        const auto it = saved.find(token);
+        if (it == saved.end()) return;
+        Release(it->second);
+        saved.erase(it);
+    }
     inline void Tick(GakuMotion::Core& core,void* actor) {
         const auto* entry=core.sceneActorRegistry.Find(actor); if(!entry)return;
         auto found=saved.find(entry->token); if(found==saved.end())return;

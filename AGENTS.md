@@ -14,3 +14,8 @@
 - Present the demo videos as highlighting major capabilities while also including basic fixes. Keep the README feature demos linked to the relevant capabilities: BV1otWa62EgK for ensemble playback, BV1G6s76KE3C for character import and stage takeover, and BV14Ds76bE4e for takeover with more than three actors. Link character-import functionality to https://github.com/54yq/GakuActors and distinguish its role from Motion playback/takeover.
 
 This repository has no automatic game-deployment step.
+
+## 分支版本维护
+
+- 在 `src/GakuMotionPlugin.cpp` 中按 `<上游版本>+fork.<分支版本>` 维护插件版本。本分支独立递增版本。
+- 版本变化时同步更新 README 和 `docs/CHANGELOG.md`。用对应提交构建 DLL，校验 `GakuPlugin_Query`，并以 `fork-v<分支版本>` 标记验证过的版本提交。记录构建、部署与实机验收状态。

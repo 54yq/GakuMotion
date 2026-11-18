@@ -9,7 +9,8 @@ int main()
 	assert(group.Set(0, 101, 7, "lead", 0.0f));
 	assert(group.Set(1, 202, 7, "partner", 0.5f));
 	assert(group.Set(2, 303, 7, "third", -0.25f));
-	assert(!group.Set(3, 404, 7, "overflow", 0.0f));
+	assert(group.Set(3, 404, 7, "fourth", 0.0f));
+	assert(group.Get()[3].actorToken == 404 && group.Get()[3].motionKey == "fourth");
 	assert(!group.Set(2, 202, 7, "duplicate actor", 0.0f));
 	assert(!group.Set(2, 404, 8, "stale roster", 0.0f));
 	assert(!group.Set(2, 404, 7, "invalid offset", std::numeric_limits<float>::quiet_NaN()));

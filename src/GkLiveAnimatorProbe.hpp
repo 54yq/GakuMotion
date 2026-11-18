@@ -135,9 +135,11 @@ namespace LiveAnimatorProbe
 						}
 					}
 					if (phase>=0) {
-						if (followerClock) followerClock->Offer(graph,graphClass,actor,player,targetMatches==1);
+						alignas(16) std::array<unsigned char, 16> actorGraph{};
+						std::memcpy(actorGraph.data(), graph, actorGraph.size());
+						if (followerClock) followerClock->Offer(actorGraph.data(),graphClass,actor,player,targetMatches==1);
 						else if (!GakuMotion::Core::Instance().player.controller.targetActor || GakuMotion::Core::Instance().player.controller.targetActor == actor)
-							LiveActorClockMvp::Offer(graph,graphClass,actor,player,targetMatches==1);
+							LiveActorClockMvp::Offer(actorGraph.data(),graphClass,actor,player,targetMatches==1);
 					}
 				}
 			}

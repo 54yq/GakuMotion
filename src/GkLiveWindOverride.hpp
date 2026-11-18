@@ -11,6 +11,16 @@ namespace LiveWindOverride
     inline TargetFn targetFn{};
     inline auto nextFind = std::chrono::steady_clock::time_point{};
     inline void Release() { if (handle && StageLoader::freeHandle) StageLoader::freeHandle(handle); handle={}; lease.Clear(); }
+    inline void RetireIfOwnerLost(uintptr_t confirmedOwner, int confirmedScene, bool sceneUnloaded) {
+        if (!lease.OwnerLost(confirmedOwner, confirmedScene, sceneUnloaded)) return;
+        if (g_hostContext.logInfo) g_hostContext.logInfo(
+            "[GakuMotion][LiveWind] retired stale lease old_scene=%d current_scene=%d unloaded=%d",
+            lease.scene, confirmedScene, int(sceneUnloaded));
+        // The manager can survive a Live scene. Its old wind values must not
+        // be written into the new scene, even when the instance is the same.
+        Release();
+        nextFind = {};
+    }
     inline bool Read(void* object, std::array<unsigned char,1024>& data, GakuMotion::live_wind::Values& values) {
         if (!object || !property || !g_faceRuntime.readField || bytes <= 0 || bytes > 1024 ||
             powerOffset < 0 || fluctuationOffset < 0) return false;
@@ -27,19 +37,28 @@ namespace LiveWindOverride
         std::array<unsigned char,1024> verify{}; GakuMotion::live_wind::Values actual{};
         return Read(object, verify, actual) && actual.power == values.power && actual.fluctuation == values.fluctuation;
     }
-    inline bool Restore(uintptr_t owner, int scene) {
+    inline bool Restore(uintptr_t owner, int scene, const char** failure = nullptr) {
+        const auto fail = [failure](const char* reason) {
+            if (failure) *failure = reason;
+            return false;
+        };
         if (!lease.active) { Release(); return true; }
         const auto& core=GakuMotion::Core::Instance();
-        if (core.liveOwnerToken != lease.owner || core.liveOwnerScene != lease.scene) return false;
-        void* object = handle && targetFn ? targetFn(handle) : nullptr;
+        if (core.liveOwnerToken != lease.owner || core.liveOwnerScene != lease.scene)
+            return fail("owner_or_scene_mismatch");
+        if (!handle || !targetFn) return fail("manager_handle_unavailable");
+        void* object = targetFn(handle);
         if (!object || !CameraBridge::IsAlive(object)) { Release(); return true; }
         const int id = StageLoader::ReadInt(StageLoader::instanceId, object);
         if (!lease.Matches(owner,scene,id)) {
             if (g_hostContext.logWarn) g_hostContext.logWarn("[GakuMotion][LiveWind] restore refused: owner or manager changed");
-            return false;
+            return fail("manager_identity_mismatch");
         }
         std::array<unsigned char,1024> data{}; GakuMotion::live_wind::Values current{};
-        if (!Read(object,data,current) || !Write(object,data,lease.RestoreValues(current))) return false;
+        if (!Read(object,data,current)) return fail("wind_read_failed");
+        const auto restored = lease.RestoreValues(current);
+        if ((current.power != restored.power || current.fluctuation != restored.fluctuation) &&
+            !Write(object,data,restored)) return fail("wind_write_unconfirmed");
         if (g_hostContext.logInfo) g_hostContext.logInfo("[GakuMotion][LiveWind] restored=1 power=%.4f fluctuation=%.4f",lease.saved.power,lease.saved.fluctuation);
         Release(); return true;
     }

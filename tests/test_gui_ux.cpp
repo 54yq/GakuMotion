@@ -615,6 +615,10 @@ namespace
 		app.Settle();
         Check(!app.ItemWithLabel("##ensemble_actor"), "new ensemble starts with no follower slots");
         app.Click("新增角色"); app.Settle();
+        app.Click("删除角色", 0); app.Settle();
+        Check(!app.core.gui.ensembleHiddenSlots.empty() && app.core.gui.ensembleHiddenSlots[0], "deleting an unbound role removes its row");
+        app.Click("新增角色"); app.Settle();
+        Check(!app.core.gui.ensembleHiddenSlots[0] && app.core.gui.ensembleVisibleSlots == 1, "adding a role reuses a removed slot");
         app.Click("新增角色"); app.Settle();
         app.Click("新增角色"); app.Settle();
         app.Click("新增角色"); app.Settle();
@@ -664,6 +668,7 @@ namespace
               "follower model visibility affects only the bound actor");
         app.Click("隐藏角色模型##follower_model",0); app.Settle();
         Check(!modelVisibility[roster[1].token] && !app.core.actorModelHidden.count(roster[1].token), "follower model visibility restores independently");
+        app.Click("站位与朝向",0); app.Settle();
         setPositionText("##ensemble_pos_z", "-300");
         Check(app.core.ensemble.Followers()[0].player->controller.initialPositionOffset.z==-256.0f, "follower position clamps numeric input at negative 256");
         setPositionText("##ensemble_pos_z", "0");
@@ -781,6 +786,9 @@ namespace
 		app.Click("解除绑定", 0); app.Settle();
 		Check(!app.core.ensemble.Followers()[0].player && app.core.ensemble.Followers()[1].player,
 		      "removing one follower leaves the other binding intact");
+        app.Click("删除角色", 1); app.Settle();
+        Check(!app.core.ensemble.Followers()[1].player && app.core.gui.ensembleHiddenSlots[1],
+              "deleting a bound role clears only its binding and removes its row");
 		Check(!app.core.ensemble.SetSceneArmCalibration(roster[2].token, epoch + 1, 1, 12, app.core.sceneActorRegistry),
 		      "stale scene roster cannot modify a calibration");
 		app.core.ensemble.SetSceneArmCalibration(roster[2].token, epoch, 1, 33, app.core.sceneActorRegistry);
@@ -911,7 +919,7 @@ void ImGuiTestEngineHook_ItemAdd(ImGuiContext* context, ImGuiID id, const ImRect
 	// This vendored BeginCombo emits ItemAdd but no ItemInfo. Identify its real
 	// submitted item by the current ID stack without changing production code.
 	if (context->CurrentWindow && !context->CurrentWindow->IDStack.empty())
-		for (const char* label : {"##play_mode", "##playback_speed", "##camera_quick_mode", "##physics_engine_select", "##drive_actor_combo", "##camera_mode", "跟随部位", "##ensemble_actor", "##ensemble_motion", "##aux_drive_mode", "校正角色"})
+		for (const char* label : {"##play_mode", "##playback_speed", "##camera_quick_mode", "##physics_engine_select", "##drive_actor_combo", "##camera_mode", "跟随部位", "##ensemble_actor", "##ensemble_motion", "##aux_drive_mode", "校正角色", "文件夹"})
 			if (ImHashStr(label, 0, context->CurrentWindow->IDStack.back()) == id) items[id].label = label;
 }
 void ImGuiTestEngineHook_ItemInfo(ImGuiContext*, ImGuiID id, const char* label, ImGuiItemStatusFlags status)
@@ -1067,7 +1075,10 @@ int main(int argc, char** argv)
 		Check(app.Text().find("当前音乐后端不支持独立音量") != std::string::npos,
 			"unavailable audio volume control is disclosed in the player");
 		app.contextPatch = {};
+        const float libraryTopBefore = app.LibraryTableWindow() ? app.LibraryTableWindow()->Pos.y : -1.0f;
 		app.Click("##row", 1);
+        const float libraryTopAfter = app.LibraryTableWindow() ? app.LibraryTableWindow()->Pos.y : -2.0f;
+        Check(libraryTopBefore >= 0 && std::fabs(libraryTopAfter-libraryTopBefore)<.1f, "selecting a song does not shift the library table");
 		Check(app.core.gui.selectedLibraryKey == "B", "actual library single click browses B");
 		Check(app.core.currentMotionIndex == 0 && app.core.loadedMotionKey == "A" &&
 			app.core.player.loadedMotionFile == app.core.motions[0].motionFile,
@@ -1533,23 +1544,42 @@ int main(int argc, char** argv)
 	{
 		Harness app(root);
 		app.windowHeight=1800;
-		app.core.liveTakeoverActive=true; app.core.liveViewingConfirmed=true;
-		app.core.gui.activePage=GuiPage::Motion;
-		void* actor=reinterpret_cast<void*>(0xa1000);
+		app.core.gui.activePage = GuiPage::Motion;
+		void* actor = reinterpret_cast<void*>(0xa1000);
 		app.core.PublishSceneActors({{actor,101,"hmsz"}});
+		const auto token = app.core.BuildGuiContext().sceneActors[0].token;
+		app.core.actorProps = {
+			{token,"Root_Microphone","Prop_Microphone","秦谷美铃",1001,true,true},
+			{token,"Root_Hknesuitcase","Prop_Hknesuitcase","秦谷美铃",1002,true,true},
+			{token,"Root_Penlightklljduo","Prop_Penlightklljduo","秦谷美铃",1003,false,true},
+			{token,"Root_WaterGun","Prop_WaterGun","秦谷美铃",1004,true,true},
+			{token,"Root_Candy","Prop_Candy","秦谷美铃",1005,true,true}
+		};
+		const auto label = [&](size_t index, const char* name) {
+			return std::string("秦谷美铃 / ") + name + "##" + ActorPropKey(app.core.actorProps[index]);
+		};
+		const auto mic = label(0, "麦克风"), bag = label(1, "行李箱"), light = label(2, "荧光棒（Penlightklljduo）");
 		app.Settle();
-		const auto roster=app.core.BuildGuiContext().sceneActors;
-		Check(app.ItemWithLabel("隐藏麦克风##primary_mic")!=nullptr,"Live motion page exposes the main actor microphone switch");
-		app.Click("隐藏麦克风##primary_mic");
-		Check(app.core.BuildGuiContext().sceneActors[0].microphoneHidden,"microphone switch submits the selected actor token");
-		app.core.actorProps.push_back({roster[0].token,"Root_Microphone","Prop_Microphone","秦谷美铃",false});
-		app.core.gui.activePage=GuiPage::Stage; app.Settle();
-		if (auto* page=FindResponsiveWindow("/##gkmotion_main_content_")) page->StateStorage.Clear();
+		const auto gun = label(3, "水枪（WaterGun）"), candy = label(4, "糖果（Candy）");
+		Check(app.ItemWithLabel(mic.c_str()) && app.ItemWithLabel(bag.c_str()) && app.ItemWithLabel(light.c_str()) &&
+			app.ItemWithLabel(gun.c_str()) && app.ItemWithLabel(candy.c_str()),
+			"the default-open Motion prop list exposes all detected item types");
+		app.contextPatch = [](GuiContext& ctx) { ctx.actorPropsEditable = false; };
+		app.Settle();
+		const auto* readOnly = app.ItemWithLabel(light.c_str());
+		Check(readOnly && (readOnly->flags & ImGuiItemFlags_Disabled),
+			"recognized Live props remain visible when the scene is read-only");
+		app.contextPatch = {};
+		app.Settle();
+		app.Click(light.c_str());
+		Check(app.core.BuildGuiContext().actorProps[2].hidden,
+			"the unified prop control submits the selected actor and prop instance");
+		app.core.gui.activePage = GuiPage::Stage; app.Settle();
+		if (auto* page = FindResponsiveWindow("/##gkmotion_main_content_")) page->StateStorage.Clear();
 		app.Settle();
 		app.Click("高级场景编辑"); app.Settle();
-		const auto propLabel=std::string("秦谷美铃 / 麦克风##")+ActorPropKey(roster[0].token,"Root_Microphone","Prop_Microphone");
-		Check(app.ItemWithLabel(propLabel.c_str())!=nullptr,
-			"advanced scene editor lists the actor microphone as a prop");
+		Check(!app.ItemWithLabel(mic.c_str()) && !app.ItemWithLabel(bag.c_str()) && !app.ItemWithLabel(light.c_str()),
+			"the Stage page has no duplicate prop controls");
 	}
 	{
 		Harness app(root);
@@ -1569,6 +1599,17 @@ int main(int argc, char** argv)
 		Check(app.Text().find("原生待确认，当前内建")!=std::string::npos, "native fallback is shown distinctly");
 		app.core.gui.activePage=GuiPage::Settings;
 		Check(app.Text().find("物理运行监控")==std::string::npos, "settings omit detailed diagnostics");
+		const char* beforeQuartzLabel = "BeforeQuartz 同源输入 [实验性]";
+		Check(app.ItemWithLabel(beforeQuartzLabel) != nullptr, "normal settings expose the native same-source switch");
+		app.Click(beforeQuartzLabel); app.Settle();
+		Check(app.core.guiBeforeQuartzExperiment.load(), "settings switch reaches the native same-source command");
+		m.actual = 2;
+		Check(app.Text().find("等待主角色原生任务确认") != std::string::npos, "standard native status cannot confirm same-source mode");
+		m.beforeQuartzRequested = true;
+		app.core.physicsMonitorAt = std::chrono::steady_clock::now();
+		Check(app.Text().find("同源输入已确认（主角色）") != std::string::npos, "current native paired status confirms the switch");
+		app.Click(beforeQuartzLabel); app.Settle();
+		Check(!app.core.guiBeforeQuartzExperiment.load(), "settings switch restores standard native input");
 		app.core.player.controller.targetActor=nullptr;
 	}
 	{
@@ -1606,9 +1647,9 @@ int main(int argc, char** argv)
 		app.Settle();
 		app.Click("诊断与测试"); app.Settle();
         Check(!app.core.liveContinuousArmDiagnostics, "continuous arm diagnostics default off");
-        app.Click("连续记录手臂诊断（影响性能）"); app.Settle();
+        app.Click("连续记录手臂与服装骨（影响性能）"); app.Settle();
         Check(app.core.liveContinuousArmDiagnostics, "continuous arm diagnostics can be enabled explicitly");
-        app.Click("连续记录手臂诊断（影响性能）"); app.Settle();
+        app.Click("连续记录手臂与服装骨（影响性能）"); app.Settle();
         Check(!app.core.liveContinuousArmDiagnostics, "continuous arm diagnostics can be disabled again");
         app.Click("记录当前 Live 状态（只读）");
 		Check(app.core.liveRecordPending && app.core.liveRecordOwner == 55 && app.core.liveRecordScene == 73,
@@ -1663,6 +1704,41 @@ int main(int argc, char** argv)
 		Check(app.core.liveTakeoverRequest == 2 && app.core.liveTakeoverRequestOwner == 55,
 			"Live page retains the owner-scoped takeover restore button");
 	}
+    {
+        Harness app(root);
+        app.windowHeight=1400; app.core.gui.activePage=GuiPage::Motion;
+        void *a=reinterpret_cast<void*>(0xa1000), *b=reinterpret_cast<void*>(0xb1000), *c=reinterpret_cast<void*>(0xc1000);
+        app.core.PublishSceneActors({{a,1,""},{b,2,""},{c,3,""}});
+        app.core.motions[0].sourceVmd=MotionPathToUtf8(app.fixture / "input" / "Song_A.vmd");
+        app.core.motions[1].sourceVmd=MotionPathToUtf8(app.fixture / "input" / "Song_B.vmd");
+        app.core.SelectMotionByIndex(1,false,true);
+        Check(app.core.currentMotionIndex==1 && !app.core.ensemble.HasActiveFollowers(), "selecting a track does not automatically assign roles");
+        app.Settle(); app.Click("多人同步播放"); app.Settle();
+        Check(app.Click("按名称自动分配"), "manual automatic assignment button is visible"); app.Settle();
+        Check(app.core.currentMotionIndex==0 && app.core.ensemble.Followers().size()>=2 &&
+              app.core.ensemble.Followers()[0].motionKey==app.core.motions[1].name &&
+              app.core.ensemble.Followers()[1].actorToken==0,
+              "button assigns A then B to scene actors and leaves the extra actor empty");
+        app.core.player.state=PlaybackState::Playing; app.Settle();
+        const auto* button=app.ItemWithLabel("按名称自动分配");
+        Check(button && (button->flags & ImGuiItemFlags_Disabled), "automatic assignment is disabled during playback");
+    }
+    {
+        Harness app(root);
+        const auto folderRoot=MotionPathToUtf8(app.fixture / "imported");
+        const auto folderA=MotionPathToUtf8(app.fixture / "imported" / "showA");
+        const auto folderB=MotionPathToUtf8(app.fixture / "imported" / "showB");
+        app.core.folderLibraryRoots={folderRoot};
+        app.core.motions[0].sourceVmd=MotionPathToUtf8(app.fixture / "imported" / "showA" / "Song_01.vmd");
+        app.core.motions[1].sourceVmd=MotionPathToUtf8(app.fixture / "imported" / "showB" / "Song_01.vmd");
+        ++app.core.libraryRevision;app.Settle();
+        app.Click("文件夹");app.Settle();
+        const auto label=std::string("showA##folder_")+folderA;
+        Check(app.Click(label.c_str()), "folder selector exposes source subfolders");app.Settle();
+        Check(MotionPathEqualsUtf8(app.core.gui.libraryFolderFilter,folderA), "choosing a subfolder filters the library to that folder");
+        app.Click("文件夹");app.Click("所有文件夹");app.Settle();
+        Check(app.core.gui.libraryFolderFilter.empty(), "all folders restores the full library");
+    }
 	ImGui::DestroyContext();
 	std::printf("GUI UX interaction checks: %d passed, %d failed\n", passed, failed);
 	return failed ? EXIT_FAILURE : EXIT_SUCCESS;

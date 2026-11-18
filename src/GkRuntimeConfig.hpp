@@ -110,6 +110,8 @@ namespace GakuMotion
 		bool hasOverrides{false}; // 是否带曲目级 bone_overrides.json
 		bool hasFacial{false};
 		bool hasCamera{false};
+        bool externalFolder{false};
+        std::string libraryFolder;
 		std::string sourceVmd;
 		std::string sourceMorphVmd;
 		std::string sourceCameraVmd;
@@ -345,6 +347,8 @@ namespace GakuMotion
 				}
 				else warn(m.name + "/info.json: " + (err.empty() ? "invalid or unreadable metadata" : err), false);
 			}
+            if (m.name.rfind("folder_", 0) == 0 && !m.sourceVmd.empty())
+                m.title = MotionPathToUtf8(MotionPathFromUtf8(m.sourceVmd).stem());
 			if (!hasFacialExplicit && !m.hasFacial) m.hasFacial = exists("motion.morph_report.json");
 			const auto afterTime = std::filesystem::last_write_time(motionPath, ec);
 			if (ec) { warn(m.name + ": motion changed during scan"); ec.clear(); continue; }

@@ -190,6 +190,11 @@ try {
     if ($LASTEXITCODE -ne 0) { throw ('Shadow pose contract build failed: ' + $LASTEXITCODE) }
     & $shadowExe
     if ($LASTEXITCODE -ne 0) { throw ('Shadow pose contract tests failed: ' + $LASTEXITCODE) }
+    $costumeExe = Join-Path $OutputRoot 'costume_physics_contracts.exe'
+    & $compiler /nologo /std:c++20 /utf-8 /EHsc /MT /W3 "/I$(Join-Path $repo 'src')" "/I$(Join-Path $repo 'include')" "/I$(Join-Path $repo 'deps/KineTexture/src')" (Join-Path $repo 'tests/test_costume_physics_capture.cpp') "/Fe:$costumeExe" "/Fo:$(Join-Path $OutputRoot 'costume_physics_contracts.obj')" winmm.lib user32.lib
+    if ($LASTEXITCODE -ne 0) { throw 'Costume physics contract build failed.' }
+    & $costumeExe
+    if ($LASTEXITCODE -ne 0) { throw 'Costume physics contract tests failed.' }
     $coreExe = Join-Path $OutputRoot 'synthetic_core.exe'
     $coreObj = Join-Path $OutputRoot 'synthetic_core.obj'
     $coreArgs = @('/nologo', '/std:c++20', '/utf-8', '/EHsc', '/MT', '/W3',

@@ -31,6 +31,7 @@ namespace GakuMotion
 		};
 
 		const std::deque<Follower>& Followers() const { return followers_; }
+		void EnsureSlots(size_t count) { if (count <= 64 && followers_.size() < count) followers_.resize(count); }
 		// The runtime releases secondary-physics ownership before a controller
 		// can be restored or destroyed. A failed release retains the follower.
 		bool (*fnBeforeRestore)(size_t, MotionPlayer&){nullptr};
@@ -124,6 +125,33 @@ namespace GakuMotion
 			bool ok = true;
 			for (size_t i = 0; i < followers_.size(); ++i) ok = Clear(i, registry) && ok;
 			return ok;
+		}
+
+		// The complete Live census includes inactive actors. Restore surviving
+		// instances while the old registry can still validate their identity.
+		bool ClearForLiveRosterChange(const SceneActorRegistry& registry,
+			const std::vector<SceneActorObservation>& loaded, bool (*releaseDetached)(size_t))
+		{
+			for (size_t i = 0; i < followers_.size(); ++i)
+			{
+				auto& follower = followers_[i];
+				if (!follower.player) continue;
+				const auto* old = registry.Find(follower.player->controller.targetActor);
+				if (!old || old->token != follower.actorToken) return false;
+				if (ObservedSceneActor(loaded, *old))
+				{
+					if (!Clear(i, registry)) return false;
+				}
+				else
+				{
+					// Release the physics publication before forgetting the binding.
+					// The departed controller must not restore its cached Unity objects.
+					if (!releaseDetached || !releaseDetached(i)) return false;
+					follower = {};
+					assignments_.Clear(i + 1);
+				}
+			}
+			return true;
 		}
 
 		// Use only after scene ownership is lost: Unity objects can be destroyed.

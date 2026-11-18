@@ -146,6 +146,20 @@ namespace GakuMotion
 		ImGui::TextWrapped("选择在本次运行中生效；重启或控制文件变更后读取 control.json 的设置。");
 		if (ctx.physicsBackend == 2)
 		{
+			bool beforeQuartz = ctx.beforeQuartzExperiment;
+			ImGui::BeginDisabled(!ctx.fnSetBeforeQuartzExperiment);
+			if (ImGui::Checkbox("BeforeQuartz 同源输入 [实验性]", &beforeQuartz) && ctx.fnSetBeforeQuartzExperiment)
+				ctx.fnSetBeforeQuartzExperiment(ctx.self, beforeQuartz);
+			ImGui::EndDisabled();
+			ImGui::TextWrapped("让 Quartz 与 Swing 使用同一份 MMD 姿势。在本次运行中生效。");
+			if (ctx.beforeQuartzExperiment)
+			{
+				const bool current = ctx.physicsMonitorFresh && ctx.physicsMonitor.beforeQuartzRequested;
+				const auto state = ClassifyPhysicsMonitor(ctx.physicsMonitor, current);
+				ImGui::TextUnformatted(state == PhysicsMonitorState::Native ? "同源输入已确认（主角色）" :
+					state == PhysicsMonitorState::Fault ? "同源输入未生效，当前使用内建物理" :
+					"等待主角色原生任务确认");
+			}
 			ImGui::PushStyleColor(ImGuiCol_Text, GuiTheme::WarningColor());
 			ImGui::TextWrapped("已选择原生物理实验；原生接口不可用时回退到内建物理。选择后端不代表原生物理已实际运行。");
 			ImGui::PopStyleColor();

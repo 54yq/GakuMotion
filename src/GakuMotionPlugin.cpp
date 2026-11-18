@@ -32,6 +32,8 @@
 #include "GkBurstBridgeMultiClient.hpp"
 #include "GkLiveProbeSummary.hpp"
 #include "GkFallbackPhysics.hpp"
+#include "GkCostumePhysicsCapture.hpp"
+#include "GkPlacementResetDebounce.hpp"
 #include "GakuPhysicsDiagnostics.h"
 #include "GakuFrameContext.h"
 #include <windows.h>
@@ -55,7 +57,7 @@
 #include "GkWindowsPaths.hpp"
 #include "GkDofRenderGate.hpp"
 
-static bool RefreshSceneActors(GakuMotion::Core& core, bool force = false);
+static bool RefreshSceneActors(GakuMotion::Core& core, bool force = false, bool refreshProps = true);
 
 namespace
 {
@@ -149,8 +151,92 @@ namespace
 	bool g_bodyShadowProbeAttempted = false;
 	GakuMotion::BurstBridgeClient g_burstBridge;
 	GakuMotion::FallbackPhysics g_fallbackPhysics;
+	GakuMotion::CostumePhysicsCapture g_costumeCapture;
+	int g_costumeCaptureMotion{-1};
+
+	void FinishCostumeCapture(GakuMotion::Core& core, const char* reason, bool complete)
+	{
+		using Status = GakuMotion::CostumeCaptureStatus;
+		const unsigned frames = g_costumeCapture.Frames();
+		const bool saved = g_costumeCapture.Close(reason);
+		core.costumeCaptureStatus = !saved ? Status::FileError :
+			!complete ? Status::Interrupted : frames ? Status::Complete : Status::NoSamples;
+		if (g_hostContext.logInfo)
+			g_hostContext.logInfo("[GakuMotion][CostumePhysics] end=%s frames=%u saved=%d", reason, frames, int(saved));
+	}
+
+	bool CostumeCaptureEligible(const GakuMotion::Core& core)
+	{
+		return core.liveTakeoverActive && core.InjectionAllowed() && !core.captureSuspended &&
+			!core.ensembleRestoreUnconfirmed && core.config.secondaryPhysicsBackend == 1 &&
+			core.player.state != GakuMotion::PlaybackState::Stopped;
+	}
+
+	bool CostumeCaptureMatches(const GakuMotion::Core& core)
+	{
+		return CostumeCaptureEligible(core) && core.injectionSession == g_costumeCapture.Session() &&
+			core.currentMotionIndex == g_costumeCaptureMotion;
+	}
+
+	void PollCostumeCapture(GakuMotion::Core& core)
+	{
+		using Capture = GakuMotion::CostumePhysicsCapture;
+		using Status = GakuMotion::CostumeCaptureStatus;
+		const auto now = Capture::Clock::now();
+		if (g_costumeCapture.Opened())
+		{
+			if (!CostumeCaptureMatches(core)) FinishCostumeCapture(core, "context_changed", false);
+			else if (g_costumeCapture.Frames() >= Capture::kFrameLimit) FinishCostumeCapture(core, "frame_limit", true);
+			else if (!g_costumeCapture.Active()) FinishCostumeCapture(core, "write_error", false);
+			else if (g_costumeCapture.Expired(now)) FinishCostumeCapture(core, "timeout", true);
+			return;
+		}
+		if (core.costumeCaptureStatus != Status::Requested) return;
+		if (!CostumeCaptureEligible(core))
+		{
+			core.costumeCaptureStatus = Status::Interrupted;
+			return;
+		}
+		const auto label = "costume_physics_" + std::to_string(GetCurrentProcessId()) + "_" +
+			std::to_string(std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count()) + ".jsonl";
+		const auto path = GakuMotion::MotionPathFromUtf8(core.diagnosticsRoot) / label;
+		const auto* motion = core.CurrentMotion();
+		if (core.diagnosticsRoot.empty() || !g_costumeCapture.Open(path, motion ? motion->name : "", core.injectionSession))
+		{
+			core.costumeCaptureStatus = Status::FileError;
+			return;
+		}
+		g_costumeCaptureMotion = core.currentMotionIndex;
+		core.costumeCaptureStatus = Status::Recording;
+		if (g_hostContext.logInfo) g_hostContext.logInfo("[GakuMotion][CostumePhysics] file=%s", label.c_str());
+	}
+
+	void PublishFallbackPhysics(GakuMotion::Core& core, GakuMotion::FallbackPhysics& solver,
+		const GakuMotion::IdolBoneBinding& binding, const GakuMotion::MotionPlayer& player,
+		unsigned slot, float dt, int frame)
+	{
+		if (!g_costumeCapture.Active() || !CostumeCaptureMatches(core))
+		{
+			solver.Publish(binding, player.controller, dt, frame);
+			return;
+		}
+		GakuMotion::FallbackPhysics::CostumeFrame costume;
+		solver.Publish(binding, player.controller, dt, frame, &costume);
+		g_costumeCapture.Record(slot, binding.actor, frame, player.currentTime, dt, static_cast<int>(core.player.state),
+			core.player.SeekCount(), core.player.scrubbing, solver, costume);
+	}
+
+	void ReleaseFallbackToNative(GakuMotion::FallbackPhysics& solver,
+		const GakuMotion::IdolBoneBinding& binding, const GakuMotion::IdolController& controller, unsigned role)
+	{
+		const auto result = solver.ReleaseToNative(binding, controller);
+		if (g_hostContext.logInfo && (result.restored || result.preserved || result.unreadable))
+			g_hostContext.logInfo("[GakuMotion][PhysicsHandoff] slot=%u actor=%p restored=%zu preserved=%zu unverified=%zu",
+				role, binding.actor, result.restored, result.preserved, result.unreadable);
+	}
 	GakuPhysicsDiagnosticSnapshot g_physicsDiagnostic{};
-	int g_physicsBackend = -1, g_physicsActual = 0, g_physicsFrame = -1, g_physicsMotion = -1;
+	int g_physicsBackend = -1, g_physicsActual = 0, g_physicsFrame = -1;
+	uint64_t g_physicsMotionGeneration = 0;
 	int g_physicsSeeks = -1;
 	bool g_physicsBeforeQuartz = false, g_physicsSleeveDiagnostics = false;
 	float g_physicsTime = -1.0f;
@@ -256,12 +342,15 @@ namespace
 			slot.lastTick = now;
 			const bool started = core.player.state == GakuMotion::PlaybackState::Playing || g_followerBridge.State(i).outstanding;
 			const bool native = requested == 2 && started && g_followerBridge.Publish(i, binding->second, ctrl, player.currentTime, frame, slot.quartz, slot.diagnostics);
-			if (native && slot.actual == 1) { slot.fallback.Restore(ctrl); slot.fallback.Clear(); }
-			slot.actual = requested == 0 ? 0 : native ? 2 : 1;
-			if (slot.actual == 1) slot.fallback.Publish(binding->second, ctrl, dt, frame);
 			const std::string reason = requested == 0 ? "off" : requested == 1 ? "fallback" :
 				!started ? "native_waiting_for_playback" : g_followerBridge.State(i).reason == "not_requested" ? g_followerBridge.reason : g_followerBridge.State(i).reason;
-			core.followerPhysicsStatus[i] = slot.actual == 2 ? "原生运行中" : slot.actual == 0 ? "已关闭" :
+			const int actual = GakuMotion::SelectSecondaryPhysicsBackend(requested, native, core.liveTakeoverActive, reason);
+			if (requested == 2 && actual != 1 && slot.actual == 1)
+				ReleaseFallbackToNative(slot.fallback, binding->second, ctrl, static_cast<unsigned>(i + 2));
+			slot.actual = actual;
+			if (slot.actual == 1) PublishFallbackPhysics(core, slot.fallback, binding->second, player, static_cast<unsigned>(i + 2), dt, frame);
+			core.followerPhysicsStatus[i] = slot.actual == 2 ? "原生运行中" :
+				slot.actual == 0 ? (requested == 2 ? "等待原生任务" : "已关闭") :
 				reason == "native_pending_stale" ? "内建（等待原生任务）" :
 				reason == "native_pending" || reason == "native_waiting_for_playback" ? "内建（原生待确认）" :
 				reason == "fallback" ? "内建运行中" : "内建（" + reason + "）";
@@ -281,21 +370,43 @@ namespace
     // their own; the confirmed native result is reported separately.
     void RecordEnsemblePhysicsHealth(GakuMotion::Core& core)
     {
+        static bool wasPlaying = false;
         if (!g_hostContext.logInfo || core.config.secondaryPhysicsBackend != 2 ||
-            core.player.state != GakuMotion::PlaybackState::Playing || core.player.scrubbing) return;
+            core.player.state != GakuMotion::PlaybackState::Playing || core.player.scrubbing)
+        {
+            wasPlaying = false;
+            return;
+        }
         static auto next = std::chrono::steady_clock::time_point{};
+        static uint64_t previousSession{};
+        static int previousSeeks = -1;
+        static bool previousQuartz = false;
+        const bool requestedQuartz = core.config.beforeQuartzExperiment;
+        const int seeks = core.player.SeekCount();
+        const bool changed = !wasPlaying || previousSession != core.injectionSession ||
+            previousSeeks != seeks || previousQuartz != requestedQuartz;
         const auto now = std::chrono::steady_clock::now();
-        if (now < next) return;
+        if (!changed && now < next) return;
+        wasPlaying = true;
+        previousSession = core.injectionSession;
+        previousSeeks = seeks;
+        previousQuartz = requestedQuartz;
         next = now + std::chrono::seconds(10);
+        SYSTEMTIME wall{};
+        GetLocalTime(&wall);
         auto log = [&](size_t role, bool observed, bool active, int actual, const char* reason,
-                       const GbbStatus& status, const GbbPerf& perf, bool identity) {
-            g_hostContext.logInfo("[GakuMotion][EnsemblePhysicsHealth] slot=%zu observed=%d active=%d actual=%d reason=%s state=%u injected=%u writes=%u sequence=%llu matched=%llu failed=%llu swing=%llu native=%llu expired=%llu identity_skips=%llu actor_matches=%d clock_active=%d clock_fault=%d live_paused=%d",
+                       const GbbStatus& status, const GbbPerf& perf, bool identity, bool publishedQuartz) {
+            const bool paired = publishedQuartz && actual == 2 && identity && status.injected && status.writes;
+            g_hostContext.logInfo("[GakuMotion][EnsemblePhysicsHealth] slot=%zu observed=%d active=%d actual=%d reason=%s state=%u injected=%u writes=%u sequence=%llu matched=%llu failed=%llu swing=%llu native=%llu expired=%llu identity_skips=%llu actor_matches=%d clock_active=%d clock_fault=%d live_paused=%d before_quartz_requested=%d paired=%d source_frame=%d seeks=%d motion_time=%.3f live_time=%.3f time=%04u-%02u-%02uT%02u:%02u:%02u.%03u",
                 role, int(observed), int(active), actual, reason, status.state, status.injected, status.writes,
                 static_cast<unsigned long long>(status.sequence), static_cast<unsigned long long>(status.matched_passes),
                 static_cast<unsigned long long>(status.failed_passes), static_cast<unsigned long long>(status.swing_calls),
                 static_cast<unsigned long long>(perf.native_passes), static_cast<unsigned long long>(perf.expired_skips),
                 static_cast<unsigned long long>(perf.identity_skips), int(identity), int(core.liveActorClockActive),
-                int(core.liveActorClockFault), int(core.liveObservation.paused));
+                int(core.liveActorClockFault), int(core.liveObservation.paused), int(requestedQuartz),
+                int(requestedQuartz && paired), actual == 2 && identity ? status.source_frame : -1,
+                seeks, core.player.currentTime, core.liveObservation.time, wall.wYear, wall.wMonth, wall.wDay,
+                wall.wHour, wall.wMinute, wall.wSecond, wall.wMilliseconds);
         };
         void* primary = core.player.controller.targetActor;
         if (primary) {
@@ -305,7 +416,7 @@ namespace
             const auto& perf = observed ? g_burstBridge.perf : emptyPerf;
             log(1, observed, observed, observed ? g_physicsActual : 0,
                 observed ? g_burstBridge.reason.c_str() : "awaiting_callback", status, perf,
-                observed && status.actor == primary);
+                observed && status.actor == primary, observed && g_physicsBeforeQuartz);
         }
         const auto& followers = core.ensemble.Followers();
         for (size_t i=0; i<followers.size(); ++i) {
@@ -320,7 +431,8 @@ namespace
             const auto& perf = observed ? bridge.perf : emptyPerf;
             log(i+2, observed, follower.active, observed ? g_followerPhysics[i].actual : 0,
                 observed ? g_followerPhysics[i].reason.c_str() : "awaiting_callback", status, perf,
-                observed && status.actor == follower.player->controller.targetActor);
+                observed && status.actor == follower.player->controller.targetActor,
+                observed && g_followerPhysics[i].quartz);
         }
     }
 
@@ -335,7 +447,7 @@ namespace
 		g_physicsActual = 0;
 		g_physicsFrame = -1;
 		g_physicsActor = nullptr;
-		g_physicsMotion = -1;
+		g_physicsMotionGeneration = 0;
 		g_physicsSeeks = -1;
 		g_physicsBeforeQuartz = g_physicsSleeveDiagnostics = false;
 		g_physicsTime = -1.0f;
@@ -572,6 +684,7 @@ namespace
 	GakuMotion::live_audio::Api g_liveAudioApi;
 	GakuMotion::live_takeover::ViewingGate g_liveViewingGate;
 	GakuMotion::live_takeover::Driver g_liveDriver;
+	constexpr int LiveRosterExitRequest = 3;
 	std::atomic<bool> g_liveTakeoverEnabled{false};
 	uintptr_t g_liveTakeoverOwner = 0, g_lastLiveActorOwner = 0;
 	int g_liveTakeoverScene = 0, g_lastLiveActorScene = 0;
@@ -1398,11 +1511,50 @@ namespace
 
 #include "GkGroundShadowBootstrap.hpp"
 #include "GkBodyShadowBootstrap.hpp"
+
+// Experimental: resolve the target rig afresh on the Unity actor callback.
+// A managed exception or unavailable metadata is reported and never retried
+// until the user changes the placement again.
+static GakuMotion::PlacementResetDebounce g_placementResetDebounce;
+static void ResetPlacementDynamicBone(void* actor)
+{
+    if (!actor || !g_gameAssembly || !g_getComponentInChildrenNative || !il2cpp_class_get_type ||
+        !il2cpp_type_get_object || !g_faceRuntime.objectClass || !g_faceRuntime.parentClass ||
+        !g_faceRuntime.readField || !g_faceRuntime.invoke) return;
+    void* componentClass = FindClass("campus-submodule.Runtime.dll", "Campus.Common", "CampusActorAnimation");
+    if (!componentClass) componentClass = FindClass("Assembly-CSharp.dll", "Campus.Common", "CampusActorAnimation");
+    void* rigClass = FindClass("campus-submodule.Runtime.dll", "ActorAnimation", "CampusActorAnimationRig");
+    void* type = componentClass ? il2cpp_class_get_type(componentClass) : nullptr;
+    void* typeObject = type ? il2cpp_type_get_object(type) : nullptr;
+    void* component = typeObject ? g_getComponentInChildrenNative(actor, typeObject) : nullptr;
+    void* field = component ? g_faceRuntime.InstanceField(component, "_actorAnimationRig", 0x12) : nullptr;
+    void* rig = nullptr;
+    if (field) g_faceRuntime.readField(component, field, &rig);
+    bool matches = false;
+    for (void* k = rig ? g_faceRuntime.objectClass(rig) : nullptr; k; k = g_faceRuntime.parentClass(k))
+        if (k == rigClass && rigClass) { matches = true; break; }
+    const auto metadata = GroundShadowProbeBootstrap::Resolve(g_gameAssembly).method;
+    const void* method = matches ? metadata.Find(rigClass, "ResetDynamicBone", false, {0x01}, {}) : nullptr;
+    using VirtualFn = const void* (*)(void*, const void*);
+    const auto getVirtual = reinterpret_cast<VirtualFn>(GetProcAddress(g_gameAssembly, "il2cpp_object_get_virtual_method"));
+    if (method && getVirtual) method = getVirtual(rig, method);
+    // Recognition probe only. The native job's synchronization and the
+    // method's effects have not been established, so do not invoke it here.
+    if (g_hostContext.logInfo) g_hostContext.logInfo("[GakuMotion][PlacementResetProbe] actor=%p component_class=%d component=%d rig_class=%d field=%d rig_object=%d rig_matches=%d virtual_api=%d virtual_method=%d invoked=0",
+        actor, int(componentClass!=nullptr), int(component!=nullptr), int(rigClass!=nullptr),
+        int(field!=nullptr), int(rig!=nullptr), int(matches), int(getVirtual!=nullptr), int(method!=nullptr));
+}
+
 #include "GkCameraBridge.hpp"
 #include "GkLiveSchedulingProbe.hpp"
 #include "GkLiveCodeCapture.hpp"
 #include "GkLiveAudioGraphProbe.hpp"
 #include "GkLiveActorClockMvp.hpp"
+    bool OwnsPrimaryMmdClock(void* actor)
+    {
+        return actor && LiveActorClockMvp::active && LiveActorClockMvp::mmdSession &&
+            LiveActorClockMvp::SameOwner() && LiveActorClockMvp::actor == reinterpret_cast<uintptr_t>(actor);
+    }
     std::deque<LiveDynamicFollowerClock> g_followerClocks;
 	bool RestoreFollowerClock(size_t index)
 	{
@@ -1509,7 +1661,7 @@ namespace
 		auto& core = GakuMotion::Core::Instance();
 		std::lock_guard<std::recursive_mutex> lock(core.stateMutex);
 		return core.player.state != GakuMotion::PlaybackState::Stopped ||
-			core.camera.owned || core.stageManager.injectionEnabled ||
+			core.camera.owned || core.stageManager.injectionEnabled || !LiveActorProps::saved.empty() ||
 			(core.liveTakeoverFault && core.liveOwnerToken && core.liveOwnerToken == core.liveFaultOwner);
 	}
 
@@ -1522,7 +1674,7 @@ namespace
 		if (g_hostContext.logError) g_hostContext.logError("[GakuMotion][Capture] manual guard disabled: %s", reason);
 	}
 
-	bool RestoreActorClockMvp(const char* reason);
+	bool RestoreActorClockMvp(const char* reason, bool detached = false);
 	void RevokeProtectedInjection()
 	{
 		auto& core = GakuMotion::Core::Instance();
@@ -1553,7 +1705,7 @@ namespace
 		if (!LiveActorProps::RestoreAll(core)) return false;
 		if (!LiveWindOverride::Restore(g_liveTakeoverOwner, g_liveTakeoverScene)) return false;
 		if(LiveActorClockMvp::active&&!RestoreActorClockMvp("capture_begin"))return false;
-		const bool rosterConfirmed = !core.ensemble.HasActiveFollowers() || RefreshSceneActors(core, true);
+		const bool rosterConfirmed = !core.ensemble.HasActiveFollowers() || RefreshSceneActors(core, true, false);
 		core.injectionPolicy.BeginCapture();
 		if (core.injectionPolicy.Read().captureDepth > 1) return ContinueProtectedCapture(type);
 		g_captureOriginOwner = g_sceneOwner;
@@ -1701,27 +1853,40 @@ namespace
 			GakuMotion::Core::Instance().liveObservation.time,GakuMotion::Core::Instance().player.currentTime);
 		if(!begin){
 			auto& c=GakuMotion::Core::Instance();
+			const char* clockMode = "3 秒角色图实验运行中";
+			if (LiveActorClockMvp::mmdSession)
+				clockMode = LiveActorClockMvp::clipEnd.ClipCount()
+					? "原 Live 动画停在片段末尾，原生物理时钟运行中"
+					: "原生物理兼容模式，原 Live 动画未停在末尾";
 			c.liveActorClockNotice=GakuMotion::detail::FormatMsg("%s；Swing 增量 %s；原生执行增量 %s；当前角色注入：%s。",
-				LiveActorClockMvp::mmdSession?"MMD 独立时钟运行中（舞台暂停）":"3 秒角色图实验运行中",
+				clockMode,
 				sd?std::to_string(s.swing_calls-g_clockStatusStart.swing_calls).c_str():"未知",
 				pd?std::to_string(p.native_passes-g_clockPerfStart.native_passes).c_str():"未知",consumed?"已观测":"待确认");
 		}
 		g_clockNextLog=now+1.0;
 	}
-	bool RestoreActorClockMvp(const char* reason) {
+	bool RestoreActorClockMvp(const char* reason, bool detached) {
 		auto& core=GakuMotion::Core::Instance();
-		RecordActorClockPhysics(false,0);
+		if (!detached) RecordActorClockPhysics(false,0);
 		bool followersRestored=true;
         for (size_t i=0;i<g_followerClocks.size();++i) followersRestored=RestoreFollowerClock(i)&&followersRestored;
 		const bool same=LiveActorClockMvp::SameOwner();
         const bool borrowed=LiveActorClockMvp::borrowedRunningGraph;
-		const bool graphRestored=LiveActorClockMvp::RestoreGraph();
+		if (detached) {
+			LiveActorClockMvp::active = false;
+			LiveActorClockMvp::offered = false;
+			LiveActorClockMvp::borrowedRunningGraph = false;
+			LiveActorClockMvp::rootAdvancedKnown = false;
+			LiveActorClockMvp::nodes.clear();
+			LiveActorClockMvp::clipEnd = {};
+		}
+		const bool graphRestored=detached||LiveActorClockMvp::RestoreGraph();
 		bool timelineRestored=false;
 		if(same&&graphRestored) {
 			const auto access=LiveRuntimeAccess();void* scene=reinterpret_cast<void*>(core.liveOwnerToken);
             // An already-running graph was only observed, so do not seek the
             // stage as a side effect of releasing that observation.
-			const bool seekOk=borrowed || GakuMotion::live_takeover::Seek(g_liveApi,access,scene,core.liveActorClockOrigin);
+			const bool seekOk=detached || borrowed || GakuMotion::live_takeover::Seek(g_liveApi,access,scene,core.liveActorClockOrigin);
 			const auto after=GakuMotion::live_takeover::Observe(g_liveApi,access,scene);
 			timelineRestored=seekOk&&after.confirmed&&after.paused&&std::abs(after.time-core.liveActorClockOrigin)<0.1f;
 		}
@@ -1919,6 +2084,14 @@ namespace
 		const auto ownerObservation = SceneOwnerRuntime::Read(name, forceOwnerRead || g_pendingProtectionFault.load(std::memory_order_acquire));
 		g_sceneOwner = ownerObservation.owner;
 		g_verifiedOwnerSceneName = ownerObservation.sceneName;
+		if (LiveWindOverride::lease.active)
+		{
+			const bool ownerConfirmed = g_sceneOwner.Valid();
+			LiveWindOverride::RetireIfOwnerLost(
+				ownerConfirmed ? g_sceneOwner.presenterIdentity : 0,
+				ownerConfirmed ? g_sceneOwner.sceneHandle : 0,
+				!ownerConfirmed && SceneOwnerRuntime::ConfirmedUnloaded(LiveWindOverride::lease.scene));
+		}
 		// Read only the fresh, exact current presenter; never scan unrelated Live
 		// objects or retain managed pointers across frames. This does not admit
 		// injection or change the game playback state.
@@ -1979,6 +2152,7 @@ namespace
 			// The old Scene may already have destroyed its actors. Never Rebind or
 			// restore cached Unity instances here; orphan stages have a fresh scan.
             ActorModelVisibility::Abandon();
+			LiveActorProps::Abandon();
 			ClearSecondaryPhysics(true);
 			core.AbandonScene();
 			HelperClearActorAnimatorCache();
@@ -2811,17 +2985,146 @@ static bool EnsureRuntimeReadyForActor(void* activeActor, void (*initialize)(voi
 // Search only an admitted owner scene, at most four times per second unless a
 // scene boundary or a target-selection command requires a fresh admission check.
 // No callbacks, managed pointers or speculative metadata are exposed to ImGui.
-static bool RefreshSceneActors(GakuMotion::Core& core, bool force)
+static bool ReadSceneActors(std::vector<GakuMotion::SceneActorObservation>& observations, bool includeInactive)
+{
+	if (!StageLoader::findAll || !StageLoader::componentGo || !StageLoader::goScene || !StageLoader::instanceId ||
+	    !StageLoader::arrayLength || !StageLoader::newHandle || !StageLoader::freeHandle ||
+	    (!StageLoader::actorTypes[0] && !StageLoader::actorTypes[1])) return false;
+	for (void* actorType : StageLoader::actorTypes)
+	{
+		if (!actorType) continue;
+		void* args[]{actorType, &includeInactive};
+		void* array = StageLoader::Invoke(StageLoader::findAll, nullptr, args);
+		if (!array) return false;
+		StageLoader::Handle pin = StageLoader::newHandle(array, false);
+		if (!pin) return false;
+		struct Release { StageLoader::Handle value; ~Release() { StageLoader::freeHandle(value); } } release{pin};
+		const uintptr_t count = StageLoader::arrayLength(array);
+		if (count > 4096) return false;
+		void** items = reinterpret_cast<void**>(static_cast<char*>(array) + 32);
+		for (uintptr_t i = 0; i < count; ++i)
+		{
+			void* actor = items[i];
+			if (!actor || std::any_of(observations.begin(), observations.end(), [&](const auto& item) { return item.actor == actor; })) continue;
+			void* go = StageLoader::Invoke(StageLoader::componentGo, actor);
+			const int scene = go ? StageLoader::SceneOfFreshGo(go) : 0;
+			if (!scene && includeInactive && CameraBridge::IsAlive(actor)) return false;
+			if (scene != g_sceneOwner.sceneHandle) continue;
+			const int id = StageLoader::ReadInt(StageLoader::instanceId, actor);
+			if (!id) {
+				if (includeInactive) return false;
+				continue;
+			}
+			if (includeInactive) {
+				observations.push_back({actor, id});
+				continue;
+			}
+			// Prefer the loaded face identity, including a replacement's actual face.
+			const auto actorName = HelperGetActorName(actor);
+			const auto presetName = GakuMotion::GakuActorsPresetName(actorName);
+			void* face = HelperGetFaceModel(actor);
+			std::string character = GakuMotion::DetectIdolCharacterCode(face ? HelperGetFaceModelName(face) : "");
+			if (character.empty()) character = GakuMotion::DetectIdolCharacterCode(presetName.empty()?actorName:actorName.substr(0,actorName.find(" | GakuActors[")));
+			observations.push_back({actor, id, std::move(character), presetName});
+		}
+	}
+	return true;
+}
+
+static const char* RestoreForLiveRosterChange(GakuMotion::Core& core,
+	const std::vector<GakuMotion::SceneActorObservation>& observations)
+{
+	std::vector<GakuMotion::SceneActorObservation> loaded;
+	if (!ReadSceneActors(loaded, true) ||
+	    !std::all_of(observations.begin(), observations.end(), [&](const auto& actor) {
+		    return GakuMotion::ObservedSceneActor(loaded, actor);
+	    })) return "actor_census_unconfirmed";
+
+	const auto& registry = core.sceneActorRegistry;
+	const auto isLoaded = [&](void* actor) {
+		const auto* old = registry.Find(actor);
+		return old && GakuMotion::ObservedSceneActor(loaded, *old);
+	};
+	for (const auto& actor : registry.Entries()) {
+		if (GakuMotion::ObservedSceneActor(loaded, actor)) continue;
+		LiveActorProps::AbandonActor(actor.token);
+		ActorModelVisibility::AbandonActor(actor.token);
+		if (g_hostContext.logInfo) g_hostContext.logInfo(
+			"[GakuMotion][LiveRoster] detached scene=%d actor_token=%llu",
+			core.liveOwnerScene, static_cast<unsigned long long>(actor.token));
+	}
+	if (!LiveActorProps::RestoreAll(core)) return "props_restore_unconfirmed";
+	if (!ActorModelVisibility::RestoreAll(core)) return "models_restore_unconfirmed";
+
+	// Animator restoration can invoke native animation callbacks.
+	struct RestoreScope {
+		bool previous{g_restoringNative};
+		RestoreScope() { g_restoringNative = true; }
+		~RestoreScope() { g_restoringNative = previous; }
+	} restoring;
+	if (!core.ensemble.ClearForLiveRosterChange(registry, loaded, [](size_t slot) {
+		if (!ClearFollowerPhysics(slot, nullptr, true)) return false;
+		if (slot < g_followerClocks.size()) g_followerClocks[slot] = {};
+		return true;
+	})) return "follower_restore_or_release_unconfirmed";
+
+	if (LiveActorClockMvp::active &&
+	    !RestoreActorClockMvp("roster_change", !isLoaded(reinterpret_cast<void*>(LiveActorClockMvp::actor))))
+		return "actor_clock_restore_unconfirmed";
+
+	auto& controller = core.player.controller;
+	const auto* primary = registry.Find(controller.targetActor);
+	if (controller.targetActor && !primary) return "primary_identity_unconfirmed";
+	if (primary && !GakuMotion::ObservedSceneActor(observations, *primary))
+	{
+		if (!g_burstBridge.ClearForCapture()) return "primary_physics_release_unconfirmed";
+		if (GakuMotion::ObservedSceneActor(loaded, *primary))
+		{
+			if (!g_fallbackPhysics.RestoreForCapture(controller)) return "primary_physics_restore_unconfirmed";
+			const auto restored = controller.RestoreForCapture();
+			if (!restored.bodyConfirmed || !restored.faceConfirmed || !restored.gazeConfirmed)
+				return "primary_pose_restore_unconfirmed";
+		}
+		if (!core.camera.ReleaseForCapture().confirmed) return "camera_restore_unconfirmed";
+	}
+	return nullptr;
+}
+
+static bool RefreshSceneActors(GakuMotion::Core& core, bool force, bool refreshProps)
 {
 	static auto lastScan = std::chrono::steady_clock::time_point{};
+	static auto lastPropScan = std::chrono::steady_clock::time_point{};
+	static GakuMotion::injection::OwnerSnapshot lastPropOwner;
+	static bool lastPropWritable = false;
 	const auto now = std::chrono::steady_clock::now();
-	if (!core.InjectionAllowed() || !g_sceneOwner.Valid() || g_currentSceneHandle != g_sceneOwner.sceneHandle)
-		return false;
-	if (!force && !core.HasPendingTargetSelection() && now - lastScan < std::chrono::milliseconds(250)) return true;
+	const bool motionReady = core.InjectionAllowed() && g_boundSceneOwner.SameOwner(g_sceneOwner);
+	const bool liveViewing = core.liveViewingConfirmed &&
+		g_sceneOwner.role == GakuMotion::injection::OwnerRole::Live;
+	const bool propsScene = g_activeSceneVerified && g_sceneOwner.Valid() &&
+		(core.injectionPolicy.Read().sceneAllowed || liveViewing);
+	if (!propsScene) {
+		core.actorProps.clear();
+		lastPropOwner = {};
+	}
+	if (!motionReady && !propsScene) return false;
+
+	const bool propWritable = motionReady && core.CanControlActorProps() &&
+		(!liveViewing || GakuMotion::capture::LiveAutoPhotoIdle());
+	const bool propScanDue = refreshProps && propsScene && (force || !lastPropOwner.SameOwner(g_sceneOwner) ||
+		lastPropWritable != propWritable || now - lastPropScan >= std::chrono::milliseconds(500));
+	if (!force && !propScanDue && (!motionReady ||
+		(!core.HasPendingTargetSelection() && now - lastScan < std::chrono::milliseconds(250)))) return motionReady;
 	lastScan = now;
+	auto scanProps = [&](const auto& actors) {
+		LiveActorProps::Scan(core, actors, propWritable);
+		lastPropOwner = g_sceneOwner;
+		lastPropScan = now;
+		lastPropWritable = propWritable;
+	};
 	auto unavailable = [&]
 	{
-		if (core.ensemble.HasActiveFollowers())
+		core.actorProps.clear();
+		if (core.ensemble.HasActiveFollowers() || !LiveActorProps::saved.empty())
 		{
 			// A failed scan is not proof of destruction. Retain ownership without
 			// touching actor pointers; block further injection and native capture.
@@ -2841,49 +3144,46 @@ static bool RefreshSceneActors(GakuMotion::Core& core, bool force)
 		}
 		return false;
 	};
-	if (!StageLoader::findAll || !StageLoader::componentGo || !StageLoader::goScene || !StageLoader::instanceId ||
-		!StageLoader::arrayLength || !StageLoader::newHandle || !StageLoader::freeHandle ||
-		(!StageLoader::actorTypes[0] && !StageLoader::actorTypes[1])) return unavailable();
 	std::vector<GakuMotion::SceneActorObservation> observations;
-	for (void* actorType : StageLoader::actorTypes)
-	{
-		if (!actorType) continue;
-		bool includeInactive = false;
-		void* args[]{actorType, &includeInactive};
-		void* array = StageLoader::Invoke(StageLoader::findAll, nullptr, args);
-		if (!array) return unavailable();
-		StageLoader::Handle pin = StageLoader::newHandle(array, false);
-		if (!pin) return unavailable();
-		struct Release { StageLoader::Handle value; ~Release() { StageLoader::freeHandle(value); } } release{pin};
-		const uintptr_t count = StageLoader::arrayLength(array);
-		if (count > 4096) return unavailable();
-		void** items = reinterpret_cast<void**>(static_cast<char*>(array) + 32);
-		for (uintptr_t i = 0; i < count; ++i)
-		{
-			void* actor = items[i];
-			if (!actor || std::any_of(observations.begin(), observations.end(), [&](const auto& item) { return item.actor == actor; })) continue;
-			void* go = StageLoader::Invoke(StageLoader::componentGo, actor);
-			if (!go || StageLoader::SceneOfFreshGo(go) != g_sceneOwner.sceneHandle) continue;
-			const int id = StageLoader::ReadInt(StageLoader::instanceId, actor);
-			if (!id) continue;
-			// Prefer the loaded face identity, including a replacement's actual face.
-			const auto actorName = HelperGetActorName(actor);
-			const auto presetName = GakuMotion::GakuActorsPresetName(actorName);
-			void* face = HelperGetFaceModel(actor);
-			std::string character = GakuMotion::DetectIdolCharacterCode(face ? HelperGetFaceModelName(face) : "");
-			if (character.empty()) character = GakuMotion::DetectIdolCharacterCode(presetName.empty()?actorName:actorName.substr(0,actorName.find(" | GakuActors[")));
-			observations.push_back({actor, id, std::move(character), presetName});
+	if (!ReadSceneActors(observations, false)) {
+		if (propScanDue) {
+			core.actorProps.clear();
+			lastPropOwner = g_sceneOwner;
+			lastPropScan = now;
+			lastPropWritable = propWritable;
 		}
+		return motionReady ? unavailable() : false;
 	}
-	const bool hadActors = !core.sceneActorRegistry.Entries().empty();
+	if (!motionReady) {
+		if (propScanDue) scanProps(observations);
+		return false;
+	}
 	const auto oldEpoch = core.sceneActorRegistry.Epoch();
 	const auto& oldEntries = core.sceneActorRegistry.Entries();
-	bool actorSetChanged = oldEntries.size() != observations.size();
-	if (!actorSetChanged) for (const auto& item : oldEntries)
-		if (std::none_of(observations.begin(),observations.end(),[&](const auto& found) {
-			return found.actor==item.actor && found.instanceId==item.instanceId;
-		})) { actorSetChanged=true; break; }
-	if (actorSetChanged && (!LiveActorProps::RestoreAll(core) || !ActorModelVisibility::RestoreAll(core))) {
+	const size_t oldCount = oldEntries.size();
+	const bool actorSetChanged = oldCount != observations.size() ||
+		std::any_of(oldEntries.begin(), oldEntries.end(), [&](const auto& old) {
+			return !GakuMotion::ObservedSceneActor(observations, old);
+		});
+	const bool liveRosterChanged = oldCount && actorSetChanged && core.liveTakeoverActive &&
+		core.liveViewingConfirmed && core.liveObservation.confirmed && core.liveObservation.paused &&
+		core.liveOwnerToken == g_liveTakeoverOwner && core.liveOwnerScene == g_liveTakeoverScene &&
+		core.injectionPolicy.Read().captureDepth == 0 && GakuMotion::capture::LiveAutoPhotoIdle();
+	if (liveRosterChanged)
+	{
+		if (const char* reason = RestoreForLiveRosterChange(core, observations)) {
+			core.actorProps.clear();
+			if (g_hostContext.logWarn) g_hostContext.logWarn(
+				"[GakuMotion][LiveRoster] blocked scene=%d reason=%s", core.liveOwnerScene, reason);
+			core.ensembleRestoreUnconfirmed = true;
+			core.ensembleNotice = "角色名单已变化，旧状态恢复未确认；已暂停动作注入";
+			core.player.Pause();
+			g_motionSceneAllowed = false;
+			return false;
+		}
+	}
+	else if (actorSetChanged && (!LiveActorProps::RestoreAll(core) || !ActorModelVisibility::RestoreAll(core))) {
+		core.actorProps.clear();
 		core.ensembleRestoreUnconfirmed=true;
 		core.ensembleNotice="角色道具恢复未确认，已暂停注入；请重新进入场景";
 		core.player.Pause(); g_motionSceneAllowed=false; return false;
@@ -2895,18 +3195,32 @@ static bool RefreshSceneActors(GakuMotion::Core& core, bool force)
 		NativeAudio::Release(GakuMotion::bgm::ReleaseReason::SceneLost);
 		core.PickBoundActorAsTarget(); // Old physics has been abandoned; bind only a fresh actor.
 	}
-	if (hadActors && oldEpoch != core.sceneActorRegistry.Epoch())
+	if (oldCount && oldEpoch != core.sceneActorRegistry.Epoch())
 	{
 		void* current = observations.empty() ? nullptr : observations.front().actor;
 		if (current) StageLoader::BindContext(g_sceneOwner.sceneHandle, current);
-		if (!core.stageManager.OnActorSetChanged(current))
+		if (!core.stageManager.OnActorSetChanged(current)) {
 			ProtectedCaptureFault("stage restoration failed during actor replacement");
+			return false;
+		}
+	}
+	if (propScanDue || (refreshProps && propsScene && actorSetChanged)) scanProps(observations);
+	if (liveRosterChanged && g_liveDriver.MayInject() && !core.liveTakeoverRequest)
+	{
+		core.liveTakeoverRequest = LiveRosterExitRequest;
+		core.liveTakeoverRequestOwner = core.liveOwnerToken;
+		core.liveTakeoverRequestScene = core.liveOwnerScene;
+		core.liveControlNotice = "角色名单已变化，正在退出接管。";
+		if (g_hostContext.logInfo) g_hostContext.logInfo(
+			"[GakuMotion][LiveRoster] exit_queued scene=%d previous=%zu current=%zu",
+			core.liveOwnerScene, oldCount, observations.size());
 	}
 	return true;
 }
 
 void MotionActorTick(void*, void* activeActor, float deltaTime)
 {
+	if (g_restoringNative) return;
 	if (!EnsureRuntimeReadyForActor(activeActor, MotionRuntimeReady)) return;
 	if (activeActor) ActorGroundShadow::BindUnityThread();
 	ResolveDeferredManagedTypes();
@@ -2972,7 +3286,6 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	}
 	if (core.liveObservation.confirmed && activeActor)
 	{
-		if(!GakuMotion::visual_handoff::Requested())LiveActorProps::Tick(core,activeActor,sceneHandle);
 		if (core.liveViewingConfirmed && g_sceneOwner.Valid() && sceneHandle == g_sceneOwner.sceneHandle &&
 			core.sceneActorRegistry.Find(activeActor)) {
 			static std::array<void*, 3> sampledActors{};
@@ -3061,6 +3374,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 		ClearSecondaryPhysics(true);
 		core.stageManager.SetInjectionEnabled(false);
         ActorModelVisibility::Abandon();
+		LiveActorProps::Abandon();
 		core.AbandonScene();
 		HelperClearActorAnimatorCache();
 		g_currentSceneHandle = sceneHandle;
@@ -3472,6 +3786,33 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 		GakuMotion::OnLateUpdate(activeActor, anim, nullptr, dtToPass, isNewPhysicalFrame,
 		                        s_cameraFrameDelta, s_cameraPhysicalFrame);
 	EyeGazeProbe::After(activeActor);
+    // Only observed Motion-owned actors can trigger this. Each role has its own
+    // identity, scene epoch and follower generation; never retain managed rigs.
+    if (!core.placementResetExperiment.load() || !core.InjectionAllowed() || core.captureSuspended ||
+        player.state == GakuMotion::PlaybackState::Stopped || core.ensembleRestoreUnconfirmed)
+        g_placementResetDebounce.Clear();
+    else {
+        const auto epoch = core.sceneActorRegistry.Epoch();
+        const auto* entry = core.sceneActorRegistry.Find(activeActor);
+        const GakuMotion::IdolController* controller = nullptr;
+        unsigned slot = 0; uint64_t generation = entry ? entry->token : 0;
+        if (entry && core.IsTargetActor(activeActor) && player.controller.bindings.count(activeActor)) controller = &player.controller;
+        if (entry && !controller) {
+            for (size_t i=0; i<core.ensemble.Followers().size(); ++i) {
+                const auto& f = core.ensemble.Followers()[i];
+                if (f.active && f.player && f.actorToken == entry->token && f.player->controller.targetActor == activeActor &&
+                    core.sceneActorRegistry.Resolve(f.actorToken, epoch) == activeActor) {
+                    controller = &f.player->controller; slot = static_cast<unsigned>(i+1); generation = f.bindingGeneration; break;
+                }
+            }
+        }
+        if (controller) {
+            const auto& pos = controller->initialPositionOffset;
+            const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+            if (g_placementResetDebounce.Observe(slot, activeActor, epoch, generation, pos.x, pos.y, pos.z, seconds))
+                ResetPlacementDynamicBone(activeActor);
+        }
+    }
 	if (player.state != GakuMotion::PlaybackState::Stopped)
 		DispatchFollowerPhysics(core, activeActor, unityFrame >= 0 ? unityFrame : s_fallbackFrame);
 	NativeAudio::Sync();
@@ -3506,8 +3847,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 			const int requested = core.config.secondaryPhysicsBackend;
 			if (requested != g_physicsBackend || core.config.beforeQuartzExperiment != g_physicsBeforeQuartz ||
 				core.config.sleeveMuscleDiagnostics != g_physicsSleeveDiagnostics ||
-				activeActor != g_physicsActor || core.currentMotionIndex !=
-				g_physicsMotion ||
+				activeActor != g_physicsActor || core.loadedMotionGeneration != g_physicsMotionGeneration ||
 				player.SeekCount() != g_physicsSeeks || player.scrubbing || player.currentTime + .001f < g_physicsTime)
 			{
 				if (g_physicsActor == activeActor)
@@ -3521,7 +3861,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 				g_physicsBackend = requested;
 				g_physicsBeforeQuartz = core.config.beforeQuartzExperiment;
 				g_physicsSleeveDiagnostics = core.config.sleeveMuscleDiagnostics;
-				g_physicsMotion = core.currentMotionIndex;
+				g_physicsMotionGeneration = core.loadedMotionGeneration;
 				g_physicsActor = activeActor;
 			}
 			g_physicsSeeks = player.SeekCount();
@@ -3536,26 +3876,29 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 				                         ? 0.0f
 				                         : std::chrono::duration<float>(dispatchBegin - g_physicsLastTick).count();
 			g_physicsLastTick = dispatchBegin;
-			// Preview can remain on frame zero indefinitely while the user selects
-			// a motion. Do not spend the bridge's discovery timeout before playback.
-			// Once started, keep servicing its existing lease across pause/resume.
-			const bool nativeReadyToStart = player.state == GakuMotion::PlaybackState::Playing ||
-			                                g_burstBridge.HasCaptureInput();
+			// A seek or track change invalidates the packet. The same role clock
+			// can receive the replacement pose in pause or track preview.
+			const bool nativeReadyToStart = GakuMotion::live_physics_clock::CanPublish(
+				player.state == GakuMotion::PlaybackState::Playing,
+				player.state == GakuMotion::PlaybackState::Paused, g_burstBridge.HasCaptureInput(),
+				core.liveTakeoverActive && !core.liveTakeoverFault && OwnsPrimaryMmdClock(activeActor),
+				player.state == GakuMotion::PlaybackState::Preview && player.clip.total_frames > 0);
 			bool native = requested == 2 && nativeReadyToStart && g_burstBridge.Publish(binding->second, player.controller,
 			                                                      player.currentTime, frame,
 			                                                      core.config.beforeQuartzExperiment,
 			                                                      core.config.sleeveMuscleDiagnostics);
-			if (native && g_physicsActual == 1)
+			const std::string reason = requested == 2 ? (nativeReadyToStart ? g_burstBridge.reason : "native_waiting_for_playback") : requested == 1 ? "fallback" : "off";
+			const int actual = GakuMotion::SelectSecondaryPhysicsBackend(requested, native, core.liveTakeoverActive, reason);
+			if (requested == 2 && actual != 1 && g_physicsActual == 1)
 			{
-				g_fallbackPhysics.Restore(player.controller);
-				g_fallbackPhysics.Clear();
+				ReleaseFallbackToNative(g_fallbackPhysics, binding->second, player.controller, 1);
 			}
-			g_physicsActual = requested == 0 ? 0 : native ? 2 : 1;
+			g_physicsActual = actual;
 			if (g_physicsActual == 1)
 			{
 				// Original engine jobs have completed at this LateUpdate callback.
 				// Override only secondary local rotations after MMD body writes.
-				g_fallbackPhysics.Publish(binding->second, player.controller, physicalDt, frame);
+				PublishFallbackPhysics(core, g_fallbackPhysics, binding->second, player, 1, physicalDt, frame);
 			}
 			const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
 				std::chrono::steady_clock::now() - dispatchBegin).count();
@@ -3591,11 +3934,11 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 			d.bridge_failures = perf.failed_passes;
 			d.bridge_expired_skips = perf.expired_skips;
 			d.bridge_identity_skips = perf.identity_skips;
-			const std::string reason = requested == 2 ? (nativeReadyToStart ? g_burstBridge.reason : "native_waiting_for_playback") : requested == 1 ? "fallback" : "off";
 			auto& monitor = core.physicsMonitor;
 			monitor.observed = true; monitor.live = core.liveTakeoverActive;
 			monitor.actor = reinterpret_cast<uintptr_t>(activeActor); monitor.session = core.injectionSession;
 			monitor.requested = requested; monitor.actual = g_physicsActual;
+			monitor.beforeQuartzRequested = g_physicsBeforeQuartz;
 			monitor.fault = g_burstBridge.status.injection_fault != 0;
 			monitor.publishResult = g_burstBridge.lastPublishResult;
 			monitor.swingCalls = g_burstBridge.status.swing_calls;
@@ -3820,6 +4163,7 @@ void MotionShutdown(void*)
 	GakuMotion::host::UnregisterHotkey(kToggleOverridesActionId);
 	auto& core = GakuMotion::Core::Instance();
 	std::lock_guard<std::recursive_mutex> stateLock(core.stateMutex);
+	if (g_costumeCapture.Opened()) FinishCostumeCapture(core, "shutdown", false);
 	core.WaitForLibraryRefresh();
 	core.injectionPolicy.SetSceneAllowed(false);
 	core.injectionPolicy.SetCaptureHooksReady(false);
@@ -3944,6 +4288,7 @@ void MotionTick(void*, float)
 		RefreshProtectedContext();
 		auto& core = GakuMotion::Core::Instance();
 		std::lock_guard<std::recursive_mutex> lock(core.stateMutex);
+		PollCostumeCapture(core);
         const bool frameLog = core.liveFrameMonitor.Update(GakuMotion::LiveFrameMonitor::Clock::now(),
             core.liveViewingConfirmed && core.liveObservation.confirmed, core.liveOwnerToken, core.liveOwnerScene);
         if (frameLog && g_hostContext.logWarn) {
@@ -4196,8 +4541,13 @@ void MotionTick(void*, float)
 		if (core.liveTakeoverRequest)
 		{
 			const int request = core.liveTakeoverRequest;
+			const bool rosterExit = request == LiveRosterExitRequest;
+			const bool exitRequested = request == 2 || rosterExit;
 			const uintptr_t requestedOwner = core.liveTakeoverRequestOwner;
 			const int requestedScene = core.liveTakeoverRequestScene;
+			if (exitRequested && g_hostContext.logInfo)
+				g_hostContext.logInfo("[GakuMotion][LiveExit] requested scene=%d source=%s",
+					requestedScene, rosterExit ? "roster_change" : "manual");
 			core.liveTakeoverRequest = 0; core.liveTakeoverRequestOwner = 0; core.liveTakeoverRequestScene = 0;
 			core.livePauseRequest = 0; core.livePauseRequestOwner = 0; core.livePauseRequestScene = 0;
 			RefreshProtectedContext(true);
@@ -4215,20 +4565,29 @@ void MotionTick(void*, float)
 				if (!core.liveTakeoverActive) { g_liveTakeoverOwner = 0; g_liveTakeoverScene = 0; }
 				core.liveControlNotice = core.liveTakeoverActive ? "Live 已暂停，可以为场景角色选择动作。" :
 					"未能确认 Live 暂停和角色状态，未开启接管。";
+				if (g_hostContext.logInfo) g_hostContext.logInfo(
+					"[GakuMotion][LiveEnter] finished scene=%d active=%d driver_phase=%d",
+					requestedScene, int(core.liveTakeoverActive), int(g_liveDriver.State()));
 			}
-			else if (request == 2 && requestedOwner && requestedOwner == core.liveOwnerToken && requestedScene == core.liveOwnerScene &&
+			else if (exitRequested && requestedOwner && requestedOwner == core.liveOwnerToken && requestedScene == core.liveOwnerScene &&
 				core.liveTakeoverActive && core.injectionPolicy.Read().captureDepth == 0)
 			{
 				const bool resumeLive = g_liveDriver.OwnsPause();
 				if (!LiveActorProps::RestoreAll(core)) {
+					if (g_hostContext.logWarn) g_hostContext.logWarn("[GakuMotion][LiveExit] blocked scene=%d step=props", requestedScene);
 					core.liveControlNotice = "角色道具恢复未确认，Live 保持暂停；请重试退出接管。";
 					return;
 				}
                 if (!ActorModelVisibility::RestoreAll(core)) {
+                    if (g_hostContext.logWarn) g_hostContext.logWarn("[GakuMotion][LiveExit] blocked scene=%d step=models", requestedScene);
                     core.liveControlNotice = "角色模型恢复未确认，Live 保持暂停；请重试退出接管。";
                     return;
                 }
-				if (!LiveWindOverride::Restore(requestedOwner, requestedScene)) {
+				const char* windFailure = nullptr;
+				if (!LiveWindOverride::Restore(requestedOwner, requestedScene, &windFailure)) {
+					if (g_hostContext.logWarn) g_hostContext.logWarn(
+						"[GakuMotion][LiveExit] blocked scene=%d step=wind reason=%s lease_scene=%d",
+						requestedScene, windFailure ? windFailure : "unknown", LiveWindOverride::lease.scene);
 					core.liveControlNotice = "风力恢复未确认，Live 保持暂停；请重试退出接管。";
 					return;
 				}
@@ -4252,8 +4611,21 @@ void MotionTick(void*, float)
 				g_liveTakeoverScene = 0;
 				core.liveControlNotice = clean ? (resumeLive ? "已恢复角色与 Live 播放。" : "已恢复角色，Live 保持原有暂停状态。") :
 					"角色或 Live 恢复未确认；已停止接管，请重新进入场景。";
+				if (clean && rosterExit)
+					core.liveControlNotice = "角色名单已更新，可以重新接管并分配动作。";
+				if (g_hostContext.logInfo) g_hostContext.logInfo(
+					"[GakuMotion][LiveExit] finished scene=%d clean=%d resume_requested=%d actor_clock_restored=%d driver_phase=%d source=%s",
+					requestedScene, int(clean), int(resumeLive), int(clockClean), int(g_liveDriver.State()),
+					rosterExit ? "roster_change" : "manual");
 			}
-			else core.liveControlNotice = "Live 场景或拍照状态已变化，操作未执行。";
+			else
+			{
+				if (exitRequested && g_hostContext.logWarn) g_hostContext.logWarn(
+					"[GakuMotion][LiveExit] blocked scene=%d step=admission current_scene=%d owner_matches=%d active=%d capture_depth=%u",
+					requestedScene, core.liveOwnerScene, int(requestedOwner != 0 && requestedOwner == core.liveOwnerToken),
+					int(core.liveTakeoverActive), static_cast<unsigned>(core.injectionPolicy.Read().captureDepth));
+				core.liveControlNotice = "Live 场景或拍照状态已变化，操作未执行。";
+			}
 			RefreshProtectedContext(true);
 		}
 		LiveWindOverride::Tick(core);
@@ -4289,7 +4661,9 @@ void MotionTick(void*, float)
 			if(!LiveActorClockMvp::SameOwner()&&!LiveActorClockMvp::active){core.liveActorClockFault=false;core.liveActorClockAvailable=false;}
 			const bool mmdWanted=GakuMotion::live_physics_clock::ShouldRun(core.liveTakeoverActive, core.liveTakeoverFault,
 				core.config.secondaryPhysicsBackend, core.player.state==GakuMotion::PlaybackState::Playing,
-				core.player.state==GakuMotion::PlaybackState::Paused, g_burstBridge.HasCaptureInput());
+				core.player.state==GakuMotion::PlaybackState::Paused, g_burstBridge.HasCaptureInput(),
+				OwnsPrimaryMmdClock(core.player.controller.targetActor),
+				core.player.state==GakuMotion::PlaybackState::Preview && core.player.clip.total_frames>0);
 			const bool mmdMatches=reinterpret_cast<void*>(LiveActorClockMvp::actor)==core.player.controller.targetActor;
 			const bool loopContext=LiveActorClockMvp::SameOwner()&&core.liveObservation.confirmed&&core.liveObservation.paused&&
 				std::abs(core.liveObservation.time-core.liveActorClockOrigin)<=0.1f&&core.injectionPolicy.Read().captureDepth==0&&GakuMotion::capture::LiveAutoPhotoIdle();
@@ -4299,7 +4673,7 @@ void MotionTick(void*, float)
 				!core.liveObservation.confirmed || !core.liveObservation.paused || std::abs(core.liveObservation.time-core.liveActorClockOrigin)>0.1f ||
 				core.injectionPolicy.Read().captureDepth!=0 || !GakuMotion::capture::LiveAutoPhotoIdle() || !loopOk)) {
 				RestoreActorClockMvp(loopOk?"stop_or_timeout_or_context":"actor_loop_failed");
-				if(!loopOk){core.liveActorClockFault=true;core.liveActorClockNotice="角色图运行状态异常，独立时钟已停止；请退出接管并重新进入 Live。";}
+			if(!loopOk){core.liveActorClockFault=true;core.liveActorClockNotice="角色图状态或片段恢复未确认，独立时钟已停止；请退出接管并重新进入 Live。";}
 			}
 			else if(!LiveActorClockMvp::active&&((request==1&&requestMatches&&!core.liveTakeoverActive)||mmdWanted)&&
 				!core.liveActorClockFault&&!core.liveTakeoverFault&&core.injectionPolicy.Read().captureDepth==0&&
@@ -4315,13 +4689,21 @@ void MotionTick(void*, float)
 					LiveActorClockMvp::offered&&(mmdWanted||LiveActorClockMvp::CaptureLoop(now,core.liveObservation.duration-core.liveObservation.time));
 				const bool started=prepared&&LiveActorClockMvp::Start(now,mmdWanted);
 				core.liveActorClockActive=LiveActorClockMvp::active;
-				core.liveActorClockNotice=started?(mmdWanted?"MMD 角色图连续运行，不进行角色图回绕；舞台保持暂停。":"角色图使用 Unity 时钟运行中（最多 3 秒），接近结尾会仅循环角色图。"):"角色图归属或所需接口未就绪，未启动独立时钟。";
+				if (!started) core.liveActorClockNotice = "角色图归属或启动未确认，独立时钟未启动。";
+				else if (!mmdWanted) core.liveActorClockNotice = "角色图使用 Unity 时钟运行中（最多 3 秒），接近结尾会仅循环角色图。";
+				else core.liveActorClockNotice = LiveActorClockMvp::clipEnd.ClipCount()
+					? "原 Live 动画停在片段末尾，原生物理时钟运行中。"
+					: "原生物理兼容模式，原 Live 动画未停在末尾。";
 				if(started)RecordActorClockPhysics(true,now);
 				// Failed preparation must not be retried every tick without a user action.
 				if(!started&&LiveActorClockMvp::active)RestoreActorClockMvp("partial_start");
 				if(!started&&mmdWanted)core.liveActorClockFault=true;
 				if(g_hostContext.logInfo)g_hostContext.logInfo("[GakuMotion][ActorClockMVP] start=%d origin=%.3f",int(started),core.liveActorClockOrigin);
 				if(g_hostContext.logInfo)g_hostContext.logInfo("[GakuMotion][ActorClockLoop] mmd=%d prepared=%d nodes=%zu window=%.3f error=%s",int(mmdWanted),int(prepared),LiveActorClockMvp::nodes.size(),LiveActorClockMvp::loopWindow,LiveActorClockMvp::loopError?LiveActorClockMvp::loopError:"none");
+				if(started && mmdWanted && g_hostContext.logInfo)
+					g_hostContext.logInfo("[GakuMotion][LiveActorClipEnd] slot=1 mode=%s parked_clips=%zu outputs=%u",
+						LiveActorClockMvp::clipEnd.ClipCount() ? "past_last_frame" : "native_compatibility",
+						LiveActorClockMvp::clipEnd.ClipCount(), LiveActorClockMvp::verifiedOutputs);
 			}
 			if(LiveActorClockMvp::active&&now>=g_clockNextLog)RecordActorClockPhysics(false,now);
 			// Each bound follower must own an independently verified animation
@@ -4348,7 +4730,9 @@ void MotionTick(void*, float)
                 const bool prepared = clock.offered && clock.SameOwner() && clock.actor == reinterpret_cast<uintptr_t>(actor) && !samePrimary && !sameOther;
                 const bool started = prepared && clock.Start(now, true);
                 if (!started && clock.active && !RestoreFollowerClock(index)) core.ensembleRestoreUnconfirmed = true;
-                if (g_hostContext.logInfo) g_hostContext.logInfo("[GakuMotion][FollowerClock] slot=%zu prepared=%d started=%d same_primary=%d same_other=%d", index + 2, int(prepared), int(started), int(samePrimary), int(sameOther));
+                if (g_hostContext.logInfo) g_hostContext.logInfo("[GakuMotion][FollowerClock] slot=%zu prepared=%d started=%d same_primary=%d same_other=%d parked_clips=%zu error=%s",
+                    index + 2, int(prepared), int(started), int(samePrimary), int(sameOther), clock.clipEnd.ClipCount(),
+                    clock.loopError ? clock.loopError : "none");
             }
 		}
 		if (core.liveLoopEnabled && (core.liveLoopOwner != core.liveOwnerToken || core.liveLoopScene != core.liveOwnerScene || !core.liveViewingConfirmed))
@@ -4456,7 +4840,7 @@ extern "C" GAKU_PLUGIN_EXPORT GakuStatus GakuPlugin_Query(
 	if (!output) return GAKU_E_INVALID_ARGUMENT;
 	if (outputSize < sizeof(GakuPluginDescriptor)) return GAKU_E_SIZE;
 	const GakuPluginDescriptor descriptor{GAKU_ABI_VERSION, sizeof(GakuPluginDescriptor),
-		"gakumotion", "GakuMotion", "0.1.1",
+		"gakumotion", "GakuMotion", "0.1.1+fork.4.1",
 		MotionActivate, MotionRuntimeReady, MotionTick, MotionActorTick,
 		RenderGmlMotion, MotionShutdown};
 	*output = descriptor;

@@ -657,6 +657,9 @@ namespace GakuMotion
 			LibraryEntry e;
 			e.id = m.name;
 			e.title = m.title.empty() ? m.name : m.title;
+            e.sourceVmd = m.sourceVmd;
+            e.libraryFolder = !m.libraryFolder.empty() ? m.libraryFolder : (m.sourceVmd.empty()?std::string{}:MotionPathToUtf8(MotionPathFromUtf8(m.sourceVmd).parent_path()));
+            e.externalFolder=m.externalFolder;
 			e.durationSeconds = m.durationSeconds;
 			e.totalFrames = m.totalFrames;
 			e.boneCount = m.boneCount;
@@ -1197,7 +1200,10 @@ namespace GakuMotion
 		{
 			if (!pickedFiles.empty())
 			{
-				if (pickedSlot == -1)
+                if (pickedSlot == -5) {
+                    if (ctx.fnAddLibraryFolder) ctx.fnAddLibraryFolder(ctx.self, pickedFiles.front().c_str());
+                }
+				else if (pickedSlot == -1)
 				{
 					if (g_libraryModal.isOpen)
 						g_libraryModal.AppendFiles(pickedFiles);
@@ -1278,13 +1284,18 @@ namespace GakuMotion
 		ImGui::EndDisabled();
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("选择 .vmd 动作/表情/镜头或音频文件添加到曲库");
+        ContinueToolbar("添加文件夹", 110);
+        ImGui::BeginDisabled(g_asyncFileDialog.IsBusy() || !ctx.fnAddLibraryFolder);
+        if (GuiIcons::Button("添加文件夹", GuiIcons::Icon::Folder, ImVec2(110, 26))) g_asyncFileDialog.OpenFolder();
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("扫描文件夹及子文件夹，未编译的动作在后台转换到 Motion 曲库，原文件保持不变");
 
 		ContinueToolbar("管理选中", 85);
 
 		const bool hasSelection = (overlay.selectedLibraryIndex >= 0 &&
 		                           overlay.selectedLibraryIndex < static_cast<int>(overlay.libraryEntries.size()));
 
-		ImGui::BeginDisabled(!hasSelection || ctx.importBusy || ctx.libraryRefreshing);
+		ImGui::BeginDisabled(!hasSelection || ctx.importBusy || ctx.libraryRefreshing || (hasSelection && overlay.libraryEntries[overlay.selectedLibraryIndex].externalFolder));
 		if (GuiIcons::Button("管理选中", GuiIcons::Icon::Edit, ImVec2(85, 26)))
 		{
 			if (hasSelection)
@@ -1303,6 +1314,55 @@ namespace GakuMotion
 		ImGui::EndDisabled();
 		overlay.DrawMotionDeleteConfirmation(ctx);
 
+        std::vector<std::string> folders=ctx.folderLibraryRoots;
+        for (const auto& entry : overlay.libraryEntries) {
+            if (entry.libraryFolder.empty()) continue;
+            const auto& parent=entry.libraryFolder;
+            if (!parent.empty() && std::none_of(folders.begin(),folders.end(),[&](const auto& x){return MotionPathEqualsUtf8(x,parent);})) folders.push_back(parent);
+        }
+        // Keep registered roots and every intermediate directory navigable.
+        const auto leaves=folders;
+        for(const auto& leaf:leaves) for(const auto& root:ctx.folderLibraryRoots) {
+            if(!FolderIsWithin(MotionPathFromUtf8(leaf),root)) continue;
+            auto p=MotionPathFromUtf8(leaf).parent_path();
+            while(!p.empty() && FolderIsWithin(p,root) && !MotionPathEqualsUtf8(MotionPathToUtf8(p),root)) {
+                const auto value=MotionPathToUtf8(p);
+                if(std::none_of(folders.begin(),folders.end(),[&](const auto& x){return MotionPathEqualsUtf8(x,value);})) folders.push_back(value);
+                const auto next=p.parent_path(); if(next==p)break; p=next;
+            }
+        }
+        std::sort(folders.begin(),folders.end());
+        const auto selectedFolderLabel=overlay.libraryFolderFilter.empty()?std::string("所有文件夹"):
+            MotionPathToUtf8(MotionPathFromUtf8(overlay.libraryFolderFilter).filename());
+        ImGui::SetNextItemWidth((std::min)(400.0f,ImGui::GetContentRegionAvail().x));
+        if (ImGui::BeginCombo("文件夹", selectedFolderLabel.empty()?overlay.libraryFolderFilter.c_str():selectedFolderLabel.c_str())) {
+            if (ImGui::Selectable("所有文件夹",overlay.libraryFolderFilter.empty())) overlay.libraryFolderFilter.clear();
+            for(const auto& folder:folders) {
+                int depth=0;
+                for(const auto& root:ctx.folderLibraryRoots) if(FolderIsWithin(MotionPathFromUtf8(folder),root)) {
+                    auto p=MotionPathFromUtf8(folder);
+                    while(!MotionPathEqualsUtf8(MotionPathToUtf8(p),root) && p.has_parent_path() && depth<12) {p=p.parent_path();++depth;}
+                    break;
+                }
+                const auto name=MotionPathToUtf8(MotionPathFromUtf8(folder).filename());
+                const auto label=(name.empty()?folder:name)+"##folder_"+folder;
+                if(depth) ImGui::Indent(14.0f*depth);
+                if(ImGui::Selectable(label.c_str(),MotionPathEqualsUtf8(folder,overlay.libraryFolderFilter))) overlay.libraryFolderFilter=folder;
+                if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s",folder.c_str());
+                if(depth) ImGui::Unindent(14.0f*depth);
+            }
+            ImGui::EndCombo();
+        }
+        const bool registeredFolder=std::any_of(ctx.folderLibraryRoots.begin(),ctx.folderLibraryRoots.end(),[&](const auto& root){return MotionPathEqualsUtf8(root,overlay.libraryFolderFilter);});
+        GuiIcons::SameLineIfRoom("移除文件夹", ImVec2(115, 0));
+        ImGui::BeginDisabled(!registeredFolder || !ctx.fnRemoveLibraryFolder);
+        if (ImGui::Button("移除文件夹")) {ctx.fnRemoveLibraryFolder(ctx.self,overlay.libraryFolderFilter.c_str());overlay.libraryFolderFilter.clear();}
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("仅移除文件夹来源，原文件和已有转换缓存均保留");
+        if (!ctx.folderLibraryNotice.empty()) {
+            GuiIcons::SameLineIfRoom("状态", ImVec2(180, 0));
+            ImGui::TextDisabled("%s",ctx.folderLibraryNotice.c_str());
+        }
 		// 搜索独占一行，避免窄窗口把操作按钮挤出内容区域。
 		overlay.libraryFilter.Draw("搜索曲目", (std::max)(80.0f, ImGui::GetContentRegionAvail().x - 75.0f));
 		if (ImGui::IsItemHovered() && overlay.libraryFilter.InputBuf[0] == '\0')
@@ -1312,16 +1372,13 @@ namespace GakuMotion
 			ContinueToolbar("清空", 55);
 			if (ImGui::Button("清空")) overlay.libraryFilter.Clear();
 		}
-		if (hasSelection)
-		{
-			const auto& selected = overlay.libraryEntries[overlay.selectedLibraryIndex];
-			ImGui::TextWrapped("选中：%s", selected.title.c_str());
-			ImGui::BeginDisabled(ctx.importBusy || ctx.libraryRefreshing || !ctx.fnSelectMotion);
-			if (GuiIcons::Button("加载预览", GuiIcons::Icon::Preview)) ctx.fnSelectMotion(ctx.self, overlay.selectedLibraryIndex, false);
-			ContinueToolbar("播放选中", 85);
-			if (GuiIcons::Button("播放选中", GuiIcons::Icon::Play)) ctx.fnSelectMotion(ctx.self, overlay.selectedLibraryIndex, true);
-			ImGui::EndDisabled();
-		}
+        ImGui::BeginDisabled(!hasSelection || ctx.importBusy || ctx.libraryRefreshing || !ctx.fnSelectMotion);
+        if (GuiIcons::Button("加载预览", GuiIcons::Icon::Preview)) ctx.fnSelectMotion(ctx.self, overlay.selectedLibraryIndex, false);
+        ContinueToolbar("播放选中", 85);
+        if (GuiIcons::Button("播放选中", GuiIcons::Icon::Play)) ctx.fnSelectMotion(ctx.self, overlay.selectedLibraryIndex, true);
+        ImGui::EndDisabled();
+        GuiIcons::SameLineIfRoom("当前选中", ImVec2(130, 0));
+        ImGui::TextUnformatted(hasSelection ? overlay.libraryEntries[overlay.selectedLibraryIndex].title.c_str() : "尚未选择曲目");
 
 		ImGui::Spacing();
 		ImGui::Separator();
@@ -1338,7 +1395,8 @@ namespace GakuMotion
 		for (size_t i = 0; i < overlay.libraryEntries.size(); ++i)
 		{
 			const auto& entry = overlay.libraryEntries[i];
-			if (overlay.libraryFilter.PassFilter(entry.title.c_str()) || overlay.libraryFilter.PassFilter(entry.id.c_str()))
+            const bool folderMatch = overlay.libraryFolderFilter.empty() || (!entry.libraryFolder.empty() && MotionPathEqualsUtf8(entry.libraryFolder, overlay.libraryFolderFilter));
+			if (folderMatch && (overlay.libraryFilter.PassFilter(entry.title.c_str()) || overlay.libraryFilter.PassFilter(entry.id.c_str())))
 				visibleIndices.push_back(static_cast<int>(i));
 		}
 		ImGui::TextDisabled("显示 %zu / %zu 个曲目", visibleIndices.size(), overlay.libraryEntries.size());

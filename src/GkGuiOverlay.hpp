@@ -20,6 +20,7 @@
 #include "GkTransportTime.hpp"
 #include "GkLookAtManager.hpp"
 #include "GkRuntimeConfig.hpp"
+#include "GkFolderLibrary.hpp"
 #include "GkBoneOverride.hpp"
 #include "GkPlaylist.hpp"
 #include "GkSoleMeasurement.hpp"
@@ -127,12 +128,20 @@ namespace GakuMotion
 		const BoneOverrideSet* overrides{nullptr};
 		bool* masterOverridesEnabled{nullptr};
 		const int* selectedMotionIndex{nullptr};
+        std::vector<std::string> folderLibraryRoots;
+        std::string folderLibraryNotice;
+        void (*fnAddLibraryFolder)(void*, const char*){nullptr};
+        void (*fnRemoveLibraryFolder)(void*, const char*){nullptr};
 		std::string statusLine;
 		int physicsBackend{2}; // Published selection, not the render thread's config.
+		CostumeCaptureStatus costumeCaptureStatus{};
+		void (*fnCaptureCostumePhysics)(void*){};
 		PhysicsMonitor physicsMonitor{};
 		bool physicsMonitorFresh{false};
 		bool physicsGraphCurrent{false};
 		bool physicsLiveObservationCurrent{false};
+		bool placementResetExperiment{true};
+		void (*fnSetPlacementResetExperiment)(void*, bool){nullptr};
 		bool beforeQuartzExperiment{true};
 		void (*fnSetBeforeQuartzExperiment)(void*, bool){nullptr};
 		bool experimentalWaistSupport{true};
@@ -202,16 +211,19 @@ namespace GakuMotion
 		void (*fnSetSceneArm)(void*, uint64_t, uint64_t, int, float){nullptr};
 		uint64_t actorRosterEpoch{0};
 		void (*fnSelectTargetActor)(void*, uint64_t token, uint64_t epoch){nullptr};
-		void (*fnSetMicrophoneHidden)(void*, uint64_t token, uint64_t epoch, bool hidden){nullptr};
 		void (*fnSetActorModelHidden)(void*, uint64_t token, uint64_t epoch, bool hidden){nullptr};
+		bool actorPropsEditable{false};
 		std::vector<GuiActorProp> actorProps;
 		void (*fnSetActorPropHidden)(void*, uint64_t, uint64_t, const char*, bool){nullptr};
 		void (*fnClearTargetActor)(void* self){nullptr}; // Legacy developer callback: reselect bound/first actor
 		void (*fnNextTargetActor)(void* self){nullptr}; // Legacy developer callback: cycle current actors
 		void (*fnPickFocusedActor)(void* self){nullptr}; // Legacy developer callback: select bound actor
 		std::vector<GuiEnsembleFollower> ensembleFollowers;
+        uint64_t ensembleAutoGeneration{0};
+        std::vector<uint64_t> ensembleAutoActors;
 		std::string ensembleNotice;
 		void (*fnAlignEnsemble)(void*){nullptr};
+        void (*fnAutoAssignEnsemble)(void*){nullptr};
 		std::vector<std::string> ensemblePresetNames;
 		std::string ensemblePresetNotice;
 		void (*fnSaveEnsemblePreset)(void*, const char*){nullptr};
@@ -288,6 +300,7 @@ namespace GakuMotion
 		GuiPage activePage{GuiPage::Library};
 		bool developerMode{false};
 		std::vector<LibraryEntry> libraryEntries;
+        std::string libraryFolderFilter;
 		int selectedLibraryIndex{0};
 		float initialRotationEdit[3]{0.0f, 0.0f, 0.0f};
 		float cameraBaseRotation[3]{0.0f, 0.0f, 0.0f};
@@ -353,8 +366,10 @@ namespace GakuMotion
 		uint64_t armCalibrationToken{0};
 		uint64_t armCalibrationEpoch{0};
 		char ensemblePresetName[128] = "默认队形";
-		uint64_t ensembleDraftEpoch{0};
+		uint64_t ensembleDraftEpoch{0}, ensembleSeenAutoGeneration{0};
 		size_t ensembleVisibleSlots{0};
+		std::vector<bool> ensembleHiddenSlots, ensembleRemovePending;
+		std::vector<unsigned> ensembleRemoveFrames;
 		std::vector<uint64_t> ensembleDraftActor;
 		std::vector<std::string> ensembleDraftMotion;
 		std::vector<float> ensembleDraftOffset;
@@ -470,7 +485,7 @@ namespace GakuMotion
                             ImGui::EndDisabled();
                             bool continuousArmDiagnostics = ctx.liveContinuousArmDiagnostics;
                             ImGui::BeginDisabled(!ctx.fnSetContinuousArmDiagnostics);
-                            if (ImGui::Checkbox("连续记录手臂诊断（影响性能）", &continuousArmDiagnostics) && ctx.fnSetContinuousArmDiagnostics)
+                            if (ImGui::Checkbox("连续记录手臂与服装骨（影响性能）", &continuousArmDiagnostics) && ctx.fnSetContinuousArmDiagnostics)
                                 ctx.fnSetContinuousArmDiagnostics(ctx.self, continuousArmDiagnostics);
                             ImGui::EndDisabled();
                             ImGui::BeginDisabled(!ctx.fnActorClockTrial||ctx.liveTakeoverActive||(!ctx.liveActorClockActive&&(!ctx.liveActorClockAvailable||!ctx.livePaused)));
@@ -527,7 +542,8 @@ namespace GakuMotion
                             }
                             if(!ctx.liveAudioNotice.empty())ImGui::TextWrapped("%s",ctx.liveAudioNotice.c_str());
                             ImGui::Spacing();
-                            const char* physics=!ctx.physicsMonitorFresh?"待播放":ctx.physicsMonitor.actual==2?"原生运行中":ctx.physicsMonitor.actual==1?"内建物理":"未运行";
+                            const char* physics=!ctx.physicsMonitorFresh?"待播放":ctx.physicsMonitor.actual==2?"原生运行中":ctx.physicsMonitor.actual==1?"内建物理":
+                                ctx.physicsMonitor.requested==2?"等待原生任务":"未运行";
                             ImGui::TextWrapped("接管：%s    Live：%s    物理：%s",ctx.liveTakeoverAvailable?"可用":"等待确认",ctx.liveViewingConfirmed?"已识别":"等待确认",physics);
                             ImGui::Spacing();
                             ImGui::BeginDisabled(!ctx.liveTakeoverAvailable||!ctx.fnSetLiveTakeover);
@@ -538,6 +554,7 @@ namespace GakuMotion
                             if(!ctx.liveTakeoverActive){ ImGui::SameLine(); ImGui::BeginDisabled(); ImGui::Button("恢复 Live"); ImGui::EndDisabled(); }
                             if(ctx.liveTakeoverActive&&ImGui::Button("进入 MMD 页面")){livePageOpen=false;activePage=GuiPage::Library;}
                             ImGui::TextDisabled(ctx.liveTakeoverActive?"退出后恢复原先 Live 状态。":"启动后暂停舞台并进入 MMD 曲库。");
+                            ImGui::TextWrapped("如果 MMD 播放出现物理运算异常，请退出 Live 接管并重新接入，重置物理状态。");
                             if(!ctx.liveControlNotice.empty())ImGui::TextWrapped("%s",ctx.liveControlNotice.c_str());
                             if(!ctx.liveTakeoverAvailable)ImGui::TextWrapped("等待角色、拍照保护和 Live 状态就绪。");
                             ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing();

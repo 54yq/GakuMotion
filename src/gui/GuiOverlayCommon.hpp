@@ -25,6 +25,10 @@
 #include <windows.h>
 #include <commdlg.h>
 #include <objbase.h>
+#include <shlobj.h>
+#ifdef _MSC_VER
+#pragma comment(lib, "shell32.lib")
+#endif
 #undef near
 #undef far
 
@@ -55,6 +59,8 @@ namespace GakuMotion
 	{
 		std::string id;            // 唯一标识（如文件夹名）
 		std::string title;         // 显示标题
+        std::string sourceVmd, libraryFolder;
+        bool externalFolder{false};
 		std::string motionFile;    // 动作文件（.vmd, .gkmotion, .gkclip）
 		std::string facialFile;    // 表情文件（.vmd 等）
 		std::string cameraFile;    // 镜头文件（.vmd, .gkcamera）
@@ -461,6 +467,23 @@ namespace GakuMotion
 
 			return true;
 		}
+
+        bool OpenFolder(int slot = -5, HWND owner = nullptr)
+        {
+            if (isRunning.load()) return false;
+            if (worker.joinable()) worker.join();
+            targetSlot=slot; ownerHwnd=owner; hasCompleted=false; pickedFiles.clear(); isRunning.store(true);
+            worker=std::thread([this] {
+                HRESULT hr=CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);
+                BROWSEINFOW info{}; info.hwndOwner=ownerHwnd; info.lpszTitle=L"选择动作文件夹";
+                info.ulFlags=BIF_RETURNONLYFSDIRS|BIF_NEWDIALOGSTYLE;
+                auto* item=SHBrowseForFolderW(&info); std::vector<std::string> result;
+                if(item) { wchar_t path[32768]{}; if(SHGetPathFromIDListW(item,path)) result.push_back(WideToUtf8(path)); CoTaskMemFree(item); }
+                { std::lock_guard<std::mutex> lock(dataMutex); pickedFiles=std::move(result); hasCompleted=true; }
+                if(SUCCEEDED(hr)) CoUninitialize(); isRunning.store(false);
+            });
+            return true;
+        }
 
 		bool Poll(std::vector<std::string>& outFiles, int& outSlot)
 		{

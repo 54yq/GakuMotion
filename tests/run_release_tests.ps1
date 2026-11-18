@@ -22,7 +22,8 @@ param(
     [string]$KineTextureInclude = '',
     [string]$VisualStudioPath = '',
     [string]$WindowsSdkRoot = '',
-    [string]$OutputRoot = ''
+    [string]$OutputRoot = '',
+    [string]$FixtureRoot = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -122,7 +123,8 @@ Write-Host "=== [1/3] Build and run offline unit tests (MSVC) ===" -ForegroundCo
 if ($LASTEXITCODE -ne 0) { throw "Unit test build failed (exit=$LASTEXITCODE)" }
 Write-Host "  built: $testExe" -ForegroundColor Green
 
-& $testExe $RepoRoot
+if ([string]::IsNullOrWhiteSpace($FixtureRoot)) { $FixtureRoot = $RepoRoot }
+& $testExe $FixtureRoot
 $testExit = $LASTEXITCODE
 if ($testExit -ne 0) {
     Write-Host "Unit tests FAILED (exit=$testExit)" -ForegroundColor Red

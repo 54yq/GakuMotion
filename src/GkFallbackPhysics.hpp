@@ -4,6 +4,8 @@
 #include <cctype>
 #include <unordered_set>
 #include <sstream>
+#include <array>
+#include <string_view>
 
 namespace GakuMotion
 {
@@ -35,6 +37,43 @@ namespace GakuMotion
 			float inputMaxDeltaDegrees{}, inputMeanDeltaDegrees{};
 		};
 
+		struct CostumeSample
+		{
+			std::string_view bone;
+			Quaternion rest{}, input{}, parent{}, output{};
+			Vector3 anchor{}, acceleration{}, velocity{};
+			float length{}, anchorDelta{-1.f}, parentDelta{-1.f}, inputDelta{-1.f}, outputDelta{};
+			bool inputKnown{};
+		};
+
+		struct CostumeFrame
+		{
+			enum Peak { Anchor, Parent, External, Acceleration, Speed, Output, PeakCount };
+			std::array<CostumeSample, PeakCount> peaks{};
+			std::array<float, PeakCount> maxima{-1.f, -1.f, -1.f, -1.f, -1.f, -1.f};
+			float spring{}, damping{}, gravity{}, coneDegrees{};
+			unsigned garments{}, solved{}, invalid{}, initialResets{}, poseResets{}, angleClamps{}, speedClamps{}, substeps{};
+			bool rebound{}, timeReset{};
+
+			void Record(const CostumeSample& sample, float acceleration, float speed)
+			{
+				const std::array<float, PeakCount> scores{sample.anchorDelta, sample.parentDelta, sample.inputDelta,
+					acceleration, speed, sample.outputDelta};
+				for (size_t i = 0; i < scores.size(); ++i)
+					if (std::isfinite(scores[i]) && scores[i] > maxima[i])
+						{ maxima[i] = scores[i]; peaks[i] = sample; }
+			}
+		};
+
+		// Callback views refer to the active solver's names and are consumed
+		// before any rebind or destruction.
+		template<class Visit>
+		void VisitCostumeRest(Visit&& visit) const
+		{
+			for (const Bone& bone : bones_)
+				if (bone.garment) visit(bone.name, bone.length, bone.axis, bone.rest);
+		}
+
 		FallbackPhysics() = default;
 
 		explicit FallbackPhysics(Settings settings) : settings_(settings)
@@ -63,6 +102,11 @@ namespace GakuMotion
 			return false;
 		}
 
+		static bool IsGarmentBone(const std::string& name)
+		{
+			return EndsWith(name, "_S") && CostumeName(name, true);
+		}
+
 		// No dereferences: safe after the old Unity objects have been destroyed.
 		void Clear() noexcept
 		{
@@ -73,15 +117,41 @@ namespace GakuMotion
 			stats_.boundBones = stats_.solvedBones = 0;
 		}
 
-		// Optional live-object cleanup before switching modes/Stop. Never use it
-		// after scene destruction; Clear is the lifecycle escape hatch then.
-		void Restore(const IdolController& controller)
+		struct NativeHandoff
 		{
-			if (controller.fnSetLocalRotation)
+			size_t restored{}, preserved{}, unreadable{};
+		};
+
+		NativeHandoff ReleaseToNative(const IdolBoneBinding& binding, const IdolController& controller)
+		{
+			NativeHandoff result;
+			if (SameBinding(binding) && controller.CanDriveActor(binding.actor))
 			{
-				for (const Bone& b : bones_) Write(controller, b.transform, b.rest);
+				for (const Bone& b : bones_)
+				{
+					if (!b.written) continue;
+					Quaternion current;
+					if (!controller.fnGetLocalRotation ||
+						!CaptureRotation(controller.fnGetLocalRotation, b.transform, current))
+					{
+						++result.unreadable;
+						continue;
+					}
+					// The game can already have published this frame's output
+					// before we receive confirmation of native ownership.
+					if (1.f - std::fabs(Quaternion::Dot(current, b.lastWritten)) > 1e-6f)
+					{
+						++result.preserved;
+						continue;
+					}
+					if (!controller.fnSetLocalRotation || !CaptureWrite(controller, b.transform, b.rest))
+						++result.unreadable;
+					else
+						++result.restored;
+				}
 			}
 			Clear();
+			return result;
 		}
 
 		bool RestoreForCapture(const IdolController& controller)
@@ -106,7 +176,7 @@ namespace GakuMotion
 		}
 
 		bool Publish(const IdolBoneBinding& binding, const IdolController& controller,
-		             float dt, int frame)
+		             float dt, int frame, CostumeFrame* costume = nullptr)
 		{
 			if (frame >= 0 && frame == lastFrame_ && SameBinding(binding)) return false;
 			const auto start = std::chrono::steady_clock::now();
@@ -120,7 +190,9 @@ namespace GakuMotion
 				Clear();
 				return Finish(start);
 			}
-			if (!SameBinding(binding)) Bind(binding, controller);
+			const bool rebound = !SameBinding(binding);
+			if (rebound) Bind(binding, controller);
+			if (costume) costume->rebound = rebound;
 			lastFrame_ = frame;
 			if (bones_.empty()) return Finish(start);
 
@@ -134,11 +206,26 @@ namespace GakuMotion
 			const float damping = FiniteSetting(settings_.damping, 18.f, 0.f, 50.f);
 			const float gravity = FiniteSetting(settings_.gravity, .6f, 0.f, 20.f);
 			const float cone = FiniteSetting(settings_.maxSwingDegrees, 25.f, 0.f, 80.f) * kRadians;
+			if (costume)
+			{
+				costume->spring = stiffness;
+				costume->damping = damping;
+				costume->gravity = gravity;
+				costume->coneDegrees = cone / kRadians;
+				costume->timeReset = reset;
+				costume->substeps = reset ? 0u : steps;
+			}
 			bool resetFrame = reset;
 			for (Bone& b : bones_)
 			{
+				auto* trace = b.garment ? costume : nullptr;
+				if (trace) ++trace->garments;
+				CostumeSample sample;
 				Quaternion observed;
-				if (stats_.inputCompared < 32 && b.written && Rotation(controller.fnGetLocalRotation, b.transform, observed))
+				const bool compare = stats_.inputCompared < 32 && b.written;
+				const bool localKnown = (trace || compare) &&
+					Rotation(controller.fnGetLocalRotation, b.transform, observed);
+				if (compare && localKnown)
 				{
 					const float delta = RotationAngle(observed, b.lastWritten) / kRadians;
 					if (std::isfinite(delta))
@@ -155,6 +242,7 @@ namespace GakuMotion
 					!Rotation(controller.fnGetWorldRotation, b.parent, parent))
 				{
 					++stats_.invalidSamples;
+					if (trace) ++trace->invalid;
 					b.initialized = false;
 					continue;
 				}
@@ -164,6 +252,25 @@ namespace GakuMotion
 				const bool teleport = b.initialized &&
 				(Length(anchor - b.anchor) > (std::max)(.20f, 3.f * b.length) ||
 					RotationAngle(base, b.base) > 75.f * kRadians);
+				if (trace)
+				{
+					sample.bone = b.name;
+					sample.rest = b.rest;
+					sample.input = observed;
+					sample.inputKnown = localKnown;
+					sample.parent = parent;
+					sample.anchor = anchor;
+					sample.length = b.length;
+					if (b.initialized)
+					{
+						sample.anchorDelta = Length(anchor - b.anchor);
+						sample.parentDelta = RotationAngle(base, b.base) / kRadians;
+					}
+					if (localKnown && b.written) sample.inputDelta = RotationAngle(observed, b.lastWritten) / kRadians;
+					if (!b.initialized) ++trace->initialResets;
+					if (teleport) ++trace->poseResets;
+				}
+				float peakAcceleration = reset || !b.initialized || teleport ? -1.f : 0.f;
 				if (!b.initialized || reset || teleport)
 				{
 					b.tip = restTip;
@@ -176,6 +283,15 @@ namespace GakuMotion
 					for (unsigned n = 0; n < steps; ++n)
 					{
 						const Vector3 force = Scale(restTip - b.tip, stiffness) + Vector3(0, -gravity, 0);
+						if (trace)
+						{
+							const float magnitude = Length(force);
+							if (magnitude > peakAcceleration)
+							{
+								peakAcceleration = magnitude;
+								sample.acceleration = force;
+							}
+						}
 						b.velocity = Scale(b.velocity + Scale(force, h), std::exp(-damping * h));
 						const Vector3 oldTip = b.tip;
 						Vector3 direction = Unit(b.tip + Scale(b.velocity, h) - anchor, restDirection);
@@ -186,6 +302,7 @@ namespace GakuMotion
 							swing = Quaternion::Slerp(Quaternion::Identity(), swing, cone / angle);
 							direction = swing.Rotate(restDirection);
 							++stats_.clamps;
+							if (trace) ++trace->angleClamps;
 						}
 						b.tip = anchor + Scale(direction, b.length);
 						b.velocity = Scale(b.tip - oldTip, 1.f / h);
@@ -197,6 +314,7 @@ namespace GakuMotion
 						{
 							b.velocity = Scale(b.velocity, maxSpeed / speed);
 							++stats_.clamps;
+							if (trace) ++trace->speedClamps;
 						}
 					}
 				}
@@ -210,10 +328,19 @@ namespace GakuMotion
 					b.lastWritten = local;
 					b.written = true;
 					++stats_.solvedBones;
+					if (trace)
+					{
+						++trace->solved;
+						sample.output = local;
+						sample.outputDelta = RotationAngle(local, b.rest) / kRadians;
+						sample.velocity = b.velocity;
+						trace->Record(sample, peakAcceleration, Length(b.velocity));
+					}
 				}
 				else
 				{
 					++stats_.invalidSamples;
+					if (trace) ++trace->invalid;
 					b.initialized = false;
 				}
 			}
@@ -234,6 +361,7 @@ namespace GakuMotion
 			Vector3 axis{}, tip{}, velocity{}, anchor{};
 			float length{};
 			bool initialized{}, written{};
+			bool garment{};
 		};
 
 		Settings settings_{};
@@ -355,12 +483,12 @@ namespace GakuMotion
 			return name.size() >= n && name.compare(name.size() - n, n, suffix) == 0;
 		}
 
-		static bool CostumeName(std::string name)
+		static bool CostumeName(std::string name, bool garmentOnly = false)
 		{
 			for (char& c : name) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-			for (const char* token : {"hair", "skirt", "jacket", "belt", "sleeve", "cloth", "dress", "coat", "ribbon"})
+			for (const char* token : {"skirt", "jacket", "belt", "sleeve", "cloth", "dress", "coat", "ribbon"})
 				if (name.find(token) != std::string::npos) return true;
-			return false;
+			return !garmentOnly && name.find("hair") != std::string::npos;
 		}
 
 		bool SameBinding(const IdolBoneBinding& b) const
@@ -428,6 +556,7 @@ namespace GakuMotion
 					}
 					Bone b;
 					b.name = name;
+					b.garment = IsGarmentBone(name);
 					b.transform = e.t;
 					b.parent = e.parent;
 					Quaternion world;
