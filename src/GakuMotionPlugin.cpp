@@ -1560,7 +1560,9 @@ static void ResetPlacementDynamicBone(void* actor)
 		return ok;
 	}
 #include "GkLiveAnimatorProbe.hpp"
+#ifdef GKMOTION_ENABLE_SHOE_MESH_PROBE
 #include "GkShoeMeshProbe.hpp"
+#endif
 
 #include "GkStageRuntime.hpp"
 #include "GkLiveLetterboxProbe.hpp"
@@ -1583,7 +1585,6 @@ static void ResetPlacementDynamicBone(void* actor)
 			GakuMotion::host::mainThread.isMainThread(GakuMotion::host::mainThread.context);
 	}
 
-#include "GkLiveSleeveProbe.hpp"
 #include "GkSceneOwnerRuntime.hpp"
 #include "GkStageLoadOverride.hpp"
 #include "GkPageObservation.hpp"
@@ -2370,8 +2371,6 @@ bool InitializeMotion()
 	core.fnLogWarn = g_hostCaps.hasLogWarn ? g_hostContext.logWarn : nullptr;
 	core.fnNotifyMotionPlaying = NotifyHostMotionPlaying;
 	core.fnReadFormationOrigin = GakuMotion::csharp_import::ReadFormationOrigin;
-	core.fnObserveLivePlacement = LiveSleeveProbe::Placement;
-	core.fnObserveLiveBinding = LiveSleeveProbe::Binding;
 	core.fnStartImport = StartMotionImport;
 	core.fnPollImport = PollMotionImport;
 	core.fnPollImportProgress = PollMotionImportWithProgress;
@@ -2383,7 +2382,6 @@ bool InitializeMotion()
 
 	// Bind audio helpers to player
 	auto& player = core.player;
-	player.fnObserveTimeline = LiveSleeveProbe::BeforeTimeline;
 	player.fnPlayAudio = HelperAudioPlay;
 	player.fnPauseAudio = HelperAudioPause;
 	player.fnStopAudio = HelperAudioStop;
@@ -3485,10 +3483,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 		core.IsTargetActor(activeActor) && player.state == GakuMotion::PlaybackState::Playing)
 		LiveAnimatorProbe::SamplePhotography(activeActor);
 	StageLoader::BindContext(sceneHandle, activeActor);
-	LiveSleeveProbe::Frame(core, unityFrame >= 0 ? unityFrame : s_fallbackFrame);
 	if (isNewPhysicalFrame) core.ProcessPendingGuiCommands();
-	LiveSleeveProbe::ObserveOpening(core, activeActor, false, false);
-	LiveSleeveProbe::Actor(core, activeActor, false);
 	void* anim = g_motionSceneAllowed && player.state != GakuMotion::PlaybackState::Stopped
 		             ? HelperGetActorAnimator(activeActor)
 		             : nullptr;
@@ -3738,20 +3733,6 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	if (player.controller.targetActor)
 		GakuMotion::OnLateUpdate(activeActor, anim, nullptr, dtToPass, isNewPhysicalFrame,
 		                        s_cameraFrameDelta, s_cameraPhysicalFrame);
-	bool sleeveBodyWritten = false;
-	if (core.liveTakeoverActive && core.config.secondaryPhysicsBackend == 2) {
-		const auto* afterBody = ActorGroundShadow::PlayerForActor(activeActor);
-		sleeveBodyWritten = afterBody && afterBody == posePlayer &&
-			afterBody->controller.footPoseWriteStamp.actor == activeActor &&
-			afterBody->controller.footPoseWriteStamp.serial != poseSerialBefore;
-		LiveSleeveProbe::ObserveOpening(core, activeActor, true, sleeveBodyWritten);
-		if (sleeveBodyWritten)
-		{
-			LiveSleeveProbe::BindingPose(core, activeActor, false);
-			LiveSleeveProbe::TimelinePose(core, activeActor, false, unityFrame >= 0 ? unityFrame : s_fallbackFrame);
-		}
-		if (LiveSleeveProbe::event) LiveSleeveProbe::Actor(core, activeActor, true, sleeveBodyWritten);
-	}
 	EyeGazeProbe::After(activeActor);
     // Only observed Motion-owned actors can trigger this. Each role has its own
     // identity, scene epoch and follower generation; never retain managed rigs.
@@ -3978,11 +3959,6 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 		std::ofstream snapshot(directory / "before_quartz_snapshot.json", std::ios::binary | std::ios::trunc);
 		snapshot << json;
 		if (g_hostContext.logInfo) g_hostContext.logInfo("[GakuMotion][BeforeQuartz] trace seq=%lld result=%d", seq, result);
-	}
-	if (sleeveBodyWritten)
-	{
-		LiveSleeveProbe::BindingPose(core, activeActor, true);
-		LiveSleeveProbe::TimelinePose(core, activeActor, true, unityFrame >= 0 ? unityFrame : s_fallbackFrame);
 	}
 	// Native foot AO may have been derived before the post-actor callback.
 	// Consume the completed body + secondary pose in the same tick.
@@ -4525,7 +4501,6 @@ void MotionTick(void*, float)
 			if (request == 1 && requestedOwner && requestedOwner == core.liveOwnerToken && requestedScene == core.liveOwnerScene &&
 				core.liveTakeoverAvailable && !core.liveTakeoverActive)
 			{
-				LiveSleeveProbe::BeforeTakeover(core);
 				g_liveTakeoverOwner = requestedOwner;
 				g_liveTakeoverScene = requestedScene;
 				g_liveDriver.Enable();

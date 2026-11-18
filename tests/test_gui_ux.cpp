@@ -44,74 +44,6 @@ namespace
 	std::map<void*, Vector3> formationPositions;
 	std::map<void*, Quaternion> formationRotations;
 	bool formationSourceUnavailable = false;
-	struct FormationObservation { std::string operation; bool before; float mainX, followerYaw; };
-	std::vector<FormationObservation> formationObservations;
-	void ObserveFormation(Core& core, const char* operation, bool before)
-	{
-		formationObservations.push_back({operation, before, core.player.controller.initialPositionOffset.x,
-			core.ensemble.Followers().front().player->controller.initialYawDegrees});
-	}
-	struct BindingObservation { void* requested; void* current; bool before; };
-	std::vector<BindingObservation> bindingObservations;
-	void ObserveBinding(Core& core, void* actor, bool before)
-	{
-		bindingObservations.push_back({actor, core.player.controller.targetActor, before});
-	}
-	void TestLiveBindingObservation()
-	{
-		Core core;
-		void* first = reinterpret_cast<void*>(0xB1000);
-		void* second = reinterpret_cast<void*>(0xB2000);
-		core.PublishSceneActors({{first, 1, ""}, {second, 2, ""}});
-		core.SetTargetActor(first);
-		core.liveTakeoverActive = true;
-		core.fnObserveLiveBinding = ObserveBinding;
-		bindingObservations.clear();
-		core.SetTargetActor(second);
-		Check(bindingObservations.size() == 2 && bindingObservations[0].requested == second &&
-			bindingObservations[0].before && bindingObservations[0].current == first &&
-			!bindingObservations[1].before && bindingObservations[1].current == second,
-			"Live binding probe brackets the target commit");
-		bindingObservations.clear();
-		core.SetTargetActor(second);
-		Check(bindingObservations.empty(), "reselecting the same Live target does not start the binding probe");
-	}
-	struct TimelineObservation { MotionPlayer::TimelineEdit edit; float before, target; };
-	std::vector<TimelineObservation> timelineObservations;
-	MotionPlayer* observedTimeline{};
-	void ObserveTimeline(MotionPlayer::TimelineEdit edit, float target)
-	{
-		timelineObservations.push_back({edit, observedTimeline->currentTime, target});
-	}
-	void TestLiveTimelineObservation()
-	{
-		using Edit = MotionPlayer::TimelineEdit;
-		MotionPlayer player;
-		observedTimeline = &player;
-		timelineObservations.clear();
-		player.fnObserveTimeline = ObserveTimeline;
-		player.clip.total_frames = 300;
-		player.clip.fps = 30;
-		player.clip.duration_seconds = 10;
-		player.currentTime = 8;
-		player.state = PlaybackState::Paused;
-		player.SeekRelative(-5);
-		player.BeginScrub(3);
-		player.UpdateScrub(1);
-		player.EndScrub(-1);
-		Check(timelineObservations.size() == 4 && timelineObservations[0].edit == Edit::Seek &&
-			timelineObservations[0].before == 8 && timelineObservations[0].target == 3 &&
-			timelineObservations[1].edit == Edit::ScrubBegin &&
-			timelineObservations[2].edit == Edit::ScrubUpdate &&
-			timelineObservations[2].before == 3 && timelineObservations[2].target == 1 &&
-			timelineObservations[3].edit == Edit::ScrubEnd &&
-			timelineObservations[3].before == 1 && timelineObservations[3].target == 0 &&
-			player.currentTime == 0 && player.SeekCount() == 2,
-			"Live timeline observer sees the previous time and clamped destination before rewind and scrub");
-		player.UpdateScrub(8);
-		Check(timelineObservations.size() == 4, "ignored drag updates do not trigger the timeline observer");
-		observedTimeline = nullptr;
-	}
 	void FormationPosition(void* actor, float* out)
 	{ const auto p = formationPositions[actor]; out[0] = p.x; out[1] = p.y; out[2] = p.z; }
 	void FormationRotation(void* actor, float* out)
@@ -904,30 +836,6 @@ namespace
 		app.Settle();
 		if (!app.ItemWithLabel("以主角色对齐原曲队形")) app.Click("多人同步播放");
 		app.Settle();
-		formationObservations.clear();
-		app.core.liveTakeoverActive = true;
-		app.core.fnObserveLivePlacement = ObserveFormation;
-		app.core.QueueInitialPosition({0.75f, 0.f, 0.f});
-		app.core.ProcessPendingGuiCommands();
-		Check(formationObservations.size() == 2 && formationObservations[0].operation == "main_position" &&
-			formationObservations[0].before && !formationObservations[1].before &&
-			formationObservations[0].mainX == 0.f && formationObservations[1].mainX == 0.75f,
-			"Live placement probe brackets the manual position edit");
-		app.core.player.controller.SetInitialPositionOffset({});
-		formationObservations.clear();
-		app.core.QueueAlignEnsemble();
-		app.core.ProcessPendingGuiCommands();
-		Check(formationObservations.size() == 2 && formationObservations[0].operation == "align_formation" &&
-			formationObservations[0].before && !formationObservations[1].before &&
-			formationObservations[0].followerYaw == 0.f && std::fabs(formationObservations[1].followerYaw - 90.f) < 1e-4f,
-			"Live placement probe brackets the validated formation commit");
-		formationSourceUnavailable = true;
-		formationObservations.clear();
-		app.core.QueueAlignEnsemble();
-		app.core.ProcessPendingGuiCommands();
-		Check(formationObservations.empty(), "rejected formation does not start the Live placement probe");
-		formationSourceUnavailable = false;
-		app.core.liveTakeoverActive = false;
 		app.Click("以主角色对齐原曲队形"); app.Settle();
 		const Quaternion basis = Quaternion::FromEulerDegreesXYZ(0,50,0);
 		const Vector3 expected = formationPositions[a] + basis.Rotate({1,0,0});
@@ -1051,8 +959,6 @@ int main(int argc, char** argv)
 	TestAuxDriveModeControls(root);
 	TestEnsembleControls(root);
 	TestFormationAlignment(root);
-	TestLiveBindingObservation();
-	TestLiveTimelineObservation();
 	{
 		const ImGuiConfigFlags originalConfigFlags = io.ConfigFlags;
 		io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // Escape closes native combo popups.

@@ -92,18 +92,6 @@ namespace GakuMotion
 		std::string ensemblePresetPath;
 
 		bool (*fnReadFormationOrigin)(const std::string&, Vector3&){nullptr};
-		void (*fnObserveLivePlacement)(Core&, const char*, bool){nullptr};
-		void (*fnObserveLiveBinding)(Core&, void*, bool){nullptr};
-		void ObserveLiveBinding(void* actor, bool before)
-		{
-			if (fnObserveLiveBinding && liveTakeoverActive && actor)
-				fnObserveLiveBinding(*this, actor, before);
-		}
-		void ObserveLivePlacement(const char* action, bool before)
-		{
-			if (fnObserveLivePlacement && liveTakeoverActive)
-				fnObserveLivePlacement(*this, action, before);
-		}
 		void RememberCurrentPlacement()
 		{
 			if (const auto* actor = sceneActorRegistry.Find(player.controller.targetActor))
@@ -970,12 +958,10 @@ namespace GakuMotion
 					    cmd.candidateIndex < 0 || ensembleRestoreUnconfirmed ||
 					    player.state == PlaybackState::Playing || player.state == PlaybackState::Paused)
 					{ ensembleNotice = "绑定失败：请停止播放并确认角色和曲库未变化"; break; }
-					void* actor = sceneActorRegistry.Resolve(cmd.actorToken, cmd.actorEpoch);
-					ObserveLiveBinding(actor, true);
 					const bool ok = ensemble.Set(static_cast<size_t>(cmd.candidateIndex), cmd.actorToken,
 					                             cmd.actorEpoch, motions[motionIndex], cmd.value, sceneActorRegistry,
 					                             player, globalOverrides, masterOverridesEnabled);
-					if (ok) { ++injectionSession; ObserveLiveBinding(actor, false); ensembleNotice = "已绑定角色动作"; }
+					if (ok) { ++injectionSession; ensembleNotice = "已绑定角色动作"; }
 					else if (ensemble.RestoreUnconfirmed())
 					{ ensembleRestoreUnconfirmed = true; ensembleNotice = "角色恢复未确认，已停止动作注入"; }
 					else ensembleNotice = "绑定失败：角色重复、名单已变化或动作无法读取";
@@ -1034,22 +1020,14 @@ namespace GakuMotion
 				case GuiAction::EnsemblePosition:
                     ensembleAutoAlignPending=false;
 					if (!ensembleRestoreUnconfirmed && cmd.candidateIndex >= 0 && static_cast<size_t>(cmd.candidateIndex) < ensemble.Followers().size())
-					{
-						ObserveLivePlacement("follower_position", true);
 						ensemble.SetPosition(static_cast<size_t>(cmd.candidateIndex), cmd.actorToken, cmd.actorEpoch,
 						                     cmd.loadedGeneration, cmd.position, sceneActorRegistry);
-						ObserveLivePlacement("follower_position", false);
-					}
 					break;
 				case GuiAction::EnsembleYaw:
                     ensembleAutoAlignPending=false;
 					if (!ensembleRestoreUnconfirmed && cmd.candidateIndex >= 0 && static_cast<size_t>(cmd.candidateIndex) < ensemble.Followers().size())
-					{
-						ObserveLivePlacement("follower_yaw", true);
 						ensemble.SetYaw(static_cast<size_t>(cmd.candidateIndex), cmd.actorToken, cmd.actorEpoch,
 						                cmd.loadedGeneration, cmd.value, sceneActorRegistry);
-						ObserveLivePlacement("follower_yaw", false);
-					}
 					break;
 				case GuiAction::ClearTarget: PickBoundActorAsTarget();
 					break;
@@ -1059,12 +1037,7 @@ namespace GakuMotion
 					break;
 				case GuiAction::InitialPosition:
                     ensembleAutoAlignPending=false;
-					if (IsCurrentPlacementTarget(cmd))
-					{
-						ObserveLivePlacement("main_position", true);
-						if (player.controller.SetInitialPositionOffset(cmd.position)) RememberCurrentPlacement();
-						ObserveLivePlacement("main_position", false);
-					}
+					if (IsCurrentPlacementTarget(cmd) && player.controller.SetInitialPositionOffset(cmd.position)) RememberCurrentPlacement();
 					break;
 				case GuiAction::LiveDofDisabled:
 					if (liveTakeoverActive && cmd.actorToken == liveOwnerToken && cmd.sceneSession == injectionSession)
@@ -1072,12 +1045,7 @@ namespace GakuMotion
 					break;
 				case GuiAction::InitialYaw:
                     ensembleAutoAlignPending=false;
-					if (IsCurrentPlacementTarget(cmd))
-					{
-						ObserveLivePlacement("main_yaw", true);
-						if (player.controller.SetInitialYawDegrees(cmd.value)) RememberCurrentPlacement();
-						ObserveLivePlacement("main_yaw", false);
-					}
+					if (IsCurrentPlacementTarget(cmd) && player.controller.SetInitialYawDegrees(cmd.value)) RememberCurrentPlacement();
 					break;
 				case GuiAction::SaveInitialPosition: SaveInitialPosition();
 					break;
@@ -3384,14 +3352,12 @@ namespace GakuMotion
 				++count;
 			}
 			if (!count) { ensembleNotice = "请先绑定至少一个副角色动作"; return; }
-			ObserveLivePlacement("align_formation", true);
 			for (size_t i = 0; i < updates.size(); ++i) if (updates[i].active)
 			{
 				const auto& follower = ensemble.Followers()[i];
 				ensemble.SetPosition(i, follower.actorToken, cmd.actorEpoch, follower.bindingGeneration, updates[i].position, sceneActorRegistry);
 				ensemble.SetYaw(i, follower.actorToken, cmd.actorEpoch, follower.bindingGeneration, updates[i].yaw, sceneActorRegistry);
 			}
-			ObserveLivePlacement("align_formation", false);
 			ensembleNotice = "已按主角色恢复分轨初始站位并统一朝向与走位；可继续微调站位";
 		}
 
@@ -3451,7 +3417,6 @@ namespace GakuMotion
 		{
 			if (ensembleRestoreUnconfirmed) return;
 			if (!a || !sceneActorRegistry.Find(a) || player.controller.targetActor == a) return;
-			ObserveLiveBinding(a, true);
 			const bool hadTarget = player.controller.targetActor != nullptr;
 			if (fnBeforeTargetChange && !fnBeforeTargetChange())
 			{
@@ -3505,7 +3470,6 @@ namespace GakuMotion
 			++injectionSession;
 			ResetSoleObservation();
 			player.controller.SetTargetActor(a);
-			ObserveLiveBinding(a, false);
 			LogDebug("[GakuMotion][Target] selected one current scene actor");
 		}
 

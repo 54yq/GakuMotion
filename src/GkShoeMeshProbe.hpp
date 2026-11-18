@@ -482,7 +482,6 @@ namespace ShoeMeshProbe
 	inline Method getComponents = nullptr, getTransform = nullptr, getName = nullptr, getBones = nullptr;
 	inline Method getSharedMesh = nullptr, getVertexCount = nullptr, getReadable = nullptr, meshCtor = nullptr;
 	inline Method bakeMesh = nullptr, getVertices = nullptr, destroyObject = nullptr, arrayGetValue = nullptr;
-	inline Method getBoneWeights = nullptr;
 	inline Method getLocalToWorld = nullptr, getWorldToLocal = nullptr;
 	inline Method getEnabled = nullptr, getGameObject = nullptr, getActive = nullptr, getLossyScale = nullptr,
 	              getWorldPosition = nullptr;
@@ -764,7 +763,6 @@ namespace ShoeMeshProbe
 		getVertexCount = Match(meshClass, "get_vertexCount", "System.Int32", {}, false);
 		getReadable = Match(meshClass, "get_isReadable", "System.Boolean", {}, false);
 		getVertices = Match(meshClass, "get_vertices", "UnityEngine.Vector3[]", {}, false);
-		getBoneWeights = Match(meshClass, "get_boneWeights", "UnityEngine.BoneWeight[]", {}, false);
 		meshCtor = Match(meshClass, ".ctor", "System.Void", {}, false);
 		destroyObject = Match(object, "Destroy", "System.Void", {"UnityEngine.Object"}, true);
 		getLocalToWorld = Match(transform, "get_localToWorldMatrix", "UnityEngine.Matrix4x4", {}, false);
