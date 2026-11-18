@@ -258,9 +258,14 @@ public:
             unsigned char valid{};
             auto* node = clip.handle.bytes.data();
             if (!Read(nodeValid, node, valid) || !valid || !Read(time, node, current) ||
-                !std::isfinite(current) || std::abs(current - clip.end) > 0.001 ||
-                !Read(speed, node, rate) || rate != 0.0 || !Read(wrap, node, wrapMode) || wrapMode != holdWrap)
+                !Read(speed, node, rate) || !Read(wrap, node, wrapMode))
+                return Fail("animation_clip_state_unreadable");
+            if (!std::isfinite(current) || std::abs(current - clip.end) > 0.001 || rate != 0.0 || wrapMode != holdWrap) {
+                if (g_hostContext.logInfo)
+                    g_hostContext.logInfo("[GakuMotion][LiveActorClipEnd] clip_state time=%.6f expected=%.6f speed=%.6f wrap=%d",
+                        current, clip.end, rate, wrapMode);
                 return Fail("animation_clip_no_longer_at_end");
+            }
         }
         return true;
     }

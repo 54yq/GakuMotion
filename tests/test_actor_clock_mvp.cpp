@@ -140,6 +140,16 @@ struct ClockTest : LiveActorClockMvp { static int Run(){
  CHECK(!ShouldRun(false,false,2,false,true,true));
  CHECK(!ShouldRun(true,true,2,false,true,true));
  CHECK(!ShouldRun(true,false,1,false,true,true));
+ using GakuMotion::live_physics_clock::CanPublish;
+ CHECK(ShouldRun(true,false,2,false,true,false,true)); // Seek clears the packet, not an owned role clock.
+ CHECK(ShouldRun(true,false,2,true,false,false,true));
+ CHECK(CanPublish(false,true,false,true));
+ CHECK(!CanPublish(false,true,false,false));
+ CHECK(!CanPublish(false,false,false,true));
+ CHECK(!ShouldRun(false,false,2,false,true,false,true));
+ CHECK(!ShouldRun(true,true,2,false,true,false,true));
+ CHECK(!ShouldRun(true,false,1,false,true,false,true));
+ CHECK(!ShouldRun(true,false,2,false,false,false,true));
  GakuMotion::live_arm_snapshot::Schedule samples;
  void* sampleA=reinterpret_cast<void*>(1); void* sampleB=reinterpret_cast<void*>(2);
  CHECK(samples.Due(42,7,sampleA,10.0) && !samples.Due(42,7,sampleA,10.9));
@@ -201,6 +211,10 @@ struct ClockTest : LiveActorClockMvp { static int Run(){
  c.liveTakeoverActive=true;
  CHECK(Start(10,true) && mmdSession && playingValue==1 && modeValue==1);
  CHECK(clipEnd.ClipCount()==1 && std::abs(clipTime-(4.0+1.0/60.0))<1e-8 && clipSpeed==0.0 && clipWrap==0);
+ const bool ownsClockDuringSeek = active && mmdSession && SameOwner();
+ CHECK(ShouldRun(true,false,2,false,true,false,ownsClockDuringSeek));
+ CHECK(CanPublish(false,true,false,ownsClockDuringSeek));
+ CHECK(TickLoop(10.5) && clipEnd.ClipCount()==1 && clipSpeed==0.0 && playingValue==1);
  times[0]+=1.9;times[1]+=1.9;
  CHECK(TickLoop(11.9) && loops==0 && nodeWrites==0);
  CHECK(TickLoop(200) && RestoreGraph() && clipTime==1.0 && clipSpeed==1.5 && clipWrap==1 && modeValue==3);

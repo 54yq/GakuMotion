@@ -1549,6 +1549,11 @@ static void ResetPlacementDynamicBone(void* actor)
 #include "GkLiveCodeCapture.hpp"
 #include "GkLiveAudioGraphProbe.hpp"
 #include "GkLiveActorClockMvp.hpp"
+    bool OwnsPrimaryMmdClock(void* actor)
+    {
+        return actor && LiveActorClockMvp::active && LiveActorClockMvp::mmdSession &&
+            LiveActorClockMvp::SameOwner() && LiveActorClockMvp::actor == reinterpret_cast<uintptr_t>(actor);
+    }
     std::deque<LiveDynamicFollowerClock> g_followerClocks;
 	bool RestoreFollowerClock(size_t index)
 	{
@@ -3831,11 +3836,12 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 				                         ? 0.0f
 				                         : std::chrono::duration<float>(dispatchBegin - g_physicsLastTick).count();
 			g_physicsLastTick = dispatchBegin;
-			// Preview can remain on frame zero indefinitely while the user selects
-			// a motion. Do not spend the bridge's discovery timeout before playback.
-			// Once started, keep servicing its existing lease across pause/resume.
-			const bool nativeReadyToStart = player.state == GakuMotion::PlaybackState::Playing ||
-			                                g_burstBridge.HasCaptureInput();
+			// Preview must not start bridge discovery. Seeking invalidates the prior
+			// packet, but an owned clock can accept a fresh pose while paused.
+			const bool nativeReadyToStart = GakuMotion::live_physics_clock::CanPublish(
+				player.state == GakuMotion::PlaybackState::Playing,
+				player.state == GakuMotion::PlaybackState::Paused, g_burstBridge.HasCaptureInput(),
+				core.liveTakeoverActive && OwnsPrimaryMmdClock(activeActor));
 			bool native = requested == 2 && nativeReadyToStart && g_burstBridge.Publish(binding->second, player.controller,
 			                                                      player.currentTime, frame,
 			                                                      core.config.beforeQuartzExperiment,
@@ -4614,7 +4620,8 @@ void MotionTick(void*, float)
 			if(!LiveActorClockMvp::SameOwner()&&!LiveActorClockMvp::active){core.liveActorClockFault=false;core.liveActorClockAvailable=false;}
 			const bool mmdWanted=GakuMotion::live_physics_clock::ShouldRun(core.liveTakeoverActive, core.liveTakeoverFault,
 				core.config.secondaryPhysicsBackend, core.player.state==GakuMotion::PlaybackState::Playing,
-				core.player.state==GakuMotion::PlaybackState::Paused, g_burstBridge.HasCaptureInput());
+				core.player.state==GakuMotion::PlaybackState::Paused, g_burstBridge.HasCaptureInput(),
+				OwnsPrimaryMmdClock(core.player.controller.targetActor));
 			const bool mmdMatches=reinterpret_cast<void*>(LiveActorClockMvp::actor)==core.player.controller.targetActor;
 			const bool loopContext=LiveActorClockMvp::SameOwner()&&core.liveObservation.confirmed&&core.liveObservation.paused&&
 				std::abs(core.liveObservation.time-core.liveActorClockOrigin)<=0.1f&&core.injectionPolicy.Read().captureDepth==0&&GakuMotion::capture::LiveAutoPhotoIdle();
