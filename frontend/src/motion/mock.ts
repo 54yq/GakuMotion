@@ -1325,6 +1325,66 @@ export class MotionMockBridgeClient implements MotionBridgeClient {
     this.emit('appearance.changed', { ...this.appearanceState })
   }
 
+  simulateImportProgress(outcome: 'success' | 'error'): void {
+    this.emit('import.progress', {
+      active: true,
+      finished: false,
+      succeeded: false,
+      progress: 0.22,
+      stage: 'READING',
+      statusText: '正在解析 VMD 与音频轨道...',
+      errorDetail: '',
+    })
+    const t1 = setTimeout(() => {
+      if (this.closed) return
+      this.emit('import.progress', {
+        active: true,
+        finished: false,
+        succeeded: false,
+        progress: 0.68,
+        stage: outcome === 'error' ? 'COPYING' : 'BUILDING',
+        statusText: outcome === 'error' ? '正在写入演出资源文件...' : '正在生成标准化演出缓存...',
+        errorDetail: '',
+      })
+    }, 420)
+    const t2 = setTimeout(() => {
+      if (this.closed) return
+      if (outcome === 'error') {
+        this.emit('import.progress', {
+          active: false,
+          finished: true,
+          succeeded: false,
+          progress: 0.68,
+          stage: 'ERROR',
+          statusText: '导入失败',
+          errorDetail:
+            "System.IO.IOException: The process cannot access the file 'gakumas-local\\motions\\hikari-no-saki\\audio.wav' because it is being used by another process.\r\n   at GakuMotion.VmdImporter.Native.ImportPipeline.RunEdit(ImportRequest request)",
+        })
+      } else {
+        this.emit('import.progress', {
+          active: false,
+          finished: true,
+          succeeded: true,
+          progress: 1,
+          stage: 'DONE',
+          statusText: '导入完成',
+          errorDetail: '',
+        })
+      }
+    }, 900)
+    this.importTimers.push(t1, t2)
+  }
+
+  setDropPeekPreview(next: Partial<DropPeek>): void {
+    const visual = next.visual ?? this.dropPeekState.visual
+    this.dropTargetEnabled = visual !== 'none'
+    this.dropPeekState = {
+      ...this.dropPeekState,
+      ...next,
+      visual,
+    }
+  }
+
   savedVolume(): number {
     return this.volumeSaved
   }

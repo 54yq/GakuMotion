@@ -1,7 +1,22 @@
 import * as React from 'react'
-import { RiFlaskFill, RiLoader4Fill, RiPlugFill, RiRefreshFill, RiUploadCloud2Fill } from '@remixicon/react'
+import {
+  RiFlaskFill,
+  RiLoader4Fill,
+  RiPlugFill,
+  RiRefreshFill,
+  RiUploadCloud2Fill,
+  RiWindowFill,
+} from '@remixicon/react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { motionStore, useMotionStore } from '../store'
 import { getMotionBridge, MotionMockBridgeClient, setMotionBridge } from '../bridge'
@@ -83,6 +98,36 @@ const PREVIEW_THEMES = [
 
 const PREVIEW_SCALES = [0.75, 1, 1.25, 1.5]
 
+function PreviewFontStats({ appearance }: { appearance: { theme: number; uiScale: number } }) {
+  const [stats, setStats] = React.useState({ rootPx: 16, bodyPx: 14, dpr: 1 })
+
+  React.useEffect(() => {
+    const measure = () => {
+      const rootPx = Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize) || 16
+      const bodyPx = Number.parseFloat(window.getComputedStyle(document.body).fontSize) || rootPx
+      const dpr = window.devicePixelRatio || 1
+      setStats({ rootPx, bodyPx, dpr })
+    }
+    const raf = window.requestAnimationFrame(measure)
+    window.addEventListener('resize', measure)
+    return () => {
+      window.cancelAnimationFrame(raf)
+      window.removeEventListener('resize', measure)
+    }
+  }, [appearance.theme, appearance.uiScale])
+
+  const effectivePx = stats.bodyPx * appearance.uiScale
+  return (
+    <span
+      className="inline-flex h-6 items-center rounded border bg-background/80 px-2 font-mono text-[11px] text-muted-foreground"
+      data-testid="preview-font-stats"
+      title={`html: ${stats.rootPx.toFixed(1)}px | body: ${stats.bodyPx.toFixed(1)}px | zoom: ${Math.round(appearance.uiScale * 100)}% | DPR: ${stats.dpr.toFixed(2)}`}
+    >
+      字号: 根{stats.rootPx.toFixed(0)} / 正文{stats.bodyPx.toFixed(0)}px (等效{effectivePx.toFixed(1)}px)
+    </span>
+  )
+}
+
 function PreviewToolbar({
   appearance,
   injectionAllowed,
@@ -95,9 +140,11 @@ function PreviewToolbar({
   const [profile, setProfile] = React.useState<'full' | 'phase1'>(() =>
     mock?.getCapabilityProfile() ?? 'full',
   )
+  const entries = useMotionStore((state) => state.library.entries)
   if (!mock) return null
   return (
     <div className="ml-auto flex flex-wrap items-center gap-2" data-testid="preview-toolbar">
+      <PreviewFontStats appearance={appearance} />
       <label className="flex items-center gap-1 text-xs">
         <span className="text-muted-foreground">主题</span>
         <select
@@ -145,6 +192,134 @@ function PreviewToolbar({
           <option value="phase1">基础降级</option>
         </select>
       </label>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-6 px-2 text-xs"
+            data-testid="preview-special-modals-trigger"
+          >
+            <RiWindowFill className="size-3" />
+            特殊弹窗
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-64">
+          <DropdownMenuLabel>导入流程弹窗（Issue #5）</DropdownMenuLabel>
+          <DropdownMenuItem onClick={() => motionStore.previewImportFlow('success')}>
+            导入中 → 导入成功弹窗
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => motionStore.previewImportFlow('error')}>
+            导入中 → 导入出错弹窗 (IOException)
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => motionStore.previewImportErrorDirect()}>
+            直接打开导入出错弹窗
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={!injectionAllowed || entries.length === 0}
+            onClick={() => {
+              const target = entries[0]
+              if (!target) return
+              motionStore.setPage('library')
+              void (async () => {
+                await motionStore.selectMotion(target.id, true)
+                await motionStore.openImportEdit(target.id)
+              })()
+            }}
+          >
+            编辑播放中曲目（停止并保存保护）
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel>曲库与删除确认</DropdownMenuLabel>
+          <DropdownMenuItem
+            disabled={!injectionAllowed || entries.length === 0}
+            onClick={() => motionStore.previewDeleteDialog(false)}
+          >
+            删除确认弹窗
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={!injectionAllowed || entries.length === 0}
+            onClick={() => motionStore.previewDeleteDialog(true)}
+          >
+            曲库过期冲突删除弹窗
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel>拖放遮罩（DropOverlay）</DropdownMenuLabel>
+          <DropdownMenuItem
+            disabled={!injectionAllowed}
+            onClick={() => {
+              motionStore.setPage('library')
+              motionStore.previewDropOverlay({
+                visual: 'hover',
+                fileCount: 3,
+                accepted: 3,
+                hostElevated: false,
+                hostBlocked: false,
+              })
+            }}
+          >
+            拖放悬停遮罩（有效文件）
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={!injectionAllowed}
+            onClick={() => {
+              motionStore.setPage('library')
+              motionStore.previewDropOverlay({
+                visual: 'hover',
+                fileCount: 2,
+                accepted: 0,
+                hostElevated: true,
+                hostBlocked: false,
+              })
+            }}
+          >
+            拖放遮罩（管理员提权提示）
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={!injectionAllowed}
+            onClick={() => {
+              motionStore.setPage('library')
+              motionStore.previewDropOverlay({
+                visual: 'invalid',
+                fileCount: 2,
+                accepted: 0,
+                hostElevated: false,
+                hostBlocked: false,
+              })
+            }}
+          >
+            拖放遮罩（无效文件）
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() =>
+              motionStore.previewDropOverlay({
+                visual: 'none',
+                fileCount: 0,
+                accepted: 0,
+                hostElevated: false,
+                hostBlocked: false,
+              })
+            }
+          >
+            关闭拖放遮罩
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel>系统异常状态</DropdownMenuLabel>
+          <DropdownMenuItem
+            onClick={() =>
+              motionStore.previewActionError(
+                '播放中禁止覆盖当前曲目：请先停止播放后再保存（Issue #5 IOException 防护）',
+              )
+            }
+          >
+            全局操作错误横幅
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => motionStore.previewDisconnect()}>
+            原生桥接断连重连页
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
       <Button
         type="button"
         variant="outline"

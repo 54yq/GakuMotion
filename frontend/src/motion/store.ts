@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import { getMotionBridge, setMotionBridge } from './bridge'
+import { getMotionBridge, MotionMockBridgeClient, setMotionBridge } from './bridge'
 import { cameraControlModeIndex, setCameraControlMode, syncLegacyTransforms } from './cameraMode'
 import {
   BridgeError,
@@ -1884,6 +1884,76 @@ export class MotionStore {
 
   closeImportError = (): void => {
     this.set({ importUi: { ...this.state.importUi, errorModalOpen: false, errorDetail: '' } })
+  }
+
+  // ---- Preview-only modal & state triggers ----
+
+  previewImportFlow = (outcome: 'success' | 'error'): void => {
+    const now = Date.now()
+    this.set({
+      importUi: {
+        ...emptyImportUi(),
+        visible: true,
+        awaitingStart: true,
+        startTime: now,
+        minDisplayUntil: now + (outcome === 'success' ? 1350 : 550),
+        displayProgress: 0.15,
+        displayStatus: outcome === 'error' ? '正在启动模拟导入（将触发出错）...' : '正在启动模拟导入流程...',
+        lastProgress: null,
+      },
+      actionError: null,
+    })
+    this.startImportUiTimer()
+    if (this.bridge instanceof MotionMockBridgeClient) {
+      this.bridge.simulateImportProgress(outcome)
+    }
+  }
+
+  previewImportErrorDirect = (
+    detail = "System.IO.IOException: The process cannot access the file 'audio.wav' because it is being used by another process.",
+  ): void => {
+    this.stopImportUiTimer()
+    this.set({
+      importUi: {
+        ...emptyImportUi(),
+        errorModalOpen: true,
+        errorDetail: detail,
+      },
+    })
+  }
+
+  previewDeleteDialog = (stale = false): void => {
+    const entries = this.state.library.entries
+    const target =
+      entries.find((item) => item.id === this.state.selectedLibraryKey) ??
+      entries[0] ??
+      null
+    if (!target) return
+    this.set({
+      page: 'library',
+      selectedLibraryKey: target.id,
+      pendingDelete: {
+        key: target.id,
+        directory: target.directory,
+        revision: this.state.library.revision,
+      },
+      deleteStale: stale,
+    })
+  }
+
+  previewDropOverlay = (drop: DropUiState): void => {
+    this.set({ drop })
+    if (this.bridge instanceof MotionMockBridgeClient) {
+      this.bridge.setDropPeekPreview(drop)
+    }
+  }
+
+  previewActionError = (actionError: string | null): void => {
+    this.set({ actionError })
+  }
+
+  previewDisconnect = (message = '模拟原生桥接异常断开（可用于验收断连重连界面）'): void => {
+    this.set({ ready: true, connected: false, error: message })
   }
 
   // ---- File dialog (dialog.pickFile / dialog.poll) ----
