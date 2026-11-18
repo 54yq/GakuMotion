@@ -1,6 +1,7 @@
 #pragma once
 
 #include "GkMotionData.hpp"
+#include "GkMouthSource.hpp"
 #include "GkAudioPlayback.hpp"
 #include "GkIdolController.hpp"
 #include "GkRuntimeConfig.hpp"   // MotionEntry：曲目库索引与「上一曲/下一曲」
@@ -247,6 +248,7 @@ namespace GakuMotion
 
 		// Absolute path of the clip actually loaded (diagnostics / panel display)
 		std::string loadedMotionFile{""};
+		std::string mouthSourceStatus;
 
 		bool LoadMotion(const std::string& motionDirectory)
 		{
@@ -270,6 +272,8 @@ namespace GakuMotion
 		// Core uses this when atomically reloading body and camera from one version.
 		void AdoptLoadedMotion(const std::string& motionDirectory, const std::string& motionFile, MotionClip nextClip)
 		{
+			mouthSourceStatus = mouth_source::Restore(nextClip, motionDirectory);
+			if (mouth_source::report) mouth_source::report(motionDirectory.c_str(), mouthSourceStatus.c_str());
 			// Release the old pose before replacing its clip, including callers
 			// that bypass Core::SelectMotionByIndex. Keep the original actor rest
 			// snapshot; recapturing immediately after Rebind samples old animation.

@@ -25,6 +25,7 @@ namespace GakuMotion::csharp_import
 {
 	using RunFn = int32_t (*)(const char* requestUtf8Json, char* responseUtf8Json, int32_t responseCapacity);
 	using AbiFn = int32_t (*)();
+	using MouthSourceFn = int32_t (*)(const char*, float, float, int32_t, float*, int32_t);
 
 	namespace detail
 	{
@@ -68,6 +69,12 @@ namespace GakuMotion::csharp_import
 		{
 			static RunFn fn{nullptr};
 			return fn;
+		}
+
+		inline MouthSourceFn& MouthSourceRead()
+		{
+			static MouthSourceFn function{nullptr};
+			return function;
 		}
 
 		inline std::string& Detail()
@@ -257,6 +264,9 @@ namespace GakuMotion::csharp_import
 				auto cameraAbi = reinterpret_cast<AbiFn>(GetProcAddress(module, "GkCameraImporter_AbiVersion"));
 				CameraRun() = cameraAbi && cameraAbi() == 1
 					? reinterpret_cast<RunFn>(GetProcAddress(module, "GkCameraImport_Run")) : nullptr;
+				auto mouthAbi = reinterpret_cast<AbiFn>(GetProcAddress(module, "GkMouthSource_AbiVersion"));
+				MouthSourceRead() = mouthAbi && mouthAbi() == 1
+					? reinterpret_cast<MouthSourceFn>(GetProcAddress(module, "GkMouthSource_Read")) : nullptr;
 				const size_t slash = candidate.find_last_of(L"/\\");
 				ModuleDir() = slash == std::wstring::npos ? std::wstring() : candidate.substr(0, slash);
 				ModuleDirUtf8() = Utf8(ModuleDir());
@@ -299,6 +309,14 @@ namespace GakuMotion::csharp_import
 	{
 		std::lock_guard<std::mutex> lock(detail::Mutex());
 		return detail::Detail();
+	}
+
+	inline int32_t ReadMouthSource(const char* path, float sourceFps, float clipFps,
+		int32_t frames, float* output, int32_t outputFloats)
+	{
+		std::lock_guard<std::mutex> lock(detail::Mutex());
+		if (!detail::LoadLocked(detail::PluginsRoot()) || !detail::MouthSourceRead()) return 5;
+		return detail::MouthSourceRead()(path, sourceFps, clipFps, frames, output, outputFloats);
 	}
 
 	inline bool Busy()

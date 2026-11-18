@@ -1,0 +1,118 @@
+#pragma once
+
+namespace runtime_mouth_test
+{
+    inline const char* Inputs[]{"a", "i", "u", "e", "o", "∧", "口角上げ"};
+    inline const char* Outputs[]{"b_mouth.mouth_019", "b_mouth.mouth_025", "b_mouth.mouth_010",
+        "b_mouth.mouth_027", "b_mouth.mouth_023", "b_mouth.mouth_001", "b_mouth.mouth_004",
+        "b_mouth.mouth_024", "b_mouth.mouth_026", "b_mouth.mouth_028"};
+    inline const GakuMouthFitFace Face{"mdl_chr_krnh-base-0000_face", "krnh", 7, 10, 27, 0,
+        Inputs, Outputs, "synthetic-table-sha"};
+    inline int evaluations{};
+    inline const GakuMouthFitFace* Find(void*, const char* name)
+    {
+        return std::strcmp(name, Face.faceName) == 0 ? &Face : nullptr;
+    }
+    inline GakuStatus Evaluate(void*, const GakuMouthFitFace* face, const float* input,
+        uint32_t inputCount, float* output, uint32_t outputCount)
+    {
+        if (face != &Face || inputCount != 7 || outputCount != 10) return GAKU_E_INVALID_ARGUMENT;
+        ++evaluations;
+        std::fill_n(output, outputCount, 0.0f);
+        output[0] = input[0];
+        output[8] = input[5] * .1f + input[6] * .2f;
+        output[9] = .15f;
+        return GAKU_OK;
+    }
+}
+
+static void TestRuntimeMouthSource()
+{
+    g_current = "runtime VMD mouth source and published seven-input fit";
+    MotionClip clip;
+    clip.fps = 30;
+    clip.total_frames = 2;
+    clip.blendshape_names = {"mmd2.a", "b_mouth.mouth_028", "b_eye.eye_005"};
+    clip.blendshape_weights = {.6f, .7f, .4f, .2f, .9f, .1f};
+    clip.root_positions = {{1, 2, 3}, {4, 5, 6}};
+    const auto before = clip;
+    std::vector<float> source(2 * mouth_source::Names.size());
+    for (size_t frame = 0; frame < 2; ++frame)
+    {
+        source[frame * mouth_source::Names.size()] = .3f;
+        source[frame * mouth_source::Names.size() + 5] = 1;
+        source[frame * mouth_source::Names.size() + 8] = .8f;
+        source[frame * mouth_source::Names.size() + 9] = .8f;
+        source[frame * mouth_source::Names.size() + 13] = .04f;
+        source[frame * mouth_source::Names.size() + 14] = .5f;
+        source[frame * mouth_source::Names.size() + 15] = 1;
+    }
+    Check(mouth_source::Append(clip, source), "source curves append to a legacy clip in memory");
+    bool originalsPreserved = clip.root_positions.size() == before.root_positions.size() &&
+        std::memcmp(clip.root_positions.data(), before.root_positions.data(), clip.root_positions.size() * sizeof(Vector3)) == 0;
+    for (size_t frame = 0; frame < 2; ++frame)
+        for (size_t channel = 0; channel < before.blendshape_names.size(); ++channel)
+            originalsPreserved = originalsPreserved && clip.blendshape_weights[frame * clip.blendshape_names.size() + channel] ==
+                before.blendshape_weights[frame * before.blendshape_names.size() + channel];
+    Check(originalsPreserved, "original body and every native/semantic curve are preserved byte for byte");
+    Check(mouth_source::HasFamily(clip, 0, 8) && mouth_source::HasFamily(clip, 8, 10),
+        "legacy raw8 and seven-input source contracts are both supplied");
+    const auto once = clip.blendshape_weights;
+    Check(mouth_source::Append(clip, source) && clip.blendshape_weights == once,
+        "repeated source restore is idempotent");
+    source[0] = std::numeric_limits<float>::quiet_NaN();
+    Check(!mouth_source::Append(clip, source) && clip.blendshape_weights == once,
+        "invalid source response never partially mutates the loaded clip");
+    auto authoredClip = before;
+    authoredClip.blendshape_names.emplace_back("miku.raw.v1.native_authored");
+    authoredClip.blendshape_weights = {.6f, .7f, .4f, 1, .2f, .9f, .1f, 1};
+    source[0] = .3f;
+    Check(mouth_source::Append(authoredClip, source) &&
+        authoredClip.blendshape_weights[FindClipSlot(authoredClip.blendshape_names, "miku.rawmouth.v1.native_authored")] == 1,
+        "an existing native-authored marker carries into the newly restored mouth contract");
+    MotionClip eyesOnly;
+    eyesOnly.total_frames = 2;
+    eyesOnly.blendshape_names = {"b_eye.eye_005"};
+    eyesOnly.blendshape_weights = {.4f, .1f};
+    const auto eyesBefore = eyesOnly;
+    Check(mouth_source::Append(eyesOnly, std::vector<float>(2 * mouth_source::Names.size())) &&
+        eyesOnly.blendshape_names == eyesBefore.blendshape_names && eyesOnly.blendshape_weights == eyesBefore.blendshape_weights,
+        "eyes-only source never acquires raw mouth columns or mouth-family ownership");
+
+    const auto previousService = facial_fit::mouthService;
+    const auto previousHost = facial_fit::host;
+    facial_fit::host = {};
+    facial_fit::mouthService = {GAKU_MOUTH_FIT_VERSION, sizeof(GakuMouthFitService), nullptr,
+        runtime_mouth_test::Find, runtime_mouth_test::Evaluate};
+    std::vector<std::string> available(std::begin(runtime_mouth_test::Outputs), std::end(runtime_mouth_test::Outputs));
+    available.emplace_back("b_mouth.mouth_031");
+    available.emplace_back("b_eye.eye_005");
+    auto fit = BindPublishedMouthFit("mdl_chr_krnh-base-0000_face(Clone)", clip.blendshape_names, available);
+    ResolvePublishedMouthSlots(fit, available);
+    Check(fit.claim && fit.face->qualityGrade == 0, "published experimental mouth table owns the family without a quality veto");
+    std::vector<float> samples;
+    clip.SampleBlendshapes(0, samples);
+    std::vector<float> adapted(available.size(), .9f);
+    auto decision = TryApplyPublishedMouthFit(fit, samples, "auto", available, adapted);
+    Check(decision == MikuFitDecision::ExternalApplied && runtime_mouth_test::evaluations > 0,
+        "valid seven-channel mixtures evaluate even when vowel sum exceeds one");
+    Check(Near(adapted[0], .8f) && Near(adapted[8], .104f) && Near(adapted[9], .15f) &&
+        adapted[10] == 0 && adapted[11] == .9f,
+        "table output replaces the entire mouth family and preserves eye curves");
+    const auto applied = adapted;
+    samples[static_cast<size_t>(fit.unsupportedSlot)] = .1f;
+    Check(TryApplyPublishedMouthFit(fit, samples, "auto", available, adapted) == MikuFitDecision::UnsupportedSource && adapted == applied,
+        "unsupported authored mouth intent has an explicit decision before any write");
+    samples[static_cast<size_t>(fit.unsupportedSlot)] = 0;
+    samples[static_cast<size_t>(fit.nativeAuthoredSlot)] = 1;
+    Check(TryApplyPublishedMouthFit(fit, samples, "auto", available, adapted) == MikuFitDecision::NativeAuthored && adapted == applied,
+        "explicit native mouth authoring retains its existing precedence");
+    Check(!BindPublishedMouthFit("mdl_chr_amao-base-0000_face", clip.blendshape_names, available).face,
+        "the krnh provider cannot replace a compiled built-in role");
+    auto incomplete = available;
+    incomplete.erase(incomplete.begin() + 3);
+    Check(!BindPublishedMouthFit(runtime_mouth_test::Face.faceName, clip.blendshape_names, incomplete).claim,
+        "a missing live native output is diagnosed before family ownership");
+    facial_fit::mouthService = previousService;
+    facial_fit::host = previousHost;
+}

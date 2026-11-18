@@ -13,8 +13,10 @@ using GakuMotion.VmdImporter.Vmd;
 /// </summary>
 internal static class MorphCurve
 {
-    public static float[] Sample(IReadOnlyList<MorphKeyframe>? keyframes, int totalFrames)
+    public static float[] Sample(IReadOnlyList<MorphKeyframe>? keyframes, int totalFrames, double sourceFrameStep = 1)
     {
+        if (!double.IsFinite(sourceFrameStep) || sourceFrameStep <= 0)
+            throw new ArgumentOutOfRangeException(nameof(sourceFrameStep));
         var result = new float[Math.Max(0, totalFrames)];
         if (keyframes == null || keyframes.Count == 0 || totalFrames <= 0) return result;
 
@@ -40,7 +42,7 @@ internal static class MorphCurve
 
         for (int f = 0; f < totalFrames; f++)
         {
-            double query = f;
+            double query = f * sourceFrameStep;
             if (query <= ticks[0])
             {
                 result[f] = (float)values[0];

@@ -4,6 +4,9 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
+#include <limits>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -60,7 +63,7 @@ namespace GakuMotion
     }
     inline bool IsEyeFamilyName(const std::string& name)
     {
-        return name.rfind("b_eye.", 0) == 0 || name.rfind("b_brow.", 0) == 0;
+        return name.rfind("b_eye.eye_", 0) == 0 || name.rfind("b_brow.brow_", 0) == 0;
     }
     inline const MikuMouthFitProfile* FindMikuMouthProfile(const std::string& code)
     {
@@ -180,24 +183,24 @@ namespace GakuMotion
         return MikuFitDecision::Applied;
     }
 
-    // ---- Published profile path (rinha.facial-fit) --------------------------
+    // ---- Published profile path --------------------------------------------
     // Everything below only runs when a provider published a table for this
     // face. The compiled per-character tables above stay authoritative
     // otherwise, and their evaluator is untouched.
     struct ExternalFacialFit
     {
         const RinhaFacialFitFace* face{nullptr};
+        const RinhaFacialFitService* provider{nullptr};
         std::string character;
         std::vector<int> mouthShapeSlots;  // ownedNames index per fitted mouth shape
         std::vector<int> eyeKeySlots;      // clip slot per fitted eye key
         std::vector<int> eyeChannelSlots;  // ownedNames index per fitted eye channel
-        std::vector<uint8_t> eyeKeyGrades; // per fitted eye key
         std::vector<float> eyeAmplitudes;  // scratch, never reallocated per frame
         std::vector<float> eyeWeights;     // scratch, never reallocated per frame
         int eyePresentSlot{-1}, eyeUnsupportedSlot{-1}, eyeNativeAuthoredSlot{-1};
         bool mouthPresent{false}, eyesPresent{false};
         bool mouthClaim{false}, eyeClaim{false};
-        bool eyeHasUnverifiedKey{false};
+        MikuFitDecision eyeClipDecision{MikuFitDecision::MissingRawEyeSource};
     };
 
     inline int FindClipSlot(const std::vector<std::string>& names, const std::string& wanted)
@@ -206,27 +209,161 @@ namespace GakuMotion
         return found == names.end() ? -1 : static_cast<int>(found - names.begin());
     }
 
+    inline constexpr const char* kPublishedMouthPrefix = "miku.rawmouth.v1.";
+    struct PublishedMouthFit
+    {
+        const GakuMouthFitFace* face{};
+        std::vector<int> inputSlots, outputSlots;
+        std::vector<float> inputs, output;
+        int presentSlot{-1}, unsupportedSlot{-1}, nativeAuthoredSlot{-1};
+        MikuFitDecision bindingDecision{MikuFitDecision::UnknownFace};
+        bool claim{};
+    };
+
+    inline PublishedMouthFit BindPublishedMouthFit(const std::string& faceName,
+        const std::vector<std::string>& clipNames, const std::vector<std::string>& modelNames)
+    {
+        PublishedMouthFit fit;
+        fit.face = facial_fit::FindMouth(faceName);
+        if (!fit.face) return fit;
+        const auto& face = *fit.face;
+        fit.bindingDecision = MikuFitDecision::InvalidModel;
+        if (!face.faceName || facial_fit::StripCloneSuffix(faceName) != face.faceName || !face.character ||
+            !face.inputCount || face.inputCount > GAKU_MOUTH_FIT_MAX_INPUTS ||
+            !face.outputCount || face.outputCount > GAKU_MOUTH_FIT_MAX_OUTPUTS ||
+            !face.knotCount || face.knotCount > GAKU_MOUTH_FIT_MAX_KNOTS ||
+            !face.inputNames || !face.outputNames || !face.tableSha256) return fit;
+        fit.presentSlot = FindClipSlot(clipNames, std::string(kPublishedMouthPrefix) + "present");
+        fit.unsupportedSlot = FindClipSlot(clipNames, std::string(kPublishedMouthPrefix) + "unsupported");
+        fit.nativeAuthoredSlot = FindClipSlot(clipNames, std::string(kPublishedMouthPrefix) + "native_authored");
+        fit.bindingDecision = MikuFitDecision::MissingRawSource;
+        if (fit.presentSlot < 0 || fit.unsupportedSlot < 0 || fit.nativeAuthoredSlot < 0) return fit;
+        for (uint32_t input = 0; input < face.inputCount; ++input)
+        {
+            if (!face.inputNames[input] || !face.inputNames[input][0]) return fit;
+            const std::string name = std::string(kPublishedMouthPrefix) + face.inputNames[input];
+            if (std::count(clipNames.begin(), clipNames.end(), name) != 1) return fit;
+            fit.inputSlots.push_back(FindClipSlot(clipNames, name));
+        }
+        fit.bindingDecision = MikuFitDecision::MissingOutput;
+        for (uint32_t output = 0; output < face.outputCount; ++output)
+        {
+            if (!face.outputNames[output] || std::string(face.outputNames[output]).rfind("b_mouth.mouth_", 0) != 0 ||
+                std::count(modelNames.begin(), modelNames.end(), face.outputNames[output]) != 1) return fit;
+            for (uint32_t previous = 0; previous < output; ++previous)
+                if (std::strcmp(face.outputNames[previous], face.outputNames[output]) == 0) return fit;
+        }
+        fit.inputs.resize(face.inputCount);
+        fit.output.resize(face.outputCount);
+        fit.claim = true;
+        fit.bindingDecision = MikuFitDecision::ExternalApplied;
+        return fit;
+    }
+
+    inline void ResolvePublishedMouthSlots(PublishedMouthFit& fit, const std::vector<std::string>& available)
+    {
+        fit.outputSlots.clear();
+        if (!fit.claim) return;
+        for (uint32_t output = 0; output < fit.face->outputCount; ++output)
+            fit.outputSlots.push_back(FindClipSlot(available, fit.face->outputNames[output]));
+    }
+
+    inline MikuFitDecision TryApplyPublishedMouthFit(PublishedMouthFit& fit,
+        const std::vector<float>& input, const std::string& characterOverride,
+        const std::vector<std::string>& available, std::vector<float>& adapted)
+    {
+        if (!fit.claim) return fit.bindingDecision;
+        if (!characterOverride.empty() && characterOverride != "auto" && characterOverride != fit.face->character)
+            return MikuFitDecision::CharacterMismatch;
+        auto sample = [&](int slot) { return slot >= 0 && static_cast<size_t>(slot) < input.size()
+            ? input[static_cast<size_t>(slot)] : std::numeric_limits<float>::quiet_NaN(); };
+        if (sample(fit.presentSlot) != 1.0f) return MikuFitDecision::InvalidRawSource;
+        const float authored = sample(fit.nativeAuthoredSlot), unsupported = sample(fit.unsupportedSlot);
+        if (!std::isfinite(authored) || authored < 0 || !std::isfinite(unsupported) || unsupported < 0)
+            return MikuFitDecision::InvalidRawSource;
+        if (authored != 0) return MikuFitDecision::NativeAuthored;
+        if (unsupported != 0) return MikuFitDecision::UnsupportedSource;
+        for (size_t channel = 0; channel < fit.inputSlots.size(); ++channel)
+        {
+            const float value = sample(fit.inputSlots[channel]);
+            if (!std::isfinite(value) || value < 0 || value > 1) return MikuFitDecision::InvalidRawSource;
+            fit.inputs[channel] = value;
+        }
+        if (adapted.size() != available.size() || fit.outputSlots.size() != fit.output.size() ||
+            std::any_of(fit.outputSlots.begin(), fit.outputSlots.end(), [&](int slot) { return slot < 0 || static_cast<size_t>(slot) >= adapted.size(); }))
+            return MikuFitDecision::MissingOutput;
+        const auto status = facial_fit::mouthService.evaluate(facial_fit::mouthService.context,
+            fit.face, fit.inputs.data(), static_cast<uint32_t>(fit.inputs.size()),
+            fit.output.data(), static_cast<uint32_t>(fit.output.size()));
+        if (status != GAKU_OK || std::any_of(fit.output.begin(), fit.output.end(),
+            [](float value) { return !std::isfinite(value) || value < 0 || value > 1; })) return MikuFitDecision::InvalidModel;
+        for (size_t output = 0; output < available.size(); ++output)
+            if (available[output].rfind("b_mouth.mouth_", 0) == 0) adapted[output] = 0;
+        for (size_t output = 0; output < fit.output.size(); ++output)
+            adapted[static_cast<size_t>(fit.outputSlots[output])] = fit.output[output];
+        return MikuFitDecision::ExternalApplied;
+    }
+
+    inline MikuFitDecision CheckExternalEyeSource(const ExternalFacialFit& fit,
+        const std::vector<std::string>& clipNames, std::span<const float> samples, bool allowUnverified)
+    {
+        if (!HasMikuRawEyeSource(clipNames)) return MikuFitDecision::MissingRawEyeSource;
+        const size_t stride = clipNames.size();
+        if (samples.empty() || samples.size() % stride != 0) return MikuFitDecision::InvalidRawSource;
+
+        // Importers emit dense curves for unused profile keys. Evaluate actual
+        // activity across the clip so a zero column does not block measured keys.
+        const auto active = [&](size_t slot) {
+            for (size_t i = slot; i < samples.size(); i += stride)
+                if (samples[i] != 0.0f) return true;
+            return false;
+        };
+        if (active(fit.eyeNativeAuthoredSlot)) return MikuFitDecision::NativeAuthored;
+        if (active(fit.eyeUnsupportedSlot)) return MikuFitDecision::UnsupportedEyeSource;
+        for (size_t i = fit.eyePresentSlot; i < samples.size(); i += stride)
+            if (samples[i] != 1.0f) return MikuFitDecision::MissingRawEyeSource;
+
+        for (size_t slot = 0; slot < stride; ++slot)
+        {
+            if (clipNames[slot].rfind(kMikuRawEyePrefix, 0) != 0 ||
+                slot == static_cast<size_t>(fit.eyePresentSlot) ||
+                slot == static_cast<size_t>(fit.eyeUnsupportedSlot) ||
+                slot == static_cast<size_t>(fit.eyeNativeAuthoredSlot)) continue;
+            const auto key = std::find(fit.eyeKeySlots.begin(), fit.eyeKeySlots.end(), static_cast<int>(slot));
+            if (key == fit.eyeKeySlots.end() && active(slot)) return MikuFitDecision::UnsupportedEyeSource;
+            if (key != fit.eyeKeySlots.end() && !allowUnverified &&
+                (!fit.face->eyesGrade || !fit.face->eyeKeyGrades || !fit.face->eyeKeyGrades[key - fit.eyeKeySlots.begin()]) &&
+                active(slot)) return MikuFitDecision::ExternalUnverified;
+        }
+        return MikuFitDecision::ExternalApplied;
+    }
+
     // Bind-time resolution only: which clip channel feeds which fitted key, and
     // whether the model can host the fitted outputs at all. `modelNames` is the
     // live face's channel list, not the owned subset, because claiming a family
     // is what puts those channels into the owned subset afterwards.
     inline ExternalFacialFit BindExternalFacialFit(const std::string& faceName,
         const std::vector<std::string>& clipNames, const std::vector<std::string>& modelNames,
-        bool allowUnverified)
+        std::span<const float> clipSamples, bool allowUnverified)
     {
         ExternalFacialFit fit;
-        fit.face = facial_fit::Find(faceName);
+        const auto match = facial_fit::FindFit(faceName);
+        fit.face = match.face;
+        fit.provider = match.provider;
         if (!fit.face) return fit;
         fit.character = fit.face->character ? fit.face->character : "";
         fit.mouthPresent = fit.face->mouthPresent != 0 && fit.face->mouthShapeNames != nullptr &&
             fit.face->mouthKnots > 0;
         fit.eyesPresent = fit.face->eyesPresent != 0 && fit.face->eyeKeyNames != nullptr &&
-            fit.face->eyeChannelNames != nullptr && fit.face->eyeKeyCount > 0 && fit.face->eyeChannelCount > 0;
+            fit.face->eyeChannelNames != nullptr &&
+            fit.face->eyeKeyCount > 0 && fit.face->eyeKeyCount <= RINHA_FACIAL_FIT_MAX_KEYS &&
+            fit.face->eyeChannelCount > 0 && fit.face->eyeChannelCount <= RINHA_FACIAL_FIT_MAX_CHANNELS;
         if (fit.mouthPresent)
         {
             bool complete = true;
             for (uint32_t shape = 0; shape < RINHA_FACIAL_FIT_MOUTH_SHAPES; ++shape)
-                complete = complete && FindClipSlot(modelNames, fit.face->mouthShapeNames[shape]) >= 0;
+                complete = complete && fit.face->mouthShapeNames[shape] &&
+                    FindClipSlot(modelNames, fit.face->mouthShapeNames[shape]) >= 0;
             fit.mouthClaim = complete && HasMikuRawSource(clipNames) &&
                 (fit.face->mouthGrade != 0 || allowUnverified);
         }
@@ -236,21 +373,24 @@ namespace GakuMotion
             fit.eyeUnsupportedSlot = FindClipSlot(clipNames, kMikuRawEyeMarkers[1]);
             fit.eyeNativeAuthoredSlot = FindClipSlot(clipNames, kMikuRawEyeMarkers[2]);
             fit.eyeKeySlots.assign(fit.face->eyeKeyCount, -1);
-            fit.eyeKeyGrades.assign(fit.face->eyeKeyCount, 0);
             bool hostable = false;
             for (uint32_t key = 0; key < fit.face->eyeKeyCount; ++key)
             {
+                if (!fit.face->eyeKeyNames[key]) { fit.eyesPresent = false; return fit; }
                 fit.eyeKeySlots[key] = FindClipSlot(clipNames,
                     std::string(kMikuRawEyePrefix) + fit.face->eyeKeyNames[key]);
-                fit.eyeKeyGrades[key] = fit.face->eyeKeyGrades ? fit.face->eyeKeyGrades[key] : 0;
-                if (fit.eyeKeyGrades[key] == 0 && fit.eyeKeySlots[key] >= 0) fit.eyeHasUnverifiedKey = true;
             }
             for (uint32_t channel = 0; channel < fit.face->eyeChannelCount; ++channel)
+            {
+                if (!fit.face->eyeChannelNames[channel]) { fit.eyesPresent = false; return fit; }
                 hostable = hostable || FindClipSlot(modelNames, fit.face->eyeChannelNames[channel]) >= 0;
+            }
             fit.eyeAmplitudes.assign(fit.face->eyeKeyCount, 0.0f);
             fit.eyeWeights.assign(fit.face->eyeChannelCount, 0.0f);
-            fit.eyeClaim = hostable && HasMikuRawEyeSource(clipNames) &&
-                (!fit.eyeHasUnverifiedKey || allowUnverified);
+            fit.eyeClipDecision = CheckExternalEyeSource(fit, clipNames, clipSamples, allowUnverified);
+            if (!hostable && fit.eyeClipDecision == MikuFitDecision::ExternalApplied)
+                fit.eyeClipDecision = MikuFitDecision::MissingOutput;
+            fit.eyeClaim = fit.eyeClipDecision == MikuFitDecision::ExternalApplied;
         }
         return fit;
     }
@@ -263,11 +403,14 @@ namespace GakuMotion
         fit.mouthShapeSlots.assign(RINHA_FACIAL_FIT_MOUTH_SHAPES, -1);
         if (fit.mouthPresent)
             for (uint32_t shape = 0; shape < RINHA_FACIAL_FIT_MOUTH_SHAPES; ++shape)
-                fit.mouthShapeSlots[shape] = FindClipSlot(ownedNames, fit.face->mouthShapeNames[shape]);
-        fit.eyeChannelSlots.assign(fit.face->eyeChannelCount, -1);
+                if (fit.face->mouthShapeNames[shape])
+                    fit.mouthShapeSlots[shape] = FindClipSlot(ownedNames, fit.face->mouthShapeNames[shape]);
         if (fit.eyesPresent)
+        {
+            fit.eyeChannelSlots.assign(fit.face->eyeChannelCount, -1);
             for (uint32_t channel = 0; channel < fit.face->eyeChannelCount; ++channel)
                 fit.eyeChannelSlots[channel] = FindClipSlot(ownedNames, fit.face->eyeChannelNames[channel]);
+        }
     }
 
     inline MikuFitDecision TryApplyExternalMouthFit(const ExternalFacialFit& fit,
@@ -298,7 +441,7 @@ namespace GakuMotion
         if (adapted.size() != available.size()) return MikuFitDecision::InvalidModel;
         const float vowels[5]{raw[0], raw[1], raw[2], raw[3], raw[4]};
         std::array<float, RINHA_FACIAL_FIT_MOUTH_SHAPES> weights{};
-        const auto status = facial_fit::service.evaluateMouth(facial_fit::service.context, fit.face,
+        const auto status = fit.provider->evaluateMouth(fit.provider->context, fit.face,
             vowels, weights.data());
         if (status == GAKU_E_LIMIT) return MikuFitDecision::OutsideDomain;
         if (status != GAKU_OK) return MikuFitDecision::InvalidModel;
@@ -314,7 +457,7 @@ namespace GakuMotion
     // before the first write, leaving the caller's adapted vector untouched.
     inline MikuFitDecision TryApplyExternalEyeFit(ExternalFacialFit& fit,
         const std::vector<std::string>& names, const std::vector<float>& input,
-        const std::string& characterOverride, bool allowUnverified,
+        const std::string& characterOverride,
         const std::vector<std::string>& available, std::vector<float>& adapted)
     {
         if (!fit.eyesPresent) return MikuFitDecision::UnknownFace;
@@ -329,16 +472,13 @@ namespace GakuMotion
         if (sample(fit.eyeUnsupportedSlot) != 0.0f) return MikuFitDecision::UnsupportedEyeSource;
         if (!characterOverride.empty() && characterOverride != "auto" && characterOverride != fit.character)
             return MikuFitDecision::CharacterMismatch;
-        // Clip-level refusal: one unverified key that the clip actually drives
-        // would make the summed result unmeasured, so the whole clip falls back
-        // instead of flickering per frame.
-        if (fit.eyeHasUnverifiedKey && !allowUnverified) return MikuFitDecision::ExternalUnverified;
+        if (fit.eyeClipDecision != MikuFitDecision::ExternalApplied) return fit.eyeClipDecision;
         for (int slot : fit.eyeChannelSlots)
             if (slot >= 0 && static_cast<size_t>(slot) >= available.size()) return MikuFitDecision::MissingOutput;
         if (adapted.size() != available.size()) return MikuFitDecision::InvalidModel;
         for (size_t key = 0; key < fit.eyeAmplitudes.size(); ++key)
             fit.eyeAmplitudes[key] = std::clamp(sample(fit.eyeKeySlots[key]), 0.0f, 1.0f);
-        const auto status = facial_fit::service.evaluateEyes(facial_fit::service.context, fit.face,
+        const auto status = fit.provider->evaluateEyes(fit.provider->context, fit.face,
             fit.eyeAmplitudes.data(), fit.eyeWeights.data());
         if (status != GAKU_OK) return MikuFitDecision::InvalidModel;
         for (size_t i = 0; i < adapted.size(); ++i)

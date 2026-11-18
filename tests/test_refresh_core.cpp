@@ -2905,6 +2905,7 @@ static void TestOrderedPlaybackCommands()
 #include "test_face_ownership.hpp"
 #include "test_facial_continuity.hpp"
 #include "test_miku_facial_fit.hpp"
+#include "test_runtime_mouth_source.hpp"
 #include "test_rinha_facial_fit.hpp"
 #include "test_scene_actor_selection.hpp"
 #include "test_waist_support.hpp"
@@ -3077,6 +3078,7 @@ int main(int argc, char** argv)
  TestFacialSemanticBindingV2();
  TestFacialDefaultContinuity();
  TestMikuMouthFit();
+ TestRuntimeMouthSource();
  TestRinhaFacialFit();
  TestSceneActorSelection();
  TestEnsembleIntegration(repoRoot);
