@@ -123,6 +123,7 @@ namespace GakuMotion
 		live_takeover::Observation liveObservation;
 		bool liveViewingConfirmed{false};
 		bool liveTakeoverActive{false}, liveTakeoverAvailable{false};
+		bool liveAspectPreviewRequested{true};
 		PhysicsMonitor physicsMonitor;
 		std::chrono::steady_clock::time_point physicsMonitorAt{};
 		bool liveDofDisabled{false};
@@ -3730,6 +3731,10 @@ namespace GakuMotion
 			};
 			ctx.liveViewingConfirmed = liveViewingConfirmed && !liveTakeoverFault;
 			ctx.liveTakeoverActive = liveTakeoverActive;
+			ctx.liveAspectPreviewRequested = liveAspectPreviewRequested;
+			ctx.fnSetLiveAspectPreview = [](void* self, bool enabled) {
+				static_cast<Core*>(self)->liveAspectPreviewRequested = enabled;
+			};
 			ctx.liveContinuousArmDiagnostics = liveContinuousArmDiagnostics;
             ctx.fnSetContinuousArmDiagnostics = [](void* self, bool enabled) { static_cast<Core*>(self)->liveContinuousArmDiagnostics = enabled; };
 			ctx.fnLoadSwingReport = [](void* self) { static_cast<Core*>(self)->swingReportLoadPending=true; };

@@ -90,6 +90,8 @@ namespace GakuMotion
         LiveFrameMonitor::Snapshot liveFrameMonitor{};
         uint32_t liveFrameFollowers{};
 		bool liveTakeoverActive{false}, liveTakeoverAvailable{false};
+		bool liveAspectPreviewRequested{true};
+		void (*fnSetLiveAspectPreview)(void*, bool){nullptr};
 		bool liveLoopEnabled{false};
 		float liveLoopLead{1.0f};
 		uint64_t liveLoopCycles{};
@@ -452,6 +454,13 @@ namespace GakuMotion
 		}
 
 #ifdef GKMOTION_GUI_ACTIVE
+		void DrawLiveAspectPreview(const GuiContext& ctx)
+		{
+			bool enabled = ctx.liveAspectPreviewRequested;
+			if (ctx.fnSetLiveAspectPreview && ImGui::Checkbox("接管时使用 16:9（测试）", &enabled))
+				ctx.fnSetLiveAspectPreview(ctx.self, enabled);
+		}
+
 		void Draw(const GuiContext& ctx, bool hostedPanel = false)
 		{
 			PollBrowse(ctx);
@@ -545,6 +554,7 @@ namespace GakuMotion
                             const char* physics=!ctx.physicsMonitorFresh?"待播放":ctx.physicsMonitor.actual==2?"原生运行中":ctx.physicsMonitor.actual==1?"内建物理":
                                 ctx.physicsMonitor.requested==2?"等待原生任务":"未运行";
                             ImGui::TextWrapped("接管：%s    Live：%s    物理：%s",ctx.liveTakeoverAvailable?"可用":"等待确认",ctx.liveViewingConfirmed?"已识别":"等待确认",physics);
+                            DrawLiveAspectPreview(ctx);
                             ImGui::Spacing();
                             ImGui::BeginDisabled(!ctx.liveTakeoverAvailable||!ctx.fnSetLiveTakeover);
                             if(ImGui::Button(ctx.liveTakeoverActive?"退出 Live 动作接管":"启动 Live 接管",ImVec2((std::min)(260.0f,ImGui::GetContentRegionAvail().x),h*1.35f))&&ctx.fnSetLiveTakeover){
@@ -599,6 +609,7 @@ namespace GakuMotion
 				if (browsePendingKind >= 0) ImGui::TextDisabled("等待文件选择…");
 				if (!ctx.injectionNotice.empty()) ImGui::TextWrapped("%s", ctx.injectionNotice.c_str());
 				if (!browseNotice.empty()) ImGui::TextWrapped("%s", browseNotice.c_str());
+				if (ctx.liveTakeoverActive) DrawLiveAspectPreview(ctx);
 
 				DrawShell(*this, ctx);
 			}
