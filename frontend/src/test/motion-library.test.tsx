@@ -149,4 +149,17 @@ describe('LibraryPage', () => {
     await waitFor(() => expect(screen.getByTestId('library-count')).toHaveTextContent('显示 6 / 6 个曲目'))
     expect(screen.getByText(/作者A \/ 作者B/)).toBeInTheDocument()
   })
+
+  it('renders track cover thumbnails in library rows and probes mp3 cover/artist on import', async () => {
+    const user = userEvent.setup()
+    render(<LibraryPage />)
+    await waitFor(() => expect(screen.getByTestId('library-cover-hikari-no-saki')).toBeInTheDocument())
+
+    await user.click(screen.getByRole('button', { name: '添加到曲库' }))
+    const dialog = await screen.findByTestId('import-dialog')
+    await motionStore.importPickSlotFile('audio', 'C:\\music\\stage_live.mp3')
+    await waitFor(() => expect(within(dialog).getByTestId('import-audio-preview')).toBeInTheDocument())
+    expect(within(dialog).getByTestId('import-cover-preview')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('副标题 / 作者')).toHaveValue('初星学園')
+  })
 })

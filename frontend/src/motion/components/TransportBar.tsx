@@ -6,6 +6,7 @@ import {
   RiCheckFill,
   RiDiscFill,
   RiEqualizerFill,
+  RiMusic2Fill,
   RiOrderPlayFill,
   RiPauseFill,
   RiPlayFill,
@@ -62,11 +63,15 @@ export function TransportBar() {
   const navigationError = useMotionStore((state) => state.navigationError)
   const actionError = useMotionStore((state) => state.actionError)
   const cameraPending = useMotionStore((state) => state.cameraPending)
+  const clock = useMotionStore((state) => state.clock)
+  const audioEffect = useMotionStore((state) => state.audioEffect)
+  const coverCache = useMotionStore((state) => state.coverCache)
   const capabilities = useMotionStore((state) => state.capabilities)
   const seekStepSeconds = useMotionStore((state) => state.seekStepSeconds)
   const precisionOpen = useMotionStore((state) => state.precisionPanelOpen)
   const precisionPinned = useMotionStore((state) => state.precisionPanelPinned)
 
+  const [audioFxOpen, setAudioFxOpen] = React.useState(false)
   const [cameraOpen, setCameraOpen] = React.useState(false)
   const [speedOpen, setSpeedOpen] = React.useState(false)
   const [volumeOpen, setVolumeOpen] = React.useState(false)
@@ -93,6 +98,17 @@ export function TransportBar() {
     () => libraryEntries.find((entry) => entry.id === loaded.motionKey) ?? null,
     [libraryEntries, loaded.motionKey],
   )
+  React.useEffect(() => {
+    if (currentEntry?.hasCover) {
+      void motionStore.ensureTrackCover(currentEntry.id)
+    }
+  }, [currentEntry?.id, currentEntry?.hasCover])
+  const currentCoverUri = currentEntry?.id ? (coverCache[currentEntry.id] ?? '') : ''
+  const activeEffectPreset = React.useMemo(
+    () => audioEffect.presets.find((p) => p.id === audioEffect.activeId) ?? audioEffect.presets[0] ?? { id: 'flat', name: '原声', category: 'flat', description: '' },
+    [audioEffect.presets, audioEffect.activeId],
+  )
+  const effectModified = audioEffect.activeId !== 'flat'
   const currentSubtitle = React.useMemo(() => {
     if (!currentEntry?.subtitle) return ''
     return currentEntry.subtitle
@@ -225,13 +241,22 @@ export function TransportBar() {
           <div
             aria-hidden="true"
             className={cn(
-              'flex size-9 shrink-0 items-center justify-center rounded-md border',
+              'flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md border',
               hasClip
                 ? 'border-primary/25 bg-primary/10 text-primary'
                 : 'border-border bg-muted/60 text-muted-foreground',
             )}
           >
-            <RiDiscFill className="size-4" />
+            {currentCoverUri ? (
+              <img
+                src={currentCoverUri}
+                alt=""
+                data-testid="transport-cover-img"
+                className="size-full object-cover"
+              />
+            ) : (
+              <RiDiscFill className="size-4" />
+            )}
           </div>
           <div className="min-w-0 flex-1 space-y-0.5">
             <div className="flex items-center gap-2">
@@ -241,6 +266,14 @@ export function TransportBar() {
               >
                 {player.title}
               </div>
+              {clock.runMode === 'recording' && (
+                <span
+                  data-testid="transport-recording-badge"
+                  className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400"
+                >
+                  供录制
+                </span>
+              )}
               {!supports('player.scrubBegin') && <PendingBadge />}
             </div>
             <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
@@ -326,8 +359,66 @@ export function TransportBar() {
           {!transportSupported && <PendingBadge />}
         </div>
 
-        {/* Right: Camera Badge Popover, Speed Icon, Volume Icon, Precision Drawer Trigger */}
+        {/* Right: Audio Effect Badge, Camera Badge Popover, Speed Icon, Volume Icon, Precision Drawer Trigger */}
         <div className="flex flex-1 items-center justify-end gap-1.5">
+          {/* Audio Effect Preset Badge */}
+          <div className="flex items-center gap-1">
+            <Popover open={audioFxOpen} onOpenChange={setAudioFxOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="音效预设"
+                  data-testid="audio-effect-badge"
+                  disabled={!supports('audioEffect.set')}
+                  title={audioEffect.available ? `音效：${activeEffectPreset.name}` : '未加载 GakuAudio 音效插件'}
+                  className={cn(
+                    'inline-flex h-6 items-center gap-1 rounded-[4px] border px-2 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50',
+                    effectModified && audioEffect.available
+                      ? 'border-primary/40 bg-primary/10 text-primary hover:border-primary/60'
+                      : 'border-border bg-background/70 text-muted-foreground hover:border-foreground/30 hover:text-foreground',
+                  )}
+                >
+                  <RiMusic2Fill className="size-3 shrink-0" />
+                  <span>{activeEffectPreset.name}</span>
+                </button>
+              </PopoverTrigger>
+              <PopoverContent side="top" align="end" className="w-56 p-1">
+                <div className="flex items-center justify-between px-2 py-1 text-[10px] font-medium text-muted-foreground">
+                  <span>音效环境预设 (GakuAudio)</span>
+                  {!audioEffect.available && <span className="text-amber-500">未加载</span>}
+                </div>
+                {audioEffect.presets.map((preset) => {
+                  const active = audioEffect.activeId === preset.id
+                  return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={active}
+                      disabled={!audioEffect.available}
+                      onClick={() => {
+                        setAudioFxOpen(false)
+                        void motionStore.setAudioEffect(preset.id)
+                      }}
+                      className={cn(
+                        'flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50',
+                        active ? 'font-semibold text-primary' : 'text-foreground',
+                      )}
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate">{preset.name}</div>
+                        {preset.description && (
+                          <div className="truncate text-[10px] text-muted-foreground">{preset.description}</div>
+                        )}
+                      </div>
+                      {active && <RiCheckFill className="size-3.5 shrink-0 text-primary" />}
+                    </button>
+                  )
+                })}
+              </PopoverContent>
+            </Popover>
+          </div>
+
           {/* Compact Camera Mode Badge (NetEase right-side badge aesthetic) */}
           <div className="flex items-center gap-1">
             <Popover open={cameraOpen} onOpenChange={setCameraOpen}>

@@ -7,7 +7,9 @@
 
 import {
   BridgeError,
+  DEFAULT_AUDIO_EFFECT_STATE,
   DEFAULT_CAMERA_SETTINGS,
+  DEFAULT_CLOCK_STATE,
   DEFAULT_EXPERIMENT_SETTINGS,
   DEFAULT_FACIAL_WEIGHTS,
   DEFAULT_GAZE_SETTINGS,
@@ -19,8 +21,13 @@ import {
   defaultSoleSettings,
   defaultStudioSettings,
   symmetricalHid,
+  type AudioEffectState,
+  type AudioProbeInfo,
   type BoneState,
   type CameraSettings,
+  type ClockRunMode,
+  type ClockSource,
+  type ClockState,
   type DropPeek,
   type EditEntryInfo,
   type EnsembleSettings,
@@ -94,6 +101,11 @@ const PHASE2_METHODS: MotionMethodName[] = [
   'library.import',
   'library.probeFiles',
   'library.startEdit',
+  'library.probeAudio',
+  'library.getCover',
+  'clock.setRunMode',
+  'clock.configure',
+  'audioEffect.set',
   'dialog.pickFile',
   'dialog.poll',
   'drop.setTarget',
@@ -153,6 +165,22 @@ const SUPPORTED_EVENTS: MotionEventName[] = [
   'sole.changed',
   'solePitch.changed',
   'studio.changed',
+  'clock.changed',
+  'audioEffect.changed',
+]
+
+const MOCK_COVER_PNG =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+
+const MOCK_AUDIO_EFFECT_PRESETS = [
+  { id: 'flat', name: '原声', category: 'flat', description: '直通输出（保留原始母带音色）' },
+  { id: 'concert_arena', name: '演唱会现场', category: 'live', description: '万人巨蛋空间混响与氛围临场感' },
+  { id: 'livehouse', name: 'LiveHouse现场', category: 'live', description: '近距离中小场地节奏冲击与清晰人声' },
+  { id: 'mega_bass', name: '极重低音', category: 'bass', description: 'Sub-bass 与低频弹性强化' },
+  { id: 'vocal_clear', name: '清澈人声', category: 'vocal', description: '突出偶像人声泛音与齿音透明度' },
+  { id: 'symphony_hall', name: '音乐厅', category: 'space', description: '古典音乐厅自然早期反射' },
+  { id: 'surround_3d', name: '3D环绕', category: 'space', description: 'Haas + 立体声宽度增强' },
+  { id: 'pure_acg', name: '纯净ACG', category: 'eq', description: '二次元流行乐高频通透调音' },
 ]
 
 function seedEntries(): LibraryEntry[] {
@@ -168,6 +196,8 @@ function seedEntries(): LibraryEntry[] {
       hasFacial: true,
       hasCamera: true,
       hasAudio: true,
+      audioFile: 'song.flac',
+      hasCover: true,
     },
     {
       id: 'starlight-step',
@@ -481,6 +511,13 @@ export class MotionMockBridgeClient implements MotionBridgeClient {
     lightingNotice: '',
     videoNotice: '',
   }
+  private clock: ClockState = { ...DEFAULT_CLOCK_STATE }
+  private audioEffect: AudioEffectState = {
+    ...DEFAULT_AUDIO_EFFECT_STATE,
+    available: true,
+    presets: MOCK_AUDIO_EFFECT_PRESETS.map((item) => ({ ...item })),
+  }
+  private coverByKey = new Map<string, string>([['hikari-no-saki', MOCK_COVER_PNG]])
 
   private nextDialogId = 1
   private dialogResults = new Map<number, { paths: string[] }>()
@@ -927,9 +964,77 @@ export class MotionMockBridgeClient implements MotionBridgeClient {
           hasFacial: entry.hasFacial,
           hasCamera: entry.hasCamera,
           hasAudio: entry.hasAudio,
+          audioFile: entry.audioFile,
+          hasCover: entry.hasCover,
           timing: this.timings.get(entry.id) ?? defaultPerformanceTiming(),
         }
         return result as MotionMethods[M]['result']
+      }
+      case 'library.probeAudio': {
+        this.requireCapability('library.probeAudio')
+        const path = String(p.path ?? '')
+        if (!path || /^[a-zA-Z]+:\/\//.test(path) || path.startsWith('\\\\') || path.startsWith('//')) {
+          throw new BridgeError('invalid_params', '不支持网络或流媒体路径')
+        }
+        const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase()
+        const stem = (path.split(/[\\/]/).pop() ?? '').replace(/\.[^.]+$/, '')
+        const info: AudioProbeInfo = {
+          valid: ['wav', 'mp3', 'flac', 'ogg', 'oga', 'm4a', 'aac', 'opus'].includes(ext),
+          sampleRate: 48000,
+          channels: 2,
+          durationSeconds: 185,
+          codec: ext || 'wav',
+          title: stem || 'Mock Track',
+          artist: ext === 'wav' ? '' : '初星学園',
+          album: 'Live Collection',
+          hasCover: ext !== 'wav',
+          coverDataUri: ext !== 'wav' ? MOCK_COVER_PNG : '',
+        }
+        return info as MotionMethods[M]['result']
+      }
+      case 'library.getCover': {
+        this.requireCapability('library.getCover')
+        const key = String(p.key ?? '')
+        const dir = String(p.directory ?? '')
+        const entry = this.entries.find((item) => (key && item.id === key) || (dir && item.directory === dir))
+        const cover = entry ? (this.coverByKey.get(entry.id) ?? (entry.hasCover ? MOCK_COVER_PNG : '')) : ''
+        return { hasCover: cover !== '', coverDataUri: cover } as MotionMethods[M]['result']
+      }
+      case 'clock.setRunMode': {
+        this.requireCapability('clock.setRunMode')
+        const runMode: ClockRunMode = p.runMode === 'recording' ? 'recording' : 'realtime'
+        this.clock = {
+          ...this.clock,
+          runMode,
+          effectiveSource: runMode === 'recording' ? 'fixed_step' : this.clock.configuredSource,
+        }
+        this.emit('clock.changed', { ...this.clock })
+        return { ...this.clock } as MotionMethods[M]['result']
+      }
+      case 'clock.configure': {
+        this.requireCapability('clock.configure')
+        const source = (p.source as ClockSource | undefined) ?? this.clock.configuredSource
+        const fpsNumerator = Number(p.fpsNumerator ?? this.clock.fpsNumerator) || 60
+        const fpsDenominator = Number(p.fpsDenominator ?? this.clock.fpsDenominator) || 1
+        this.clock = {
+          ...this.clock,
+          configuredSource: source,
+          effectiveSource: this.clock.runMode === 'recording' ? 'fixed_step' : source,
+          fpsNumerator,
+          fpsDenominator,
+        }
+        this.emit('clock.changed', { ...this.clock })
+        return { ...this.clock } as MotionMethods[M]['result']
+      }
+      case 'audioEffect.set': {
+        this.requireCapability('audioEffect.set')
+        const presetId = String(p.presetId ?? '')
+        if (!this.audioEffect.presets.some((item) => item.id === presetId)) {
+          throw new BridgeError('failed', `未知音效预设: ${presetId}`)
+        }
+        this.audioEffect = { ...this.audioEffect, activeId: presetId }
+        this.emit('audioEffect.changed', { ...this.audioEffect, presets: this.audioEffect.presets.map((x) => ({ ...x })) })
+        return { ...this.audioEffect, presets: this.audioEffect.presets.map((x) => ({ ...x })) } as MotionMethods[M]['result']
       }
       case 'library.import': {
         this.requireCapability('library.import')
@@ -1311,6 +1416,11 @@ export class MotionMockBridgeClient implements MotionBridgeClient {
       musicVolumeNotice: '',
       importProgress: null,
       motionsRoot: 'gakumas-local/motions',
+      clock: { ...this.clock },
+      audioEffect: {
+        ...this.audioEffect,
+        presets: this.audioEffect.presets.map((item) => ({ ...item })),
+      },
     }
   }
 

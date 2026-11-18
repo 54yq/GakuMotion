@@ -667,7 +667,10 @@ namespace GakuMotion
 			e.motionFile = !m.motionFile.empty() ? m.motionFile : (!m.dir.empty() ? m.dir : m.name) + "/motion.gkclip";
 
 			if (m.hasAudio)
-				e.audioFile = (!m.dir.empty() ? m.dir : m.name) + "/song.wav";
+			{
+				const std::string audioName = !m.audioFile.empty() ? m.audioFile : "song.wav";
+				e.audioFile = (!m.dir.empty() ? m.dir : m.name) + "/" + audioName;
+			}
 
 			e.hasCamera = m.hasCamera;
 			e.cameraFile = e.hasCamera ? ((!m.dir.empty() ? m.dir : m.name) + "/camera.gkcamera") : "";
@@ -942,10 +945,11 @@ namespace GakuMotion
 			{
 				std::string ext = WideToUtf8(std::filesystem::path(Utf8ToWide(pickedAudio)).extension().wstring());
 				for (auto& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-				if (ext != ".wav")
+				if (ext != ".wav" && ext != ".mp3" && ext != ".flac" && ext != ".ogg" &&
+				    ext != ".oga" && ext != ".m4a" && ext != ".aac" && ext != ".opus")
 				{
 					canConfirm = false;
-					validationError = "当前音频轨道仅支持 .wav 无损格式";
+					validationError = "音频轨道仅支持 .wav/.mp3/.flac/.ogg/.m4a/.aac/.opus 本地文件";
 				}
 			}
 

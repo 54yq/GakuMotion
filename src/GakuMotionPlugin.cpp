@@ -5,6 +5,8 @@
 #include "GkCaptureSafety.hpp"
 #include "GkGmlClient.hpp"
 #include "GakuMotion.hpp"
+#include "GkAudioPluginClient.hpp"
+#include "GkWicCover.hpp"
 #include "GkWebPanelBridge.hpp"
 #include "GakuMotionControl.h"
 #include "GkLog.hpp"
@@ -219,7 +221,7 @@ namespace
 		g_physicsLastTick = {};
 	}
 	void DispatchEnsemblePhysics(GakuMotion::Core& core, void* actor, int frame,
-		std::chrono::steady_clock::time_point bodyBegin)
+		float realDeltaTime, std::chrono::steady_clock::time_point bodyBegin)
 	{
 		auto* track = core.PlayerForActor(actor);
 		if (!track) return;
@@ -267,8 +269,7 @@ namespace
 		}
 		slot.seeks = core.player.SeekCount(); slot.time = core.player.currentTime; slot.frame = frame;
 		const auto dispatchBegin = std::chrono::steady_clock::now();
-		const float dt = slot.lastTick.time_since_epoch().count() == 0 ? 0.f :
-			std::chrono::duration<float>(dispatchBegin - slot.lastTick).count();
+		const float dt = slot.lastTick.time_since_epoch().count() == 0 ? 0.f : core.EffectiveSimulationDelta(realDeltaTime);
 		slot.lastTick = dispatchBegin;
 		bool native = false;
 		if (useV3) native = g_multiBurstBridge.Publish(index, binding->second, ctrl, slot.time, frame,
@@ -586,6 +587,8 @@ namespace
 	}
 
 	int (*g_faceUnityFrame)(){nullptr};
+	float (*g_unityUnscaledDeltaTime)(){nullptr};
+	int (*g_unityRenderedFrameCount)(){nullptr};
 
 	std::string HelperGetFaceShapeName(void* model, int index)
 	{
@@ -1148,6 +1151,23 @@ namespace
 	GakuMotion::bgm::Lease g_bgmLease;
 	GakuMotion::bgm::Lease g_voiceLease;
 	GakuMotion::bgm::Lease g_seLease;
+	GakuMotion::audio::AudioPluginClient g_audioPlugin;
+
+	bool HelperAudioSupportsRate()
+	{
+		return g_audioPlugin.Available();
+	}
+
+	void HelperAudioSetRate(float rate)
+	{
+		if (g_audioPlugin.Available())
+			g_audioPlugin.SetPlaybackRate(rate);
+	}
+
+	std::string HelperActiveAudioEffectId()
+	{
+		return g_audioPlugin.ActivePresetId();
+	}
 
 	bool HelperAudioMissingAlias(MCIERROR error)
 	{
@@ -1158,6 +1178,11 @@ namespace
 	{
 		if (!std::isfinite(volume)) return false;
 		g_musicVolume = std::clamp(volume, 0.0f, 1.0f);
+		if (g_audioPlugin.Available())
+		{
+			g_musicVolumeSupport = 1;
+			return g_audioPlugin.SetVolume(g_musicVolume);
+		}
 		if (!g_audioObservation.sourceOpen) { g_musicVolumeSupport = 0; return true; }
 		if (!g_audioUsesDigitalVideo) { g_musicVolumeSupport = -1; return false; }
 		char cmd[80]{};
@@ -1168,10 +1193,23 @@ namespace
 		// A volume failure must not poison transport observation or synchronization.
 		return result == 0;
 	}
-	int HelperAudioVolumeSupport() { return g_musicVolumeSupport; }
+	int HelperAudioVolumeSupport()
+	{
+		if (g_audioPlugin.Available()) return 1;
+		return g_musicVolumeSupport;
+	}
 
 	GakuMotion::audio::Observation HelperAudioObserve()
 	{
+		if (g_audioPlugin.Available())
+		{
+			GakuMotion::audio::Observation obs{};
+			if (g_audioPlugin.Observe(obs))
+			{
+				g_audioObservation = obs;
+				return obs;
+			}
+		}
 		auto observed = g_audioObservation;
 		if (!observed.sourceOpen) return observed;
 		char mode[32]{};
@@ -1199,6 +1237,8 @@ namespace
 
 	bool HelperAudioIsOpen()
 	{
+		if (g_audioPlugin.Available())
+			return HelperAudioObserve().sourceOpen;
 		char buf[64]{};
 		const MCIERROR error = g_sendMciAudio("status mmd_song mode", buf, sizeof(buf), NULL);
 		if (error)
@@ -1221,6 +1261,15 @@ namespace
 	// 打开并以 startMs 为起点播放
 	void HelperAudioOpenAndPlay(const std::string& path, int startMs)
 	{
+		if (g_audioPlugin.Available())
+		{
+			if (g_audioObservation.sourceOpen)
+				g_sendMciAudio("close mmd_song", NULL, 0, NULL);
+			g_audioPlugin.SetVolume(g_musicVolume);
+			g_audioPlugin.OpenAndPlay(path, static_cast<double>((std::max)(0, startMs)) / 1000.0);
+			HelperAudioObserve();
+			return;
+		}
 		const MCIERROR closeError = g_sendMciAudio("close mmd_song", NULL, 0, NULL);
 		if (closeError && !HelperAudioMissingAlias(closeError))
 		{
@@ -1280,12 +1329,24 @@ namespace
 
 	void HelperAudioPause()
 	{
+		if (g_audioPlugin.Available())
+		{
+			g_audioPlugin.Pause();
+			HelperAudioObserve();
+			return;
+		}
 		HelperAudioRecordCommand(g_sendMciAudio("pause mmd_song", NULL, 0, NULL));
 	}
 
 	// Always use the requested absolute timeline position, including zero.
 	void HelperAudioResumeAt(float seconds)
 	{
+		if (g_audioPlugin.Available())
+		{
+			g_audioPlugin.ResumeAt(seconds);
+			HelperAudioObserve();
+			return;
+		}
 		const int ms = HelperAudioMsFromSeconds(seconds);
 		if (HelperAudioIsOpen())
 		{
@@ -1303,6 +1364,12 @@ namespace
 	// 进度跳转：仅在音频已打开时生效；未打开时由播放器下一次 Play() 负责对齐
 	void HelperAudioSeekTo(float seconds, bool playing)
 	{
+		if (g_audioPlugin.Available())
+		{
+			g_audioPlugin.Seek(seconds, playing);
+			HelperAudioObserve();
+			return;
+		}
 		if (!HelperAudioIsOpen()) return;
 		const int ms = HelperAudioMsFromSeconds(seconds);
 		char cmd[128]{};
@@ -1317,6 +1384,12 @@ namespace
 
 	void HelperAudioStop()
 	{
+		if (g_audioPlugin.Available())
+		{
+			g_audioPlugin.Stop();
+			HelperAudioObserve();
+			return;
+		}
 		MCIERROR stopError = g_sendMciAudio("stop mmd_song", NULL, 0, NULL);
 		const MCIERROR closeError = g_sendMciAudio("close mmd_song", NULL, 0, NULL);
 		if (HelperAudioMissingAlias(stopError)) stopError = 0;
@@ -1332,6 +1405,17 @@ namespace
 
 	float HelperAudioGetTime()
 	{
+		if (g_audioPlugin.Available())
+		{
+			GakuMotion::audio::Observation obs{};
+			double posSec = -1.0;
+			if (g_audioPlugin.Observe(obs, &posSec) && obs.EffectivePlaying() &&
+				std::isfinite(posSec) && posSec >= 0.0)
+			{
+				return static_cast<float>(posSec);
+			}
+			return -1.0f;
+		}
 		// A failed seek/resume cannot pull the motion back to an old alias clock.
 		if (!HelperAudioObserve().EffectivePlaying()) return -1.0f;
 		char buf[64]{};
@@ -1964,6 +2048,8 @@ bool InitializeMotion()
 	core.fnPickFile = GakuMotion::host::active ? nullptr : PickMotionFile;
 	core.fnBeginPickFile = GakuMotion::host::active ? BeginMotionFile : nullptr;
 	core.fnPollPickFile = GakuMotion::host::active ? PollMotionFile : nullptr;
+	core.fnActiveAudioEffectId = HelperActiveAudioEffectId;
+	g_audioPlugin.SetConfigRoot(GakuMotion::MotionPathFromUtf8(selected.configs));
 
 	// Bind audio helpers to player
 	auto& player = core.player;
@@ -1978,6 +2064,8 @@ bool InitializeMotion()
 	player.fnObserveAudio = HelperAudioObserve;
 	player.fnSetAudioVolume = HelperAudioSetVolume;
 	player.fnAudioVolumeSupport = HelperAudioVolumeSupport;
+	player.fnSupportsAudioPlaybackRate = HelperAudioSupportsRate;
+	player.fnSetAudioPlaybackRate = HelperAudioSetRate;
 	player.fnCanPlay = HelperCanPlay;
 
 	if (g_hostContext.pluginsRoot)
@@ -2233,8 +2321,14 @@ void MotionRuntimeReady(void*)
 	g_getSceneNameNative = reinterpret_cast<decltype(g_getSceneNameNative)>(FindMethodPointer(
 		FindClass("UnityEngine.CoreModule.dll", "UnityEngine.SceneManagement", "Scene"), "GetNameInternal", 1));
 	ctrl.fnCanDriveActor = HelperCanDriveActor;
-	g_faceUnityFrame = reinterpret_cast<int (*)()>(FindMethodPointer(
-		FindClass("UnityEngine.CoreModule.dll", "UnityEngine", "Time"), "get_frameCount", 0));
+	void* timeClass = FindClass("UnityEngine.CoreModule.dll", "UnityEngine", "Time");
+	g_faceUnityFrame = reinterpret_cast<int (*)()>(FindMethodPointer(timeClass, "get_frameCount", 0));
+	g_unityUnscaledDeltaTime = reinterpret_cast<float (*)()>(FindMethodPointer(timeClass, "get_unscaledDeltaTime", 0));
+	g_unityRenderedFrameCount = reinterpret_cast<int (*)()>(FindMethodPointer(timeClass, "get_renderedFrameCount", 0));
+	CameraBridge::onFrameRenderCompleted = []()
+	{
+		GakuMotion::Core::Instance().OnMainCameraRendered(true);
+	};
 	if (g_hostContext.logInfo)
 		g_hostContext.logInfo(
 			"[GakuMotion][Scene] API gameObject=%d injected=%d value=%d name=%d",
@@ -2771,32 +2865,33 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 			sceneHandle, name.c_str(), g_motionSceneAllowed ? "allowed" : "blocked");
 	}
 
-	// All actors share one physical playback clock. Target identity and roster
-	// lifetimes are managed by the fresh typed snapshot below, not callback order.
-	static auto s_lastPhysicalFrameTime = std::chrono::steady_clock::now();
-	static int s_lastUnityFrame = -1, s_fallbackFrame = 0;
-	// The camera target may be a later actor in this frame. Cache its unscaled
-	// wall-clock delta independently of the existing playback/physics delta.
+	// All actors share one performance clock. Target identity and roster lifetimes are
+	// managed by the fresh typed snapshot below, decoupled from Windows wall-clock.
+	static int s_lastUnityFrame = -1, s_lastRenderedFrame = -1, s_fallbackFrame = 0;
 	static float s_cameraFrameDelta = 0.0333f;
 	static uint64_t s_cameraPhysicalFrame = 0;
-	auto now = std::chrono::steady_clock::now();
-	const float elapsedMs = std::chrono::duration<float, std::milli>(now - s_lastPhysicalFrameTime).count();
+	const int renderedFrame = g_unityRenderedFrameCount ? g_unityRenderedFrameCount() : -1;
+	if (renderedFrame >= 0 && renderedFrame != s_lastRenderedFrame)
+	{
+		s_lastRenderedFrame = renderedFrame;
+		core.OnMainCameraRendered(false);
+	}
 	const int unityFrame = g_faceUnityFrame ? g_faceUnityFrame() : -1;
-	const bool isNewPhysicalFrame = unityFrame >= 0 ? unityFrame != s_lastUnityFrame : elapsedMs > 2.0f;
-	float realDeltaTime = deltaTime;
+	const bool isNewPhysicalFrame = unityFrame >= 0 ? unityFrame != s_lastUnityFrame : true;
+	float realDeltaTime = (std::isfinite(deltaTime) && deltaTime > 0.0f) ? (std::min)(deltaTime, 0.1f) : 0.0f;
 	if (isNewPhysicalFrame)
 	{
 		s_lastUnityFrame = unityFrame;
 		++s_fallbackFrame;
-		s_lastPhysicalFrameTime = now;
-		realDeltaTime = elapsedMs > 100.0f ? 0.0333f : elapsedMs / 1000.0f;
-		s_cameraFrameDelta = s_cameraPhysicalFrame == 0 ? 0.0333f :
-			(std::max)(0.0f, elapsedMs / 1000.0f);
+		const float unscaledDt = g_unityUnscaledDeltaTime ? g_unityUnscaledDeltaTime() : deltaTime;
+		realDeltaTime = (std::isfinite(unscaledDt) && unscaledDt > 0.0f)
+			? (std::min)(unscaledDt, 0.1f)
+			: (realDeltaTime > 0.0f ? realDeltaTime : 0.0333f);
+		const float simDt = core.EffectiveSimulationDelta(realDeltaTime);
+		s_cameraFrameDelta = s_cameraPhysicalFrame == 0 ? 0.0333f : (std::max)(0.0f, simDt);
 		// Zero is reserved by CameraController for callers without a frame ID.
 		if (++s_cameraPhysicalFrame == 0) ++s_cameraPhysicalFrame;
 	}
-	// Without Unity's frame counter, the first callbacks can precede the 2ms
-	// fallback boundary. They still share a nonzero camera deduplication ID.
 	if (s_cameraPhysicalFrame == 0) s_cameraPhysicalFrame = 1;
 	// Fresh typed snapshots remove disabled/destroyed actors even when no actor
 	// callback remains. Never retain an accumulating list of seen scene actors.
@@ -3019,7 +3114,8 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 		// 142 条中 130 条内容完全相同；而切曲/暂停这些真正要看的事件反而淹没在里面。
 		static std::string s_lastStatusFingerprint;
 		static auto s_lastStatusEmit = std::chrono::steady_clock::now();
-		const float sinceStatusEmit = std::chrono::duration<float>(now - s_lastStatusEmit).count();
+		const auto statusNow = std::chrono::steady_clock::now();
+		const float sinceStatusEmit = std::chrono::duration<float>(statusNow - s_lastStatusEmit).count();
 		if (sinceStatusEmit >= 0.25f) // 去抖：最多 4 次/秒，顺带避免每帧构造摘要
 		{
 			const std::string summary = core.StatusSummary();
@@ -3027,7 +3123,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 			if (fingerprint != s_lastStatusFingerprint || sinceStatusEmit >= 30.0f)
 			{
 				s_lastStatusFingerprint = fingerprint;
-				s_lastStatusEmit = now;
+				s_lastStatusEmit = statusNow;
 				// ASCII only: the host decodes log lines as ANSI, so a Chinese
 				// literal here arrives as mojibake (was "本帧覆盖生效"). It also
 				// adds nothing -- the count is already in StatusSummary()'s
@@ -3069,7 +3165,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	if (!core.EnsembleActive() && HasEnsemblePhysics())
 		for (size_t i = 0; i < g_ensemblePhysics.size(); ++i) ClearEnsemblePhysicsSlot(i, true);
 	if (core.EnsembleActive())
-		DispatchEnsemblePhysics(core, activeActor, unityFrame >= 0 ? unityFrame : s_fallbackFrame, bodyBegin);
+		DispatchEnsemblePhysics(core, activeActor, unityFrame >= 0 ? unityFrame : s_fallbackFrame, realDeltaTime, bodyBegin);
 	else if (core.IsTargetActor(activeActor))
 	{
 		auto binding = player.controller.bindings.find(activeActor);
@@ -3117,9 +3213,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 			++d.body_calls;
 			d.body_total_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(bodyEnd - bodyBegin).count();
 			const auto dispatchBegin = bodyEnd;
-			const float physicalDt = g_physicsLastTick.time_since_epoch().count() == 0
-				                         ? 0.0f
-				                         : std::chrono::duration<float>(dispatchBegin - g_physicsLastTick).count();
+			const float physicalDt = core.EffectiveSimulationDelta(realDeltaTime);
 			g_physicsLastTick = dispatchBegin;
 			bool native = requested == 2 && g_burstBridge.Publish(binding->second, player.controller,
 			                                                      player.currentTime, frame,
@@ -3527,7 +3621,9 @@ GakuStatus PublishActorApi()
 		{
 		case 0:
 			title = L"选择演出与导入素材";
-			filter = GakuFileFilter{L"演出与导入素材 (*.vmd;*.gkcamera;*.wav)", L"*.vmd;*.gkcamera;*.wav"};
+			filter = GakuFileFilter{
+				L"演出与导入素材 (*.vmd;*.gkcamera;*.wav;*.mp3;*.flac;*.ogg;*.m4a;*.aac;*.opus)",
+				L"*.vmd;*.gkcamera;*.wav;*.mp3;*.flac;*.ogg;*.oga;*.m4a;*.aac;*.opus"};
 			break;
 		case 1:
 			title = L"选择身体动作 VMD";
@@ -3542,8 +3638,10 @@ GakuStatus PublishActorApi()
 			filter = GakuFileFilter{L"镜头 VMD / GKCAM", L"*.vmd;*.gkcamera"};
 			break;
 		case 4:
-			title = L"选择 WAV 音频";
-			filter = GakuFileFilter{L"WAV 音频", L"*.wav"};
+			title = L"选择音频文件";
+			filter = GakuFileFilter{
+				L"音频文件 (*.wav;*.mp3;*.flac;*.ogg;*.m4a;*.aac;*.opus)",
+				L"*.wav;*.mp3;*.flac;*.ogg;*.oga;*.m4a;*.aac;*.opus"};
 			break;
 		case 5:
 			title = L"选择本地视频";
@@ -3662,6 +3760,70 @@ GakuStatus PublishActorApi()
 		return info;
 	}
 
+	GakuMotion::webpanel::AudioProbeView WebPanelProbeAudio(const std::string& pathUtf8, bool includeCover)
+	{
+		GakuMotion::webpanel::AudioProbeView out;
+		const auto probed = g_audioPlugin.ProbeFile(pathUtf8, includeCover);
+		out.valid = probed.valid;
+		out.sampleRate = probed.sampleRate;
+		out.channels = probed.channels;
+		out.hasCover = probed.hasCover;
+		out.durationSeconds = probed.durationSeconds;
+		out.codec = probed.codec;
+		out.title = probed.title;
+		out.artist = probed.artist;
+		out.album = probed.album;
+		if (includeCover && !probed.coverBytes.empty())
+		{
+			out.coverDataUri = GakuMotion::cover::BytesToThumbnailDataUri(
+				probed.coverBytes.data(), probed.coverBytes.size(), probed.coverMime, 512);
+			if (out.coverDataUri.empty()) out.hasCover = false;
+		}
+		return out;
+	}
+
+	std::string WebPanelGetTrackCoverDataUri(const std::string& trackDirUtf8)
+	{
+		if (trackDirUtf8.empty()) return {};
+		const auto dirPath = GakuMotion::MotionPathFromUtf8(trackDirUtf8);
+		const std::string coverFile = GakuMotion::audio::ResolveTrackCoverFileName(dirPath);
+		if (!coverFile.empty())
+		{
+			std::string uri = GakuMotion::cover::LoadCoverAsDataUri(
+				dirPath / GakuMotion::MotionPathFromUtf8(coverFile), 512);
+			if (!uri.empty()) return uri;
+		}
+		const std::string audioFile = GakuMotion::audio::ResolveTrackAudioFileName(dirPath);
+		if (!audioFile.empty())
+		{
+			const auto probed = g_audioPlugin.ProbeFile(
+				GakuMotion::MotionPathToUtf8(dirPath / GakuMotion::MotionPathFromUtf8(audioFile)), true);
+			if (!probed.coverBytes.empty())
+			{
+				return GakuMotion::cover::BytesToThumbnailDataUri(
+					probed.coverBytes.data(), probed.coverBytes.size(), probed.coverMime, 512);
+			}
+		}
+		return {};
+	}
+
+	GakuMotion::webpanel::AudioEffectState WebPanelGetAudioEffectsState()
+	{
+		GakuMotion::webpanel::AudioEffectState st;
+		st.available = g_audioPlugin.Available();
+		st.activeId = g_audioPlugin.ActivePresetId();
+		for (const auto& p : g_audioPlugin.Presets())
+		{
+			st.presets.push_back({ p.id, p.name, p.category, p.description });
+		}
+		return st;
+	}
+
+	bool WebPanelSetAudioEffectPreset(const std::string& presetId, std::string& error)
+	{
+		return g_audioPlugin.SetActivePreset(presetId, &error);
+	}
+
 	GakuMotion::webpanel::HostHooks MakeWebPanelHooks()
 	{
 		GakuMotion::webpanel::HostHooks hooks;
@@ -3673,6 +3835,10 @@ GakuStatus PublishActorApi()
 		hooks.dropPeek = WebPanelDropPeek;
 		hooks.dropConsume = WebPanelDropConsume;
 		hooks.appearance = WebPanelAppearance;
+		hooks.probeAudio = WebPanelProbeAudio;
+		hooks.getTrackCoverDataUri = WebPanelGetTrackCoverDataUri;
+		hooks.getAudioEffectsState = WebPanelGetAudioEffectsState;
+		hooks.setAudioEffectPreset = WebPanelSetAudioEffectPreset;
 		hooks.pluginVersion = "0.1.1";
 		return hooks;
 	}
@@ -3752,6 +3918,62 @@ GakuStatus PublishSceneNodesApi()
 		ServiceName, sizeof(service), &service);
 }
 
+GakuStatus PublishClockApi()
+{
+	static GakuMotionClockServiceV1 service{};
+	service.abiVersion = GAKU_MOTION_CLOCK_VERSION;
+	service.structSize = sizeof(service);
+	service.context = &GakuMotion::Core::Instance();
+	service.getSnapshot = [](void* ctx, GakuMotionClockSnapshotV1* out) -> GakuStatus
+	{
+		return ctx ? static_cast<GakuMotion::Core*>(ctx)->ReadClockSnapshot(out) : GAKU_E_INVALID_ARGUMENT;
+	};
+	service.setRunMode = [](void* ctx, uint32_t runMode) -> GakuStatus
+	{
+		return ctx ? static_cast<GakuMotion::Core*>(ctx)->SetClockRunMode(runMode) : GAKU_E_INVALID_ARGUMENT;
+	};
+	service.configureClock = [](void* ctx, uint32_t clockSource, uint32_t fpsNum, uint32_t fpsDen) -> GakuStatus
+	{
+		return ctx ? static_cast<GakuMotion::Core*>(ctx)->ConfigureClock(clockSource, fpsNum, fpsDen) : GAKU_E_INVALID_ARGUMENT;
+	};
+	service.acquireRecordingLease = [](void* ctx, const char* ownerName, uint32_t fpsNum, uint32_t fpsDen, uint64_t* outLeaseId) -> GakuStatus
+	{
+		return ctx ? static_cast<GakuMotion::Core*>(ctx)->AcquireRecordingLease(ownerName, fpsNum, fpsDen, outLeaseId) : GAKU_E_INVALID_ARGUMENT;
+	};
+	service.releaseRecordingLease = [](void* ctx, uint64_t leaseId) -> GakuStatus
+	{
+		return ctx ? static_cast<GakuMotion::Core*>(ctx)->ReleaseRecordingLease(leaseId) : GAKU_E_INVALID_ARGUMENT;
+	};
+	service.recordingBegin = [](void* ctx, uint64_t leaseId, double startSeconds) -> GakuStatus
+	{
+		return ctx ? static_cast<GakuMotion::Core*>(ctx)->RecordingBegin(leaseId, startSeconds) : GAKU_E_INVALID_ARGUMENT;
+	};
+	service.recordingStop = [](void* ctx, uint64_t leaseId) -> GakuStatus
+	{
+		return ctx ? static_cast<GakuMotion::Core*>(ctx)->RecordingStop(leaseId) : GAKU_E_INVALID_ARGUMENT;
+	};
+	service.notifyFrameRendered = [](void* ctx, uint64_t leaseId, uint64_t evaluatedFrameSerial, uint32_t advanceFrames) -> GakuStatus
+	{
+		return ctx ? static_cast<GakuMotion::Core*>(ctx)->NotifyFrameRendered(leaseId, evaluatedFrameSerial, advanceFrames) : GAKU_E_INVALID_ARGUMENT;
+	};
+	return GakuMotion::host::api.registerService(GakuMotion::host::api.hostContext,
+		GAKU_SERVICE_MOTION_CLOCK, sizeof(service), &service);
+}
+
+GakuStatus PublishStageStateApi()
+{
+	static GakuMotionStageStateServiceV1 service{};
+	service.abiVersion = GAKU_MOTION_STAGE_STATE_VERSION;
+	service.structSize = sizeof(service);
+	service.context = &GakuMotion::Core::Instance();
+	service.getState = [](void* ctx, GakuMotionStageStateV1* out) -> GakuStatus
+	{
+		return ctx ? static_cast<GakuMotion::Core*>(ctx)->ReadStageState(out) : GAKU_E_INVALID_ARGUMENT;
+	};
+	return GakuMotion::host::api.registerService(GakuMotion::host::api.hostContext,
+		GAKU_SERVICE_MOTION_STAGE_STATE, sizeof(service), &service);
+}
+
 // Native activation: connect the loader services, publish the playback contract,
 // fill the host adapter and initialize config/audio/import. Runs before Unity
 // exists, so it must not call managed code.
@@ -3761,6 +3983,7 @@ GakuStatus MotionActivate(const GakuHostApi* host, void** pluginState)
 	if (g_pluginInitialized) return GAKU_E_CONFLICT;
 	const auto status = GakuMotion::host::Connect(host);
 	if (status != GAKU_OK) return status;
+	g_audioPlugin.BindHost(&GakuMotion::host::api);
 	const auto published = GakuMotion::host::PublishPlayback();
 	if (published != GAKU_OK) return published;
 	const auto controlPublished = PublishControlApi();
@@ -3770,6 +3993,12 @@ GakuStatus MotionActivate(const GakuHostApi* host, void** pluginState)
 	const auto actorPublished = PublishActorApi();
 	if (actorPublished != GAKU_OK)
 		MotionLogWarn("[GakuMotion] Selected actor service unavailable (%d).", actorPublished);
+	const auto clockPublished = PublishClockApi();
+	if (clockPublished != GAKU_OK)
+		MotionLogWarn("[GakuMotion] Clock service unavailable (%d).", clockPublished);
+	const auto stagePublished = PublishStageStateApi();
+	if (stagePublished != GAKU_OK)
+		MotionLogWarn("[GakuMotion] Stage state service unavailable (%d).", stagePublished);
 
 	g_hostContext = MotionHostContext{};
 	g_hostContext.apiVersion = GAKU_ABI_VERSION;

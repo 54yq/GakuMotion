@@ -17,7 +17,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Slider } from '@/components/ui/slider'
 import { cn } from '@/lib/utils'
-import { PLAYBACK_SPEEDS } from '../protocol'
+import { PLAYBACK_SPEEDS, type ClockSource } from '../protocol'
 import { motionStore, useMotionStore } from '../store'
 import { durationMismatch, formatTransportTime, framePosition, lastFrameTime, validTimeline } from '../time'
 import { PendingBadge } from './Unsupported'
@@ -26,6 +26,7 @@ const SEEK_STEP_OPTIONS = [1, 5, 10, 15] as const
 
 export function PrecisionControlPanel({ onClose }: { onClose: () => void }) {
   const player = useMotionStore((state) => state.player)
+  const clock = useMotionStore((state) => state.clock)
   const loaded = useMotionStore((state) => state.loaded)
   const ensembleActive = useMotionStore((state) => state.ensemble.active)
   const libraryEmpty = useMotionStore((state) => state.library.entries.length === 0)
@@ -368,6 +369,113 @@ export function PrecisionControlPanel({ onClose }: { onClose: () => void }) {
               </button>
             )
           })}
+        </div>
+      </div>
+
+      {/* Play mode & clock source decoupling (Req 1 & Req 3) */}
+      <div className="space-y-2 border-t border-border/60 pt-3" data-testid="clock-mode-section">
+        <div className="flex items-center justify-between gap-2">
+          <span className="font-medium text-foreground">播放与时钟模式</span>
+          <div className="flex items-center gap-1">
+            {clock.leaseId > 0 && (
+              <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 px-1.5 py-0 text-[10px] text-amber-600 dark:text-amber-400">
+                {clock.leaseOwner || '录制插件'} 接管中
+              </Badge>
+            )}
+            <Badge variant="secondary" className="px-1.5 py-0 text-[10px] tabular-nums">
+              {clock.runMode === 'recording' ? '供录制' : '实时'}
+            </Badge>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-1.5">
+          <button
+            type="button"
+            data-testid="run-mode-realtime"
+            disabled={!supports('clock.setRunMode') || clock.leaseId > 0}
+            onClick={() => void motionStore.setClockRunMode('realtime')}
+            className={cn(
+              'rounded-md border px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-50',
+              clock.runMode === 'realtime'
+                ? 'border-primary bg-primary text-primary-foreground'
+                : 'border-border/80 bg-background/60 text-muted-foreground hover:text-foreground',
+            )}
+          >
+            实时模式
+          </button>
+          <button
+            type="button"
+            data-testid="run-mode-recording"
+            disabled={!supports('clock.setRunMode') || clock.leaseId > 0}
+            onClick={() => void motionStore.setClockRunMode('recording')}
+            className={cn(
+              'rounded-md border px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-50',
+              clock.runMode === 'recording'
+                ? 'border-primary bg-primary text-primary-foreground'
+                : 'border-border/80 bg-background/60 text-muted-foreground hover:text-foreground',
+            )}
+          >
+            供录制模式
+          </button>
+        </div>
+        <div className="flex flex-wrap items-center gap-1" data-testid="clock-source-options">
+          {(
+            [
+              ['audio', '音频主时钟'],
+              ['engine_delta', '引擎帧间隔'],
+              ['fixed_step', '固定步进'],
+              ['external', '外部时钟'],
+            ] as Array<[ClockSource, string]>
+          ).map(([sourceId, label]) => {
+            const active = clock.configuredSource === sourceId
+            return (
+              <button
+                key={sourceId}
+                type="button"
+                data-testid={`clock-source-${sourceId}`}
+                disabled={!supports('clock.configure') || clock.leaseId > 0}
+                onClick={() => void motionStore.configureClock({ source: sourceId })}
+                className={cn(
+                  'rounded-md border px-2 py-0.5 text-[11px] transition-colors disabled:opacity-50',
+                  active
+                    ? 'border-primary/60 bg-primary/15 font-medium text-primary'
+                    : 'border-border/80 bg-background/60 text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {label}
+              </button>
+            )
+          })}
+        </div>
+        {(clock.runMode === 'recording' || clock.configuredSource === 'fixed_step') && (
+          <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+            <span>步进帧率</span>
+            <div className="flex items-center gap-1">
+              {[30, 60, 120].map((fpsVal) => {
+                const active = clock.fpsNumerator === fpsVal && clock.fpsDenominator === 1
+                return (
+                  <button
+                    key={fpsVal}
+                    type="button"
+                    disabled={!supports('clock.configure') || clock.leaseId > 0}
+                    onClick={() => void motionStore.configureClock({ fpsNumerator: fpsVal, fpsDenominator: 1 })}
+                    className={cn(
+                      'rounded border px-1.5 py-0.5 text-[11px] tabular-nums transition-colors disabled:opacity-50',
+                      active
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'border-border/80 bg-background/60 text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    {fpsVal} fps
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
+        <div className="text-[10px] text-muted-foreground">
+          {clock.runMode === 'recording'
+            ? '供录制模式将等待每帧渲染完成后推进步进时钟（禁用实时配乐），可由 VideoExporter 锁步接管。'
+            : '当前已与 Windows 挂钟解耦，按引擎/音频时钟推进。'}
         </div>
       </div>
 

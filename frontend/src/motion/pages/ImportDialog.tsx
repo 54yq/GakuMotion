@@ -32,7 +32,7 @@ const SLOT_META: Record<ImportSlotKey, { label: string; hint: string; icon: Remi
   motion: { label: '动作', hint: '身体骨骼动作 (.vmd)', icon: RiSparkling2Fill },
   facial: { label: '表情', hint: '口型与眼眉表情 (.vmd)', icon: RiEmotionHappyFill },
   camera: { label: '镜头', hint: 'VMD 镜头或烘焙 .gkcamera', icon: RiCameraFill },
-  audio: { label: '音频', hint: '演出配乐 (.wav 无损)', icon: RiMusic2Fill },
+  audio: { label: '音频', hint: '本地音频 (.mp3 / .flac / .wav / .ogg / .m4a / .aac / .opus)', icon: RiMusic2Fill },
 }
 
 function CandidateBadge({ path }: { path: string }) {
@@ -204,6 +204,34 @@ export function ImportDialog() {
                 )
               })}
             </div>
+
+            {form.audioProbe?.valid && (
+              <div
+                data-testid="import-audio-preview"
+                className="flex items-center gap-3 rounded-lg border border-border/70 bg-muted/30 p-2.5"
+              >
+                {form.audioProbe.hasCover && form.audioProbe.coverDataUri && (
+                  <img
+                    src={form.audioProbe.coverDataUri}
+                    alt=""
+                    data-testid="import-cover-preview"
+                    className="size-12 shrink-0 rounded-md border border-border/60 object-cover"
+                  />
+                )}
+                <div className="min-w-0 flex-1 space-y-0.5 text-xs">
+                  <div className="truncate font-medium text-foreground">
+                    {form.audioProbe.title || '音频元数据'}
+                    {form.audioProbe.artist && (
+                      <span className="ml-2 text-muted-foreground">· {form.audioProbe.artist}</span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-muted-foreground tabular-nums">
+                    {form.audioProbe.codec.toUpperCase()} · {Math.round(form.audioProbe.sampleRate / 100) / 10} kHz ·{' '}
+                    {form.audioProbe.durationSeconds.toFixed(1)}s
+                  </div>
+                </div>
+              </div>
+            )}
 
             {unsupportedAudio > 0 && (
               <p className="text-xs text-muted-foreground">

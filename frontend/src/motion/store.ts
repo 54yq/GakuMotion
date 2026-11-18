@@ -3,7 +3,9 @@ import { getMotionBridge, MotionMockBridgeClient, setMotionBridge } from './brid
 import { cameraControlModeIndex, setCameraControlMode, syncLegacyTransforms } from './cameraMode'
 import {
   BridgeError,
+  DEFAULT_AUDIO_EFFECT_STATE,
   DEFAULT_CAMERA_SETTINGS,
+  DEFAULT_CLOCK_STATE,
   DEFAULT_FACIAL_WEIGHTS,
   DEFAULT_PLAYER_STATE,
   DEFAULT_STAGE_SETTINGS,
@@ -19,9 +21,14 @@ import {
   isSlotPlaceholder,
   boneNameByHid,
   type ActorsState,
+  type AudioEffectState,
+  type AudioProbeInfo,
   type BoneState,
   type CameraSettings,
   type CameraState,
+  type ClockRunMode,
+  type ClockSource,
+  type ClockState,
   type EditEntryInfo,
   type EnsembleSnapshot,
   type EnsembleSettings,
@@ -58,6 +65,7 @@ import { deepEqual } from './utils'
 import {
   classifyImportFiles,
   ensembleUiError,
+  isSupportedAudioExtension,
   isSupportedLibraryFile,
   validateImportForm,
   validateSole,
@@ -96,6 +104,7 @@ export interface ImportFormState {
   slots: Record<ImportSlotKey, ImportSlotState>
   unsupportedAudio: number
   probes: Record<string, VmdProbe>
+  audioProbe: AudioProbeInfo | null
   activeTrackWarning: string
   pendingStopAndSave: boolean
 }
@@ -143,6 +152,7 @@ function emptyImportForm(): ImportFormState {
     },
     unsupportedAudio: 0,
     probes: {},
+    audioProbe: null,
     activeTrackWarning: '',
     pendingStopAndSave: false,
   }
@@ -439,7 +449,57 @@ function normalizeEditEntryInfo(raw: unknown, fallbackKey: string): EditEntryInf
     hasFacial: asBool(obj.hasFacial, false),
     hasCamera: asBool(obj.hasCamera, false),
     hasAudio: asBool(obj.hasAudio, false),
+    audioFile: asStr(obj.audioFile, ''),
+    hasCover: asBool(obj.hasCover, false),
     timing: normalizeTiming(obj.timing ?? entry.timing),
+  }
+}
+
+function normalizeClockState(raw: unknown): ClockState {
+  if (!raw || typeof raw !== 'object') return { ...DEFAULT_CLOCK_STATE }
+  const obj = asObj(raw)
+  const runMode: ClockRunMode = obj.runMode === 'recording' ? 'recording' : 'realtime'
+  const validSrc = (v: unknown, fb: ClockSource): ClockSource =>
+    v === 'audio' || v === 'engine_delta' || v === 'fixed_step' || v === 'external' ? v : fb
+  const configuredSource = validSrc(obj.configuredSource, DEFAULT_CLOCK_STATE.configuredSource)
+  const effectiveSource = validSrc(obj.effectiveSource, runMode === 'recording' ? 'fixed_step' : configuredSource)
+  return {
+    runMode,
+    configuredSource,
+    effectiveSource,
+    fpsNumerator: Math.max(1, asNum(obj.fpsNumerator, 60)),
+    fpsDenominator: Math.max(1, asNum(obj.fpsDenominator, 1)),
+    waitingForRenderComplete: asBool(obj.waitingForRenderComplete, false),
+    leaseId: asNum(obj.leaseId, 0),
+    leaseOwner: asStr(obj.leaseOwner, ''),
+    evaluatedFrameSerial: asNum(obj.evaluatedFrameSerial, 0),
+  }
+}
+
+function normalizeAudioEffectState(raw: unknown): AudioEffectState {
+  if (!raw || typeof raw !== 'object') {
+    return {
+      ...DEFAULT_AUDIO_EFFECT_STATE,
+      presets: DEFAULT_AUDIO_EFFECT_STATE.presets.map((p) => ({ ...p })),
+    }
+  }
+  const obj = asObj(raw)
+  const presetsRaw = Array.isArray(obj.presets) ? obj.presets : []
+  const presets = presetsRaw
+    .map((item) => {
+      const p = asObj(item)
+      return {
+        id: asStr(p.id),
+        name: asStr(p.name),
+        category: asStr(p.category, 'eq'),
+        description: asStr(p.description),
+      }
+    })
+    .filter((p) => p.id !== '')
+  return {
+    available: asBool(obj.available, false),
+    activeId: asStr(obj.activeId, 'flat') || 'flat',
+    presets: presets.length > 0 ? presets : DEFAULT_AUDIO_EFFECT_STATE.presets.map((p) => ({ ...p })),
   }
 }
 
@@ -517,6 +577,9 @@ export interface MotionAppState {
   sole: SoleState
   solePitch: SolePitchState
   studio: StudioState
+  clock: ClockState
+  audioEffect: AudioEffectState
+  coverCache: Record<string, string>
   // ---- UI-local state (never persisted by the bridge) ----
   page: MotionPage
   developerMode: boolean
@@ -626,6 +689,12 @@ function initialState(): MotionAppState {
     sole: { settings: defaultSoleSettings(), snapshot: { available: false, calibrated: false, clipTime: 0, feet: [] }, generation: 0, notice: '' },
     solePitch: { settings: { ...DEFAULT_SOLE_PITCH_SETTINGS }, clipTime: 0, feet: [], notice: '' },
     studio: { settings: defaultStudioSettings(), revision: 0, lightingNotice: '', videoNotice: '' },
+    clock: { ...DEFAULT_CLOCK_STATE },
+    audioEffect: {
+      ...DEFAULT_AUDIO_EFFECT_STATE,
+      presets: DEFAULT_AUDIO_EFFECT_STATE.presets.map((p) => ({ ...p })),
+    },
+    coverCache: {},
     page: 'library',
     developerMode: false,
     selectedLibraryKey: null,
@@ -692,6 +761,7 @@ export class MotionStore {
   private importUiTimer: ReturnType<typeof setInterval> | null = null
   private soleTimer: ReturnType<typeof setInterval> | null = null
   private solePitchTimer: ReturnType<typeof setInterval> | null = null
+  private coverPending = new Set<string>()
 
   constructor(bridge?: MotionBridgeClient) {
     this.bridge = bridge ?? null
@@ -745,7 +815,13 @@ export class MotionStore {
       bridge.on('library.changed', (library) => {
         const selectedKey = this.state.selectedLibraryKey
         const stillPresent = selectedKey !== null && library.entries.some((entry) => entry.id === selectedKey)
-        this.set({ library, selectedLibraryKey: stillPresent ? selectedKey : null })
+        const revisionChanged = library.revision !== this.state.library.revision
+        if (revisionChanged) this.coverPending.clear()
+        this.set({
+          library,
+          selectedLibraryKey: stillPresent ? selectedKey : null,
+          ...(revisionChanged ? { coverCache: {} } : {}),
+        })
       }),
       bridge.on('loaded.changed', (loaded) => {
         const previous = this.state.loaded
@@ -782,6 +858,10 @@ export class MotionStore {
         this.set({ solePitch: normalizeSolePitchState(solePitch) }),
       ),
       bridge.on('studio.changed', (studio) => this.onStudioChanged(normalizeStudioState(studio))),
+      bridge.on('clock.changed', (clock) => this.set({ clock: normalizeClockState(clock) })),
+      bridge.on('audioEffect.changed', (audioEffect) =>
+        this.set({ audioEffect: normalizeAudioEffectState(audioEffect) }),
+      ),
       bridge.on('bridge.closed', () => {
         this.stopWatchers()
         this.set({ connected: false, error: '原生桥已关闭', scrub: { active: false, value: 0 } })
@@ -879,6 +959,8 @@ export class MotionStore {
       musicVolumeNotice: snapshot.musicVolumeNotice,
       importProgress: snapshot.importProgress,
       motionsRoot: snapshot.motionsRoot,
+      clock: normalizeClockState(raw.clock),
+      audioEffect: normalizeAudioEffectState(raw.audioEffect),
       cameraDraft: cameraSettings,
       cameraLastSnapshot: cameraSettings,
       cameraExpected: null,
@@ -1536,8 +1618,12 @@ export class MotionStore {
         title: classification.suggestedTitle,
         slots,
         unsupportedAudio: classification.unsupportedAudioCount,
+        audioProbe: null,
       },
     })
+    if (classification.audioCandidate) {
+      void this.probeImportAudio(classification.audioCandidate)
+    }
   }
 
   openImportEdit = async (key: string): Promise<void> => {
@@ -1605,7 +1691,7 @@ export class MotionStore {
         appendUnique(slots.camera.candidates, file)
       } else if (ext === '.gkcamera') {
         appendUnique(slots.camera.candidates, file)
-      } else if (ext === '.wav') {
+      } else if (isSupportedAudioExtension(file)) {
         appendUnique(slots.audio.candidates, file)
       }
     }
@@ -1625,17 +1711,99 @@ export class MotionStore {
       importForm: {
         ...this.state.importForm,
         slots: { ...this.state.importForm.slots, [slot]: { candidates, selection } },
+        ...(slot === 'audio' ? { audioProbe: null } : {}),
       },
     })
+    if (slot === 'audio' && !isSlotPlaceholder(file)) {
+      void this.probeImportAudio(file)
+    }
   }
 
   setImportSelection = (slot: ImportSlotKey, selection: number): void => {
+    const picked = this.state.importForm.slots[slot].candidates[selection] ?? ''
     this.set({
       importForm: {
         ...this.state.importForm,
         slots: { ...this.state.importForm.slots, [slot]: { ...this.state.importForm.slots[slot], selection } },
+        ...(slot === 'audio' ? { audioProbe: null } : {}),
       },
     })
+    if (slot === 'audio' && !isSlotPlaceholder(picked)) {
+      void this.probeImportAudio(picked)
+    }
+  }
+
+  probeImportAudio = async (path: string): Promise<void> => {
+    if (!path || isSlotPlaceholder(path) || !this.supports('library.probeAudio')) return
+    try {
+      const result = await this.client().request('library.probeAudio', { path, includeCover: true })
+      const currentAudio = this.importFormPicks().audio
+      if (currentAudio !== path) return
+      const form = this.state.importForm
+      const nextPatch: Partial<ImportFormState> = { audioProbe: result }
+      if (result.valid) {
+        if (form.subtitle.trim() === '' && result.artist.trim() !== '') {
+          nextPatch.subtitle = result.artist.trim()
+        }
+        if (form.mode === 'new' && form.title.trim() === '' && result.title.trim() !== '') {
+          nextPatch.title = result.title.trim()
+        }
+      }
+      this.set({ importForm: { ...form, ...nextPatch } })
+    } catch {
+      // Probe failures fall back gracefully without blocking validation.
+    }
+  }
+
+  ensureTrackCover = async (key: string): Promise<void> => {
+    if (!key || !this.supports('library.getCover')) return
+    if (Object.prototype.hasOwnProperty.call(this.state.coverCache, key) || this.coverPending.has(key)) return
+    const entry = this.state.library.entries.find((item) => item.id === key)
+    if (!entry?.hasCover) return
+    this.coverPending.add(key)
+    try {
+      const res = await this.client().request('library.getCover', { key })
+      if (res.hasCover && res.coverDataUri) {
+        this.set({ coverCache: { ...this.state.coverCache, [key]: res.coverDataUri } })
+      } else {
+        this.set({ coverCache: { ...this.state.coverCache, [key]: '' } })
+      }
+    } catch {
+      // Leave cache clean on transient bridge error so it can retry later.
+    } finally {
+      this.coverPending.delete(key)
+    }
+  }
+
+  setClockRunMode = async (runMode: ClockRunMode): Promise<void> => {
+    try {
+      const next = await this.client().request('clock.setRunMode', { runMode })
+      this.set({ clock: normalizeClockState(next), actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  configureClock = async (patch: {
+    source?: ClockSource
+    fpsNumerator?: number
+    fpsDenominator?: number
+  }): Promise<void> => {
+    try {
+      const next = await this.client().request('clock.configure', patch)
+      this.set({ clock: normalizeClockState(next), actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  setAudioEffect = async (presetId: string): Promise<void> => {
+    try {
+      const next = await this.client().request('audioEffect.set', { presetId })
+      this.set({ audioEffect: normalizeAudioEffectState(next), actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
   }
 
   setImportTitle = (title: string): void => {
@@ -2522,6 +2690,7 @@ export class MotionStore {
     this.facialTimer = null
     this.pendingVolume = null
     this.pendingFacial = null
+    this.coverPending.clear()
     this.bridge = null
     this.started = false
     this.state = initialState()

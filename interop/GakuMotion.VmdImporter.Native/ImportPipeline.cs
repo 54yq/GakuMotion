@@ -117,10 +117,15 @@ internal static class ImportPipeline
                     return Fail(log, timing, total, "镜头文件必须是 .vmd 或 .gkcamera");
             }
 
-            // --- Audio (PCM WAV only) ------------------------------------------
-            string? wavPath = ResolveAudio(vmdPath, request.Audio, request.ClearAudio);
-            if (wavPath != null && !TryValidatePcmWav(wavPath, out _, out string audioError))
-                return Fail(log, timing, total, audioError);
+            // --- Audio (.wav / .mp3 / .flac / .ogg / .m4a / .aac / .opus) -----
+            string? audioPath = AudioProbe.ResolveInputAudio(vmdPath, request.Audio, request.ClearAudio);
+            AudioProbeResult? audioProbe = null;
+            if (audioPath != null)
+            {
+                audioProbe = AudioProbe.Probe(audioPath, extractCover: true);
+                if (!audioProbe.Valid)
+                    return Fail(log, timing, total, audioProbe.Error);
+            }
 
             sw.Restart();
             VmdMotion motion = VmdReader.Parse(vmdPath);
@@ -138,7 +143,7 @@ internal static class ImportPipeline
             // the "60 fps" stem). request.Fps selects the rate the clip is
             // *stored* at, not how fast the source ticks advance: 0 keeps the
             // source clock, which is the historical 1 tick = 1 frame behaviour.
-            float sourceFps = request.SourceFps > 0 ? request.SourceFps : DetectSourceFps(vmdPath, motion, wavPath);
+            float sourceFps = request.SourceFps > 0 ? request.SourceFps : DetectSourceFps(vmdPath, motion, audioPath);
             log.Line($"源动作帧率: {sourceFps:g} fps ({(request.SourceFps > 0 ? "手动指定" : "自动识别")}); 身体末帧={BodyEndFrame(motion)}, 全部轨道末帧={motion.MaxFrame}");
             if (BodyEndFrame(motion) > 0 && motion.MaxFrame > BodyEndFrame(motion) * 1.25)
                 log.Line("注意：表情或其他轨道明显长于身体动作；全部关键帧仍会保留，请检查同步。");
@@ -280,7 +285,7 @@ internal static class ImportPipeline
                     : replaceMorph ? Path.GetFullPath(request.MorphVmd)
                     : File.Exists(Path.Combine(stage, "source_morph.vmd")) ? Path.Combine(stage, "source_morph.vmd") : string.Empty;
                 float fps = request.Fps > 0 ? request.Fps : (info["fps"]?.GetValue<float>() ?? 0);
-                string existingAudio = Path.Combine(stage, "song.wav");
+                string? existingAudio = AudioProbe.FindExistingAudioFile(stage, info);
                 // Audio changes are applied after conversion, matching edit mode:
                 // no discovery or replacement of the track's audio is implied.
                 var bakeRequest = new ImportRequest
@@ -292,8 +297,8 @@ internal static class ImportPipeline
                     Title = "edit-body",
                     Fps = fps,
                     SourceFps = request.SourceFps > 0 ? request.SourceFps : (!replaceBody ? EditFps(info) : 0),
-                    Audio = File.Exists(existingAudio) ? existingAudio : string.Empty,
-                    ClearAudio = !File.Exists(existingAudio),
+                    Audio = existingAudio ?? string.Empty,
+                    ClearAudio = existingAudio is null,
                     ToothChannel = request.ToothChannel
                 };
                 ImportOutcome baked = Run(bakeRequest, log);
@@ -358,13 +363,49 @@ internal static class ImportPipeline
             }
             info["has_camera"] = File.Exists(Path.Combine(stage, "camera.gkcamera"));
 
-            if (request.ClearAudio) File.Delete(Path.Combine(stage, "song.wav"));
+            if (request.ClearAudio)
+            {
+                AudioProbe.DeleteExistingAudioFiles(stage);
+                AudioProbe.DeleteExistingCoverFiles(stage);
+                info.Remove("audio_file");
+                info.Remove("audio_duration");
+                info.Remove("audio_artist");
+                info.Remove("audio_title");
+                info["has_cover"] = false;
+                info.Remove("cover_file");
+            }
             else if (!string.IsNullOrEmpty(request.Audio))
             {
+                if (AudioProbe.IsNetworkPath(request.Audio))
+                    throw new InvalidDataException("不支持网络或流媒体路径，请选择本地音频文件。");
                 string audio = Path.GetFullPath(request.Audio);
                 if (!File.Exists(audio)) throw new InvalidDataException("找不到音频文件: " + audio);
-                if (!TryValidatePcmWav(audio, out _, out string error)) throw new InvalidDataException(error);
-                File.Copy(audio, Path.Combine(stage, "song.wav"), overwrite: true);
+                AudioProbeResult probed = AudioProbe.Probe(audio, extractCover: true);
+                if (!probed.Valid) throw new InvalidDataException(probed.Error);
+                AudioProbe.DeleteExistingAudioFiles(stage);
+                string ext = Path.GetExtension(audio).ToLowerInvariant();
+                string audioFile = "song" + ext;
+                File.Copy(audio, Path.Combine(stage, audioFile), overwrite: true);
+                info["audio_file"] = audioFile;
+                double dur = probed.DurationSeconds > 0 ? probed.DurationSeconds : request.AudioDurationHint;
+                if (dur > 0) info["audio_duration"] = dur;
+                else info.Remove("audio_duration");
+                if (!string.IsNullOrWhiteSpace(probed.Artist)) info["audio_artist"] = probed.Artist;
+                else info.Remove("audio_artist");
+                if (!string.IsNullOrWhiteSpace(probed.Title)) info["audio_title"] = probed.Title;
+                else info.Remove("audio_title");
+                string? coverFile = AudioProbe.SaveCoverToDirectory(probed.CoverBytes, probed.CoverMime, stage);
+                if (coverFile != null)
+                {
+                    info["has_cover"] = true;
+                    info["cover_file"] = coverFile;
+                }
+                else
+                {
+                    AudioProbe.DeleteExistingCoverFiles(stage);
+                    info["has_cover"] = false;
+                    info.Remove("cover_file");
+                }
             }
             if (!string.IsNullOrWhiteSpace(request.Title)) info["title"] = request.Title.Trim();
             else if (info["title"] is null || info["title"]!.ToString().Length == 0) info["title"] = Path.GetFileName(target);
@@ -571,13 +612,17 @@ internal static class ImportPipeline
             }
         }
 
-        if (wavPath != null && TryValidatePcmWav(wavPath, out double seconds, out _) && seconds > 0.0)
+        if (wavPath != null)
         {
-            double ratio = (BodyEndFrame(motion) + 1) / seconds;
-            if (ratio is >= 54.0 and <= 66.0) return 60.0f;
-            if (ratio is >= 24.0 and <= 36.0) return 30.0f;
-            if (ratio >= 45.0) return 60.0f;
-            return 30.0f;
+            AudioProbeResult audioMeta = AudioProbe.Probe(wavPath);
+            if (audioMeta.Valid && audioMeta.DurationSeconds > 0.0)
+            {
+                double ratio = (BodyEndFrame(motion) + 1) / audioMeta.DurationSeconds;
+                if (ratio is >= 54.0 and <= 66.0) return 60.0f;
+                if (ratio is >= 24.0 and <= 36.0) return 30.0f;
+                if (ratio >= 45.0) return 60.0f;
+                return 30.0f;
+            }
         }
 
         if (Regex.IsMatch(Path.GetFileNameWithoutExtension(vmdPath), @"60\s*fps", RegexOptions.IgnoreCase))
@@ -598,131 +643,6 @@ internal static class ImportPipeline
         var animated = tracks.Where(keys => keys.Count > 1 && keys[^1].Frame > keys[0].Frame)
             .Select(keys => keys[^1].Frame).OrderBy(frame => frame).ToArray();
         return animated.Length >= 4 ? animated[(animated.Length - 1) * 3 / 4] : tracks.Max(keys => keys[^1].Frame);
-    }
-
-    /// <summary>import_motion's audio resolution: explicit file, else adjacent WAV.</summary>
-    private static string? ResolveAudio(string vmdPath, string audioPath, bool clearAudio)
-    {
-        if (clearAudio) return null;
-        if (!string.IsNullOrEmpty(audioPath))
-        {
-            string explicitPath = Path.GetFullPath(audioPath);
-            return File.Exists(explicitPath) ? explicitPath : null;
-        }
-        string sibling = Path.ChangeExtension(vmdPath, ".wav");
-        if (File.Exists(sibling)) return sibling;
-        string song = Path.Combine(Path.GetDirectoryName(vmdPath)!, "song.wav");
-        return File.Exists(song) ? song : null;
-    }
-
-    /// <summary>
-    /// PCM WAV contract. The runtime plays song.wav through MCI `type waveaudio`,
-    /// so a container that is merely *named* .wav produces a track that shows a
-    /// music badge and plays silence. Reject it before anything is written.
-    /// </summary>
-    private static bool TryValidatePcmWav(string path, out double seconds, out string error)
-    {
-        seconds = 0.0;
-        error = string.Empty;
-        try
-        {
-            if (!string.Equals(Path.GetExtension(path), ".wav", StringComparison.OrdinalIgnoreCase))
-            {
-                error = $"音频轨道仅支持 PCM WAV：{Path.GetFileName(path)} 不是 .wav 文件。";
-                return false;
-            }
-
-            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-            using var reader = new BinaryReader(stream, Encoding.ASCII, leaveOpen: true);
-            if (stream.Length < 44)
-            {
-                error = $"音频文件不是有效的 WAV（长度不足）：{path}";
-                return false;
-            }
-            if (new string(reader.ReadChars(4)) != "RIFF")
-            {
-                error = $"音频文件不是有效的 RIFF/WAVE（可能是改名的 mp3 等）：{path}";
-                return false;
-            }
-            reader.ReadUInt32();
-            if (new string(reader.ReadChars(4)) != "WAVE")
-            {
-                error = $"音频文件不是有效的 RIFF/WAVE（可能是改名的 mp3 等）：{path}";
-                return false;
-            }
-
-            bool hasFormat = false, hasData = false, pcm = false;
-            int channels = 0, sampleRate = 0, bitsPerSample = 0;
-            long dataBytes = 0;
-            while (stream.Position + 8 <= stream.Length)
-            {
-                string chunk = new(reader.ReadChars(4));
-                uint size = reader.ReadUInt32();
-                long next = stream.Position + size + (size % 2);
-                if (chunk == "fmt ")
-                {
-                    if (size < 16) break;
-                    ushort format = reader.ReadUInt16();
-                    channels = reader.ReadUInt16();
-                    sampleRate = reader.ReadInt32();
-                    reader.ReadInt32();
-                    reader.ReadUInt16();
-                    bitsPerSample = reader.ReadUInt16();
-                    if (format == 0xFFFE && size >= 40)
-                    {
-                        // WAVE_FORMAT_EXTENSIBLE: the sub-format GUID starts with
-                        // the actual tag; only the PCM tag is accepted.
-                        reader.ReadUInt16();
-                        reader.ReadUInt16();
-                        reader.ReadUInt32();
-                        pcm = reader.ReadUInt16() == 1;
-                    }
-                    else
-                    {
-                        pcm = format == 1;
-                    }
-                    hasFormat = true;
-                }
-                else if (chunk == "data")
-                {
-                    dataBytes = Math.Min(size, stream.Length - stream.Position);
-                    hasData = true;
-                }
-                if (next > stream.Length) break;
-                stream.Seek(next, SeekOrigin.Begin);
-            }
-
-            if (!hasFormat || channels <= 0 || sampleRate <= 0 || bitsPerSample <= 0)
-            {
-                error = $"音频文件缺少有效的 WAV 格式块：{path}";
-                return false;
-            }
-            if (!pcm)
-            {
-                error = $"音频文件不是 PCM WAV（可能是改名的 mp3 等）：{path}";
-                return false;
-            }
-            if (!hasData || dataBytes <= 0)
-            {
-                error = $"音频文件没有音频数据：{path}";
-                return false;
-            }
-
-            int blockAlign = channels * (bitsPerSample / 8);
-            if (blockAlign <= 0)
-            {
-                error = $"音频文件的采样格式无效：{path}";
-                return false;
-            }
-            long frames = dataBytes / blockAlign;
-            seconds = frames / (double)sampleRate;
-            return true;
-        }
-        catch (Exception ex)
-        {
-            error = $"读取音频文件失败：{path} ({ex.Message})";
-            return false;
-        }
     }
 
     /// <summary>
@@ -787,8 +707,18 @@ internal static class ImportPipeline
                                  !string.Equals(morphPath, vmdPath, StringComparison.OrdinalIgnoreCase);
             if (distinctMorph) File.Copy(morphPath, Path.Combine(stage, "source_morph.vmd"), overwrite: true);
 
-            string? wav = ResolveAudio(vmdPath, request.Audio, request.ClearAudio);
-            if (wav != null) File.Copy(wav, Path.Combine(stage, "song.wav"), overwrite: true);
+            string? audio = AudioProbe.ResolveInputAudio(vmdPath, request.Audio, request.ClearAudio);
+            AudioProbeResult? audioProbe = null;
+            string copiedAudioFile = string.Empty;
+            string? coverFile = null;
+            if (audio != null)
+            {
+                audioProbe = AudioProbe.Probe(audio, extractCover: true);
+                if (!audioProbe.Valid) throw new InvalidDataException(audioProbe.Error);
+                copiedAudioFile = "song" + Path.GetExtension(audio).ToLowerInvariant();
+                File.Copy(audio, Path.Combine(stage, copiedAudioFile), overwrite: true);
+                coverFile = AudioProbe.SaveCoverToDirectory(audioProbe.CoverBytes, audioProbe.CoverMime, stage);
+            }
 
             string sourceMorph = request.DisableMorph
                 ? string.Empty
@@ -853,6 +783,26 @@ internal static class ImportPipeline
             JsonObject info = ReadEditInfo(Path.Combine(stage, "info.json"));
             if (request.HasSubtitle && !string.IsNullOrWhiteSpace(request.Subtitle))
                 info["subtitle"] = request.Subtitle.Trim();
+            else if (audioProbe != null && !string.IsNullOrWhiteSpace(audioProbe.Artist) &&
+                     (info["subtitle"] is null || string.IsNullOrWhiteSpace(info["subtitle"]!.ToString())))
+                info["subtitle"] = audioProbe.Artist.Trim();
+            if (!string.IsNullOrEmpty(copiedAudioFile))
+            {
+                info["audio_file"] = copiedAudioFile;
+                double dur = audioProbe!.DurationSeconds > 0 ? audioProbe.DurationSeconds : request.AudioDurationHint;
+                if (dur > 0) info["audio_duration"] = dur;
+                if (!string.IsNullOrWhiteSpace(audioProbe.Artist)) info["audio_artist"] = audioProbe.Artist;
+                if (!string.IsNullOrWhiteSpace(audioProbe.Title)) info["audio_title"] = audioProbe.Title;
+            }
+            if (!string.IsNullOrEmpty(coverFile))
+            {
+                info["has_cover"] = true;
+                info["cover_file"] = coverFile;
+            }
+            else if (audio != null)
+            {
+                info["has_cover"] = false;
+            }
             info["track_timing"] = (request.TrackTiming ?? new PerformanceTimingSettings()).ToJson();
             WriteEditInfo(stage, info);
             PublishNewTrack(stage, commit);

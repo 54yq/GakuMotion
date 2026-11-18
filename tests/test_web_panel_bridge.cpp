@@ -1200,6 +1200,132 @@ static void TestDropPeek()
 	Check(!targetActive, "hiding panel disarms drop target on next OnUiTick");
 }
 
+static void TestClockAudioEffectsAndCovers()
+{
+	BeginTest("clock_audio_effects_and_covers");
+	using namespace GakuMotion;
+	using namespace GakuMotion::webpanel;
+	namespace fs = std::filesystem;
+
+	const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+	const fs::path root = fs::temp_directory_path() / ("gaku_webpanel_clock_" + std::to_string(stamp));
+	fs::create_directories(root);
+
+	Core core;
+	core.configRoot = MotionPathToUtf8(root);
+	MotionEntry entry;
+	entry.name = "luna-track";
+	entry.title = "Luna";
+	entry.dir = MotionPathToUtf8(root / "luna-track");
+	entry.hasAudio = true;
+	entry.audioFile = "song.flac";
+	entry.hasCover = true;
+	entry.coverFile = "cover.jpg";
+	core.motions = {entry};
+
+	std::string activePreset = "flat";
+	HostHooks hooks;
+	hooks.getAudioEffectsState = [&] {
+		AudioEffectState st;
+		st.available = true;
+		st.activeId = activePreset;
+		st.presets = {
+			{"flat", "原声", "flat", "直通"},
+			{"concert_arena", "演唱会现场", "live", "万人场馆"},
+			{"livehouse", "LiveHouse现场", "live", "小型舞台"},
+		};
+		return st;
+	};
+	hooks.setAudioEffectPreset = [&](const std::string& id, std::string& err) {
+		if (id != "flat" && id != "concert_arena" && id != "livehouse")
+		{
+			err = "unknown preset";
+			return false;
+		}
+		activePreset = id;
+		return true;
+	};
+	hooks.probeAudio = [&](const std::string& path, bool includeCover) {
+		AudioProbeView p;
+		p.valid = true;
+		p.codec = "flac";
+		p.sampleRate = 48000;
+		p.channels = 2;
+		p.durationSeconds = 123.5;
+		p.title = "Luna";
+		p.artist = "Sakiko";
+		p.hasCover = includeCover;
+		p.coverDataUri = includeCover ? "data:image/jpeg;base64,/9j/4AAQ" : "";
+		(void)path;
+		return p;
+	};
+	hooks.getTrackCoverDataUri = [&](const std::string& dir) {
+		return dir == entry.dir ? std::string("data:image/jpeg;base64,LUNA") : std::string();
+	};
+
+	Bridge bridge(core, hooks);
+	bridge.OnShow();
+	const auto snap = ParseJson(bridge.HandleMessageForTest(
+		"{\"v\":1,\"id\":1,\"type\":\"request\",\"method\":\"state.get\",\"params\":{}}"));
+	Check(snap.Find("ok")->boolValue, "state.get succeeds");
+	Check(snap.Find("result")->Find("clock")->Find("runMode")->stringValue == "realtime", "default runMode realtime");
+	Check(snap.Find("result")->Find("audioEffect")->Find("available")->boolValue &&
+		snap.Find("result")->Find("audioEffect")->Find("presets")->Size() == 3,
+		"state.get exposes audioEffect presets");
+	Check(snap.Find("result")->Find("library")->Find("entries")->At(0)->Find("hasCover")->boolValue &&
+		snap.Find("result")->Find("library")->Find("entries")->At(0)->Find("audioFile")->stringValue == "song.flac",
+		"library entry exposes hasCover and audioFile");
+
+	const auto setRec = ParseJson(bridge.HandleMessageForTest(
+		"{\"v\":1,\"id\":2,\"type\":\"request\",\"method\":\"clock.setRunMode\",\"params\":{\"runMode\":\"recording\"}}"));
+	Check(setRec.Find("ok")->boolValue &&
+		setRec.Find("result")->Find("runMode")->stringValue == "recording" &&
+		setRec.Find("result")->Find("effectiveSource")->stringValue == "fixed_step",
+		"clock.setRunMode switches to recording with fixed_step");
+
+	const auto cfgClock = ParseJson(bridge.HandleMessageForTest(
+		"{\"v\":1,\"id\":3,\"type\":\"request\",\"method\":\"clock.configure\",\"params\":{\"source\":\"engine_delta\",\"fpsNumerator\":120,\"fpsDenominator\":1}}"));
+	Check(cfgClock.Find("ok")->boolValue &&
+		cfgClock.Find("result")->Find("configuredSource")->stringValue == "engine_delta" &&
+		cfgClock.Find("result")->Find("fpsNumerator")->numberValue == 120,
+		"clock.configure updates source and fps");
+	Check(fs::exists(root / "clock.json"), "clock.json persisted");
+
+	const auto setFx = ParseJson(bridge.HandleMessageForTest(
+		"{\"v\":1,\"id\":4,\"type\":\"request\",\"method\":\"audioEffect.set\",\"params\":{\"presetId\":\"concert_arena\"}}"));
+	Check(setFx.Find("ok")->boolValue &&
+		setFx.Find("result")->Find("activeId")->stringValue == "concert_arena",
+		"audioEffect.set switches preset");
+
+	const auto probeMp3 = ParseJson(bridge.HandleMessageForTest(
+		"{\"v\":1,\"id\":5,\"type\":\"request\",\"method\":\"library.probeAudio\",\"params\":{\"path\":\"C:\\\\music\\\\song.flac\"}}"));
+	Check(probeMp3.Find("ok")->boolValue &&
+		probeMp3.Find("result")->Find("artist")->stringValue == "Sakiko" &&
+		probeMp3.Find("result")->Find("hasCover")->boolValue,
+		"library.probeAudio returns artist and cover data URI");
+
+	const auto rejectNet = ParseJson(bridge.HandleMessageForTest(
+		"{\"v\":1,\"id\":6,\"type\":\"request\",\"method\":\"library.probeAudio\",\"params\":{\"path\":\"https://example.com/song.mp3\"}}"));
+	Check(!rejectNet.Find("ok")->boolValue && rejectNet.Find("error")->Find("code")->stringValue == "invalid_params",
+		"library.probeAudio rejects network URLs");
+
+	const auto coverRes = ParseJson(bridge.HandleMessageForTest(
+		"{\"v\":1,\"id\":7,\"type\":\"request\",\"method\":\"library.getCover\",\"params\":{\"key\":\"luna-track\"}}"));
+	Check(coverRes.Find("ok")->boolValue &&
+		coverRes.Find("result")->Find("coverDataUri")->stringValue == "data:image/jpeg;base64,LUNA",
+		"library.getCover resolves track cover");
+
+	const auto probeFiles = ParseJson(bridge.HandleMessageForTest(
+		"{\"v\":1,\"id\":8,\"type\":\"request\",\"method\":\"library.probeFiles\",\"params\":{\"paths\":[\"C:\\\\music\\\\song.mp3\"]}}"));
+	Check(probeFiles.Find("ok")->boolValue &&
+		probeFiles.Find("result")->Find("classification")->Find("audioCandidate")->stringValue == "C:\\music\\song.mp3" &&
+		probeFiles.Find("result")->Find("classification")->Find("unsupportedAudioCount")->numberValue == 0,
+		"library.probeFiles classifies .mp3 as supported audioCandidate");
+
+	std::error_code ec;
+	fs::remove_all(root, ec);
+}
+
 int main()
 {
 	std::setvbuf(stdout, nullptr, _IONBF, 0);
@@ -1226,6 +1352,7 @@ int main()
 	TestSoleStudio();
 	TestExperimentsTelemetry();
 	TestDropPeek();
+	TestClockAudioEffectsAndCovers();
 	std::printf("\nweb-panel bridge contracts: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail == 0 ? 0 : 1;
 }

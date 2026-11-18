@@ -220,8 +220,12 @@ export function validateImportForm(
     if (!probe || !canUseAsCamera(probe)) return '所选镜头文件不包含镜头关键帧'
   }
   if (!isSlotPlaceholder(picks.audio)) {
-    const ext = picks.audio.slice(picks.audio.lastIndexOf('.')).toLowerCase()
-    if (ext !== '.wav') return '当前音频轨道仅支持 .wav 无损格式'
+    if (/^[a-zA-Z]+:\/\//.test(picks.audio) || picks.audio.startsWith('\\\\') || picks.audio.startsWith('//')) {
+      return '不支持网络或流媒体路径，请选择本地音频文件'
+    }
+    if (!isSupportedAudioExtension(picks.audio)) {
+      return '音频轨道仅支持 .wav/.mp3/.flac/.ogg/.m4a/.aac/.opus 本地文件'
+    }
   }
   if (picks.title.trim() === '') return '请输入有效的演出曲目名称'
   return null
@@ -291,8 +295,15 @@ function cleanTitleSuffix(title: string): string {
   return result
 }
 
+// Supported local audio formats (decoded via GakuAudio miniaudio / Media Foundation).
+export const SUPPORTED_AUDIO_EXTS = ['.wav', '.mp3', '.flac', '.ogg', '.oga', '.m4a', '.aac', '.opus'] as const
+
+export function isSupportedAudioExtension(path: string): boolean {
+  return (SUPPORTED_AUDIO_EXTS as readonly string[]).includes(fileExt(path))
+}
+
 // ClassifyImportFiles port: probes are supplied by the caller (native probe or
-// the dev mock). Only .wav audio is recommended; other audio is counted.
+// the dev mock). Accepts all supported local audio formats.
 export function classifyImportFiles(paths: string[], probes: VmdProbe[]): ImportClassification {
   const result: ImportClassification = {
     suggestedTitle: '',
@@ -303,20 +314,18 @@ export function classifyImportFiles(paths: string[], probes: VmdProbe[]): Import
     unsupportedAudioCount: 0,
   }
   const probeByPath = new Map(probes.map((probe) => [probe.path, probe]))
-  const wavAudios: string[] = []
+  const audios: string[] = []
   const vmdAndCam: Array<{ path: string; probe: VmdProbe }> = []
   for (const path of paths) {
     const ext = fileExt(path)
     if (ext === '.vmd' || ext === '.gkcamera') {
       const probe = probeByPath.get(path)
       if (probe) vmdAndCam.push({ path, probe })
-    } else if (ext === '.wav') {
-      wavAudios.push(path)
-    } else if (ext === '.mp3' || ext === '.ogg' || ext === '.flac' || ext === '.m4a') {
-      result.unsupportedAudioCount += 1
+    } else if ((SUPPORTED_AUDIO_EXTS as readonly string[]).includes(ext)) {
+      audios.push(path)
     }
   }
-  if (wavAudios.length > 0) result.audioCandidate = wavAudios[0]
+  if (audios.length > 0) result.audioCandidate = audios[0]
 
   const cameraOnlyList = vmdAndCam.filter((item) => item.probe.tendency === 'cameraOnly').map((item) => item.path)
   const facialOnlyList = vmdAndCam.filter((item) => item.probe.tendency === 'facialOnly').map((item) => item.path)
@@ -356,5 +365,5 @@ export function classifyImportFiles(paths: string[], probes: VmdProbe[]): Import
 // Extensions accepted by the whole-window drop target (IsSupportedLibraryFile).
 export function isSupportedLibraryFile(path: string): boolean {
   const ext = fileExt(path)
-  return ['.vmd', '.gkcamera', '.wav', '.mp3', '.ogg', '.flac', '.m4a'].includes(ext)
+  return ['.vmd', '.gkcamera', ...SUPPORTED_AUDIO_EXTS].includes(ext)
 }

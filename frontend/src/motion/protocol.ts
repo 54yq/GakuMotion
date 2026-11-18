@@ -15,6 +15,47 @@ export interface Vector3 {
 
 export type PlaybackStatus = 'stopped' | 'playing' | 'paused' | 'preview'
 
+export type ClockRunMode = 'realtime' | 'recording'
+export type ClockSource = 'audio' | 'engine_delta' | 'fixed_step' | 'external'
+
+export interface ClockState {
+  runMode: ClockRunMode
+  configuredSource: ClockSource
+  effectiveSource: ClockSource
+  fpsNumerator: number
+  fpsDenominator: number
+  waitingForRenderComplete: boolean
+  leaseId: number
+  leaseOwner: string
+  evaluatedFrameSerial: number
+}
+
+export interface AudioEffectPreset {
+  id: string
+  name: string
+  category: string
+  description: string
+}
+
+export interface AudioEffectState {
+  available: boolean
+  activeId: string
+  presets: AudioEffectPreset[]
+}
+
+export interface AudioProbeInfo {
+  valid: boolean
+  sampleRate: number
+  channels: number
+  durationSeconds: number
+  codec: string
+  title: string
+  artist: string
+  album: string
+  hasCover: boolean
+  coverDataUri: string
+}
+
 export interface PlayerState {
   state: PlaybackStatus
   title: string
@@ -38,6 +79,8 @@ export interface LibraryEntry {
   hasFacial: boolean
   hasCamera: boolean
   hasAudio: boolean
+  audioFile?: string
+  hasCover?: boolean
 }
 
 export interface LibraryState {
@@ -216,6 +259,8 @@ export interface MotionStateSnapshot {
   musicVolumeNotice: string
   importProgress: ImportProgress | null
   motionsRoot: string
+  clock?: ClockState
+  audioEffect?: AudioEffectState
 }
 
 export interface MotionHello {
@@ -289,6 +334,8 @@ export interface EditEntryInfo {
   hasFacial: boolean
   hasCamera: boolean
   hasAudio: boolean
+  audioFile?: string
+  hasCover?: boolean
   timing: PerformanceTiming
 }
 
@@ -567,6 +614,11 @@ export interface MotionMethods {
     result: { classification: ImportClassification; probes: VmdProbe[] }
   }
   'library.startEdit': { params: { key: string; revision: number }; result: EditEntryInfo }
+  'library.probeAudio': { params: { path: string; includeCover?: boolean }; result: AudioProbeInfo }
+  'library.getCover': { params: { key?: string; directory?: string }; result: { hasCover: boolean; coverDataUri: string } }
+  'clock.setRunMode': { params: { runMode: ClockRunMode }; result: ClockState }
+  'clock.configure': { params: { source?: ClockSource; fpsNumerator?: number; fpsDenominator?: number }; result: ClockState }
+  'audioEffect.set': { params: { presetId: string }; result: AudioEffectState }
   'drop.setTarget': { params: { enabled: boolean }; result: Record<string, never> }
   'drop.poll': { params: void; result: { files: string[] } }
   'drop.peek': { params: void; result: DropPeek }
@@ -639,6 +691,8 @@ export interface MotionEvents {
   'sole.changed': SoleState
   'solePitch.changed': SolePitchState
   'studio.changed': StudioState
+  'clock.changed': ClockState
+  'audioEffect.changed': AudioEffectState
 }
 
 export type MotionMethodName = keyof MotionMethods
@@ -707,6 +761,24 @@ export const DEFAULT_STAGE_SETTINGS: StageSettings = {
 }
 
 export const DEFAULT_FACIAL_WEIGHTS: FacialWeights = { overall: 1, brow: 1, eye: 1, mouth: 1 }
+
+export const DEFAULT_CLOCK_STATE: ClockState = {
+  runMode: 'realtime',
+  configuredSource: 'audio',
+  effectiveSource: 'audio',
+  fpsNumerator: 60,
+  fpsDenominator: 1,
+  waitingForRenderComplete: false,
+  leaseId: 0,
+  leaseOwner: '',
+  evaluatedFrameSerial: 0,
+}
+
+export const DEFAULT_AUDIO_EFFECT_STATE: AudioEffectState = {
+  available: false,
+  activeId: 'flat',
+  presets: [{ id: 'flat', name: '原声', category: 'flat', description: '直通输出' }],
+}
 
 export const DEFAULT_PLAYER_STATE: PlayerState = {
   state: 'stopped',

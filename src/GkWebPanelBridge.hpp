@@ -134,6 +134,35 @@ namespace GakuMotion::webpanel
 		float uiScale{1.0f};
 	};
 
+	struct AudioEffectPresetView
+	{
+		std::string id;
+		std::string name;
+		std::string category;
+		std::string description;
+	};
+
+	struct AudioEffectState
+	{
+		bool available{false};
+		std::string activeId{"flat"};
+		std::vector<AudioEffectPresetView> presets;
+	};
+
+	struct AudioProbeView
+	{
+		bool valid{false};
+		uint32_t sampleRate{0};
+		uint32_t channels{0};
+		bool hasCover{false};
+		double durationSeconds{0.0};
+		std::string codec;
+		std::string title;
+		std::string artist;
+		std::string album;
+		std::string coverDataUri;
+	};
+
 	struct HostHooks
 	{
 		// Ordered asset-directory candidates supplied by the plugin (the plugin
@@ -147,6 +176,10 @@ namespace GakuMotion::webpanel
 		std::function<DropPeek()> dropPeek;
 		std::function<DropBatch()> dropConsume;
 		std::function<AppearanceInfo()> appearance;
+		std::function<AudioProbeView(const std::string& pathUtf8, bool includeCover)> probeAudio;
+		std::function<std::string(const std::string& trackDirUtf8)> getTrackCoverDataUri;
+		std::function<AudioEffectState()> getAudioEffectsState;
+		std::function<bool(const std::string& presetId, std::string& error)> setAudioEffectPreset;
 		std::string pluginVersion{"0.1.1"};
 	};
 
@@ -182,6 +215,9 @@ namespace GakuMotion::webpanel
 		"playlist.setMode",
 		"library.refresh", "library.select", "library.delete", "library.openFolder",
 		"library.import", "library.probeFiles", "library.startEdit",
+		"library.probeAudio", "library.getCover",
+		"clock.setRunMode", "clock.configure",
+		"audioEffect.set",
 		"actors.selectTarget",
 		"facial.setWeights", "facial.save",
 		"position.set", "position.save",
@@ -211,6 +247,7 @@ namespace GakuMotion::webpanel
 		"import.progress", "appearance.changed", "bridge.closed",
 		"gaze.changed", "bone.changed", "sole.changed", "solePitch.changed",
 		"studio.changed", "experiments.changed",
+		"clock.changed", "audioEffect.changed",
 	};
 
 	class Bridge
@@ -619,6 +656,13 @@ namespace GakuMotion::webpanel
 			if (method == "library.import") return LibraryImport(params);
 			if (method == "library.probeFiles") return LibraryProbeFiles(params);
 			if (method == "library.startEdit") return LibraryStartEdit(params);
+			if (method == "library.probeAudio") return LibraryProbeAudio(params);
+			if (method == "library.getCover") return LibraryGetCover(params);
+
+			// Clock & Audio Effects ---------------------------------------------
+			if (method == "clock.setRunMode") return ClockSetRunMode(params);
+			if (method == "clock.configure") return ClockConfigure(params);
+			if (method == "audioEffect.set") return AudioEffectSet(params);
 
 			// Actors ------------------------------------------------------------
 			if (method == "actors.selectTarget")
@@ -957,11 +1001,27 @@ namespace GakuMotion::webpanel
 			else dialogState_ = "failed";
 		}
 
+		static bool IsSupportedAudioExtensionPath(const std::string& path)
+		{
+			std::string ext = WideToUtf8(std::filesystem::path(Utf8ToWide(path)).extension().wstring());
+			for (auto& ch : ext) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+			return ext == ".wav" || ext == ".mp3" || ext == ".flac" ||
+			       ext == ".ogg" || ext == ".oga" || ext == ".m4a" ||
+			       ext == ".aac" || ext == ".opus" || ext == ".wma";
+		}
+
+		static bool IsNetworkAudioPath(const std::string& path)
+		{
+			return path.find("://") != std::string::npos ||
+			       path.rfind("\\\\", 0) == 0 ||
+			       path.rfind("//", 0) == 0;
+		}
+
 		static bool IsAcceptedImportFile(const std::string& path)
 		{
 			std::string ext = WideToUtf8(std::filesystem::path(Utf8ToWide(path)).extension().wstring());
 			for (auto& ch : ext) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-			return ext == ".vmd" || ext == ".gkcamera" || ext == ".wav";
+			return ext == ".vmd" || ext == ".gkcamera" || IsSupportedAudioExtensionPath(path);
 		}
 
 		static DropPeek NormalizeDropPeek(const DropPeek& raw)
@@ -1138,7 +1198,155 @@ namespace GakuMotion::webpanel
 				",\"hasFacial\":" + JBool(entry.hasFacial) +
 				",\"hasCamera\":" + JBool(entry.hasCamera) +
 				",\"hasAudio\":" + JBool(entry.hasAudio) +
+				",\"audioFile\":" + JString(entry.audioFile) +
+				",\"hasCover\":" + JBool(entry.hasCover) +
 				",\"timing\":" + TimingJson(entry.timing) + "}");
+		}
+
+		CmdResult LibraryProbeAudio(const jsonlite::Value& params)
+		{
+			std::string path;
+			if (!StringParam(params, "path", path) || path.empty() || path.size() > 32767)
+				return CmdResult::Err("invalid_params", "path must be a non-empty string");
+			if (IsNetworkAudioPath(path))
+				return CmdResult::Err("invalid_params", "不支持网络或流媒体路径，请选择本地音频文件");
+			if (!IsSupportedAudioExtensionPath(path))
+				return CmdResult::Err("invalid_params", "音频格式不支持（支持 .wav/.mp3/.flac/.ogg/.m4a/.aac/.opus）");
+			bool includeCover = true;
+			if (params.Find("includeCover") && !BoolParam(params, "includeCover", includeCover))
+				return CmdResult::Err("invalid_params", "includeCover must be a boolean");
+
+			AudioProbeView probed;
+			if (hooks_.probeAudio) probed = hooks_.probeAudio(path, includeCover);
+			return CmdResult::Ok("{\"valid\":" + JBool(probed.valid) +
+				",\"sampleRate\":" + JNum(probed.sampleRate) +
+				",\"channels\":" + JNum(probed.channels) +
+				",\"durationSeconds\":" + JNum(probed.durationSeconds) +
+				",\"codec\":" + JString(probed.codec) +
+				",\"title\":" + JString(probed.title) +
+				",\"artist\":" + JString(probed.artist) +
+				",\"album\":" + JString(probed.album) +
+				",\"hasCover\":" + JBool(probed.hasCover) +
+				",\"coverDataUri\":" + JString(probed.coverDataUri) + "}");
+		}
+
+		CmdResult LibraryGetCover(const jsonlite::Value& params)
+		{
+			std::string key, directory;
+			StringParam(params, "key", key);
+			StringParam(params, "directory", directory);
+			if (key.empty() && directory.empty())
+				return CmdResult::Err("invalid_params", "key or directory is required");
+
+			std::string resolvedDir;
+			bool hasCoverHint = false;
+			{
+				std::lock_guard<std::recursive_mutex> lock(core_.stateMutex);
+				for (const auto& entry : core_.motions)
+				{
+					if ((!key.empty() && entry.name == key) ||
+						(!directory.empty() && entry.dir == directory))
+					{
+						resolvedDir = entry.dir;
+						hasCoverHint = entry.hasCover || entry.hasAudio;
+						break;
+					}
+				}
+			}
+			if (resolvedDir.empty())
+				return CmdResult::Err("not_found", "Track not found in library");
+
+			std::string dataUri;
+			if (hasCoverHint && hooks_.getTrackCoverDataUri)
+				dataUri = hooks_.getTrackCoverDataUri(resolvedDir);
+			return CmdResult::Ok("{\"hasCover\":" + JBool(!dataUri.empty()) +
+				",\"coverDataUri\":" + JString(dataUri) + "}");
+		}
+
+		CmdResult ClockSetRunMode(const jsonlite::Value& params)
+		{
+			uint32_t rawMode = GAKUMOTION_RUN_REALTIME;
+			if (const auto* rm = params.Find("runMode"))
+			{
+				if (rm->IsString())
+				{
+					if (rm->stringValue == "recording") rawMode = GAKUMOTION_RUN_RECORDING;
+					else if (rm->stringValue == "realtime") rawMode = GAKUMOTION_RUN_REALTIME;
+					else return CmdResult::Err("invalid_params", "runMode must be realtime or recording");
+				}
+				else if (rm->IsNumber())
+				{
+					const int v = rm->AsInt(-1);
+					if (v != 0 && v != 1) return CmdResult::Err("invalid_params", "runMode must be 0 or 1");
+					rawMode = static_cast<uint32_t>(v);
+				}
+				else return CmdResult::Err("invalid_params", "runMode must be realtime or recording");
+			}
+			else return CmdResult::Err("invalid_params", "runMode is required");
+
+			if (core_.SetClockRunMode(rawMode) != GAKU_OK)
+				return CmdResult::Err("failed", "Failed to update run mode");
+			std::lock_guard<std::recursive_mutex> lock(core_.stateMutex);
+			return CmdResult::Ok(ClockJsonLocked());
+		}
+
+		CmdResult ClockConfigure(const jsonlite::Value& params)
+		{
+			GakuMotionClockSnapshotV1 cur{};
+			core_.ReadClockSnapshot(&cur);
+			uint32_t source = cur.configuredSource;
+			uint32_t fpsNum = cur.fpsNumerator > 0 ? cur.fpsNumerator : 60u;
+			uint32_t fpsDen = cur.fpsDenominator > 0 ? cur.fpsDenominator : 1u;
+
+			if (const auto* s = params.Find("source"))
+			{
+				if (s->IsString())
+				{
+					if (s->stringValue == "audio") source = GAKUMOTION_CLOCK_AUDIO;
+					else if (s->stringValue == "engine_delta") source = GAKUMOTION_CLOCK_ENGINE_DELTA;
+					else if (s->stringValue == "fixed_step") source = GAKUMOTION_CLOCK_FIXED_STEP;
+					else if (s->stringValue == "external") source = GAKUMOTION_CLOCK_EXTERNAL;
+					else return CmdResult::Err("invalid_params", "unknown clock source");
+				}
+				else if (s->IsNumber())
+				{
+					const int v = s->AsInt(-1);
+					if (v < 0 || v > 3) return CmdResult::Err("invalid_params", "clock source out of range");
+					source = static_cast<uint32_t>(v);
+				}
+				else return CmdResult::Err("invalid_params", "source must be string or number");
+			}
+			int64_t num = 0, den = 0;
+			if (params.Find("fpsNumerator"))
+			{
+				if (!IntParam(params, "fpsNumerator", num) || num < 1 || num > 1000)
+					return CmdResult::Err("invalid_params", "fpsNumerator must be in 1..1000");
+				fpsNum = static_cast<uint32_t>(num);
+			}
+			if (params.Find("fpsDenominator"))
+			{
+				if (!IntParam(params, "fpsDenominator", den) || den < 1 || den > 100)
+					return CmdResult::Err("invalid_params", "fpsDenominator must be in 1..100");
+				fpsDen = static_cast<uint32_t>(den);
+			}
+
+			if (core_.ConfigureClock(source, fpsNum, fpsDen) != GAKU_OK)
+				return CmdResult::Err("failed", "Failed to configure clock");
+			std::lock_guard<std::recursive_mutex> lock(core_.stateMutex);
+			return CmdResult::Ok(ClockJsonLocked());
+		}
+
+		CmdResult AudioEffectSet(const jsonlite::Value& params)
+		{
+			std::string presetId;
+			if (!StringParam(params, "presetId", presetId) || presetId.empty() || presetId.size() > 63)
+				return CmdResult::Err("invalid_params", "presetId is required");
+			if (!hooks_.setAudioEffectPreset)
+				return CmdResult::Err("not_implemented", "GakuAudio service hook unavailable");
+			std::string error;
+			if (!hooks_.setAudioEffectPreset(presetId, error))
+				return CmdResult::Err("failed", error.empty() ? "Failed to switch audio effect" : error);
+			return CmdResult::Ok(BuildAudioEffectJson());
 		}
 
 		static std::string ImportSlotString(const jsonlite::Value& draft, const char* fileField,
@@ -1174,9 +1382,10 @@ namespace GakuMotion::webpanel
 			if (path.size() > 32767) return CmdResult::Err("invalid_params", std::string(label) + "路径过长");
 			if (kind == 3)
 			{
-				std::string ext = WideToUtf8(std::filesystem::path(Utf8ToWide(path)).extension().wstring());
-				for (auto& ch : ext) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-				if (ext != ".wav") return CmdResult::Err("invalid_params", "当前音频轨道仅支持 .wav 无损格式");
+				if (IsNetworkAudioPath(path))
+					return CmdResult::Err("invalid_params", "不支持网络或流媒体路径，请选择本地音频文件");
+				if (!IsSupportedAudioExtensionPath(path))
+					return CmdResult::Err("invalid_params", "音频轨道仅支持 .wav / .mp3 / .flac / .ogg / .m4a / .aac / .opus 本地文件");
 				return CmdResult::Ok();
 			}
 			const VmdProbeInfo info = ProbeCameraOrVmdFile(path);
@@ -2389,7 +2598,10 @@ namespace GakuMotion::webpanel
 					",\"durationSeconds\":" + JNum(entry.durationSeconds) +
 					",\"totalFrames\":" + JNum(entry.totalFrames) +
 					",\"hasMotion\":true,\"hasFacial\":" + JBool(entry.hasFacial) +
-					",\"hasCamera\":" + JBool(entry.hasCamera) + ",\"hasAudio\":" + JBool(entry.hasAudio) + "}";
+					",\"hasCamera\":" + JBool(entry.hasCamera) +
+					",\"hasAudio\":" + JBool(entry.hasAudio) +
+					",\"audioFile\":" + JString(entry.audioFile) +
+					",\"hasCover\":" + JBool(entry.hasCover) + "}";
 			}
 			entries += "]";
 			return "{\"revision\":" + JNum(static_cast<double>(core_.libraryRevision)) +
@@ -2931,6 +3143,55 @@ namespace GakuMotion::webpanel
 				",\"dpiScale\":1,\"scaleLimited\":false}";
 		}
 
+		std::string ClockJsonLocked() const
+		{
+			GakuMotionClockSnapshotV1 snap{};
+			core_.ReadClockSnapshot(&snap);
+			const char* rm = snap.runMode == GAKUMOTION_RUN_RECORDING ? "recording" : "realtime";
+			auto srcName = [](uint32_t s) -> const char*
+			{
+				switch (s)
+				{
+				case GAKUMOTION_CLOCK_ENGINE_DELTA: return "engine_delta";
+				case GAKUMOTION_CLOCK_FIXED_STEP: return "fixed_step";
+				case GAKUMOTION_CLOCK_EXTERNAL: return "external";
+				default: return "audio";
+				}
+			};
+			return "{\"runMode\":" + JString(rm) +
+				",\"configuredSource\":" + JString(srcName(snap.configuredSource)) +
+				",\"effectiveSource\":" + JString(srcName(snap.effectiveSource)) +
+				",\"fpsNumerator\":" + JNum(snap.fpsNumerator) +
+				",\"fpsDenominator\":" + JNum(snap.fpsDenominator) +
+				",\"waitingForRenderComplete\":" + JBool(snap.waitingForRenderComplete != 0) +
+				",\"leaseId\":" + JNum(static_cast<double>(snap.leaseId)) +
+				",\"leaseOwner\":" + JString(snap.leaseOwner) +
+				",\"evaluatedFrameSerial\":" + JNum(static_cast<double>(snap.evaluatedFrameSerial)) + "}";
+		}
+
+		std::string BuildAudioEffectJson() const
+		{
+			AudioEffectState st;
+			if (hooks_.getAudioEffectsState) st = hooks_.getAudioEffectsState();
+			if (st.activeId.empty()) st.activeId = "flat";
+			if (st.presets.empty())
+				st.presets.push_back({"flat", "原声", "flat", "直通输出"});
+			std::string list = "[";
+			for (size_t i = 0; i < st.presets.size(); ++i)
+			{
+				if (i) list += ",";
+				const auto& p = st.presets[i];
+				list += "{\"id\":" + JString(p.id) +
+					",\"name\":" + JString(p.name) +
+					",\"category\":" + JString(p.category) +
+					",\"description\":" + JString(p.description) + "}";
+			}
+			list += "]";
+			return "{\"available\":" + JBool(st.available) +
+				",\"activeId\":" + JString(st.activeId) +
+				",\"presets\":" + list + "}";
+		}
+
 		std::string BuildSnapshotLocked() const
 		{
 			return "{\"permission\":" + PermissionJsonLocked() +
@@ -2955,7 +3216,9 @@ namespace GakuMotion::webpanel
 				",\"sole\":" + SoleJsonLocked() +
 				",\"solePitch\":" + SolePitchJsonLocked() +
 				",\"studio\":" + StudioJsonLocked() +
-				",\"experiments\":" + ExperimentsJsonLocked() + "}";
+				",\"experiments\":" + ExperimentsJsonLocked() +
+				",\"clock\":" + ClockJsonLocked() +
+				",\"audioEffect\":" + BuildAudioEffectJson() + "}";
 		}
 
 		// ---- UI tick: async polling + change events -------------------------------
@@ -2993,6 +3256,8 @@ namespace GakuMotion::webpanel
 			lastSolePitch_.clear();
 			lastStudio_.clear();
 			lastExperiments_.clear();
+			lastClock_.clear();
+			lastAudioEffect_.clear();
 		}
 
 		void Tick()
@@ -3030,7 +3295,7 @@ namespace GakuMotion::webpanel
 
 			std::string permission, player, library, loaded, playlist, actors, camera, stage, stageNodes,
 				facial, position, ensemble, importProgress, appearance,
-				gaze, bone, sole, solePitch, studio, experiments;
+				gaze, bone, sole, solePitch, studio, experiments, clock, audioEffect;
 			int physicsBackend = 0;
 			bool injectionAllowed = false;
 			bool scrubbing = false;
@@ -3062,8 +3327,10 @@ namespace GakuMotion::webpanel
 				solePitch = SolePitchJsonLocked();
 				studio = StudioJsonLocked();
 				experiments = ExperimentsJsonLocked();
+				clock = ClockJsonLocked();
 			}
 			appearance = BuildAppearanceJson();
+			audioEffect = BuildAudioEffectJson();
 
 			// Permission loss / session change: the frontend drops its scrub without
 			// sending scrubEnd, so finish the native scrub state through the queue.
@@ -3112,6 +3379,8 @@ namespace GakuMotion::webpanel
 			emitChanged("solePitch.changed", solePitch, lastSolePitch_);
 			emitChanged("studio.changed", studio, lastStudio_);
 			emitChanged("experiments.changed", experiments, lastExperiments_);
+			emitChanged("clock.changed", clock, lastClock_);
+			emitChanged("audioEffect.changed", audioEffect, lastAudioEffect_);
 			if (baseline || physicsBackend != lastPhysicsBackend_)
 			{
 				lastPhysicsBackend_ = physicsBackend;
@@ -3192,7 +3461,7 @@ namespace GakuMotion::webpanel
 		std::string lastPermission_, lastPlayer_, lastLibrary_, lastLoaded_, lastPlaylist_,
 			lastActors_, lastCamera_, lastStage_, lastStageNodes_, lastFacial_, lastPosition_,
 			lastEnsemble_, lastImportProgress_, lastAppearance_, lastGaze_, lastBone_, lastSole_,
-			lastSolePitch_, lastStudio_, lastExperiments_;
+			lastSolePitch_, lastStudio_, lastExperiments_, lastClock_, lastAudioEffect_;
 		int lastPhysicsBackend_{-1};
 	};
 } // namespace GakuMotion::webpanel

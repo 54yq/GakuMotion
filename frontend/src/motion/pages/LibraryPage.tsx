@@ -6,6 +6,7 @@ import {
   RiArrowUpFill,
   RiDeleteBinFill,
   RiDeleteBinLine,
+  RiDiscFill,
   RiEyeFill,
   RiEyeLine,
   RiFilter2Fill,
@@ -105,6 +106,27 @@ interface LibraryRowProps {
   onPreview: () => void
   onEdit: () => void
   onDelete: () => void
+}
+
+function LibraryRowCover({ entryId }: { entryId: string }) {
+  const coverUri = useMotionStore((state) => state.coverCache[entryId] ?? '')
+  React.useEffect(() => {
+    void motionStore.ensureTrackCover(entryId)
+  }, [entryId])
+  return (
+    <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded border border-border/60 bg-muted/40">
+      {coverUri ? (
+        <img
+          src={coverUri}
+          alt=""
+          data-testid={`library-cover-${entryId}`}
+          className="size-full object-cover"
+        />
+      ) : (
+        <RiDiscFill className="size-3.5 text-muted-foreground" />
+      )}
+    </div>
+  )
 }
 
 function LibraryRow({
@@ -212,24 +234,29 @@ function LibraryRow({
 
       {/* 演出曲目 + 右侧 3 个空心悬停小图标（正在播放时标题与小标题同时高亮为主色） */}
       <div role="cell" className="flex min-w-0 flex-1 items-center justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <div
-            className={cn(
-              'truncate text-[13px] font-medium',
-              isPlaying ? 'text-primary' : 'text-foreground',
-            )}
-            title={entry.title}
-          >
-            {entry.title}
+        <div className="flex min-w-0 flex-1 items-center gap-2.5">
+          {entry.hasCover && (
+            <LibraryRowCover entryId={entry.id} />
+          )}
+          <div className="min-w-0 flex-1">
+            <div
+              className={cn(
+                'truncate text-[13px] font-medium',
+                isPlaying ? 'text-primary' : 'text-foreground',
+              )}
+              title={entry.title}
+            >
+              {entry.title}
+            </div>
+            <p
+              className={cn(
+                'truncate text-[11px] tabular-nums',
+                isPlaying ? 'text-primary/85' : 'text-muted-foreground',
+              )}
+            >
+              {subtitleText ? `${subtitleText} · ${entry.totalFrames} 帧` : `${entry.id} · ${entry.totalFrames} 帧`}
+            </p>
           </div>
-          <p
-            className={cn(
-              'truncate text-[11px] tabular-nums',
-              isPlaying ? 'text-primary/85' : 'text-muted-foreground',
-            )}
-          >
-            {subtitleText ? `${subtitleText} · ${entry.totalFrames} 帧` : `${entry.id} · ${entry.totalFrames} 帧`}
-          </p>
         </div>
 
         {/* Hover: 仅保留预览、管理、删除 3 个空心线框小图标 */}

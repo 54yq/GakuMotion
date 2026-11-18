@@ -1,5 +1,6 @@
 #pragma once
 
+#include "GkAudioPlayback.hpp"
 #include "GkCamera.hpp"
 #include "GkTrackTiming.hpp"
 
@@ -108,6 +109,10 @@ namespace GakuMotion
 		uint32_t boneCount{0};
 		float fps{30.0f};
 		bool hasAudio{false};
+		std::string audioFile; // 解析命中的音频文件名（如 song.wav / song.flac）
+		float audioDurationSeconds{0.0f};
+		bool hasCover{false};
+		std::string coverFile; // 解析命中的封面文件名（如 cover.jpg / cover.png）
 		bool hasOverrides{false}; // 是否带曲目级 bone_overrides.json
 		bool hasFacial{false};
 		bool hasCamera{false};
@@ -308,7 +313,10 @@ namespace GakuMotion
 				if (ec) { warn(m.name + "/" + filename + ": " + ec.message()); ec.clear(); }
 				return found;
 			};
-			m.hasAudio = exists("song.wav");
+			m.audioFile = audio::ResolveTrackAudioFileName(entry.path());
+			m.hasAudio = !m.audioFile.empty();
+			m.coverFile = audio::ResolveTrackCoverFileName(entry.path());
+			m.hasCover = !m.coverFile.empty();
 			m.hasOverrides = exists("bone_overrides.json");
 			m.hasCamera = exists("camera.gkcamera") || m.hasCamera;
 
@@ -334,6 +342,21 @@ namespace GakuMotion
 					m.sourceMorphVmd = info.StringPath("source_morph_vmd", "");
 					m.sourceCameraVmd = info.StringPath("source_camera_vmd", "");
 					m.timing = ReadPerformanceTiming(info);
+					const std::string hintedAudio = info.StringPath("audio_file", "");
+					const std::string resolvedHintedAudio = audio::ResolveTrackAudioFileName(entry.path(), hintedAudio);
+					if (!resolvedHintedAudio.empty())
+					{
+						m.audioFile = resolvedHintedAudio;
+						m.hasAudio = true;
+					}
+					m.audioDurationSeconds = info.FloatPath("audio_duration", 0.0f);
+					const std::string hintedCover = info.StringPath("cover_file", "");
+					const std::string resolvedHintedCover = audio::ResolveTrackCoverFileName(entry.path(), hintedCover);
+					if (!resolvedHintedCover.empty())
+					{
+						m.coverFile = resolvedHintedCover;
+						m.hasCover = true;
+					}
 					if (info.Find("has_camera"))
 					{
 						m.hasCamera = m.hasCamera || info.BoolPath("has_camera", false);

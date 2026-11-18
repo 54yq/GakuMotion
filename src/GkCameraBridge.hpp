@@ -856,6 +856,21 @@ namespace CameraBridge
 		return true;
 	}
 
+	inline Render endFrameRender = nullptr, managerEndFrameRender = nullptr;
+	inline void (*onFrameRenderCompleted)(){nullptr};
+
+	inline void AfterFrameRendering(void* context, void* cameras, void* method)
+	{
+		if (endFrameRender) endFrameRender(context, cameras, method);
+		if (OnUnityThread() && onFrameRenderCompleted) onFrameRenderCompleted();
+	}
+
+	inline void AfterFrameRenderingManager(void* context, void* cameras, void* method)
+	{
+		if (managerEndFrameRender) managerEndFrameRender(context, cameras, method);
+		if (OnUnityThread() && onFrameRenderCompleted) onFrameRenderCompleted();
+	}
+
 	inline void BeforeCameraRendering(void* context, void* camera, void* method)
 	{
 		if (render) render(context, camera, method);
@@ -1244,6 +1259,20 @@ namespace CameraBridge
 			return false;
 		}
 		il2cppArrayLength = reinterpret_cast<Il2CppArrayLengthFn>(GetProcAddress(g_gameAssembly, "il2cpp_array_length"));
+
+		// Optional render-complete hooks for standalone ForRecording pacing. Non-fatal if
+		// unavailable or owned by another plugin; Unity Time.renderedFrameCount acts as fallback.
+		if (void* endFrame = FindMethodPointer(pipeline, "EndFrameRendering", 2))
+		{
+			InstallHook("RenderPipeline.EndFrameRendering", endFrame, (void*)AfterFrameRendering,
+				(void**)&endFrameRender);
+		}
+		if (void* managerEndFrame = FindMethodPointer(manager, "EndFrameRendering", 2);
+			managerEndFrame && managerEndFrame != FindMethodPointer(pipeline, "EndFrameRendering", 2))
+		{
+			InstallHook("RenderPipelineManager.EndFrameRendering", managerEndFrame,
+				(void*)AfterFrameRenderingManager, (void**)&managerEndFrameRender);
+		}
 
 		// Hook DrawActorShadowPass.AddRenderPasses for actor shadow experiments (anchor / bypass)
 		void* drawShadowPassKlass = FindClass("vl-unity.Runtime.dll", "VL.Rendering", "DrawActorShadowPass");

@@ -22,6 +22,7 @@ internal sealed class ImportRequest
     public bool RebakeOutput { get; init; }
     public string Audio { get; init; } = string.Empty;
     public bool ClearAudio { get; init; }
+    public float AudioDurationHint { get; init; }
     public string CameraVmd { get; init; } = string.Empty;
     public bool ClearCamera { get; init; }
     public float CameraFps { get; init; }
@@ -85,6 +86,7 @@ internal sealed class ImportRequest
             RebakeOutput = OptionalBool("rebake_output"),
             Audio = Optional("audio"),
             ClearAudio = OptionalBool("clear_audio"),
+            AudioDurationHint = OptionalFloat("audio_duration_hint"),
             CameraVmd = Optional("camera_vmd"),
             ClearCamera = OptionalBool("clear_camera"),
             CameraFps = OptionalFloat("camera_fps"),

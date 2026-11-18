@@ -77,10 +77,48 @@ namespace GakuMotion::performance
         }
     };
 
+    enum class PlaybackRunMode : uint32_t { Realtime = 0, ForRecording = 1 };
+
+    enum class ClockSource : uint32_t
+    {
+        Audio = 0,
+        EngineDelta = 1,
+        FixedStep = 2,
+        External = 3
+    };
+
+    inline const char* RunModeName(PlaybackRunMode mode) noexcept
+    {
+        return mode == PlaybackRunMode::ForRecording ? "recording" : "realtime";
+    }
+
+    inline const char* ClockSourceName(ClockSource src) noexcept
+    {
+        switch (src)
+        {
+        case ClockSource::Audio: return "audio";
+        case ClockSource::EngineDelta: return "engine_delta";
+        case ClockSource::FixedStep: return "fixed_step";
+        case ClockSource::External: return "external";
+        }
+        return "audio";
+    }
+
     struct FrameRate
     {
         uint32_t numerator{60}, denominator{1};
         bool Valid() const noexcept { return numerator != 0 && denominator != 0; }
+        double StepSeconds() const noexcept
+        {
+            return Valid() ? static_cast<double>(denominator) / static_cast<double>(numerator) : (1.0 / 60.0);
+        }
+    };
+
+    struct ClockConfiguration
+    {
+        PlaybackRunMode runMode{PlaybackRunMode::Realtime};
+        ClockSource source{ClockSource::Audio};
+        FrameRate fixedFrameRate{60, 1};
     };
 
     class FixedStep final : public Clock

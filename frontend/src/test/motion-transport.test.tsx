@@ -164,4 +164,34 @@ describe('TransportBar', () => {
     await user.click(screen.getByRole('button', { name: '1.5x' }))
     await waitFor(() => expect(motionStore.getState().player.speed).toBeCloseTo(1.5))
   })
+
+  it('places audio-effect-badge left of camera-mode-badge and switches presets', async () => {
+    const user = userEvent.setup()
+    renderBar()
+    const audioFx = screen.getByTestId('audio-effect-badge')
+    const camera = screen.getByTestId('camera-mode-badge')
+    expect(audioFx.compareDocumentPosition(camera) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    await user.click(audioFx)
+    await user.click(await screen.findByRole('menuitemradio', { name: /演唱会现场/ }))
+    await waitFor(() => expect(motionStore.getState().audioEffect.activeId).toBe('concert_arena'))
+    expect(screen.getByTestId('audio-effect-badge')).toHaveTextContent('演唱会现场')
+  })
+
+  it('toggles realtime/recording play mode and clock source in PrecisionControlPanel', async () => {
+    const user = userEvent.setup()
+    renderBar()
+    await user.click(screen.getByTestId('precision-control-trigger'))
+    const panel = await screen.findByTestId('precision-control-panel')
+    await user.click(within(panel).getByTestId('run-mode-recording'))
+    await waitFor(() => expect(motionStore.getState().clock.runMode).toBe('recording'))
+    expect(screen.getByTestId('transport-recording-badge')).toHaveTextContent('供录制')
+    await user.click(within(panel).getByTestId('clock-source-engine_delta'))
+    await waitFor(() => expect(motionStore.getState().clock.configuredSource).toBe('engine_delta'))
+  })
+
+  it('renders embedded track cover image in TransportBar when available', async () => {
+    await motionStore.selectMotion('hikari-no-saki', false)
+    renderBar()
+    await waitFor(() => expect(screen.getByTestId('transport-cover-img')).toBeInTheDocument())
+  })
 })

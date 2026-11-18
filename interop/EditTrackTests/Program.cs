@@ -351,6 +351,54 @@ internal static unsafe class Program
                 Require(!Edit(track, ("title", "Must not apply"), ("transaction_root", library)).Ok, "scratch accepted library root");
                 Same(before, Snapshot(track));
             });
+            Case("imports MP3 with ID3v2 artist and cover art, auto-filling subtitle", () =>
+            {
+                string seed = Path.Combine(_root, "mp3-import"), library = Path.Combine(seed, "library");
+                string vmd = Fixtures.WriteSyntheticVmd(seed, frames: 30);
+                string mp3 = Path.Combine(seed, "stage.mp3");
+                byte[] fakePng = { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 1 };
+                WriteSyntheticMp3WithId3(mp3, title: "Luna", artist: "Sakiko", coverMime: "image/png", coverBytes: fakePng, frameCount: 40);
+                Result r = RunRequest(new JsonObject
+                {
+                    ["motion_vmd"] = vmd, ["motions_root"] = library, ["title"] = "Luna Track", ["audio"] = mp3
+                });
+                Require(r.Ok, "mp3 import failed: " + r.Error);
+                Require(File.Exists(Path.Combine(r.Directory, "song.mp3")), "song.mp3 missing");
+                Require(!File.Exists(Path.Combine(r.Directory, "song.wav")), "unexpected song.wav");
+                Require(File.Exists(Path.Combine(r.Directory, "cover.png")), "cover.png missing");
+                JsonObject meta = Info(r.Directory);
+                Require(meta["audio_file"]?.GetValue<string>() == "song.mp3", "audio_file wrong");
+                Require(meta["subtitle"]?.GetValue<string>() == "Sakiko", "subtitle not auto-filled from artist");
+                Require(meta["has_cover"]?.GetValue<bool>() == true && meta["cover_file"]?.GetValue<string>() == "cover.png", "cover metadata wrong");
+                Require(meta["audio_duration"]?.GetValue<double>() > 0.5, "audio_duration missing");
+            });
+            Case("replaces WAV with FLAC cover and clear_audio removes both song.* and cover.*", () =>
+            {
+                string track = Track(), flac = Path.Combine(_root, "track.flac");
+                byte[] fakeJpg = { 0xFF, 0xD8, 0xFF, 0xE0, 0, 16, 0x4A, 0x46, 0x49, 0x46, 0, 1 };
+                WriteSyntheticFlac(flac, title: "Sora", artist: "Kotone", coverMime: "image/jpeg", coverBytes: fakeJpg, totalSamples: 44100);
+                Require(Edit(track, ("audio", flac)).Ok, "flac replace failed");
+                Require(!File.Exists(Path.Combine(track, "song.wav")), "old song.wav kept");
+                Require(File.Exists(Path.Combine(track, "song.flac")), "song.flac missing");
+                Require(File.Exists(Path.Combine(track, "cover.jpg")), "cover.jpg missing");
+                JsonObject meta = Info(track);
+                Require(meta["audio_file"]?.GetValue<string>() == "song.flac", "audio_file not updated");
+                Require(meta["audio_artist"]?.GetValue<string>() == "Kotone", "audio_artist missing");
+                Require(meta["has_cover"]?.GetValue<bool>() == true, "has_cover false");
+
+                Require(Edit(track, ("clear_audio", true)).Ok, "clear_audio failed");
+                Require(!File.Exists(Path.Combine(track, "song.flac")), "song.flac not cleared");
+                Require(!File.Exists(Path.Combine(track, "cover.jpg")), "cover.jpg not cleared");
+                JsonObject cleared = Info(track);
+                Require(cleared["has_cover"]?.GetValue<bool>() == false && cleared["audio_file"] is null, "cleared metadata stale");
+            });
+            Case("rejects network streaming audio URLs", () =>
+            {
+                string track = Track();
+                var before = Snapshot(track);
+                Require(!Edit(track, ("audio", "https://example.com/stream.mp3")).Ok, "network audio accepted");
+                Same(before, Snapshot(track));
+            });
         }
         finally
         {
@@ -437,5 +485,127 @@ internal static unsafe class Program
         writer.Write(Encoding.ASCII.GetBytes("GKCAM\0\0\0")); writer.Write(1u); writer.Write(60f); writer.Write(1u);
         foreach (float value in new[] { x, 2, 3, 0, 0, 0, 1, 45, 5 }) writer.Write(value);
         writer.Write(0u);
+    }
+
+    private static void WriteSyncsafeBE(Stream s, uint value)
+    {
+        s.WriteByte((byte)((value >> 21) & 0x7F));
+        s.WriteByte((byte)((value >> 14) & 0x7F));
+        s.WriteByte((byte)((value >> 7) & 0x7F));
+        s.WriteByte((byte)(value & 0x7F));
+    }
+
+    private static void WriteUInt32BE(Stream s, uint value)
+    {
+        s.WriteByte((byte)(value >> 24));
+        s.WriteByte((byte)(value >> 16));
+        s.WriteByte((byte)(value >> 8));
+        s.WriteByte((byte)value);
+    }
+
+    private static void WriteSyntheticMp3WithId3(string path, string title, string artist,
+        string coverMime, byte[] coverBytes, int frameCount)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        using var body = new MemoryStream();
+
+        void AddTextFrame(string id, string text)
+        {
+            byte[] utf8 = Encoding.UTF8.GetBytes(text);
+            body.Write(Encoding.ASCII.GetBytes(id));
+            WriteUInt32BE(body, (uint)(1 + utf8.Length));
+            body.WriteByte(0); body.WriteByte(0);
+            body.WriteByte(3); // UTF-8
+            body.Write(utf8);
+        }
+
+        AddTextFrame("TIT2", title);
+        AddTextFrame("TPE1", artist);
+
+        byte[] mimeAscii = Encoding.ASCII.GetBytes(coverMime);
+        uint apicLen = (uint)(1 + mimeAscii.Length + 1 + 1 + 1 + coverBytes.Length);
+        body.Write(Encoding.ASCII.GetBytes("APIC"));
+        WriteUInt32BE(body, apicLen);
+        body.WriteByte(0); body.WriteByte(0);
+        body.WriteByte(0); // latin1 mime/desc
+        body.Write(mimeAscii);
+        body.WriteByte(0);
+        body.WriteByte(3); // Cover (front)
+        body.WriteByte(0); // empty description
+        body.Write(coverBytes);
+
+        using var file = File.Create(path);
+        file.Write(Encoding.ASCII.GetBytes("ID3"));
+        file.WriteByte(3); file.WriteByte(0); // ID3v2.3
+        file.WriteByte(0);
+        WriteSyncsafeBE(file, (uint)body.Length);
+        body.Position = 0;
+        body.CopyTo(file);
+
+        // MPEG1 Layer 3 128kbps 44100Hz Stereo: frame size = 417 bytes
+        byte[] frame = new byte[417];
+        frame[0] = 0xFF; frame[1] = 0xFB; frame[2] = 0x90; frame[3] = 0x00;
+        for (int i = 0; i < frameCount; ++i)
+            file.Write(frame);
+    }
+
+    private static void WriteSyntheticFlac(string path, string title, string artist,
+        string coverMime, byte[] coverBytes, ulong totalSamples)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        using var file = File.Create(path);
+        file.Write(Encoding.ASCII.GetBytes("fLaC"));
+
+        // STREAMINFO (block 0, 34 bytes)
+        file.WriteByte(0x00);
+        file.WriteByte(0); file.WriteByte(0); file.WriteByte(34);
+        byte[] si = new byte[34];
+        si[10] = (byte)(44100 >> 12);
+        si[11] = (byte)((44100 >> 4) & 0xFF);
+        si[12] = (byte)(((44100 & 0xF) << 4) | (1 << 1)); // 2 channels, 16 bps (15) upper bit=0
+        si[13] = (byte)((15 << 4) | ((int)(totalSamples >> 32) & 0xF));
+        WriteUInt32BE(new MemoryStream(si, 14, 4, writable: true), (uint)(totalSamples & 0xFFFFFFFFUL));
+        file.Write(si);
+
+        // VORBIS_COMMENT (block 4)
+        using (var vc = new MemoryStream())
+        using (var w = new BinaryWriter(vc, Encoding.UTF8, leaveOpen: true))
+        {
+            byte[] vendor = Encoding.UTF8.GetBytes("GakuMotionTest");
+            w.Write((uint)vendor.Length); w.Write(vendor);
+            string[] tags = { "TITLE=" + title, "ARTIST=" + artist };
+            w.Write((uint)tags.Length);
+            foreach (string t in tags)
+            {
+                byte[] b = Encoding.UTF8.GetBytes(t);
+                w.Write((uint)b.Length); w.Write(b);
+            }
+            w.Flush();
+            uint len = (uint)vc.Length;
+            file.WriteByte(0x04);
+            file.WriteByte((byte)((len >> 16) & 0xFF));
+            file.WriteByte((byte)((len >> 8) & 0xFF));
+            file.WriteByte((byte)(len & 0xFF));
+            vc.Position = 0; vc.CopyTo(file);
+        }
+
+        // PICTURE (block 6, isLast=1 -> 0x86)
+        using (var pic = new MemoryStream())
+        {
+            WriteUInt32BE(pic, 3); // Front cover
+            byte[] mime = Encoding.ASCII.GetBytes(coverMime);
+            WriteUInt32BE(pic, (uint)mime.Length);
+            pic.Write(mime);
+            WriteUInt32BE(pic, 0); // description
+            WriteUInt32BE(pic, 0); WriteUInt32BE(pic, 0); WriteUInt32BE(pic, 0); WriteUInt32BE(pic, 0);
+            WriteUInt32BE(pic, (uint)coverBytes.Length);
+            pic.Write(coverBytes);
+            uint len = (uint)pic.Length;
+            file.WriteByte(0x86);
+            file.WriteByte((byte)((len >> 16) & 0xFF));
+            file.WriteByte((byte)((len >> 8) & 0xFF));
+            file.WriteByte((byte)(len & 0xFF));
+            pic.Position = 0; pic.CopyTo(file);
+        }
     }
 }

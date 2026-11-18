@@ -336,7 +336,7 @@ namespace GakuMotion
 	// 非阻塞异步文件选择器 (Non-blocking Async File Dialog)
 	// -----------------------------------------------------------------------------
 	static const wchar_t kAllImportFilter[] =
-		L"演出文件 (*.vmd;*.gkcamera;*.wav)\0*.vmd;*.gkcamera;*.wav\0所有文件 (*.*)\0*.*\0\0";
+		L"演出文件 (*.vmd;*.gkcamera;*.wav;*.mp3;*.flac;*.ogg;*.m4a;*.aac;*.opus)\0*.vmd;*.gkcamera;*.wav;*.mp3;*.flac;*.ogg;*.oga;*.m4a;*.aac;*.opus\0所有文件 (*.*)\0*.*\0\0";
 
 	static const wchar_t kMotionFilter[] =
 		L"动作 VMD (*.vmd)\0*.vmd\0所有文件 (*.*)\0*.*\0\0";
@@ -348,7 +348,7 @@ namespace GakuMotion
 		L"镜头文件 (*.vmd;*.gkcamera)\0*.vmd;*.gkcamera\0所有文件 (*.*)\0*.*\0\0";
 
 	static const wchar_t kAudioFilter[] =
-		L"WAV 无损音频 (*.wav)\0*.wav\0所有文件 (*.*)\0*.*\0\0";
+		L"音频文件 (*.wav;*.mp3;*.flac;*.ogg;*.m4a;*.aac;*.opus)\0*.wav;*.mp3;*.flac;*.ogg;*.oga;*.m4a;*.aac;*.opus\0所有文件 (*.*)\0*.*\0\0";
 
 	class AsyncFileDialog
 	{
@@ -564,19 +564,14 @@ namespace GakuMotion
 				VmdProbeInfo probe = ProbeCameraOrVmdFile(path);
 				vmdAndCamCandidates.push_back({path, probe});
 			}
-			else if (ext == ".wav")
+			else if (ext == ".wav" || ext == ".mp3" || ext == ".flac" || ext == ".ogg" ||
+			         ext == ".oga" || ext == ".m4a" || ext == ".aac" || ext == ".opus")
 			{
 				wavAudios.push_back(path);
 			}
-			else if (ext == ".mp3" || ext == ".ogg" || ext == ".flac" || ext == ".m4a")
-			{
-				// 不支持（导入链只接受 PCM WAV）。记下来只为了给出可读的提示，
-				// 绝不能被推荐成音频候选，否则用户会拿到一个必然失败的导入。
-				otherAudios.push_back(path);
-			}
 		}
 
-		// 只推荐原生 .wav 音频
+		// 优先选择支持的本地音频
 		if (!wavAudios.empty())
 			res.audioCandidate = wavAudios.front();
 		res.unsupportedAudioCount = static_cast<int>(otherAudios.size());
