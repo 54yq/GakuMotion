@@ -2,10 +2,18 @@ static void TestSceneActorSelection()
 {
 	BeginTest("scene actor roster and target selection lifetime");
 	Check(DetectIdolCharacterCode("MDL_CHR_KRNH-base-0000_face(Clone)") == "krnh" &&
-		FormatIdolDisplayName("krnh").find("有栖川凛花") != std::string::npos,
+		FormatIdolDisplayName("krnh").find("贺阳燐羽") != std::string::npos,
 		"replacement identity and Chinese naming do not depend on a facial baseline existing");
 	Check(DetectIdolCharacterCode("xkrnhx").empty() && DetectIdolCharacterCode("chr_krnh_ttmr").empty(),
 		"unknown substrings and ambiguous character codes are not assigned a character name");
+	Check(FormatIdolDisplayName("amao").find("有村麻央") != std::string::npos &&
+		FormatIdolDisplayName("atbm").find("雨夜燕") != std::string::npos &&
+		FormatIdolDisplayName("hmsz").find("秦谷美铃") != std::string::npos &&
+		FormatIdolDisplayName("hrnm").find("姬崎莉波") != std::string::npos,
+		"character identifiers use the corrected Chinese names");
+	Check(GakuActorsPresetName("krnh | GakuActors[2] | preset:我的燐羽 hski") == "我的燐羽 hski" &&
+		GakuActorsPresetName("krnh | GakuActors[x] | preset:错误").empty() &&
+		GakuActorsPresetName("普通角色").empty(), "preset names are read only from valid actor markers");
 	Core core;
 	GakuMotionActorSnapshot snapshot{};
 	snapshot.actorToken = 0xffff;
@@ -22,6 +30,10 @@ static void TestSceneActorSelection()
 		"fresh actual actors are deduplicated and the first actor is selected automatically");
 	Check(context.sceneActors[0].label.find("花海咲季") != std::string::npos && context.sceneActors[1].label.find("月村手毬") != std::string::npos,
 		"scene entries use the existing character-name table");
+	core.PublishSceneActors({{a, 101, "hski", "花海咲季", "face", "自定义演出"}, {b, 102, "ttmr"}});
+	context = core.BuildGuiContext();
+	Check(context.sceneActors[0].label.find("自定义演出") != std::string::npos,
+		"the actor preset label is shown without changing facial identity");
 	const auto token = context.sceneActors[1].token;
 	const auto epoch = context.actorRosterEpoch;
 	core.PublishSceneActors({{b, 102, "ttmr"}, {a, 101, "hski"}});

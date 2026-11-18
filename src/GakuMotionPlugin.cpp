@@ -2592,9 +2592,12 @@ static bool RefreshSceneActors(GakuMotion::Core& core, bool force = false)
 			const auto identity = GakuMotion::facial_fit::ResolveIdentity(faceName);
 			std::string character = identity.character;
 			if (character.empty()) character = GakuMotion::DetectIdolCharacterCode(faceName);
-			if (character.empty()) character = GakuMotion::DetectIdolCharacterCode(HelperGetActorName(actor));
+			const auto actorName = HelperGetActorName(actor);
+			const auto presetName = GakuMotion::GakuActorsPresetName(actorName);
+			if (character.empty()) character = GakuMotion::DetectIdolCharacterCode(
+				presetName.empty() ? actorName : actorName.substr(0, actorName.find(" | GakuActors[")));
 			observations.push_back({actor, id, std::move(character), identity.displayName,
-				GakuMotion::facial_fit::StripCloneSuffix(std::move(faceName))});
+				GakuMotion::facial_fit::StripCloneSuffix(std::move(faceName)), presetName});
 		}
 	}
 	const bool hadActors = !core.sceneActorRegistry.Entries().empty();

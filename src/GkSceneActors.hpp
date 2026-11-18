@@ -13,7 +13,22 @@ namespace GakuMotion
 		std::string character;
 		std::string displayName{};
 		std::string faceName{};
+		std::string presetName{};
 	};
+	inline std::string GakuActorsPresetName(const std::string& name)
+	{
+		const std::string marker=" | GakuActors[", suffix="] | preset:";
+		const auto pos=name.find(marker);
+		if(pos==std::string::npos||pos==0||pos>32)return {};
+		for(size_t i=0;i<pos;++i)if(!((name[i]>='a'&&name[i]<='z')||(name[i]>='0'&&name[i]<='9')))return {};
+		const auto end=name.find(suffix,pos+marker.size());
+		if(end==std::string::npos||end==pos+marker.size())return {};
+		for(size_t i=pos+marker.size();i<end;++i)if(!((name[i]>='0'&&name[i]<='9')||(i==pos+marker.size()&&name[i]=='-')))return {};
+		const auto label=name.substr(end+suffix.size());
+		if(label.empty()||label.size()>160)return {};
+		for(unsigned char c:label)if(c<32)return {};
+		return label;
+	}
 	struct SceneActorEntry : SceneActorObservation { uint64_t token{0}; };
 	struct GuiSceneActor
 	{
