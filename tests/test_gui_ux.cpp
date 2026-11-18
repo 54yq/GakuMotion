@@ -1544,23 +1544,42 @@ int main(int argc, char** argv)
 	{
 		Harness app(root);
 		app.windowHeight=1800;
-		app.core.liveTakeoverActive=true; app.core.liveViewingConfirmed=true;
-		app.core.gui.activePage=GuiPage::Motion;
-		void* actor=reinterpret_cast<void*>(0xa1000);
+		app.core.gui.activePage = GuiPage::Motion;
+		void* actor = reinterpret_cast<void*>(0xa1000);
 		app.core.PublishSceneActors({{actor,101,"hmsz"}});
+		const auto token = app.core.BuildGuiContext().sceneActors[0].token;
+		app.core.actorProps = {
+			{token,"Root_Microphone","Prop_Microphone","秦谷美铃",1001,true,true},
+			{token,"Root_Hknesuitcase","Prop_Hknesuitcase","秦谷美铃",1002,true,true},
+			{token,"Root_Penlightklljduo","Prop_Penlightklljduo","秦谷美铃",1003,false,true},
+			{token,"Root_WaterGun","Prop_WaterGun","秦谷美铃",1004,true,true},
+			{token,"Root_Candy","Prop_Candy","秦谷美铃",1005,true,true}
+		};
+		const auto label = [&](size_t index, const char* name) {
+			return std::string("秦谷美铃 / ") + name + "##" + ActorPropKey(app.core.actorProps[index]);
+		};
+		const auto mic = label(0, "麦克风"), bag = label(1, "行李箱"), light = label(2, "荧光棒（Penlightklljduo）");
 		app.Settle();
-		const auto roster=app.core.BuildGuiContext().sceneActors;
-		Check(app.ItemWithLabel("隐藏麦克风##primary_mic")!=nullptr,"Live motion page exposes the main actor microphone switch");
-		app.Click("隐藏麦克风##primary_mic");
-		Check(app.core.BuildGuiContext().sceneActors[0].microphoneHidden,"microphone switch submits the selected actor token");
-		app.core.actorProps.push_back({roster[0].token,"Root_Microphone","Prop_Microphone","秦谷美铃",false});
-		app.core.gui.activePage=GuiPage::Stage; app.Settle();
-		if (auto* page=FindResponsiveWindow("/##gkmotion_main_content_")) page->StateStorage.Clear();
+		const auto gun = label(3, "水枪（WaterGun）"), candy = label(4, "糖果（Candy）");
+		Check(app.ItemWithLabel(mic.c_str()) && app.ItemWithLabel(bag.c_str()) && app.ItemWithLabel(light.c_str()) &&
+			app.ItemWithLabel(gun.c_str()) && app.ItemWithLabel(candy.c_str()),
+			"the default-open Motion prop list exposes all detected item types");
+		app.contextPatch = [](GuiContext& ctx) { ctx.actorPropsEditable = false; };
+		app.Settle();
+		const auto* readOnly = app.ItemWithLabel(light.c_str());
+		Check(readOnly && (readOnly->flags & ImGuiItemFlags_Disabled),
+			"recognized Live props remain visible when the scene is read-only");
+		app.contextPatch = {};
+		app.Settle();
+		app.Click(light.c_str());
+		Check(app.core.BuildGuiContext().actorProps[2].hidden,
+			"the unified prop control submits the selected actor and prop instance");
+		app.core.gui.activePage = GuiPage::Stage; app.Settle();
+		if (auto* page = FindResponsiveWindow("/##gkmotion_main_content_")) page->StateStorage.Clear();
 		app.Settle();
 		app.Click("高级场景编辑"); app.Settle();
-		const auto propLabel=std::string("秦谷美铃 / 麦克风##")+ActorPropKey(roster[0].token,"Root_Microphone","Prop_Microphone");
-		Check(app.ItemWithLabel(propLabel.c_str())!=nullptr,
-			"advanced scene editor lists the actor microphone as a prop");
+		Check(!app.ItemWithLabel(mic.c_str()) && !app.ItemWithLabel(bag.c_str()) && !app.ItemWithLabel(light.c_str()),
+			"the Stage page has no duplicate prop controls");
 	}
 	{
 		Harness app(root);

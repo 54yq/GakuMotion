@@ -57,7 +57,7 @@
 #include "GkWindowsPaths.hpp"
 #include "GkDofRenderGate.hpp"
 
-static bool RefreshSceneActors(GakuMotion::Core& core, bool force = false);
+static bool RefreshSceneActors(GakuMotion::Core& core, bool force = false, bool refreshProps = true);
 
 namespace
 {
@@ -1661,7 +1661,7 @@ static void ResetPlacementDynamicBone(void* actor)
 		auto& core = GakuMotion::Core::Instance();
 		std::lock_guard<std::recursive_mutex> lock(core.stateMutex);
 		return core.player.state != GakuMotion::PlaybackState::Stopped ||
-			core.camera.owned || core.stageManager.injectionEnabled ||
+			core.camera.owned || core.stageManager.injectionEnabled || !LiveActorProps::saved.empty() ||
 			(core.liveTakeoverFault && core.liveOwnerToken && core.liveOwnerToken == core.liveFaultOwner);
 	}
 
@@ -1705,7 +1705,7 @@ static void ResetPlacementDynamicBone(void* actor)
 		if (!LiveActorProps::RestoreAll(core)) return false;
 		if (!LiveWindOverride::Restore(g_liveTakeoverOwner, g_liveTakeoverScene)) return false;
 		if(LiveActorClockMvp::active&&!RestoreActorClockMvp("capture_begin"))return false;
-		const bool rosterConfirmed = !core.ensemble.HasActiveFollowers() || RefreshSceneActors(core, true);
+		const bool rosterConfirmed = !core.ensemble.HasActiveFollowers() || RefreshSceneActors(core, true, false);
 		core.injectionPolicy.BeginCapture();
 		if (core.injectionPolicy.Read().captureDepth > 1) return ContinueProtectedCapture(type);
 		g_captureOriginOwner = g_sceneOwner;
@@ -2152,6 +2152,7 @@ static void ResetPlacementDynamicBone(void* actor)
 			// The old Scene may already have destroyed its actors. Never Rebind or
 			// restore cached Unity instances here; orphan stages have a fresh scan.
             ActorModelVisibility::Abandon();
+			LiveActorProps::Abandon();
 			ClearSecondaryPhysics(true);
 			core.AbandonScene();
 			HelperClearActorAnimatorCache();
@@ -3089,17 +3090,41 @@ static const char* RestoreForLiveRosterChange(GakuMotion::Core& core,
 	return nullptr;
 }
 
-static bool RefreshSceneActors(GakuMotion::Core& core, bool force)
+static bool RefreshSceneActors(GakuMotion::Core& core, bool force, bool refreshProps)
 {
 	static auto lastScan = std::chrono::steady_clock::time_point{};
+	static auto lastPropScan = std::chrono::steady_clock::time_point{};
+	static GakuMotion::injection::OwnerSnapshot lastPropOwner;
+	static bool lastPropWritable = false;
 	const auto now = std::chrono::steady_clock::now();
-	if (!core.InjectionAllowed() || !g_sceneOwner.Valid() || g_currentSceneHandle != g_sceneOwner.sceneHandle)
-		return false;
-	if (!force && !core.HasPendingTargetSelection() && now - lastScan < std::chrono::milliseconds(250)) return true;
+	const bool motionReady = core.InjectionAllowed() && g_boundSceneOwner.SameOwner(g_sceneOwner);
+	const bool liveViewing = core.liveViewingConfirmed &&
+		g_sceneOwner.role == GakuMotion::injection::OwnerRole::Live;
+	const bool propsScene = g_activeSceneVerified && g_sceneOwner.Valid() &&
+		(core.injectionPolicy.Read().sceneAllowed || liveViewing);
+	if (!propsScene) {
+		core.actorProps.clear();
+		lastPropOwner = {};
+	}
+	if (!motionReady && !propsScene) return false;
+
+	const bool propWritable = motionReady && core.CanControlActorProps() &&
+		(!liveViewing || GakuMotion::capture::LiveAutoPhotoIdle());
+	const bool propScanDue = refreshProps && propsScene && (force || !lastPropOwner.SameOwner(g_sceneOwner) ||
+		lastPropWritable != propWritable || now - lastPropScan >= std::chrono::milliseconds(500));
+	if (!force && !propScanDue && (!motionReady ||
+		(!core.HasPendingTargetSelection() && now - lastScan < std::chrono::milliseconds(250)))) return motionReady;
 	lastScan = now;
+	auto scanProps = [&](const auto& actors) {
+		LiveActorProps::Scan(core, actors, propWritable);
+		lastPropOwner = g_sceneOwner;
+		lastPropScan = now;
+		lastPropWritable = propWritable;
+	};
 	auto unavailable = [&]
 	{
-		if (core.ensemble.HasActiveFollowers())
+		core.actorProps.clear();
+		if (core.ensemble.HasActiveFollowers() || !LiveActorProps::saved.empty())
 		{
 			// A failed scan is not proof of destruction. Retain ownership without
 			// touching actor pointers; block further injection and native capture.
@@ -3120,7 +3145,19 @@ static bool RefreshSceneActors(GakuMotion::Core& core, bool force)
 		return false;
 	};
 	std::vector<GakuMotion::SceneActorObservation> observations;
-	if (!ReadSceneActors(observations, false)) return unavailable();
+	if (!ReadSceneActors(observations, false)) {
+		if (propScanDue) {
+			core.actorProps.clear();
+			lastPropOwner = g_sceneOwner;
+			lastPropScan = now;
+			lastPropWritable = propWritable;
+		}
+		return motionReady ? unavailable() : false;
+	}
+	if (!motionReady) {
+		if (propScanDue) scanProps(observations);
+		return false;
+	}
 	const auto oldEpoch = core.sceneActorRegistry.Epoch();
 	const auto& oldEntries = core.sceneActorRegistry.Entries();
 	const size_t oldCount = oldEntries.size();
@@ -3135,6 +3172,7 @@ static bool RefreshSceneActors(GakuMotion::Core& core, bool force)
 	if (liveRosterChanged)
 	{
 		if (const char* reason = RestoreForLiveRosterChange(core, observations)) {
+			core.actorProps.clear();
 			if (g_hostContext.logWarn) g_hostContext.logWarn(
 				"[GakuMotion][LiveRoster] blocked scene=%d reason=%s", core.liveOwnerScene, reason);
 			core.ensembleRestoreUnconfirmed = true;
@@ -3145,6 +3183,7 @@ static bool RefreshSceneActors(GakuMotion::Core& core, bool force)
 		}
 	}
 	else if (actorSetChanged && (!LiveActorProps::RestoreAll(core) || !ActorModelVisibility::RestoreAll(core))) {
+		core.actorProps.clear();
 		core.ensembleRestoreUnconfirmed=true;
 		core.ensembleNotice="角色道具恢复未确认，已暂停注入；请重新进入场景";
 		core.player.Pause(); g_motionSceneAllowed=false; return false;
@@ -3165,6 +3204,7 @@ static bool RefreshSceneActors(GakuMotion::Core& core, bool force)
 			return false;
 		}
 	}
+	if (propScanDue || (refreshProps && propsScene && actorSetChanged)) scanProps(observations);
 	if (liveRosterChanged && g_liveDriver.MayInject() && !core.liveTakeoverRequest)
 	{
 		core.liveTakeoverRequest = LiveRosterExitRequest;
@@ -3246,7 +3286,6 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	}
 	if (core.liveObservation.confirmed && activeActor)
 	{
-		if(!GakuMotion::visual_handoff::Requested())LiveActorProps::Tick(core,activeActor,sceneHandle);
 		if (core.liveViewingConfirmed && g_sceneOwner.Valid() && sceneHandle == g_sceneOwner.sceneHandle &&
 			core.sceneActorRegistry.Find(activeActor)) {
 			static std::array<void*, 3> sampledActors{};
@@ -3335,6 +3374,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 		ClearSecondaryPhysics(true);
 		core.stageManager.SetInjectionEnabled(false);
         ActorModelVisibility::Abandon();
+		LiveActorProps::Abandon();
 		core.AbandonScene();
 		HelperClearActorAnimatorCache();
 		g_currentSceneHandle = sceneHandle;
@@ -4800,7 +4840,7 @@ extern "C" GAKU_PLUGIN_EXPORT GakuStatus GakuPlugin_Query(
 	if (!output) return GAKU_E_INVALID_ARGUMENT;
 	if (outputSize < sizeof(GakuPluginDescriptor)) return GAKU_E_SIZE;
 	const GakuPluginDescriptor descriptor{GAKU_ABI_VERSION, sizeof(GakuPluginDescriptor),
-		"gakumotion", "GakuMotion", "0.1.1+fork.4.0",
+		"gakumotion", "GakuMotion", "0.1.1+fork.4.1",
 		MotionActivate, MotionRuntimeReady, MotionTick, MotionActorTick,
 		RenderGmlMotion, MotionShutdown};
 	*output = descriptor;

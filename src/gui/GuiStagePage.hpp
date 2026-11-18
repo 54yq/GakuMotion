@@ -223,22 +223,6 @@ namespace GakuMotion
 		if (ImGui::CollapsingHeader("高级场景编辑"))
 		{
 			ImGui::Indent(10.0f);
-			if (ctx.liveTakeoverActive && ctx.fnSetActorPropHidden)
-			{
-				ImGui::TextUnformatted("角色道具节点");
-				if (ctx.actorProps.empty()) ImGui::TextDisabled("当前未发现可控制的角色道具。");
-				for (const auto& prop : ctx.actorProps) {
-					const std::string key=ActorPropKey(prop.actorToken,prop.rootName,prop.propName);
-					const std::string label=prop.actorLabel + " / " +
-						(prop.propName=="Prop_Microphone" ? "麦克风" : prop.propName) + "##" + key;
-					bool hidden=prop.hidden;
-					if (ImGui::Checkbox(label.c_str(),&hidden))
-						ctx.fnSetActorPropHidden(ctx.self,prop.actorToken,ctx.actorRosterEpoch,key.c_str(),hidden);
-				}
-				ImGui::TextDisabled("勾选可隐藏对应道具，退出接管后恢复原状态。");
-				ImGui::Separator();
-			}
-
 			bool customControl = settings.customNodeControl;
 			if (ImGui::Checkbox("自定义场景节点 [开关]", &customControl))
 			{

@@ -366,7 +366,12 @@ namespace GakuMotion
 		// Fresh active actors in the admitted owner scene; managed reads stay on Unity thread.
 		std::vector<void*> sceneActors;
 		SceneActorRegistry sceneActorRegistry;
-		std::unordered_map<std::string, bool> actorPropHidden;
+		std::unordered_set<std::string> actorPropHidden;
+		bool CanControlActorProps() const
+		{
+			return InjectionAllowed() && injectionPolicy.Read().captureDepth == 0 &&
+				!visual_handoff::Requested() && !captureSuspended && !ensembleRestoreUnconfirmed;
+		}
 		std::unordered_map<uint64_t, bool> actorModelHidden;
 		bool (*fnApplyActorModelHidden)(uint64_t, uint64_t, bool){nullptr};
 		std::vector<GuiActorProp> actorProps;
@@ -446,7 +451,7 @@ namespace GakuMotion
 			BeforeQuartzExperiment, CostumePhysicsCapture, AuxDriveMode, WristDiagnostic, WristTwistShare, ForearmAxisAdjustment, ForearmAxisLock,
 			StageSettings, StagePreset, ToggleStageCandidate, ScanStageCandidates,
 			MountCustomStage, UnloadCustomStage, RestoreCameraSkybox,
-			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, StageLoadReplacement, SelectTarget, SetMicrophoneHidden, SetActorPropHidden, SetActorModelHidden, InitializeBeforeMotion,
+			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, StageLoadReplacement, SelectTarget, SetActorPropHidden, SetActorModelHidden, InitializeBeforeMotion,
 			AddLibraryFolder, RemoveLibraryFolder, SetEnsembleFollower, ClearEnsembleFollower, EnsemblePosition, EnsembleYaw, FollowerArm, SceneArm, AlignEnsemble, AutoAssignEnsemble, SaveEnsemblePreset, ApplyEnsemblePreset
 		};
 
@@ -758,8 +763,8 @@ namespace GakuMotion
 			}
 			for (const auto& cmd : commands)
 			{
-                if(visual_handoff::Requested() && (cmd.action==GuiAction::SetMicrophoneHidden ||
-                    cmd.action==GuiAction::SetActorModelHidden || cmd.action==GuiAction::SetActorPropHidden ||
+                if(visual_handoff::Requested() && (cmd.action==GuiAction::SetActorModelHidden ||
+                    cmd.action==GuiAction::SetActorPropHidden ||
                     cmd.action==GuiAction::StageSettings || cmd.action==GuiAction::StagePreset ||
                     cmd.action==GuiAction::ToggleStageCandidate || cmd.action==GuiAction::MountCustomStage ||
                     cmd.action==GuiAction::UnloadCustomStage || cmd.action==GuiAction::RestoreCameraSkybox)) {
@@ -930,10 +935,6 @@ namespace GakuMotion
 				case GuiAction::SelectTarget:
 					if (void* actor = sceneActorRegistry.Resolve(cmd.actorToken, cmd.actorEpoch)) SetTargetActor(actor);
 					break;
-				case GuiAction::SetMicrophoneHidden:
-					if (liveTakeoverActive && sceneActorRegistry.Resolve(cmd.actorToken, cmd.actorEpoch))
-						actorPropHidden[ActorPropKey(cmd.actorToken,"Root_Microphone","Prop_Microphone")] = cmd.flag;
-					break;
                 case GuiAction::SetActorModelHidden:
                     if (InjectionAllowed() && injectionPolicy.Read().captureDepth == 0 &&
                         sceneActorRegistry.Resolve(cmd.actorToken, cmd.actorEpoch) && fnApplyActorModelHidden &&
@@ -944,10 +945,14 @@ namespace GakuMotion
                     } else ensembleNotice = "模型显隐未完成：角色、场景或原生渲染接口不可用";
                     break;
 				case GuiAction::SetActorPropHidden:
-					if (liveTakeoverActive && sceneActorRegistry.Resolve(cmd.actorToken, cmd.actorEpoch))
-						for (const auto& prop : actorProps)
-							if (prop.actorToken == cmd.actorToken && ActorPropKey(prop.actorToken, prop.rootName, prop.propName) == cmd.key)
-								{ actorPropHidden[cmd.key]=cmd.flag; break; }
+					if (CanControlActorProps() && sceneActorRegistry.Resolve(cmd.actorToken, cmd.actorEpoch) &&
+						std::any_of(actorProps.begin(), actorProps.end(), [&](const auto& prop) {
+							return prop.controllable && prop.actorToken == cmd.actorToken && ActorPropKey(prop) == cmd.key;
+						}))
+					{
+						if (cmd.flag) actorPropHidden.insert(cmd.key);
+						else actorPropHidden.erase(cmd.key);
+					}
 					break;
 				case GuiAction::SetEnsembleFollower:
 				{
@@ -3942,9 +3947,8 @@ namespace GakuMotion
 					if (follower.player && follower.actorToken == item.token) bound = true;
 				ctx.sceneArmCalibrations.push_back({item.token, arm.share, arm.degrees, arm.locked, bound, primary});
 				const std::string name = !item.displayName.empty() ? item.displayName : item.character.empty() ? "未识别角色" : FormatIdolDisplayName(item.character.c_str());
-				const auto mic = actorPropHidden.find(ActorPropKey(item.token,"Root_Microphone","Prop_Microphone"));
 				ctx.sceneActors.push_back({item.token, name + " · " + std::to_string(ctx.sceneActors.size() + 1),
-					item.actor == player.controller.targetActor, mic != actorPropHidden.end() && mic->second,
+					item.actor == player.controller.targetActor,
                     actorModelHidden.find(item.token) != actorModelHidden.end()});
 			}
 			auto actorLabel = [&](void* actor)
@@ -3967,17 +3971,10 @@ namespace GakuMotion
                 command.actorToken=token; command.actorEpoch=epoch; command.flag=hidden;
                 static_cast<Core*>(self)->QueueGui(std::move(command));
             };
-			ctx.fnSetMicrophoneHidden = [](void* self, uint64_t token, uint64_t epoch, bool hidden)
-			{
-				GuiCommand command{GuiAction::SetMicrophoneHidden};
-				command.actorToken=token; command.actorEpoch=epoch; command.flag=hidden;
-				static_cast<Core*>(self)->QueueGui(std::move(command));
-			};
+			ctx.actorPropsEditable = CanControlActorProps();
 			ctx.actorProps = actorProps;
-			for (auto& prop : ctx.actorProps) {
-				const auto found=actorPropHidden.find(ActorPropKey(prop.actorToken,prop.rootName,prop.propName));
-				prop.hidden=found!=actorPropHidden.end() && found->second;
-			}
+			for (auto& prop : ctx.actorProps)
+				prop.hidden = actorPropHidden.contains(ActorPropKey(prop));
 			ctx.fnSetActorPropHidden = [](void* self, uint64_t token, uint64_t epoch, const char* key, bool hidden)
 			{
 				GuiCommand command{GuiAction::SetActorPropHidden}; command.actorToken=token; command.actorEpoch=epoch;

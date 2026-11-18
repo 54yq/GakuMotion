@@ -211,8 +211,8 @@ namespace GakuMotion
 		void (*fnSetSceneArm)(void*, uint64_t, uint64_t, int, float){nullptr};
 		uint64_t actorRosterEpoch{0};
 		void (*fnSelectTargetActor)(void*, uint64_t token, uint64_t epoch){nullptr};
-		void (*fnSetMicrophoneHidden)(void*, uint64_t token, uint64_t epoch, bool hidden){nullptr};
 		void (*fnSetActorModelHidden)(void*, uint64_t token, uint64_t epoch, bool hidden){nullptr};
+		bool actorPropsEditable{false};
 		std::vector<GuiActorProp> actorProps;
 		void (*fnSetActorPropHidden)(void*, uint64_t, uint64_t, const char*, bool){nullptr};
 		void (*fnClearTargetActor)(void* self){nullptr}; // Legacy developer callback: reselect bound/first actor
