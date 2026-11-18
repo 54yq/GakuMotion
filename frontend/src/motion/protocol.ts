@@ -113,6 +113,7 @@ export interface CameraState {
 }
 
 export interface StageSettings {
+  muteNativeSoundEffects: boolean
   hideBackground: boolean
   greenScreenActive: boolean
   greenScreenColor: [number, number, number, number]
@@ -687,6 +688,7 @@ export const DEFAULT_CAMERA_SETTINGS: CameraSettings = {
 }
 
 export const DEFAULT_STAGE_SETTINGS: StageSettings = {
+  muteNativeSoundEffects: false,
   hideBackground: false,
   greenScreenActive: false,
   greenScreenColor: [0, 1, 0, 1],

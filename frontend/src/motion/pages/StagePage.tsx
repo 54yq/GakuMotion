@@ -7,6 +7,7 @@ import {
   RiSparkling2Fill,
   RiStackFill,
   RiSunFill,
+  RiVolumeMuteFill,
 } from '@remixicon/react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -271,6 +272,38 @@ export function StagePage() {
               ))}
             </div>
           </div>
+        </div>
+      </PropertySection>
+
+      {/* Stage Audio Controls */}
+      <PropertySection
+        title={
+          <span className="inline-flex items-center gap-1.5">
+            <RiVolumeMuteFill className="size-3.5 text-primary" />
+            <span>舞台音频控制</span>
+          </span>
+        }
+        description="独立控制游戏原生音效（含界面音效），不影响动作曲目伴奏"
+        badge={!supported ? <PendingBadge /> : undefined}
+      >
+        <div
+          className="flex items-center justify-between gap-3 px-3.5 py-2.5"
+          title="屏蔽支持的预览场景中的游戏音效（含界面音效），不影响动作歌曲；关闭或离开支持场景后恢复。"
+        >
+          <div className="space-y-0.5">
+            <Label htmlFor="stage-mute-se" className="cursor-pointer text-[13px] font-medium">
+              屏蔽游戏音效
+            </Label>
+            <span className="block text-xs text-muted-foreground">
+              仅静音游戏 Se 音效；关闭、离开支持场景或进入受保护拍照流程后自动恢复
+            </span>
+          </div>
+          <Checkbox
+            id="stage-mute-se"
+            checked={settings.muteNativeSoundEffects}
+            disabled={disabled}
+            onCheckedChange={(checked) => motionStore.patchStage({ muteNativeSoundEffects: checked === true })}
+          />
         </div>
       </PropertySection>
 

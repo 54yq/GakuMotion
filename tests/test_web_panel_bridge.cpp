@@ -411,6 +411,17 @@ static void TestCameraStage()
 	Check(shown && !shown->stageSettings.greenScreenActive && !shown->stageSettings.overrideCameraClear,
 		"show background clears green screen");
 	Check(f.FindCommand(Core::GuiAction::RestoreCameraSkybox) != nullptr, "skybox restore queued");
+
+	f.ClearCommands();
+	Check(f.Ok(f.Req("stage.set", "{\"settings\":{\"muteNativeSoundEffects\":true}}")),
+		"muteNativeSoundEffects accepted");
+	const auto* seMuted = f.FindCommand(Core::GuiAction::StageSettings);
+	Check(seMuted && seMuted->stageSettings.muteNativeSoundEffects, "muteNativeSoundEffects queued");
+	f.core.stageManager.settings.muteNativeSoundEffects = true;
+	const auto seSnapshot = f.ReqJson("state.get");
+	const auto* stageSettingsJson = seSnapshot.Find("result")->Find("stage")->Find("settings");
+	Check(stageSettingsJson && stageSettingsJson->Find("muteNativeSoundEffects")->boolValue,
+		"muteNativeSoundEffects exposed in state snapshot");
 }
 
 static void TestFacialPositionSettings()

@@ -2291,7 +2291,8 @@ namespace GakuMotion::webpanel
 				target = field->stringValue;
 				return true;
 			};
-			return boolField("hideBackground", settings.hideBackground) &&
+			return boolField("muteNativeSoundEffects", settings.muteNativeSoundEffects) &&
+				boolField("hideBackground", settings.hideBackground) &&
 				boolField("greenScreenActive", settings.greenScreenActive) &&
 				floatField("screenDistance", settings.screenDistance) &&
 				floatField("screenScale", settings.screenScale) &&
@@ -2481,7 +2482,8 @@ namespace GakuMotion::webpanel
 				color += JNum(settings.greenScreenColor[i]);
 			}
 			color += "]";
-			return "{\"hideBackground\":" + JBool(settings.hideBackground) +
+			return "{\"muteNativeSoundEffects\":" + JBool(settings.muteNativeSoundEffects) +
+				",\"hideBackground\":" + JBool(settings.hideBackground) +
 				",\"greenScreenActive\":" + JBool(settings.greenScreenActive) +
 				",\"greenScreenColor\":" + color +
 				",\"screenDistance\":" + JNum(settings.screenDistance) +

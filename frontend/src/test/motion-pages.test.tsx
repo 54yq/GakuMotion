@@ -65,6 +65,13 @@ describe('StagePage', () => {
     expect(settings.greenScreenActive).toBe(true)
     expect(settings.overrideCameraClear).toBe(true)
   })
+
+  it('toggles native sound-effect mute independently via stage.set', async () => {
+    const user = userEvent.setup()
+    render(<StagePage />)
+    await user.click(screen.getByRole('checkbox', { name: '屏蔽游戏音效' }))
+    await waitFor(() => expect(motionStore.getState().stage.settings.muteNativeSoundEffects).toBe(true))
+  })
 })
 
 describe('SettingsPage', () => {
