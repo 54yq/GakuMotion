@@ -2381,6 +2381,7 @@ bool InitializeMotion()
 
 	// Bind audio helpers to player
 	auto& player = core.player;
+	player.fnObserveTimeline = LiveSleeveProbe::BeforeTimeline;
 	player.fnPlayAudio = HelperAudioPlay;
 	player.fnPauseAudio = HelperAudioPause;
 	player.fnStopAudio = HelperAudioStop;
@@ -3742,7 +3743,11 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 			afterBody->controller.footPoseWriteStamp.actor == activeActor &&
 			afterBody->controller.footPoseWriteStamp.serial != poseSerialBefore;
 		LiveSleeveProbe::ObserveOpening(core, activeActor, true, sleeveBodyWritten);
-		if (sleeveBodyWritten) LiveSleeveProbe::BindingPose(core, activeActor, false);
+		if (sleeveBodyWritten)
+		{
+			LiveSleeveProbe::BindingPose(core, activeActor, false);
+			LiveSleeveProbe::TimelinePose(core, activeActor, false, unityFrame >= 0 ? unityFrame : s_fallbackFrame);
+		}
 		if (LiveSleeveProbe::event) LiveSleeveProbe::Actor(core, activeActor, true, sleeveBodyWritten);
 	}
 	EyeGazeProbe::After(activeActor);
@@ -3971,7 +3976,11 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 		snapshot << json;
 		if (g_hostContext.logInfo) g_hostContext.logInfo("[GakuMotion][BeforeQuartz] trace seq=%lld result=%d", seq, result);
 	}
-	if (sleeveBodyWritten) LiveSleeveProbe::BindingPose(core, activeActor, true);
+	if (sleeveBodyWritten)
+	{
+		LiveSleeveProbe::BindingPose(core, activeActor, true);
+		LiveSleeveProbe::TimelinePose(core, activeActor, true, unityFrame >= 0 ? unityFrame : s_fallbackFrame);
+	}
 	// Native foot AO may have been derived before the post-actor callback.
 	// Consume the completed body + secondary pose in the same tick.
 	ActorGroundShadow::RefreshAfterPose(activeActor, poseSerialBefore);

@@ -464,6 +464,189 @@ namespace LiveSleeveProbe
         }
     }
 
+    struct TimelineRole
+    {
+        uint64_t token{}, generation{};
+        size_t slot{};
+        const GakuMotion::MotionPlayer* player{};
+        int actual{-1}, physicsFrame{-1};
+        const GbbStatus* status{};
+        const GakuMotion::FallbackPhysics* fallback{};
+    };
+    struct TimelineActor
+    {
+        uint64_t token{}, generation{};
+        int bodyFrame{-1}, nativeFrame{-1};
+        bool fallbackSeen{}, pendingBodySeen{}, nativeSeen{}, settledSeen{};
+    };
+    struct TimelineCapture
+    {
+        uint64_t id{}, session{}, epoch{};
+        uintptr_t owner{};
+        const char* edit{};
+        float from{}, target{};
+        std::chrono::steady_clock::time_point expires;
+        std::array<TimelineActor, 4> roles{};
+    };
+    inline TimelineCapture timeline;
+    inline bool scrubBackwardCaptured{};
+
+    inline TimelineRole ReadTimelineRole(const GakuMotion::Core& core, void* actor)
+    {
+        const auto* entry = core.sceneActorRegistry.Find(actor);
+        if (!entry) return {};
+        if (core.IsTargetActor(actor))
+        {
+            TimelineRole role{entry->token, 0, 1, &core.player};
+            if (g_physicsActor == actor)
+            {
+                role.actual = g_physicsActual;
+                role.physicsFrame = g_physicsFrame;
+                role.status = &g_burstBridge.status;
+                role.fallback = &g_fallbackPhysics;
+            }
+            return role;
+        }
+        const auto& followers = core.ensemble.Followers();
+        for (size_t i = 0; i < followers.size() && i + 1 < timeline.roles.size(); ++i)
+        {
+            const auto& follower = followers[i];
+            if (!follower.player || follower.actorToken != entry->token ||
+                follower.player->controller.targetActor != actor) continue;
+            TimelineRole role{entry->token, follower.bindingGeneration, i + 2, follower.player.get()};
+            if (i < g_followerPhysics.size() && g_followerPhysics[i].actor == actor &&
+                g_followerPhysics[i].bindingGeneration == follower.bindingGeneration)
+            {
+                role.actual = g_followerPhysics[i].actual;
+                role.physicsFrame = g_followerPhysics[i].frame;
+                role.status = &g_followerBridge.State(i).status;
+                role.fallback = &g_followerPhysics[i].fallback;
+            }
+            return role;
+        }
+        return {};
+    }
+
+    inline void RecordTimeline(GakuMotion::Core& core, void* actor, const TimelineRole& role, const char* phase)
+    {
+        if (!Enabled(core) || !role.player) return;
+        if (openingOwner != core.liveOwnerToken || openingScene != core.liveOwnerScene)
+        {
+            openingOwner = core.liveOwnerToken;
+            openingScene = core.liveOwnerScene;
+            opening.clear();
+        }
+        if (opening.size() >= 16 && opening.find(role.token) == opening.end()) return;
+        auto& cache = opening[role.token].mesh;
+        const auto* entry = core.sceneActorRegistry.Find(actor);
+        const auto seq = ++nextSample;
+        SYSTEMTIME wall{};
+        GetLocalTime(&wall);
+        const auto* status = role.status;
+        const bool native = role.actual == 2 && status && status->actor == actor && status->injected && status->writes;
+        const auto solved = role.actual == 1 && role.fallback ? role.fallback->GetStats().solvedBones : 0;
+        g_hostContext.logInfo(
+            "[GakuMotion][LiveSleeveTimeline] event=%llu sample=%llu phase=%s edit=%s frame=%d slot=%zu actor=%p token=%llu generation=%llu character=%s scene=%d session=%llu state=%d from=%.4f target=%.4f motion=%.4f source=%.4f live=%.4f seeks=%d scrubbing=%d before_quartz_requested=%d actual=%d physics_frame=%d native_frame=%d native_seq=%llu fallback_solved=%zu pose_serial=%llu time=%04u-%02u-%02uT%02u:%02u:%02u.%03u",
+            static_cast<unsigned long long>(timeline.id), static_cast<unsigned long long>(seq), phase, timeline.edit,
+            g_faceUnityFrame ? g_faceUnityFrame() : frame, role.slot, actor, static_cast<unsigned long long>(role.token),
+            static_cast<unsigned long long>(role.generation), entry ? entry->character.c_str() : "unknown",
+            core.liveOwnerScene, static_cast<unsigned long long>(timeline.session), int(core.player.state),
+            timeline.from, timeline.target, core.player.currentTime, role.player->MotionSourceTime(),
+            core.liveObservation.time, core.player.SeekCount(), int(core.player.scrubbing),
+            int(core.config.beforeQuartzExperiment), role.actual, role.physicsFrame, native ? status->source_frame : -1,
+            static_cast<unsigned long long>(native ? status->sequence : 0), static_cast<size_t>(solved),
+            static_cast<unsigned long long>(role.player->controller.footPoseWriteStamp.serial),
+            wall.wYear, wall.wMonth, wall.wDay, wall.wHour, wall.wMinute, wall.wSecond, wall.wMilliseconds);
+        RecordPose(actor, seq, cache, true);
+    }
+
+    inline void FinishTimeline(const char* reason)
+    {
+        for (size_t i = 0; i < timeline.roles.size(); ++i)
+        {
+            const auto& actor = timeline.roles[i];
+            if (!actor.token || actor.settledSeen || !g_hostContext.logInfo) continue;
+            g_hostContext.logInfo("[GakuMotion][LiveSleeveTimelineEnd] event=%llu slot=%zu token=%llu reason=%s body=%d fallback=%d native=%d",
+                static_cast<unsigned long long>(timeline.id), i + 1, static_cast<unsigned long long>(actor.token),
+                reason, int(actor.bodyFrame >= 0), int(actor.fallbackSeen), int(actor.nativeSeen));
+        }
+        timeline = {};
+    }
+
+    inline void BeforeTimeline(GakuMotion::MotionPlayer::TimelineEdit edit, float target)
+    {
+        using Edit = GakuMotion::MotionPlayer::TimelineEdit;
+        auto& core = GakuMotion::Core::Instance();
+        if (!Enabled(core) || !core.liveTakeoverActive) return;
+        const bool backwards = target + 0.0005f < core.player.currentTime;
+        if (edit == Edit::ScrubUpdate && (scrubBackwardCaptured || !backwards)) return;
+        scrubBackwardCaptured = (edit == Edit::ScrubBegin || edit == Edit::ScrubUpdate) && backwards;
+        if (timeline.id) FinishTimeline("superseded_by_timeline_edit");
+        const char* names[]{"seek", "scrub_begin", "scrub_backward", "scrub_commit"};
+        timeline.id = ++nextEvent;
+        timeline.owner = core.liveOwnerToken;
+        timeline.session = core.injectionSession;
+        timeline.epoch = core.sceneActorRegistry.Epoch();
+        timeline.edit = names[static_cast<unsigned>(edit)];
+        timeline.from = core.player.currentTime;
+        timeline.target = target;
+        timeline.expires = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        for (const auto& entry : core.sceneActorRegistry.Entries())
+        {
+            const auto role = ReadTimelineRole(core, entry.actor);
+            if (!role.slot) continue;
+            timeline.roles[role.slot - 1] = {role.token, role.generation};
+            RecordTimeline(core, entry.actor, role, "before_timeline_edit");
+        }
+    }
+
+    inline void TimelinePose(GakuMotion::Core& core, void* actor, bool afterSecondary, int currentFrame)
+    {
+        if (!timeline.id || timeline.owner != core.liveOwnerToken || timeline.session != core.injectionSession ||
+            timeline.epoch != core.sceneActorRegistry.Epoch() || !Enabled(core) || !core.liveTakeoverActive) return;
+        const auto role = ReadTimelineRole(core, actor);
+        if (!role.slot) return;
+        auto& observed = timeline.roles[role.slot - 1];
+        if (observed.token != role.token || observed.generation != role.generation || observed.settledSeen) return;
+        if (!afterSecondary)
+        {
+            if (observed.bodyFrame < 0)
+            {
+                observed.bodyFrame = currentFrame;
+                RecordTimeline(core, actor, role, "after_body");
+            }
+            else if (observed.fallbackSeen && !observed.pendingBodySeen && observed.bodyFrame != currentFrame)
+            {
+                observed.pendingBodySeen = true;
+                RecordTimeline(core, actor, role, "after_body_following_fallback");
+            }
+            return;
+        }
+        if (observed.bodyFrame < 0 || role.physicsFrame != currentFrame) return;
+        if (role.actual == 1 && !observed.fallbackSeen)
+        {
+            observed.fallbackSeen = true;
+            RecordTimeline(core, actor, role, "after_fallback");
+        }
+        const auto* status = role.status;
+        if (role.actual != 2 || !status || status->actor != actor || !status->injected || !status->writes ||
+            status->source_frame < observed.bodyFrame) return;
+        if (!observed.nativeSeen)
+        {
+            observed.nativeSeen = true;
+            observed.nativeFrame = currentFrame;
+            RecordTimeline(core, actor, role, "native_confirmed");
+        }
+        else if (observed.nativeFrame != currentFrame)
+        {
+            observed.settledSeen = true;
+            RecordTimeline(core, actor, role, "native_next_frame");
+            if (std::all_of(timeline.roles.begin(), timeline.roles.end(), [](const auto& item) {
+                return !item.token || item.settledSeen;
+            })) FinishTimeline("complete");
+        }
+    }
+
     inline void Record(GakuMotion::Core& core, size_t index, const char* phase, bool mesh)
     {
         const auto& follower = core.ensemble.Followers()[index];
@@ -507,6 +690,10 @@ namespace LiveSleeveProbe
 
     inline void Frame(GakuMotion::Core& core, int current)
     {
+        if (timeline.id && (timeline.owner != core.liveOwnerToken || timeline.session != core.injectionSession ||
+                            timeline.epoch != core.sceneActorRegistry.Epoch() || !core.liveTakeoverActive ||
+                            core.config.secondaryPhysicsBackend != 2)) FinishTimeline("context_changed");
+        if (timeline.id && std::chrono::steady_clock::now() >= timeline.expires) FinishTimeline("capture_window_elapsed");
         if (session != core.injectionSession || epoch != core.sceneActorRegistry.Epoch())
         {
             session = core.injectionSession;

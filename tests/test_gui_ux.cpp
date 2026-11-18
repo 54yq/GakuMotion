@@ -76,6 +76,42 @@ namespace
 		core.SetTargetActor(second);
 		Check(bindingObservations.empty(), "reselecting the same Live target does not start the binding probe");
 	}
+	struct TimelineObservation { MotionPlayer::TimelineEdit edit; float before, target; };
+	std::vector<TimelineObservation> timelineObservations;
+	MotionPlayer* observedTimeline{};
+	void ObserveTimeline(MotionPlayer::TimelineEdit edit, float target)
+	{
+		timelineObservations.push_back({edit, observedTimeline->currentTime, target});
+	}
+	void TestLiveTimelineObservation()
+	{
+		using Edit = MotionPlayer::TimelineEdit;
+		MotionPlayer player;
+		observedTimeline = &player;
+		timelineObservations.clear();
+		player.fnObserveTimeline = ObserveTimeline;
+		player.clip.total_frames = 300;
+		player.clip.fps = 30;
+		player.clip.duration_seconds = 10;
+		player.currentTime = 8;
+		player.state = PlaybackState::Paused;
+		player.SeekRelative(-5);
+		player.BeginScrub(3);
+		player.UpdateScrub(1);
+		player.EndScrub(-1);
+		Check(timelineObservations.size() == 4 && timelineObservations[0].edit == Edit::Seek &&
+			timelineObservations[0].before == 8 && timelineObservations[0].target == 3 &&
+			timelineObservations[1].edit == Edit::ScrubBegin &&
+			timelineObservations[2].edit == Edit::ScrubUpdate &&
+			timelineObservations[2].before == 3 && timelineObservations[2].target == 1 &&
+			timelineObservations[3].edit == Edit::ScrubEnd &&
+			timelineObservations[3].before == 1 && timelineObservations[3].target == 0 &&
+			player.currentTime == 0 && player.SeekCount() == 2,
+			"Live timeline observer sees the previous time and clamped destination before rewind and scrub");
+		player.UpdateScrub(8);
+		Check(timelineObservations.size() == 4, "ignored drag updates do not trigger the timeline observer");
+		observedTimeline = nullptr;
+	}
 	void FormationPosition(void* actor, float* out)
 	{ const auto p = formationPositions[actor]; out[0] = p.x; out[1] = p.y; out[2] = p.z; }
 	void FormationRotation(void* actor, float* out)
@@ -1016,6 +1052,7 @@ int main(int argc, char** argv)
 	TestEnsembleControls(root);
 	TestFormationAlignment(root);
 	TestLiveBindingObservation();
+	TestLiveTimelineObservation();
 	{
 		const ImGuiConfigFlags originalConfigFlags = io.ConfigFlags;
 		io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // Escape closes native combo popups.

@@ -430,12 +430,17 @@ namespace GakuMotion
 			SeekFrame(target);
 		}
 
+		enum class TimelineEdit { Seek, ScrubBegin, ScrubUpdate, ScrubEnd };
+		void (*fnObserveTimeline)(TimelineEdit, float){nullptr};
+
 		// Shared seek transport, including paused MCI positioning and settle reset.
 		// Only explicit frame inspection may use an upper bound past a malformed
 		// legacy header's duration; normal Seek retains its original range.
-		void SeekPosition(float timeSeconds, float upperBound)
+		void SeekPosition(float timeSeconds, float upperBound, TimelineEdit edit = TimelineEdit::Seek)
 		{
 			if (!std::isfinite(timeSeconds) || !std::isfinite(upperBound) || upperBound < 0.0f) return;
+			const float clamped = std::max(0.0f, std::min(upperBound, timeSeconds));
+			if (clip.total_frames && fnObserveTimeline) fnObserveTimeline(edit, clamped);
 			navigationFrame = -1;
 			scrubbing = false;
 			if (clip.total_frames == 0)
@@ -443,7 +448,6 @@ namespace GakuMotion
 				currentTime = 0.0f;
 				return;
 			}
-			const float clamped = std::max(0.0f, std::min(upperBound, timeSeconds));
 			currentTime = clamped;
 			audioSeekOffset = 0.0f;
 			audioSyncSettleFrames = (fnGetAudioTime != nullptr) ? kAudioSettleFrames : 0;
@@ -517,10 +521,11 @@ namespace GakuMotion
 				Probe("[GakuMotion][ProbeS1][PLY] BEGIN ignored: clip empty (total_frames=0)");
 				return;
 			}
+			const float clamped = std::max(0.0f, std::min(TimelineDuration(), timeSeconds));
+			if (fnObserveTimeline) fnObserveTimeline(TimelineEdit::ScrubBegin, clamped);
 			scrubbing = true;
 			if (state == PlaybackState::Stopped) state = PlaybackState::Preview;
 			if (!muted && state == PlaybackState::Playing && fnPauseAudio) fnPauseAudio();
-			const float clamped = std::max(0.0f, std::min(TimelineDuration(), timeSeconds));
 			currentTime = clamped;
 			audioSeekOffset = 0.0f;
 			audioSyncSettleFrames = 0;
@@ -539,6 +544,7 @@ namespace GakuMotion
 				return;
 			}
 			const float clamped = std::max(0.0f, std::min(TimelineDuration(), timeSeconds));
+			if (fnObserveTimeline) fnObserveTimeline(TimelineEdit::ScrubUpdate, clamped);
 			currentTime = clamped;
 		}
 
@@ -546,7 +552,7 @@ namespace GakuMotion
 		{
 			const bool wasScrubbing = scrubbing;
 			scrubbing = false;
-			Seek(timeSeconds);
+			SeekPosition(timeSeconds, TimelineDuration(), TimelineEdit::ScrubEnd);
 			Probe("[GakuMotion][ProbeS1][PLY] END req=%.3f wasScrubbing=%d -> now=%.3f seeks=%d "
 			      "audioSeekOffset=%.3f settle=%d hasSeekAudio=%d state=%d",
 			      timeSeconds, wasScrubbing ? 1 : 0, currentTime, seekCount,
