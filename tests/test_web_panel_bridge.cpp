@@ -862,6 +862,21 @@ static void TestLibraryImportProbe()
 	Check(editCommand && !editCommand->import.disableMorph && editCommand->import.morphVmd.empty(),
 		"keep facial track does not clear or replace");
 
+	f.ClearCommands();
+	const std::string badFpsReq = "{\"request\":{\"title\":\"Alpha\",\"editKey\":\"alpha\","
+		"\"motionFile\":\"\",\"facialFile\":\"\",\"cameraFile\":\"\",\"audioFile\":\"\","
+		"\"disableMorph\":false,\"clearCamera\":false,\"clearAudio\":false,\"fps\":30,\"sourceFps\":42}}";
+	Check(f.ErrorCode(f.Req("library.import", badFpsReq)) == "invalid_params",
+		"unsupported sourceFps rejected");
+	const std::string fpsReq = "{\"request\":{\"title\":\"Alpha\",\"editKey\":\"alpha\","
+		"\"motionFile\":\"\",\"facialFile\":\"\",\"cameraFile\":\"\",\"audioFile\":\"\","
+		"\"disableMorph\":false,\"clearCamera\":false,\"clearAudio\":false,\"fps\":30,\"sourceFps\":60}}";
+	Check(f.Ok(f.Req("library.import", fpsReq)), "explicit sourceFps and output fps accepted");
+	const auto* fpsCommand = f.FindCommand(Core::GuiAction::Import);
+	Check(fpsCommand && fpsCommand->import.sourceFps == 60.0f && fpsCommand->import.fps == 30.0f &&
+		fpsCommand->import.rebakeOutput,
+		"sourceFps, output fps and edit rebakeOutput forwarded");
+
 	std::error_code ec;
 	fs::remove_all(root, ec);
 }

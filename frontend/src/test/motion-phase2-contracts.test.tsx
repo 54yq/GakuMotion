@@ -439,7 +439,21 @@ describe('Phase 2 C++ wire contract & crash resilience', () => {
     const importDialog = await screen.findByTestId('import-dialog')
     expect(importDialog).toBeInTheDocument()
 
+    await user.click(within(importDialog).getByRole('combobox', { name: '源动作帧率' }))
+    await user.click(await screen.findByRole('option', { name: '60 fps' }))
+    await user.click(within(importDialog).getByRole('combobox', { name: '输出采样帧率' }))
+    await user.click(await screen.findByRole('option', { name: '30 fps' }))
+
     await user.click(within(importDialog).getByRole('button', { name: '保存修改' }))
+    const importCall = bridge.calls.find((call) => call.method === 'library.import')
+    expect(importCall?.params).toMatchObject({
+      request: {
+        editKey: 'starlight-step',
+        sourceFps: 60,
+        fps: 30,
+        rebakeOutput: true,
+      },
+    })
     const progressModal = await screen.findByTestId('import-progress-modal')
     expect(progressModal).toBeInTheDocument()
 

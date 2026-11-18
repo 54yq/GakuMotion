@@ -1228,6 +1228,23 @@ namespace GakuMotion::webpanel
 				resolvedFps = fpsIndex == 1 ? 30.0f : fpsIndex == 2 ? 60.0f : 0.0f;
 			}
 
+			float resolvedSourceFps = 0.0f;
+			if (const jsonlite::Value* sourceFpsVal = draft->Find("sourceFps"))
+			{
+				if (!sourceFpsVal->IsNumber() || !std::isfinite(sourceFpsVal->numberValue) || sourceFpsVal->numberValue < 0.0)
+					return CmdResult::Err("invalid_params", "sourceFps must be a non-negative finite number");
+				resolvedSourceFps = static_cast<float>(sourceFpsVal->numberValue);
+			}
+			else if (draft->Find("sourceFpsIndex"))
+			{
+				int64_t sourceFpsIndex = 0;
+				if (!IntParam(*draft, "sourceFpsIndex", sourceFpsIndex) || sourceFpsIndex < 0 || sourceFpsIndex > 2)
+					return CmdResult::Err("invalid_params", "sourceFpsIndex must be 0 (auto), 1 (30) or 2 (60)");
+				resolvedSourceFps = sourceFpsIndex == 1 ? 30.0f : sourceFpsIndex == 2 ? 60.0f : 0.0f;
+			}
+			if (resolvedSourceFps != 0.0f && resolvedSourceFps != 25.0f && resolvedSourceFps != 30.0f && resolvedSourceFps != 60.0f)
+				return CmdResult::Err("invalid_params", "源动作帧率只支持自动、25、30 或 60 fps");
+
 			PerformanceTiming timing;
 			std::string error;
 			const jsonlite::Value* timingValue = draft->Find("timing");
@@ -1237,6 +1254,9 @@ namespace GakuMotion::webpanel
 				return CmdResult::Err("invalid_params", "轨道速度必须 >= 0，偏移必须为有限数值");
 
 			const bool edit = !editKey.empty();
+			bool rebakeOutput = edit && resolvedFps > 0.0f;
+			if (draft->Find("rebakeOutput") && !BoolParam(*draft, "rebakeOutput", rebakeOutput))
+				return CmdResult::Err("invalid_params", "rebakeOutput must be a boolean");
 			const std::string motion = ImportSlotString(*draft, "motionFile", "motionMode", "motionPath");
 			const std::string facial = ImportSlotString(*draft, "facialFile", "facialMode", "facialPath");
 			const std::string camera = ImportSlotString(*draft, "cameraFile", "cameraMode", "cameraPath");
@@ -1253,6 +1273,8 @@ namespace GakuMotion::webpanel
 				request.subtitle = subtitle;
 			}
 			request.fps = resolvedFps;
+			request.sourceFps = resolvedSourceFps;
+			request.rebakeOutput = rebakeOutput;
 			request.timing = timing;
 			request.editKey = editKey;
 

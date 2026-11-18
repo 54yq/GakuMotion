@@ -90,6 +90,8 @@ export interface ImportFormState {
   editInfo: EditEntryInfo | null
   title: string
   subtitle: string
+  sourceFps: number
+  fps: number
   timing: PerformanceTiming
   slots: Record<ImportSlotKey, ImportSlotState>
   unsupportedAudio: number
@@ -130,6 +132,8 @@ function emptyImportForm(): ImportFormState {
     editInfo: null,
     title: '',
     subtitle: '',
+    sourceFps: 0,
+    fps: 0,
     timing: defaultPerformanceTiming(),
     slots: {
       motion: { candidates: [], selection: 0 },
@@ -1638,6 +1642,16 @@ export class MotionStore {
     this.set({ importForm: { ...this.state.importForm, subtitle } })
   }
 
+  setImportSourceFps = (sourceFps: number): void => {
+    const normalized = sourceFps === 25 || sourceFps === 30 || sourceFps === 60 ? sourceFps : 0
+    this.set({ importForm: { ...this.state.importForm, sourceFps: normalized } })
+  }
+
+  setImportOutputFps = (fps: number): void => {
+    const normalized = fps === 30 || fps === 60 ? fps : 0
+    this.set({ importForm: { ...this.state.importForm, fps: normalized } })
+  }
+
   setImportTiming = (slot: ImportSlotKey, patch: Partial<TrackTiming>): void => {
     const timing = { ...this.state.importForm.timing, [slot]: { ...this.state.importForm.timing[slot], ...patch } }
     const track = timing[slot]
@@ -1691,6 +1705,9 @@ export class MotionStore {
     const request = defaultImportRequest()
     request.title = form.title.trim() !== '' ? form.title : '未命名演出'
     request.subtitle = form.subtitle.trim()
+    request.fps = form.fps
+    request.sourceFps = form.sourceFps
+    request.rebakeOutput = form.mode === 'edit' && form.fps > 0
     request.timing = form.timing
     const isDisk = (path: string) => !isSlotPlaceholder(path)
     if (form.mode === 'edit') {

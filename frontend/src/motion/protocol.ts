@@ -277,6 +277,8 @@ export interface ImportRequest {
   clearCamera: boolean
   clearAudio: boolean
   fps: number
+  sourceFps?: number
+  rebakeOutput?: boolean
   timing: PerformanceTiming
 }
 
@@ -771,6 +773,8 @@ export function defaultImportRequest(): ImportRequest {
     clearCamera: false,
     clearAudio: false,
     fps: 0,
+    sourceFps: 0,
+    rebakeOutput: false,
     timing: defaultPerformanceTiming(),
   }
 }

@@ -210,6 +210,45 @@ export function ImportDialog() {
                 {unsupportedAudio} 个非 WAV 音频未自动填入，可用“追加文件”后手动选择。
               </p>
             )}
+
+            <div className="grid gap-3 rounded-lg border bg-card/60 p-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="import-source-fps" className="text-xs">源动作帧率</Label>
+                <Select
+                  value={String(form.sourceFps)}
+                  onValueChange={(value) => motionStore.setImportSourceFps(Number(value))}
+                >
+                  <SelectTrigger id="import-source-fps" className="h-8 text-xs" aria-label="源动作帧率">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="0">自动检测</SelectItem>
+                    <SelectItem value="25">25 fps</SelectItem>
+                    <SelectItem value="30">30 fps</SelectItem>
+                    <SelectItem value="60">60 fps</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="import-output-fps" className="text-xs">输出采样帧率</Label>
+                <Select
+                  value={String(form.fps)}
+                  onValueChange={(value) => motionStore.setImportOutputFps(Number(value))}
+                >
+                  <SelectTrigger id="import-output-fps" className="h-8 text-xs" aria-label="输出采样帧率">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="0">自动（保持原有）</SelectItem>
+                    <SelectItem value="30">30 fps</SelectItem>
+                    <SelectItem value="60">60 fps</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <p className="sm:col-span-2 text-[11px] text-muted-foreground">
+                自动检测依据身体骨骼与音频；修改已有曲目的帧率会重新烘焙动作。
+              </p>
+            </div>
           </div>
 
           {form.activeTrackWarning && <p className="text-sm text-destructive">{form.activeTrackWarning}</p>}
