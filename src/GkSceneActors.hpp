@@ -28,6 +28,13 @@ namespace GakuMotion
 		return label;
 	}
 	struct SceneActorEntry : SceneActorObservation { uint64_t token{0}; };
+	inline bool ObservedSceneActor(const std::vector<SceneActorObservation>& observations,
+		const SceneActorObservation& actor)
+	{
+		return std::any_of(observations.begin(), observations.end(), [&](const auto& current) {
+			return current.actor == actor.actor && current.instanceId == actor.instanceId;
+		});
+	}
 	struct GuiSceneActor
 	{
 		uint64_t token{0};

@@ -14,7 +14,7 @@ namespace GakuMotion
         int liveTelemetryPhase{-1};double liveTelemetryTime{};
         SwingCheckpointReport checkpointReport;
         uint64_t checkpointReportOwner{};
-        bool observed{}, live{}, fault{};
+        bool observed{}, live{}, fault{}, beforeQuartzRequested{};
         uintptr_t actor{}; uint64_t session{};
         bool graphSampled{}, graphPlayerFound{}, graphGetterFound{};
         bool photoGraphSampled{}, photoGraphPlayerFound{}, photoGraphGetterFound{};

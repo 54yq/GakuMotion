@@ -9,6 +9,13 @@ namespace LiveActorProps
     using TargetFn=void*(*)(StageLoader::Handle);
     inline TargetFn Target() { return reinterpret_cast<TargetFn>(GetProcAddress(g_gameAssembly,"il2cpp_gchandle_get_target")); }
     inline void Release(Saved& s) { if (StageLoader::freeHandle) { if(s.actor)StageLoader::freeHandle(s.actor); if(s.object)StageLoader::freeHandle(s.object); } s.actor={}; s.object={}; }
+    inline void AbandonActor(uint64_t token) {
+        for (auto it = saved.begin(); it != saved.end();) {
+            if (it->second.token != token) { ++it; continue; }
+            Release(it->second);
+            it = saved.erase(it);
+        }
+    }
     inline bool ReadActive(void* go, bool& active) {
         if(!go || !StageLoader::activeSelf || !g_faceRuntime.invoke || !g_safeBones.unbox) return false;
         void* ex=nullptr; void* boxed=g_faceRuntime.invoke(StageLoader::activeSelf,go,nullptr,&ex);

@@ -14,6 +14,9 @@ namespace EnsembleFixture
 	inline bool rejectPhysicsRestore = false;
 	inline unsigned physicsRestores = 0;
 	inline bool RestorePhysics(size_t, MotionPlayer&) { ++physicsRestores; return !rejectPhysicsRestore; }
+	inline bool rejectDetachedRelease = false;
+	inline size_t detachedSlot = 0;
+	inline bool ReleaseDetached(size_t slot) { detachedSlot = slot; return !rejectDetachedRelease; }
 	inline void* Bone(void* actor, int hid)
 	{ return reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(actor) + 0x100 + static_cast<unsigned>(hid)); }
 	inline void* Transform(void* actor)
@@ -394,4 +397,34 @@ static void TestEnsembleIntegration(const std::string& repoRoot)
     many.ProcessPendingGuiCommands();
     Check(many.ensemble.Followers()[4].player->controller.initialPositionOffset.x==3, "later follower has independent placement");
 
+	const auto oldB = many.sceneActorRegistry.Find(b)->token;
+	const auto oldEpoch = many.sceneActorRegistry.Epoch();
+	// B's address is reused with a new instance ID. C is inactive but still loaded.
+	const std::vector<SceneActorObservation> visible{{a,1}, {b,20}, {d,4}};
+	const std::vector<SceneActorObservation> loaded{{a,1}, {b,20}, {c,3}, {d,4}};
+	many.ensemble.fnBeforeRestore = EnsembleFixture::RestorePhysics;
+	EnsembleFixture::rejectDetachedRelease = true;
+	EnsembleFixture::detachedSlot = many.ensemble.Followers().size();
+	EnsembleFixture::writtenTransforms.clear();
+	Check(!many.ensemble.ClearForLiveRosterChange(many.sceneActorRegistry, loaded, EnsembleFixture::ReleaseDetached) &&
+	      EnsembleFixture::detachedSlot == 0 && many.ensemble.Followers()[0].active &&
+	      EnsembleFixture::writtenTransforms.empty(), "unconfirmed retirement retains the old binding without writing to it");
+	EnsembleFixture::rejectDetachedRelease = false;
+	EnsembleFixture::physicsRestores = 0;
+	Check(many.ensemble.ClearForLiveRosterChange(many.sceneActorRegistry, loaded, EnsembleFixture::ReleaseDetached) &&
+	      !many.ensemble.HasFollowers() && EnsembleFixture::physicsRestores == 2,
+	      "the inactive actor and the remaining follower restore before the replacement roster is published");
+	Check(std::none_of(EnsembleFixture::writtenTransforms.begin(), EnsembleFixture::writtenTransforms.end(),
+	      [&](void* t) { return (reinterpret_cast<uintptr_t>(t) & ~uintptr_t{0xfffff}) == reinterpret_cast<uintptr_t>(b); }),
+	      "only the old publication is released at the replaced address");
+	many.PublishSceneActors(visible);
+	Check(!many.ensembleRestoreUnconfirmed && !many.sceneActorRegistry.Resolve(oldB, oldEpoch) &&
+	      many.sceneActorRegistry.Find(b)->token != oldB, "the new roster invalidates old commands without locking Live");
+	many.player.state = PlaybackState::Stopped;
+	const auto replaced = many.BuildGuiContext();
+	replaced.fnSetEnsembleFollower(replaced.self, 0, many.sceneActorRegistry.Find(b)->token,
+	                               replaced.actorRosterEpoch, "B", 0, replaced.libraryRevision);
+	many.ProcessPendingGuiCommands();
+	Check(many.ensemble.Followers()[0].player && many.PrepareInjection(),
+	      "a fresh actor can bind again in the same scene");
 }

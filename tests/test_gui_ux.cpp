@@ -1580,6 +1580,17 @@ int main(int argc, char** argv)
 		Check(app.Text().find("原生待确认，当前内建")!=std::string::npos, "native fallback is shown distinctly");
 		app.core.gui.activePage=GuiPage::Settings;
 		Check(app.Text().find("物理运行监控")==std::string::npos, "settings omit detailed diagnostics");
+		const char* beforeQuartzLabel = "BeforeQuartz 同源输入 [实验性]";
+		Check(app.ItemWithLabel(beforeQuartzLabel) != nullptr, "normal settings expose the native same-source switch");
+		app.Click(beforeQuartzLabel); app.Settle();
+		Check(app.core.guiBeforeQuartzExperiment.load(), "settings switch reaches the native same-source command");
+		m.actual = 2;
+		Check(app.Text().find("等待主角色原生任务确认") != std::string::npos, "standard native status cannot confirm same-source mode");
+		m.beforeQuartzRequested = true;
+		app.core.physicsMonitorAt = std::chrono::steady_clock::now();
+		Check(app.Text().find("同源输入已确认（主角色）") != std::string::npos, "current native paired status confirms the switch");
+		app.Click(beforeQuartzLabel); app.Settle();
+		Check(!app.core.guiBeforeQuartzExperiment.load(), "settings switch restores standard native input");
 		app.core.player.controller.targetActor=nullptr;
 	}
 	{
@@ -1617,9 +1628,9 @@ int main(int argc, char** argv)
 		app.Settle();
 		app.Click("诊断与测试"); app.Settle();
         Check(!app.core.liveContinuousArmDiagnostics, "continuous arm diagnostics default off");
-        app.Click("连续记录手臂诊断（影响性能）"); app.Settle();
+        app.Click("连续记录手臂与服装骨（影响性能）"); app.Settle();
         Check(app.core.liveContinuousArmDiagnostics, "continuous arm diagnostics can be enabled explicitly");
-        app.Click("连续记录手臂诊断（影响性能）"); app.Settle();
+        app.Click("连续记录手臂与服装骨（影响性能）"); app.Settle();
         Check(!app.core.liveContinuousArmDiagnostics, "continuous arm diagnostics can be disabled again");
         app.Click("记录当前 Live 状态（只读）");
 		Check(app.core.liveRecordPending && app.core.liveRecordOwner == 55 && app.core.liveRecordScene == 73,

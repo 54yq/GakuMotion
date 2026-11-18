@@ -127,6 +127,33 @@ namespace GakuMotion
 			return ok;
 		}
 
+		// The complete Live census includes inactive actors. Restore surviving
+		// instances while the old registry can still validate their identity.
+		bool ClearForLiveRosterChange(const SceneActorRegistry& registry,
+			const std::vector<SceneActorObservation>& loaded, bool (*releaseDetached)(size_t))
+		{
+			for (size_t i = 0; i < followers_.size(); ++i)
+			{
+				auto& follower = followers_[i];
+				if (!follower.player) continue;
+				const auto* old = registry.Find(follower.player->controller.targetActor);
+				if (!old || old->token != follower.actorToken) return false;
+				if (ObservedSceneActor(loaded, *old))
+				{
+					if (!Clear(i, registry)) return false;
+				}
+				else
+				{
+					// Release the physics publication before forgetting the binding.
+					// The departed controller must not restore its cached Unity objects.
+					if (!releaseDetached || !releaseDetached(i)) return false;
+					follower = {};
+					assignments_.Clear(i + 1);
+				}
+			}
+			return true;
+		}
+
 		// Use only after scene ownership is lost: Unity objects can be destroyed.
 		void Abandon()
 		{
