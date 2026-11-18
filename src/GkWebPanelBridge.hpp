@@ -2390,10 +2390,7 @@ namespace GakuMotion::webpanel
 			for (size_t i = 0; i < entries.size(); ++i)
 			{
 				const auto& item = entries[i];
-				const std::string name = !item.displayName.empty()
-					? item.displayName + " (" + item.character + ")"
-					: item.character.empty() ? "未识别角色" : FormatIdolDisplayName(item.character.c_str());
-				const std::string label = name + " · " + std::to_string(i + 1);
+				const std::string label = FormatSceneActorLabel(item, i + 1);
 				if (i) actors += ",";
 				actors += "{\"token\":" + JNum(static_cast<double>(item.token)) +
 					",\"label\":" + JString(label) +
@@ -2402,14 +2399,7 @@ namespace GakuMotion::webpanel
 			actors += "]";
 			const auto labelFor = [&](void* actor) -> std::string {
 				for (size_t i = 0; i < entries.size(); ++i)
-					if (entries[i].actor == actor)
-					{
-						const auto& item = entries[i];
-						const std::string name = !item.displayName.empty()
-							? item.displayName + " (" + item.character + ")"
-							: item.character.empty() ? "未识别角色" : FormatIdolDisplayName(item.character.c_str());
-						return name + " · " + std::to_string(i + 1);
-					}
+					if (entries[i].actor == actor) return FormatSceneActorLabel(entries[i], i + 1);
 				return "尚未绑定角色";
 			};
 			return "{\"epoch\":" + JNum(static_cast<double>(core_.sceneActorRegistry.Epoch())) +

@@ -477,6 +477,14 @@ static void TestActorsToken()
 	const auto* actors = snapshot.Find("result")->Find("actors");
 	Check(actors->Find("epoch")->numberValue == static_cast<double>(epoch), "actors epoch exposed");
 	Check(actors->Find("actors")->Size() == 1, "actor roster exposed");
+
+	observation.presetName = "自定义演出";
+	f.core.sceneActorRegistry.Publish({observation});
+	const auto presetSnapshot = f.ReqJson("state.get");
+	const auto* presetActors = presetSnapshot.Find("result")->Find("actors")->Find("actors");
+	Check(presetActors && presetActors->Size() == 1 &&
+		presetActors->At(0)->Find("label")->stringValue == "自定义演出 · 1",
+		"actor presetName overrides display name in web-panel roster");
 }
 
 static void TestBufferContract()

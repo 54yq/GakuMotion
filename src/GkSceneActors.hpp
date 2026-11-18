@@ -1,4 +1,5 @@
 #pragma once
+#include "GkCharacterNames.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <string>
@@ -36,6 +37,16 @@ namespace GakuMotion
 		std::string label;
 		bool selected{false};
 	};
+
+	/// Formats a scene actor's UI display label, preferring any user preset name.
+	inline std::string FormatSceneActorLabel(const SceneActorObservation& item, size_t oneBasedIndex)
+	{
+		const std::string name = !item.presetName.empty() ? item.presetName
+			: !item.displayName.empty() ? item.displayName + " (" + item.character + ")"
+			: item.character.empty() ? "未识别角色"
+			: FormatIdolDisplayName(item.character.c_str());
+		return name + " · " + std::to_string(oneBasedIndex);
+	}
 
 	class SceneActorRegistry
 	{
