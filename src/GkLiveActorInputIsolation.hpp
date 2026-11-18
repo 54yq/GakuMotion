@@ -27,7 +27,7 @@ class LiveActorInputIsolation
 
     const void *getOutput{}, *getSource{}, *isNull{}, *valid{}, *getType{}, *getJobType{},
         *countInputs{}, *getInput{}, *countOutputs{}, *getOutputHandle{}, *connect{}, *disconnect{},
-        *readWeight{}, *writeWeight{}, *getSourcePort{}, *setOutputSource{};
+        *readWeight{}, *writeWeight{}, *getSourcePort{}, *setOutputSource{}, *getNodeGraph{};
     using ClassFromSystemType = void*(*)(void*);
     ClassFromSystemType classFromType{};
     void *scriptClass{}, *physicsClass{}, *mixerClass{}, *layerMixerClass{};
@@ -177,45 +177,62 @@ class LiveActorInputIsolation
         return input.sourcePort >= 0;
     }
 
-    bool FindPhysicsOutput(Handle source, const Handle& physics, int& port) const
+    bool FindPhysicsInOutput(Handle source, Handle& physics) const
     {
+        if (!getJobType) return false;
         std::vector<Handle> pending{source};
         for (size_t index = 0; index < pending.size(); ++index) {
             Handle node = pending[index];
-            unsigned char present{};
+            void* type{};
+            if (!NodeType(node, type)) return false;
+            if (type == scriptClass) {
+                void* jobType = Call(getJobType, node.data.data());
+                if (jobType && classFromType(jobType) == physicsClass) {
+                    if (!(physics == Handle{})) return false;
+                    physics = node;
+                }
+            }
             int count{};
-            if (!Read(valid, node.data.data(), present) || !present ||
-                !Read(countInputs, node.data.data(), count) || count < 0 || count > 32) return false;
+            if (!Read(countInputs, node.data.data(), count) || count < 0 || count > 32) return false;
             for (int inputPort = 0; inputPort < count; ++inputPort) {
                 Handle child;
                 unsigned char empty{};
                 void* args[]{&inputPort};
                 if (!Read(getInput, node.data.data(), child, args) || !ReadNull(child, empty)) return false;
                 if (empty) continue;
-                if (child == physics) {
-                    Input edge{node, child, inputPort};
-                    if (!FindSourcePort(edge)) return false;
-                    port = edge.sourcePort;
-                    return true;
-                }
                 if (std::find(pending.begin(), pending.end(), child) != pending.end()) continue;
                 if (pending.size() >= 128) return false;
                 pending.push_back(child);
             }
         }
-        return false;
+        return !(physics == Handle{});
     }
 
     bool PreparePhysicsOutput(void* graph, Handle physics)
     {
-        if (!getSourcePort || !setOutputSource) return false;
-        void* type = nullptr;
-        if (!NodeType(physics, type) || type != scriptClass) return false;
+        if (!getSourcePort || !setOutputSource || !getNodeGraph)
+            return Unavailable("actor_physics_output_methods");
         Handle original;
         int originalPort{};
-        if (!ReadRoute(graph, original, originalPort) || originalPort < 0) return false;
-        int physicsPort = originalPort;
-        if (!(physics == original) && !FindPhysicsOutput(original, physics, physicsPort)) return false;
+        unsigned char originalValid{};
+        if (!ReadRoute(graph, original, originalPort) || originalPort < 0 ||
+            !Read(valid, original.data.data(), originalValid) || !originalValid)
+            return Unavailable("actor_output_source_port");
+        const bool fromBuilder = !(physics == Handle{});
+        if (!fromBuilder && !FindPhysicsInOutput(original, physics))
+            return Unavailable("actor_physics_job_not_unique_or_unreadable");
+        // The builder's typed getter supplies an AnimationScriptPlayable for
+        // this actor. Its graph identity matters even when the Live output
+        // currently starts on a separate branch or under game-specific mixers.
+        Handle expectedGraph, actualGraph;
+        std::memcpy(expectedGraph.data.data(), graph, sizeof(expectedGraph));
+        unsigned char present{};
+        if (!Read(valid, physics.data.data(), present) || !present ||
+            !Read(getNodeGraph, physics.data.data(), actualGraph) || !(actualGraph == expectedGraph))
+            return Unavailable(fromBuilder ? "actor_builder_physics_graph_mismatch" : "actor_output_physics_graph_mismatch");
+        // A script playable can be installed as an animation output's source
+        // on port zero even when there is no existing connection on that port.
+        const int physicsPort = physics == original ? originalPort : 0;
         route = {original, physics, originalPort, physicsPort, true, false};
         outputs.push_back(original);
         jobs.push_back(physics);
@@ -284,6 +301,7 @@ public:
         getSource = metadata.Find(output, "GetSourcePlayable", false, {0x11, handle}, {});
         getSourcePort = metadata.Find(output, "GetSourceOutputPort", false, {0x08}, {});
         setOutputSource = metadata.Find(output, "SetSourcePlayable", false, {0x01}, {{0x11, handle}, {0x08}});
+        getNodeGraph = metadata.Find(handle, "GetGraph", false, {0x11, graphClass}, {});
         isNull = metadata.Find(handle, "IsNull", false, {0x02}, {});
         valid = metadata.Find(handle, "IsValid", false, {0x02}, {});
         getType = metadata.Find(handle, "GetPlayableType", false, {0x12}, {});
@@ -313,7 +331,7 @@ public:
 
         Handle physics;
         if (actorPhysics) std::memcpy(physics.data.data(), actorPhysics, sizeof(physics));
-        if (actorOutputCount != 1 || physics == Handle{} || !PreparePhysicsOutput(graph, physics)) {
+        if (actorOutputCount != 1 || !PreparePhysicsOutput(graph, physics)) {
             if (!getJobType) return Unavailable("GetJobType");
             unsigned visited = 0;
             for (unsigned index = 0; index < actorOutputCount; ++index) {

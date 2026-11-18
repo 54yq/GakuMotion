@@ -44,8 +44,8 @@ struct Metadata {
   const char* loopNames[]{"GetRootPlayableCount","GetTime","GetRootPlayableInternal","GetInputCount","GetInputHandle","SetTime","SetDone"};
   for(uintptr_t i=0;i<7;++i)if(!std::strcmp(name,loopNames[i]))return reinterpret_cast<void*>(i+14);
   const char* isolationNames[]{"GetSourcePlayable","GetPlayableType","GetJobType","GetInputWeightFromIndex","SetInputWeightFromIndex",
-   "GetOutputCount","GetOutputHandle","ConnectInternal","DisconnectInternal","PlayableHandle.IsNull","GetSourceOutputPort","SetSourcePlayable"};
-  for(uintptr_t i=0;i<12;++i)if(!std::strcmp(name,isolationNames[i]))return reinterpret_cast<void*>(i+21);
+   "GetOutputCount","GetOutputHandle","ConnectInternal","DisconnectInternal","PlayableHandle.IsNull","GetSourceOutputPort","SetSourcePlayable","GetGraph"};
+  for(uintptr_t i=0;i<13;++i)if(!std::strcmp(name,isolationNames[i]))return reinterpret_cast<void*>(i+21);
   const char* names[]{"IsValid","IsPlaying","GetTimeUpdateMode","SetTimeUpdateMode","Play","Stop","GetOutputInternal","GetOutput","GetHandle","IsNull"};
   for(uintptr_t i=0;i<10;++i)if(!std::strcmp(name,names[i]))return i==6&&internalMissing?nullptr:reinterpret_cast<void*>(i+1);
   return nullptr;
@@ -65,6 +65,7 @@ int isolationWrites{};
 bool wrongJobType{}, failDisconnectReadback{}, inputConnected=true;
 int physicsInputCount=1;
 bool directPhysicsFixture{}, failRouteWrite{};
+bool physicsReachableFromOutput{true}, foreignBuilderGraph{};
 int outputSource=7, outputPort=2;
 void* HandleReply(unsigned char id){
  static std::array<unsigned char,16> handle{};
@@ -91,14 +92,14 @@ void* Invoke(const void* m,void* self,void** args,void** ex){
  case 15:{if(failNodeRead){*ex=reinterpret_cast<void*>(1);break;}int i{};std::memcpy(&i,self,4);return &times[i];}
  case 16:{static std::array<unsigned char,16> h{};return h.data();}
  case 17:{int i{};std::memcpy(&i,self,4);
-          reply=directPhysicsFixture?(i==5||i==7):i==0?physicsInputCount:0;return &reply;}
+          reply=directPhysicsFixture?(i==5||(i==7&&physicsReachableFromOutput)):i==0?physicsInputCount:0;return &reply;}
  case 18:{if(!inputConnected&&failDisconnectReadback){failDisconnectReadback=false;return nullptr;}
           if(directPhysicsFixture)return HandleReply(*static_cast<unsigned char*>(self)==7?5:inputConnected?6:0);
           return HandleReply(inputConnected?1:0);}
  case 19:{++nodeWrites;if(failNodeWrite){*ex=reinterpret_cast<void*>(1);break;}int i{};std::memcpy(&i,self,4);times[i]=*static_cast<double*>(args[0]);break;}
  case 20:++nodeWrites;break;
  case 21:return HandleReply(directPhysicsFixture?static_cast<unsigned char>(outputSource):0);
- case 22:return reinterpret_cast<void*>(34);
+ case 22:return reinterpret_cast<void*>(uintptr_t(directPhysicsFixture&&*static_cast<unsigned char*>(self)!=5?38:34));
  case 23:return reinterpret_cast<void*>(uintptr_t(wrongJobType?36:35));
  case 24:return &inputWeight;
  case 25:++isolationWrites;inputWeight=*static_cast<float*>(args[1]);break;
@@ -110,6 +111,7 @@ void* Invoke(const void* m,void* self,void** args,void** ex){
  case 31:reply=outputPort;return &reply;
  case 32:outputSource=*static_cast<unsigned char*>(args[0]);outputPort=*static_cast<int*>(args[1]);
          if(failRouteWrite){failRouteWrite=false;*ex=reinterpret_cast<void*>(1);}break;
+ case 33:return HandleReply(foreignBuilderGraph?99:0);
  }return nullptr;
 }
 struct {void*(*invoke)(const void*,void*,void**,void**)=Invoke;} g_faceRuntime;
@@ -256,6 +258,17 @@ struct ClockTest : LiveActorClockMvp { static int Run(){
  CHECK(RestoreGraph() && inputConnected && inputWeight==0.75f && outputSource==7 && outputPort==2);
  offerDirect();failRouteWrite=true;
  CHECK(!Start(36,true) && active && !inputConnected && outputSource==5 && !playingValue);
+ CHECK(RestoreGraph() && inputConnected && outputSource==7 && outputPort==2);
+ physicsReachableFromOutput=false;offerDirect();
+ CHECK(Start(37,true) && inputIsolation.BypassedPlaybackOutput() && !inputConnected &&
+       outputSource==5 && outputPort==0 && TickLoop(38));
+ CHECK(RestoreGraph() && inputConnected && outputSource==7 && outputPort==2);
+ foreignBuilderGraph=true;offerDirect();
+ const int writesBeforeForeignGraph=isolationWrites;
+ CHECK(Start(39,true) && !inputIsolation.BypassedPlaybackOutput() && inputConnected && outputSource==7);
+ CHECK(RestoreGraph() && isolationWrites==writesBeforeForeignGraph);
+ foreignBuilderGraph=false;physicsReachableFromOutput=true;wrongJobType=false;offer();
+ CHECK(Start(40,true) && inputIsolation.BypassedPlaybackOutput() && !inputConnected && outputSource==5);
  CHECK(RestoreGraph() && inputConnected && outputSource==7 && outputPort==2);
  std::puts("actor clock MVP: gating, per-actor isolation, restoration and owner loss passed");return 0;
 }};

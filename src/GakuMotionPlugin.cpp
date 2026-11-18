@@ -4635,7 +4635,7 @@ void MotionTick(void*, float)
 				void* clockActor=mmdWanted?core.player.controller.targetActor:reinterpret_cast<void*>(LiveActorClockMvp::actor);
 				const bool actorValid=actorRecent&&clockActor&&CameraBridge::IsAlive(clockActor);
 				if(actorValid)
-					LiveAnimatorProbe::SampleActorGraph(clockActor,mmdWanted?3:1);
+					LiveAnimatorProbe::SampleActorGraph(clockActor,mmdWanted?3:1,0,nullptr,mmdWanted);
 				const bool prepared=actorValid&&LiveActorClockMvp::SameOwner()&&LiveActorClockMvp::actor==reinterpret_cast<uintptr_t>(clockActor)&&
 					LiveActorClockMvp::offered&&(mmdWanted||LiveActorClockMvp::CaptureLoop(now,core.liveObservation.duration-core.liveObservation.time));
 				const bool started=prepared&&LiveActorClockMvp::Start(now,mmdWanted);
@@ -4674,7 +4674,7 @@ void MotionTick(void*, float)
                 if (!wanted || clock.active || now < followerRetry[index]) continue;
                 followerRetry[index] = now + 2.0;
                 clock.offered = false;
-                LiveAnimatorProbe::SampleActorGraph(actor, 3, static_cast<int>(index + 1), &clock);
+                LiveAnimatorProbe::SampleActorGraph(actor, 3, static_cast<int>(index + 1), &clock, true);
                 const bool samePrimary = clock.graph == LiveActorClockMvp::graph;
                 bool sameOther = false;
                 for (size_t j=0; j<g_followerClocks.size(); ++j)
