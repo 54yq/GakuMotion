@@ -11,6 +11,7 @@
 //   so re-asking later is safe; `Ensure()` throttles the retry and bumps a
 //   generation counter that forces a binding rebuild once the provider appears.
 #include "GakuCharaAdapter.h"
+#include "GakuMouthFit.h"
 #include <algorithm>
 #include <chrono>
 #include <iterator>
@@ -22,6 +23,7 @@ namespace GakuMotion::facial_fit
     inline bool available{false};
     inline GakuCharaAdapterService adapter{};
     inline RinhaFacialFitService adapterFit{};
+    inline GakuMouthFitService mouthService{};
     // Bumped on every successful lookup; bindings compare their bound value so
     // a provider that appears mid-session rebinds without a clip change.
     inline unsigned generation{0};
@@ -53,6 +55,18 @@ namespace GakuMotion::facial_fit
     inline void Lookup()
     {
         if (!host.queryService) return;
+        if (!mouthService.findFace)
+        {
+            GakuMouthFitService candidate{};
+            if (host.queryService(host.hostContext, GAKU_MOUTH_FIT_SERVICE, GAKU_MOUTH_FIT_VERSION,
+                sizeof(candidate), &candidate) == GAKU_OK &&
+                candidate.abiVersion == GAKU_MOUTH_FIT_VERSION && candidate.structSize >= sizeof(candidate) &&
+                candidate.findFace && candidate.evaluate)
+            {
+                mouthService = candidate;
+                ++generation;
+            }
+        }
         if (!adapter.resolveFace)
         {
             GakuCharaAdapterService candidate{};
@@ -83,6 +97,7 @@ namespace GakuMotion::facial_fit
         available = false;
         adapter = {};
         adapterFit = {};
+        mouthService = {};
         nextAttempt = std::chrono::steady_clock::now() + kRetryInterval;
         Lookup();
     }
@@ -90,7 +105,7 @@ namespace GakuMotion::facial_fit
     // One branch in the steady state; a throttled re-query until it succeeds.
     inline void Ensure()
     {
-        if ((adapter.resolveFace && available) || !host.queryService) return;
+        if ((adapter.resolveFace && available && mouthService.findFace) || !host.queryService) return;
         const auto now = std::chrono::steady_clock::now();
         if (now < nextAttempt) return;
         nextAttempt = now + kRetryInterval;
@@ -118,6 +133,14 @@ namespace GakuMotion::facial_fit
     inline const RinhaFacialFitFace* Find(const std::string& faceName)
     {
         return FindFit(faceName).face;
+    }
+
+    inline const GakuMouthFitFace* FindMouth(const std::string& faceName)
+    {
+        Ensure();
+        const std::string name = StripCloneSuffix(faceName);
+        return mouthService.findFace && !name.empty()
+            ? mouthService.findFace(mouthService.context, name.c_str()) : nullptr;
     }
 
     inline GakuCharaIdentity ResolveIdentity(const std::string& faceName)

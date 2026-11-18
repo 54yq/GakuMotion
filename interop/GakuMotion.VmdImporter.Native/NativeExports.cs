@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 using GakuMotion.VmdImporter.Native.Camera;
+using GakuMotion.VmdImporter.Native.Facial;
 
 /// <summary>
 /// Native ABI consumed by GakuMotion.dll (GkCsharpImport.hpp).
@@ -34,6 +35,30 @@ internal static unsafe class NativeExports
 
     [UnmanagedCallersOnly(EntryPoint = "GkCameraImporter_AbiVersion")]
     public static int CameraAbiVersion() => 1;
+
+    [UnmanagedCallersOnly(EntryPoint = "GkMouthSource_AbiVersion")]
+    public static int MouthSourceAbiVersion() => 1;
+
+    [UnmanagedCallersOnly(EntryPoint = "GkMouthSource_Read")]
+    public static int ReadMouthSource(byte* sourceUtf8, float sourceFps, float clipFps,
+        int frames, float* outputFrameMajor, int outputFloats)
+    {
+        if (sourceUtf8 == null || outputFrameMajor == null ||
+            !MouthSourceReader.ValidDimensions(sourceFps, clipFps, frames)) return InvalidArgument;
+        if (outputFloats < frames * MouthSourceReader.ChannelCount) return BufferTooSmall;
+        try
+        {
+            string? sourcePath = Marshal.PtrToStringUTF8((nint)sourceUtf8);
+            if (string.IsNullOrWhiteSpace(sourcePath)) return InvalidArgument;
+            float[] values = MouthSourceReader.Read(sourcePath, sourceFps, clipFps, frames);
+            values.AsSpan().CopyTo(new Span<float>(outputFrameMajor, outputFloats));
+            return Ok;
+        }
+        catch (Exception)
+        {
+            return Failed;
+        }
+    }
 
     /// <summary>Camera-only ABI v1; shares the body import gate to avoid concurrent writes.</summary>
     [UnmanagedCallersOnly(EntryPoint = "GkCameraImport_Run")]

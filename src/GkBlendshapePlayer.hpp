@@ -33,6 +33,7 @@ namespace GakuMotion
 		bool (*writeTalk)(void* talk, bool enabled){nullptr};
 		std::string (*getModelName)(void* model){nullptr}; // Existing Unity Object identity, bind-time only.
 		void (*reportFacialFit)(const char* component, const char* decision, const char* faceName){nullptr};
+		void (*reportMouthFit)(const char* decision, const char* faceName, const char* tableSha256, uint32_t qualityGrade){nullptr};
 
 		bool Ready() const { return getModel && getCount && getName && getWeight && setWeight; }
 	};
@@ -112,6 +113,7 @@ namespace GakuMotion
 		// 1..N = compiled per-character table, N+1 = published profile, 0 = none.
 		unsigned fitRole{0};
 		ExternalFacialFit externalFit;
+		PublishedMouthFit publishedMouthFit;
 		const CharacterBaselineProfile* activeProfile{nullptr};
 		std::chrono::steady_clock::time_point observerUntil{};
 		uint64_t diagnosticSequence{0}, diagnosticTicks{0};
@@ -343,6 +345,8 @@ namespace GakuMotion
 				// that have no legacy mapped counterpart in the clip.
 				externalFit = BindExternalFacialFit(boundFaceName, names, modelNames,
 					clip.blendshape_weights, facialFitAllowUnverified);
+				publishedMouthFit = BindPublishedMouthFit(boundFaceName, names, modelNames);
+				if (enableMikuMouthFit && publishedMouthFit.claim) families |= 4;
 				if (externalFit.face && (characterOverride.empty() || characterOverride == "auto" ||
 					characterOverride == externalFit.character))
 				{
@@ -361,10 +365,11 @@ namespace GakuMotion
 					ownedSavedWeights.push_back(std::isfinite(saved) ? saved : 0.0f);
 				}
 				ResolveExternalFitSlots(externalFit, ownedNames);
+				ResolvePublishedMouthSlots(publishedMouthFit, ownedNames);
 				fitRole = 0;
 				if (const auto* compiled = FindMikuMouthFace(boundFaceName))
 					fitRole = static_cast<unsigned>(compiled - kMikuMouthFits.data()) + 1;
-				else if (externalFit.face)
+				else if (externalFit.face || publishedMouthFit.face)
 					fitRole = static_cast<unsigned>(kMikuMouthFits.size()) + 1;
 				if (api.beginBinding) api.beginBinding();
 			}
@@ -416,7 +421,9 @@ namespace GakuMotion
 			auto adapted = EvaluateFacialAdapter(clip.blendshape_names, weights, ownedNames,
 			                                         activeProfile, enableBaseline, baselineMultiplier);
 			mikuFitDecision = enableMikuMouthFit
-				? (externalFit.mouthPresent
+				? (publishedMouthFit.face
+					? TryApplyPublishedMouthFit(publishedMouthFit, weights, characterOverride, ownedNames, adapted)
+					: externalFit.mouthPresent
 					? TryApplyExternalMouthFit(externalFit, clip.blendshape_names, weights, characterOverride,
 						facialFitAllowUnverified, ownedNames, adapted)
 					: TryApplyMikuMouthFit(clip.blendshape_names, weights, ownedNames, boundFaceName, characterOverride, adapted))
@@ -431,6 +438,9 @@ namespace GakuMotion
 			if (enableMikuMouthFit && api.reportFacialFit && !(mikuReportedDecisions & decisionBit))
 			{
 				api.reportFacialFit("mouth", MikuFitDecisionName(mikuFitDecision), boundFaceName.c_str());
+				if (publishedMouthFit.face && api.reportMouthFit)
+					api.reportMouthFit(MikuFitDecisionName(mikuFitDecision), boundFaceName.c_str(),
+						publishedMouthFit.face->tableSha256, publishedMouthFit.face->qualityGrade);
 				mikuReportedDecisions |= decisionBit;
 			}
 			const uint32_t eyeDecisionBit = 1u << static_cast<unsigned>(mikuEyeDecision);

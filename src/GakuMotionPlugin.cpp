@@ -1978,16 +1978,19 @@ bool InitializeMotion()
 	player.fnAudioVolumeSupport = HelperAudioVolumeSupport;
 	player.fnCanPlay = HelperCanPlay;
 
+	if (g_hostContext.pluginsRoot)
+	{
+		GakuMotion::csharp_import::SetPluginsRoot(WidePathToNarrow(g_hostContext.pluginsRoot));
+	}
+	GakuMotion::mouth_source::reader = GakuMotion::csharp_import::ReadMouthSource;
+	GakuMotion::mouth_source::report = [](const char* directory, const char* status)
+	{
+		GM_INFO("[GakuMotion][MouthSource] track=%s status=%s", directory, status);
+	};
 	core.Initialize(localRoot, &selected);
 	HelperAudioSetVolume(player.musicVolume);
 	if (g_hostContext.logInfo) g_hostContext.logInfo("[GakuMotion][Paths] layout=%s configs=%s motions=%s",
 		selected.managed ? "gakuloader-v1" : "legacy-unmigrated", core.configRoot.c_str(), core.motionsRoot.c_str());
-	if (g_hostContext.pluginsRoot)
-	{
-		// Only records the directory; the companion DLL is loaded on first use so
-		// early activation stays free of managed-runtime initialization.
-		GakuMotion::csharp_import::SetPluginsRoot(WidePathToNarrow(g_hostContext.pluginsRoot));
-	}
 
 	if (g_hostContext.logInfo)
 	{
@@ -2267,8 +2270,13 @@ void MotionRuntimeReady(void*)
 		ctrl.faceApi.getModelName = HelperGetFaceModelName;
 		ctrl.faceApi.reportFacialFit = [](const char* component, const char* decision, const char* faceName)
 		{
-			GM_DEBUG("[GakuMotion][FacialFit] component=%s decision=%s actual_face=%s (prefab identity; asset bytes not runtime-verified)",
+			GM_INFO("[GakuMotion][FacialFit] component=%s decision=%s actual_face=%s (prefab identity; asset bytes not runtime-verified)",
 				component, decision, faceName);
+		};
+		ctrl.faceApi.reportMouthFit = [](const char* decision, const char* faceName, const char* tableSha256, uint32_t qualityGrade)
+		{
+			GM_INFO("[GakuMotion][MouthFit] decision=%s actual_face=%s table_sha256=%s quality_grade=%u",
+				decision, faceName, tableSha256 ? tableSha256 : "", qualityGrade);
 		};
 		if (g_hostContext.logInfo)
 			g_hostContext.logInfo(
