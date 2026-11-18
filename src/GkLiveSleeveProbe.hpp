@@ -23,6 +23,15 @@ namespace LiveSleeveProbe
     };
 
     inline std::array<ActorSamples, 3> actors;
+    struct OpeningSamples
+    {
+        ActorSamples mesh;
+        unsigned phases{};
+        bool bindingPending{};
+    };
+    inline std::unordered_map<uint64_t, OpeningSamples> opening;
+    inline uintptr_t openingOwner{};
+    inline int openingScene{};
     inline uint64_t session{}, epoch{}, event{}, nextEvent{}, nextSample{};
     inline int frame{-1}, eventFrame{-1}, remaining{};
     inline const char* action{};
@@ -33,9 +42,9 @@ namespace LiveSleeveProbe
 
     inline bool Enabled(const GakuMotion::Core& core)
     {
-        return !faulted && g_hostContext.logInfo && core.liveTakeoverActive && core.liveViewingConfirmed &&
+        return !faulted && g_hostContext.logInfo && core.liveOwnerToken && core.liveViewingConfirmed &&
             core.liveObservation.confirmed && !core.liveTakeoverFault && !core.ensembleRestoreUnconfirmed &&
-            core.config.secondaryPhysicsBackend == 2 && core.config.beforeQuartzExperiment &&
+            core.config.secondaryPhysicsBackend == 2 &&
             !core.captureSuspended && core.injectionPolicy.Read().captureDepth == 0 &&
             GakuMotion::capture::LiveAutoPhotoIdle() && ProtectionOnUnityThread();
     }
@@ -320,6 +329,141 @@ namespace LiveSleeveProbe
         }
     }
 
+    inline void RecordPose(void* actor, uint64_t seq, ActorSamples& cache, bool mesh)
+    {
+        if (!g_getParentNative || !g_getPosNative || !g_getRotNative || !g_getWorldPosNative ||
+            !g_getWorldRotNative || !g_getNameNative) return;
+        const int ids[]{0, 11, 12, 13, 14, 15, 16, 17, 18};
+        for (int id : ids)
+            if (auto* bone = HelperGetBoneTransform(actor, id))
+                LogBone(seq, bone, HelperGetTransformName(bone).c_str(), -1, id);
+        const char* aux[2][3]{{"LeftForeArm_Roll_H", "LeftForeArm_H", "LeftHand_H"},
+                              {"RightForeArm_Roll_H", "RightForeArm_H", "RightHand_H"}};
+        for (int side = 0; side < 2; ++side)
+        {
+            void* fore = HelperGetBoneTransform(actor, 15 + side);
+            if (!fore) continue;
+            for (const char* name : aux[side])
+                LogBone(seq, LiveActorProps::UniqueChild(fore, name), name, -1, -1);
+        }
+        if (mesh) GuardedMeshes(actor, seq, &cache);
+    }
+
+    enum class OpeningPhase : unsigned
+    {
+        NativeBeforeTakeover, TakeoverBeforeMotion, PreviewBeforeBody, PreviewAfterActor,
+        FirstPlayingBeforeBody, FirstPlayingAfterActor, BeforeBinding, BindingCommitted,
+        BindingAfterBody, BindingAfterSecondary
+    };
+    inline void RecordOpening(GakuMotion::Core& core, void* actor, OpeningPhase phase, bool wroteBody = false)
+    {
+        if (!Enabled(core) || !actor) return;
+        const auto* entry = core.sceneActorRegistry.Find(actor);
+        if (!entry) return;
+        if (openingOwner != core.liveOwnerToken || openingScene != core.liveOwnerScene)
+        {
+            openingOwner = core.liveOwnerToken;
+            openingScene = core.liveOwnerScene;
+            opening.clear();
+        }
+        const auto found = opening.find(entry->token);
+        const unsigned bit = 1u << static_cast<unsigned>(phase);
+        if ((found != opening.end() && (found->second.phases & bit)) ||
+            (found == opening.end() && opening.size() >= 16)) return;
+        if (!HelperGetBoneTransform(actor, 15) && !HelperGetBoneTransform(actor, 16)) return;
+        auto& sample = opening[entry->token];
+        sample.phases |= bit;
+
+        const auto& followers = core.ensemble.Followers();
+        size_t slot = core.IsTargetActor(actor) ? 1 : 0;
+        int actual = slot && g_physicsActor == actor ? g_physicsActual : -1;
+        for (size_t i = 0; i < followers.size(); ++i)
+        {
+            const auto& follower = followers[i];
+            if (!follower.player || follower.actorToken != entry->token ||
+                follower.player->controller.targetActor != actor) continue;
+            slot = i + 2;
+            if (i < g_followerPhysics.size() && g_followerPhysics[i].actor == actor &&
+                g_followerPhysics[i].bindingGeneration == follower.bindingGeneration)
+                actual = g_followerPhysics[i].actual;
+            break;
+        }
+        const char* names[]{"native_before_takeover", "takeover_before_motion", "preview_before_body",
+            "preview_after_actor", "first_playing_before_body", "first_playing_after_actor",
+            "before_binding", "binding_committed", "binding_after_body", "binding_after_secondary"};
+        const auto seq = ++nextSample;
+        SYSTEMTIME wall{};
+        GetLocalTime(&wall);
+        g_hostContext.logInfo(
+            "[GakuMotion][LiveSleeveStart] sample=%llu phase=%s frame=%d slot=%zu actor=%p token=%llu character=%s scene=%d session=%llu state=%d motion=%.4f live=%.4f live_paused=%d takeover=%d bound_followers=%zu physics_requested=%d actor_actual=%d before_quartz_requested=%d body_written=%d time=%04u-%02u-%02uT%02u:%02u:%02u.%03u",
+            static_cast<unsigned long long>(seq), names[static_cast<unsigned>(phase)],
+            g_faceUnityFrame ? g_faceUnityFrame() : frame, slot, actor,
+            static_cast<unsigned long long>(entry->token), entry->character.c_str(), core.liveOwnerScene,
+            static_cast<unsigned long long>(core.injectionSession), int(core.player.state), core.player.currentTime,
+            core.liveObservation.time, int(core.liveObservation.paused), int(core.liveTakeoverActive),
+            static_cast<size_t>(std::count_if(followers.begin(), followers.end(), [](const auto& f) { return f.player != nullptr; })),
+            core.config.secondaryPhysicsBackend, actual, int(core.config.beforeQuartzExperiment), int(wroteBody),
+            wall.wYear, wall.wMonth, wall.wDay, wall.wHour, wall.wMinute, wall.wSecond, wall.wMilliseconds);
+        RecordPose(actor, seq, sample.mesh, true);
+    }
+
+    inline void BeforeTakeover(GakuMotion::Core& core)
+    {
+        for (const auto& entry : core.sceneActorRegistry.Entries())
+            RecordOpening(core, entry.actor, OpeningPhase::NativeBeforeTakeover);
+    }
+
+    inline void Binding(GakuMotion::Core& core, void* actor, bool before)
+    {
+        if (!Enabled(core) || !core.liveTakeoverActive) return;
+        const auto* entry = core.sceneActorRegistry.Find(actor);
+        if (!entry) return;
+        if (before && openingOwner == core.liveOwnerToken && openingScene == core.liveOwnerScene)
+        {
+            const auto found = opening.find(entry->token);
+            if (found != opening.end())
+            {
+                constexpr unsigned bindingMask = (1u << static_cast<unsigned>(OpeningPhase::BeforeBinding)) - 1;
+                found->second.phases &= bindingMask;
+                found->second.bindingPending = false;
+            }
+        }
+        RecordOpening(core, actor, before ? OpeningPhase::BeforeBinding : OpeningPhase::BindingCommitted);
+        if (!before)
+            if (const auto found = opening.find(entry->token); found != opening.end())
+                found->second.bindingPending = true;
+    }
+
+    inline void BindingPose(GakuMotion::Core& core, void* actor, bool afterSecondary)
+    {
+        if (openingOwner != core.liveOwnerToken || openingScene != core.liveOwnerScene || !core.liveTakeoverActive) return;
+        const auto* entry = core.sceneActorRegistry.Find(actor);
+        if (!entry) return;
+        const auto found = opening.find(entry->token);
+        if (found == opening.end() || !found->second.bindingPending) return;
+        RecordOpening(core, actor, afterSecondary ? OpeningPhase::BindingAfterSecondary : OpeningPhase::BindingAfterBody, true);
+        if (afterSecondary) found->second.bindingPending = false;
+    }
+
+    inline void ObserveOpening(GakuMotion::Core& core, void* actor, bool afterBody, bool wroteBody)
+    {
+        using State = GakuMotion::PlaybackState;
+        if (!core.liveTakeoverActive) return;
+        switch (core.player.state)
+        {
+        case State::Stopped:
+            if (!afterBody) RecordOpening(core, actor, OpeningPhase::TakeoverBeforeMotion);
+            break;
+        case State::Preview:
+            RecordOpening(core, actor, afterBody ? OpeningPhase::PreviewAfterActor : OpeningPhase::PreviewBeforeBody, wroteBody);
+            break;
+        case State::Playing:
+            RecordOpening(core, actor, afterBody ? OpeningPhase::FirstPlayingAfterActor : OpeningPhase::FirstPlayingBeforeBody, wroteBody);
+            break;
+        default: break;
+        }
+    }
+
     inline void Record(GakuMotion::Core& core, size_t index, const char* phase, bool mesh)
     {
         const auto& follower = core.ensemble.Followers()[index];
@@ -358,20 +502,7 @@ namespace LiveSleeveProbe
             mainPos.x, mainPos.y, mainPos.z, main.initialYawDegrees, wall.wYear, wall.wMonth, wall.wDay,
             wall.wHour, wall.wMinute, wall.wSecond, wall.wMilliseconds);
 
-        const int ids[]{0, 11, 12, 13, 14, 15, 16, 17, 18};
-        for (int id : ids)
-            if (auto* bone = HelperGetBoneTransform(actor, id))
-                LogBone(seq, bone, HelperGetTransformName(bone).c_str(), -1, id);
-        const char* aux[2][3]{{"LeftForeArm_Roll_H", "LeftForeArm_H", "LeftHand_H"},
-                              {"RightForeArm_Roll_H", "RightForeArm_H", "RightHand_H"}};
-        for (int side = 0; side < 2; ++side)
-        {
-            void* fore = HelperGetBoneTransform(actor, 15 + side);
-            if (!fore) continue;
-            for (const char* name : aux[side])
-                LogBone(seq, LiveActorProps::UniqueChild(fore, name), name, -1, -1);
-        }
-        if (mesh) GuardedMeshes(actor, seq, &cache);
+        RecordPose(actor, seq, cache, mesh);
     }
 
     inline void Frame(GakuMotion::Core& core, int current)
@@ -400,7 +531,7 @@ namespace LiveSleeveProbe
 
     inline void Placement(GakuMotion::Core& core, const char* operation, bool before)
     {
-        if (!Enabled(core) || frame < 0) return;
+        if (!Enabled(core) || !core.liveTakeoverActive || frame < 0) return;
         const bool align = std::strcmp(operation, "align_formation") == 0;
         if (before)
         {
@@ -422,7 +553,7 @@ namespace LiveSleeveProbe
 
     inline void Actor(GakuMotion::Core& core, void* actor, bool afterBody, bool wroteBody = false)
     {
-        if (!Enabled(core) || !actor || frame < 0) return;
+        if (!Enabled(core) || !core.liveTakeoverActive || !actor || frame < 0) return;
         const auto& followers = core.ensemble.Followers();
         for (size_t i = 0; i < followers.size() && i < actors.size(); ++i)
         {
@@ -435,7 +566,7 @@ namespace LiveSleeveProbe
             if (!event && !afterBody && missing && core.player.state == GakuMotion::PlaybackState::Playing &&
                 i < g_followerPhysics.size() && g_followerPhysics[i].actor == actor &&
                 g_followerPhysics[i].bindingGeneration == follower.bindingGeneration &&
-                g_followerPhysics[i].actual == 2 && g_followerPhysics[i].quartz && status.actor == actor &&
+                g_followerPhysics[i].actual == 2 && status.actor == actor &&
                 status.injected && status.writes)
             {
                 Record(core, i, "baseline_before_body", true);

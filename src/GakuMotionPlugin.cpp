@@ -2369,6 +2369,7 @@ bool InitializeMotion()
 	core.fnNotifyMotionPlaying = NotifyHostMotionPlaying;
 	core.fnReadFormationOrigin = GakuMotion::csharp_import::ReadFormationOrigin;
 	core.fnObserveLivePlacement = LiveSleeveProbe::Placement;
+	core.fnObserveLiveBinding = LiveSleeveProbe::Binding;
 	core.fnStartImport = StartMotionImport;
 	core.fnPollImport = PollMotionImport;
 	core.fnPollImportProgress = PollMotionImportWithProgress;
@@ -3483,6 +3484,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	StageLoader::BindContext(sceneHandle, activeActor);
 	LiveSleeveProbe::Frame(core, unityFrame >= 0 ? unityFrame : s_fallbackFrame);
 	if (isNewPhysicalFrame) core.ProcessPendingGuiCommands();
+	LiveSleeveProbe::ObserveOpening(core, activeActor, false, false);
 	LiveSleeveProbe::Actor(core, activeActor, false);
 	void* anim = g_motionSceneAllowed && player.state != GakuMotion::PlaybackState::Stopped
 		             ? HelperGetActorAnimator(activeActor)
@@ -3733,11 +3735,15 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	if (player.controller.targetActor)
 		GakuMotion::OnLateUpdate(activeActor, anim, nullptr, dtToPass, isNewPhysicalFrame,
 		                        s_cameraFrameDelta, s_cameraPhysicalFrame);
-	if (LiveSleeveProbe::event) {
+	bool sleeveBodyWritten = false;
+	if (core.liveTakeoverActive && core.config.secondaryPhysicsBackend == 2) {
 		const auto* afterBody = ActorGroundShadow::PlayerForActor(activeActor);
-		LiveSleeveProbe::Actor(core, activeActor, true, afterBody && afterBody == posePlayer &&
+		sleeveBodyWritten = afterBody && afterBody == posePlayer &&
 			afterBody->controller.footPoseWriteStamp.actor == activeActor &&
-			afterBody->controller.footPoseWriteStamp.serial != poseSerialBefore);
+			afterBody->controller.footPoseWriteStamp.serial != poseSerialBefore;
+		LiveSleeveProbe::ObserveOpening(core, activeActor, true, sleeveBodyWritten);
+		if (sleeveBodyWritten) LiveSleeveProbe::BindingPose(core, activeActor, false);
+		if (LiveSleeveProbe::event) LiveSleeveProbe::Actor(core, activeActor, true, sleeveBodyWritten);
 	}
 	EyeGazeProbe::After(activeActor);
     // Only observed Motion-owned actors can trigger this. Each role has its own
@@ -3965,6 +3971,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 		snapshot << json;
 		if (g_hostContext.logInfo) g_hostContext.logInfo("[GakuMotion][BeforeQuartz] trace seq=%lld result=%d", seq, result);
 	}
+	if (sleeveBodyWritten) LiveSleeveProbe::BindingPose(core, activeActor, true);
 	// Native foot AO may have been derived before the post-actor callback.
 	// Consume the completed body + secondary pose in the same tick.
 	ActorGroundShadow::RefreshAfterPose(activeActor, poseSerialBefore);
@@ -4506,6 +4513,7 @@ void MotionTick(void*, float)
 			if (request == 1 && requestedOwner && requestedOwner == core.liveOwnerToken && requestedScene == core.liveOwnerScene &&
 				core.liveTakeoverAvailable && !core.liveTakeoverActive)
 			{
+				LiveSleeveProbe::BeforeTakeover(core);
 				g_liveTakeoverOwner = requestedOwner;
 				g_liveTakeoverScene = requestedScene;
 				g_liveDriver.Enable();

@@ -93,6 +93,12 @@ namespace GakuMotion
 
 		bool (*fnReadFormationOrigin)(const std::string&, Vector3&){nullptr};
 		void (*fnObserveLivePlacement)(Core&, const char*, bool){nullptr};
+		void (*fnObserveLiveBinding)(Core&, void*, bool){nullptr};
+		void ObserveLiveBinding(void* actor, bool before)
+		{
+			if (fnObserveLiveBinding && liveTakeoverActive && actor)
+				fnObserveLiveBinding(*this, actor, before);
+		}
 		void ObserveLivePlacement(const char* action, bool before)
 		{
 			if (fnObserveLivePlacement && liveTakeoverActive)
@@ -964,10 +970,12 @@ namespace GakuMotion
 					    cmd.candidateIndex < 0 || ensembleRestoreUnconfirmed ||
 					    player.state == PlaybackState::Playing || player.state == PlaybackState::Paused)
 					{ ensembleNotice = "绑定失败：请停止播放并确认角色和曲库未变化"; break; }
+					void* actor = sceneActorRegistry.Resolve(cmd.actorToken, cmd.actorEpoch);
+					ObserveLiveBinding(actor, true);
 					const bool ok = ensemble.Set(static_cast<size_t>(cmd.candidateIndex), cmd.actorToken,
 					                             cmd.actorEpoch, motions[motionIndex], cmd.value, sceneActorRegistry,
 					                             player, globalOverrides, masterOverridesEnabled);
-					if (ok) { ++injectionSession; ensembleNotice = "已绑定角色动作"; }
+					if (ok) { ++injectionSession; ObserveLiveBinding(actor, false); ensembleNotice = "已绑定角色动作"; }
 					else if (ensemble.RestoreUnconfirmed())
 					{ ensembleRestoreUnconfirmed = true; ensembleNotice = "角色恢复未确认，已停止动作注入"; }
 					else ensembleNotice = "绑定失败：角色重复、名单已变化或动作无法读取";
@@ -3443,6 +3451,7 @@ namespace GakuMotion
 		{
 			if (ensembleRestoreUnconfirmed) return;
 			if (!a || !sceneActorRegistry.Find(a) || player.controller.targetActor == a) return;
+			ObserveLiveBinding(a, true);
 			const bool hadTarget = player.controller.targetActor != nullptr;
 			if (fnBeforeTargetChange && !fnBeforeTargetChange())
 			{
@@ -3496,6 +3505,7 @@ namespace GakuMotion
 			++injectionSession;
 			ResetSoleObservation();
 			player.controller.SetTargetActor(a);
+			ObserveLiveBinding(a, false);
 			LogDebug("[GakuMotion][Target] selected one current scene actor");
 		}
 

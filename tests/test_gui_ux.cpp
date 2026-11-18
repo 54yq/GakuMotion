@@ -51,6 +51,31 @@ namespace
 		formationObservations.push_back({operation, before, core.player.controller.initialPositionOffset.x,
 			core.ensemble.Followers().front().player->controller.initialYawDegrees});
 	}
+	struct BindingObservation { void* requested; void* current; bool before; };
+	std::vector<BindingObservation> bindingObservations;
+	void ObserveBinding(Core& core, void* actor, bool before)
+	{
+		bindingObservations.push_back({actor, core.player.controller.targetActor, before});
+	}
+	void TestLiveBindingObservation()
+	{
+		Core core;
+		void* first = reinterpret_cast<void*>(0xB1000);
+		void* second = reinterpret_cast<void*>(0xB2000);
+		core.PublishSceneActors({{first, 1, ""}, {second, 2, ""}});
+		core.SetTargetActor(first);
+		core.liveTakeoverActive = true;
+		core.fnObserveLiveBinding = ObserveBinding;
+		bindingObservations.clear();
+		core.SetTargetActor(second);
+		Check(bindingObservations.size() == 2 && bindingObservations[0].requested == second &&
+			bindingObservations[0].before && bindingObservations[0].current == first &&
+			!bindingObservations[1].before && bindingObservations[1].current == second,
+			"Live binding probe brackets the target commit");
+		bindingObservations.clear();
+		core.SetTargetActor(second);
+		Check(bindingObservations.empty(), "reselecting the same Live target does not start the binding probe");
+	}
 	void FormationPosition(void* actor, float* out)
 	{ const auto p = formationPositions[actor]; out[0] = p.x; out[1] = p.y; out[2] = p.z; }
 	void FormationRotation(void* actor, float* out)
@@ -990,6 +1015,7 @@ int main(int argc, char** argv)
 	TestAuxDriveModeControls(root);
 	TestEnsembleControls(root);
 	TestFormationAlignment(root);
+	TestLiveBindingObservation();
 	{
 		const ImGuiConfigFlags originalConfigFlags = io.ConfigFlags;
 		io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // Escape closes native combo popups.
