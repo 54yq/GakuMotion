@@ -235,7 +235,8 @@ namespace
 				role, binding.actor, result.restored, result.preserved, result.unreadable);
 	}
 	GakuPhysicsDiagnosticSnapshot g_physicsDiagnostic{};
-	int g_physicsBackend = -1, g_physicsActual = 0, g_physicsFrame = -1, g_physicsMotion = -1;
+	int g_physicsBackend = -1, g_physicsActual = 0, g_physicsFrame = -1;
+	uint64_t g_physicsMotionGeneration = 0;
 	int g_physicsSeeks = -1;
 	bool g_physicsBeforeQuartz = false, g_physicsSleeveDiagnostics = false;
 	float g_physicsTime = -1.0f;
@@ -446,7 +447,7 @@ namespace
 		g_physicsActual = 0;
 		g_physicsFrame = -1;
 		g_physicsActor = nullptr;
-		g_physicsMotion = -1;
+		g_physicsMotionGeneration = 0;
 		g_physicsSeeks = -1;
 		g_physicsBeforeQuartz = g_physicsSleeveDiagnostics = false;
 		g_physicsTime = -1.0f;
@@ -3806,8 +3807,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 			const int requested = core.config.secondaryPhysicsBackend;
 			if (requested != g_physicsBackend || core.config.beforeQuartzExperiment != g_physicsBeforeQuartz ||
 				core.config.sleeveMuscleDiagnostics != g_physicsSleeveDiagnostics ||
-				activeActor != g_physicsActor || core.currentMotionIndex !=
-				g_physicsMotion ||
+				activeActor != g_physicsActor || core.loadedMotionGeneration != g_physicsMotionGeneration ||
 				player.SeekCount() != g_physicsSeeks || player.scrubbing || player.currentTime + .001f < g_physicsTime)
 			{
 				if (g_physicsActor == activeActor)
@@ -3821,7 +3821,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 				g_physicsBackend = requested;
 				g_physicsBeforeQuartz = core.config.beforeQuartzExperiment;
 				g_physicsSleeveDiagnostics = core.config.sleeveMuscleDiagnostics;
-				g_physicsMotion = core.currentMotionIndex;
+				g_physicsMotionGeneration = core.loadedMotionGeneration;
 				g_physicsActor = activeActor;
 			}
 			g_physicsSeeks = player.SeekCount();
@@ -3836,12 +3836,13 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 				                         ? 0.0f
 				                         : std::chrono::duration<float>(dispatchBegin - g_physicsLastTick).count();
 			g_physicsLastTick = dispatchBegin;
-			// Preview must not start bridge discovery. Seeking invalidates the prior
-			// packet, but an owned clock can accept a fresh pose while paused.
+			// A seek or track change invalidates the packet. The same role clock
+			// can receive the replacement pose in pause or track preview.
 			const bool nativeReadyToStart = GakuMotion::live_physics_clock::CanPublish(
 				player.state == GakuMotion::PlaybackState::Playing,
 				player.state == GakuMotion::PlaybackState::Paused, g_burstBridge.HasCaptureInput(),
-				core.liveTakeoverActive && OwnsPrimaryMmdClock(activeActor));
+				core.liveTakeoverActive && !core.liveTakeoverFault && OwnsPrimaryMmdClock(activeActor),
+				player.state == GakuMotion::PlaybackState::Preview && player.clip.total_frames > 0);
 			bool native = requested == 2 && nativeReadyToStart && g_burstBridge.Publish(binding->second, player.controller,
 			                                                      player.currentTime, frame,
 			                                                      core.config.beforeQuartzExperiment,
@@ -4621,7 +4622,8 @@ void MotionTick(void*, float)
 			const bool mmdWanted=GakuMotion::live_physics_clock::ShouldRun(core.liveTakeoverActive, core.liveTakeoverFault,
 				core.config.secondaryPhysicsBackend, core.player.state==GakuMotion::PlaybackState::Playing,
 				core.player.state==GakuMotion::PlaybackState::Paused, g_burstBridge.HasCaptureInput(),
-				OwnsPrimaryMmdClock(core.player.controller.targetActor));
+				OwnsPrimaryMmdClock(core.player.controller.targetActor),
+				core.player.state==GakuMotion::PlaybackState::Preview && core.player.clip.total_frames>0);
 			const bool mmdMatches=reinterpret_cast<void*>(LiveActorClockMvp::actor)==core.player.controller.targetActor;
 			const bool loopContext=LiveActorClockMvp::SameOwner()&&core.liveObservation.confirmed&&core.liveObservation.paused&&
 				std::abs(core.liveObservation.time-core.liveActorClockOrigin)<=0.1f&&core.injectionPolicy.Read().captureDepth==0&&GakuMotion::capture::LiveAutoPhotoIdle();

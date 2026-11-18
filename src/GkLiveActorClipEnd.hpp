@@ -20,7 +20,7 @@ class LiveActorClipEnd
     };
     struct Clip {
         Handle handle;
-        double time{}, speed{}, end{}, animationLength{};
+        double time{}, speed{}, lastFrame{}, end{}, animationLength{};
         int wrap{};
         unsigned char done{};
         bool touched{};
@@ -139,6 +139,7 @@ class LiveActorClipEnd
                 length = inheritedAnimationLength;
             if (!HasEnd(length)) return false;
         }
+        clip.lastFrame = length;
         clip.end = length + oneFrame;
         auto* value = clip.handle.bytes.data();
         if (!Read(time, value, clip.time) || !std::isfinite(clip.time) ||
@@ -260,10 +261,14 @@ public:
             if (!Read(nodeValid, node, valid) || !valid || !Read(time, node, current) ||
                 !Read(speed, node, rate) || !Read(wrap, node, wrapMode))
                 return Fail("animation_clip_state_unreadable");
-            if (!std::isfinite(current) || std::abs(current - clip.end) > 0.001 || rate != 0.0 || wrapMode != holdWrap) {
+            // Unity can clamp a parked playable to its duration on evaluation.
+            constexpr double tolerance = 0.001;
+            const bool atEnd = std::isfinite(current) &&
+                (std::abs(current - clip.end) <= tolerance || std::abs(current - clip.lastFrame) <= tolerance);
+            if (!atEnd || rate != 0.0 || wrapMode != holdWrap) {
                 if (g_hostContext.logInfo)
-                    g_hostContext.logInfo("[GakuMotion][LiveActorClipEnd] clip_state time=%.6f expected=%.6f speed=%.6f wrap=%d",
-                        current, clip.end, rate, wrapMode);
+                    g_hostContext.logInfo("[GakuMotion][LiveActorClipEnd] clip_state time=%.6f last_frame=%.6f expected=%.6f speed=%.6f wrap=%d",
+                        current, clip.lastFrame, clip.end, rate, wrapMode);
                 return Fail("animation_clip_no_longer_at_end");
             }
         }

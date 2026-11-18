@@ -150,6 +150,10 @@ struct ClockTest : LiveActorClockMvp { static int Run(){
  CHECK(!ShouldRun(true,true,2,false,true,false,true));
  CHECK(!ShouldRun(true,false,1,false,true,false,true));
  CHECK(!ShouldRun(true,false,2,false,false,false,true));
+ CHECK(!ShouldRun(true,false,2,false,false,true,false,true)); // A cold preview cannot acquire a clock.
+ CHECK(!CanPublish(false,false,true,false,true));
+ CHECK(!ShouldRun(true,true,2,false,false,false,true,true));
+ CHECK(!ShouldRun(true,false,1,false,false,false,true,true));
  GakuMotion::live_arm_snapshot::Schedule samples;
  void* sampleA=reinterpret_cast<void*>(1); void* sampleB=reinterpret_cast<void*>(2);
  CHECK(samples.Due(42,7,sampleA,10.0) && !samples.Due(42,7,sampleA,10.9));
@@ -211,12 +215,22 @@ struct ClockTest : LiveActorClockMvp { static int Run(){
  c.liveTakeoverActive=true;
  CHECK(Start(10,true) && mmdSession && playingValue==1 && modeValue==1);
  CHECK(clipEnd.ClipCount()==1 && std::abs(clipTime-(4.0+1.0/60.0))<1e-8 && clipSpeed==0.0 && clipWrap==0);
- const bool ownsClockDuringSeek = active && mmdSession && SameOwner();
- CHECK(ShouldRun(true,false,2,false,true,false,ownsClockDuringSeek));
- CHECK(CanPublish(false,true,false,ownsClockDuringSeek));
+ const bool ownsClock = active && mmdSession && SameOwner();
+ CHECK(ShouldRun(true,false,2,false,true,false,ownsClock));
+ CHECK(CanPublish(false,true,false,ownsClock));
  CHECK(TickLoop(10.5) && clipEnd.ClipCount()==1 && clipSpeed==0.0 && playingValue==1);
+ // Track selection clears the native packet. The same actor keeps its clock,
+ // and Unity can clamp a held clip to its exact duration during evaluation.
+ CHECK(ShouldRun(true,false,2,false,false,false,ownsClock,true));
+ CHECK(CanPublish(false,false,false,ownsClock,true));
+ const int clipWritesBeforeSwitch = clipWrites;
+ clipTime=clipDuration;
+ CHECK(TickLoop(11) && clipEnd.ClipCount()==1 && clipWrites==clipWritesBeforeSwitch && playingValue==1);
+ CHECK(ShouldRun(true,false,2,true,false,false,ownsClock));
+ CHECK(CanPublish(true,false,false,ownsClock));
  times[0]+=1.9;times[1]+=1.9;
  CHECK(TickLoop(11.9) && loops==0 && nodeWrites==0);
+ CHECK(!ShouldRun(true,false,2,false,false,true,ownsClock));
  CHECK(TickLoop(200) && RestoreGraph() && clipTime==1.0 && clipSpeed==1.5 && clipWrap==1 && modeValue==3);
  clipDuration=0.0;offer();const int writesBeforeUnsupported=clipWrites;
  CHECK(Start(17,true) && clipEnd.ClipCount()==0 && TickLoop(18) && RestoreGraph());
@@ -226,6 +240,10 @@ struct ClockTest : LiveActorClockMvp { static int Run(){
  CHECK(RestoreGraph());
  offer();CHECK(Start(18,true) && clipEnd.ClipCount()==1);
  clipTime=2.0;CHECK(TickLoop(18.5) && clipEnd.ClipCount()==0 && playingValue==1 && clipTime==1.0);
+ CHECK(RestoreGraph());
+ offer();CHECK(Start(18.6,true) && clipEnd.ClipCount()==1);
+ clipTime=clipDuration;clipSpeed=1.0;
+ CHECK(TickLoop(18.9) && clipEnd.ClipCount()==0 && clipTime==1.0 && clipSpeed==1.5);
  CHECK(RestoreGraph());
  modeValue=1;playingValue=1;offer();const int borrowedWrites=writes;
  CHECK(offered && Start(19,true) && borrowedRunningGraph && clipEnd.ClipCount()==1 && writes==borrowedWrites);
