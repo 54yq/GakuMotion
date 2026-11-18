@@ -52,6 +52,13 @@ class LiveActorInputIsolation
         return true;
     }
 
+    bool ReadNull(Handle& handle, unsigned char& empty) const
+    {
+        if (isNull) return Read(isNull, handle.data.data(), empty);
+        empty = handle == Handle{};
+        return true;
+    }
+
     bool OutputSource(void* graph, int index, Handle& source) const
     {
         Handle output;
@@ -91,8 +98,7 @@ class LiveActorInputIsolation
             Handle child;
             unsigned char empty{};
             void* args[]{&index};
-            if (!Read(getInput, node.data.data(), child, args) ||
-                !Read(isNull, child.data.data(), empty)) return false;
+            if (!Read(getInput, node.data.data(), child, args) || !ReadNull(child, empty)) return false;
             if (!empty) {
                 if (!FindJobs(child, depth + 1, visited, result)) return false;
                 connected = true;
@@ -122,16 +128,16 @@ class LiveActorInputIsolation
         auto* job = input.job.data.data();
         return Read(valid, job, current) && current && Read(countInputs, job, count) &&
             input.port < count && Read(getInput, job, source, args) &&
-            Read(isNull, source.data.data(), empty);
+            ReadNull(source, empty);
     }
 
     bool FindSourcePort(Input& input) const
     {
         unsigned char present{};
-        int count{};
         auto* source = input.source.data.data();
-        if (!Read(valid, source, present) || !present ||
-            !Read(countOutputs, source, count) || count <= 0 || count > 32) return false;
+        if (!Read(valid, source, present) || !present) return false;
+        int count = 1;
+        if (countOutputs && (!Read(countOutputs, source, count) || count <= 0 || count > 32)) return false;
         for (int port = 0; port < count; ++port) {
             Handle destination;
             void* args[]{&port};
@@ -141,6 +147,24 @@ class LiveActorInputIsolation
             input.sourcePort = port;
         }
         return input.sourcePort >= 0;
+    }
+
+    bool PlanInputConnections()
+    {
+        for (auto& input : inputs) {
+            unsigned char empty{};
+            if (!ReadNull(input.source, empty)) return Unavailable("physics_job_input_handle");
+            if (empty) continue;
+            // Source output enumeration cannot distinguish two connections
+            // from one playable to different inputs of the same job.
+            const auto connections = std::count_if(inputs.begin(), inputs.end(), [&](const Input& other) {
+                return other.job == input.job && other.source == input.source;
+            });
+            if (connections != 1) return Unavailable("physics_job_source_port_ambiguous");
+            if (!FindSourcePort(input)) return Unavailable("physics_job_source_port");
+            if (!Weight(input, input.weight)) return Unavailable("physics_job_input_weight");
+        }
+        return true;
     }
 
     bool RestoreInput(void* graph, Input& input) const
@@ -200,10 +224,10 @@ public:
         writeWeight = metadata.Find(handle, "SetInputWeightFromIndex", false, {0x01}, {{0x08}, {0x0c}});
         const std::pair<const char*, const void*> methods[]{
             {"GetOutputInternal", getOutput}, {"GetSourcePlayable", getSource},
-            {"PlayableHandle.IsNull", isNull}, {"PlayableHandle.IsValid", valid},
+            {"PlayableHandle.IsValid", valid},
             {"GetPlayableType", getType}, {"GetJobType", getJobType},
             {"GetInputCount", countInputs}, {"GetInputHandle", getInput},
-            {"PlayableHandle.GetOutputCount", countOutputs}, {"GetOutputHandle", getOutputHandle},
+            {"GetOutputHandle", getOutputHandle},
             {"ConnectInternal", connect}, {"DisconnectInternal", disconnect},
             {"GetInputWeightFromIndex", readWeight}, {"SetInputWeightFromIndex", writeWeight}
         };
@@ -227,12 +251,13 @@ public:
                 Input input{job, {}, port};
                 unsigned char empty{};
                 if (!InspectInput(input, input.source, empty)) return Unavailable("physics_job_input_handle");
-                if (!empty && !FindSourcePort(input)) return Unavailable("physics_job_source_port");
-                if (!empty && !Weight(input, input.weight)) return Unavailable("physics_job_input_weight");
                 inputs.push_back(input);
             }
         }
-        return !jobs.empty();
+        // Current game builds omit PlayableHandle.GetOutputCount. In that
+        // case verify port zero in the reverse direction and only accept a
+        // unique incoming connection from that source. No other port is guessed.
+        return !jobs.empty() && PlanInputConnections();
     }
 
     bool Detach(void* graph, double now)

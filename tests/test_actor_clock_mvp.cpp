@@ -21,6 +21,7 @@ struct Core {
 }
 HMODULE g_gameAssembly{};
 bool internalMissing{},internalThrows{},publicThrows{},throwPastEnd{},invalidOutput{};int publicReads{},outputCount=1,foreignIndex=-1,nonAnimationIndex=-1;
+bool strippedHandleQueries{};
 void* g_animatorKlass=reinterpret_cast<void*>(99);
 void* HelperGetActorAnimator(void*){return reinterpret_cast<void*>(2);}
 void* FindClass(const char*,const char*,const char* name){
@@ -36,7 +37,8 @@ namespace GroundShadowProbeBootstrap {
 struct Metadata {
  const void* Find(void* owner,const char* name,bool,GakuMotion::ExactMethodMetadata::Type,std::initializer_list<GakuMotion::ExactMethodMetadata::Type>) const {
   if(owner==reinterpret_cast<void*>(33)&&!std::strcmp(name,"IsValid"))return reinterpret_cast<void*>(11);
-  if(owner==reinterpret_cast<void*>(31)&&!std::strcmp(name,"IsNull"))return reinterpret_cast<void*>(30);
+  if(owner==reinterpret_cast<void*>(31)&&!std::strcmp(name,"IsNull"))return strippedHandleQueries?nullptr:reinterpret_cast<void*>(30);
+  if(strippedHandleQueries&&!std::strcmp(name,"GetOutputCount"))return nullptr;
   if(!std::strcmp(name,"op_Explicit"))return reinterpret_cast<void*>(12);
   if(!std::strcmp(name,"GetTarget"))return reinterpret_cast<void*>(13);
   const char* loopNames[]{"GetRootPlayableCount","GetTime","GetRootPlayableInternal","GetInputCount","GetInputHandle","SetTime","SetDone"};
@@ -61,6 +63,7 @@ double times[]{145.0,145.0}; bool failNodeRead{},failNodeWrite{};int nodeWrites{
 float inputWeight=0.75f;
 int isolationWrites{};
 bool wrongJobType{}, failDisconnectReadback{}, inputConnected=true;
+int physicsInputCount=1;
 void* Invoke(const void* m,void* self,void** args,void** ex){
  *ex=nullptr;
  switch(reinterpret_cast<uintptr_t>(m)){
@@ -80,9 +83,9 @@ void* Invoke(const void* m,void* self,void** args,void** ex){
  case 14:reply=1;return &reply;
  case 15:{if(failNodeRead){*ex=reinterpret_cast<void*>(1);break;}int i{};std::memcpy(&i,self,4);return &times[i];}
  case 16:{static std::array<unsigned char,16> h{};return h.data();}
- case 17:{int i{};std::memcpy(&i,self,4);reply=i==0?1:0;return &reply;}
+ case 17:{int i{};std::memcpy(&i,self,4);reply=i==0?physicsInputCount:0;return &reply;}
  case 18:{if(!inputConnected&&failDisconnectReadback){failDisconnectReadback=false;return nullptr;}
-          static std::array<unsigned char,16> h{};h[0]=inputConnected?1:255;return h.data();}
+          static std::array<unsigned char,16> h{};h[0]=inputConnected?1:0;return h.data();}
  case 19:{++nodeWrites;if(failNodeWrite){*ex=reinterpret_cast<void*>(1);break;}int i{};std::memcpy(&i,self,4);times[i]=*static_cast<double*>(args[0]);break;}
  case 20:++nodeWrites;break;
  case 21:{static std::array<unsigned char,16> job{};return job.data();}
@@ -94,7 +97,7 @@ void* Invoke(const void* m,void* self,void** args,void** ex){
  case 27:{static std::array<unsigned char,16> job{};return job.data();}
  case 28:++isolationWrites;inputConnected=true;inputWeight=0.0f;reply=1;return &reply;
  case 29:++isolationWrites;inputConnected=false;break;
- case 30:reply=*static_cast<unsigned char*>(self)==255;return &reply;
+ case 30:reply=*static_cast<unsigned char*>(self)==0;return &reply;
  }return nullptr;
 }
 struct {void*(*invoke)(const void*,void*,void**,void**)=Invoke;} g_faceRuntime;
@@ -224,6 +227,13 @@ struct ClockTest : LiveActorClockMvp { static int Run(){
  const int writesBeforeFollowerFallback=isolationWrites;
  CHECK(later.Start(28,true) && later.TickLoop(29) && later.inputIsolation.JobCount()==0 && inputConnected);
  CHECK(later.RestoreGraph() && isolationWrites==writesBeforeFollowerFallback && inputWeight==0.75f);
+ wrongJobType=false; strippedHandleQueries=true; offer();
+ CHECK(Start(30,true) && inputIsolation.JobCount()==1 && !inputConnected && TickLoop(31));
+ CHECK(RestoreGraph() && inputConnected && inputWeight==0.75f);
+ physicsInputCount=2;offer();
+ const int writesBeforeAmbiguousSource=isolationWrites;
+ CHECK(Start(32,true) && inputIsolation.JobCount()==0 && inputConnected && TickLoop(33));
+ CHECK(RestoreGraph() && isolationWrites==writesBeforeAmbiguousSource && inputWeight==0.75f);
  std::puts("actor clock MVP: gating, per-actor isolation, restoration and owner loss passed");return 0;
 }};
 int main(){ return ClockTest::Run(); }
