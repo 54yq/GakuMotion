@@ -19,10 +19,15 @@ class LiveActorInputIsolation
         float weight{};
         bool changed{};
     };
+    struct OutputRoute {
+        Handle original, physics;
+        int originalPort{}, physicsPort{};
+        bool active{}, changed{};
+    } route;
 
     const void *getOutput{}, *getSource{}, *isNull{}, *valid{}, *getType{}, *getJobType{},
         *countInputs{}, *getInput{}, *countOutputs{}, *getOutputHandle{}, *connect{}, *disconnect{},
-        *readWeight{}, *writeWeight{};
+        *readWeight{}, *writeWeight{}, *getSourcePort{}, *setOutputSource{};
     using ClassFromSystemType = void*(*)(void*);
     ClassFromSystemType classFromType{};
     void *scriptClass{}, *physicsClass{}, *mixerClass{}, *layerMixerClass{};
@@ -59,13 +64,36 @@ class LiveActorInputIsolation
         return true;
     }
 
+    bool ReadOutput(void* graph, int index, Handle& output) const
+    {
+        unsigned char found{};
+        void* args[]{&index, output.data.data()};
+        return Read(getOutput, graph, found, args) && found;
+    }
+
     bool OutputSource(void* graph, int index, Handle& source) const
     {
         Handle output;
-        unsigned char found{};
-        void* args[]{&index, output.data.data()};
-        return Read(getOutput, graph, found, args) && found &&
-            Read(getSource, output.data.data(), source);
+        return ReadOutput(graph, index, output) && Read(getSource, output.data.data(), source);
+    }
+
+    bool ReadRoute(void* graph, Handle& source, int& port) const
+    {
+        Handle output;
+        return ReadOutput(graph, 0, output) && Read(getSource, output.data.data(), source) &&
+            Read(getSourcePort, output.data.data(), port);
+    }
+
+    bool WriteRoute(void* graph, Handle& source, int port) const
+    {
+        Handle output;
+        if (!ReadOutput(graph, 0, output)) return false;
+        void* args[]{source.data.data(), &port};
+        void* ex = nullptr;
+        g_faceRuntime.invoke(setOutputSource, output.data.data(), args, &ex);
+        Handle actual;
+        int actualPort{};
+        return !ex && ReadRoute(graph, actual, actualPort) && actual == source && actualPort == port;
     }
 
     bool NodeType(Handle& node, void*& type) const
@@ -149,6 +177,51 @@ class LiveActorInputIsolation
         return input.sourcePort >= 0;
     }
 
+    bool FindPhysicsOutput(Handle source, const Handle& physics, int& port) const
+    {
+        std::vector<Handle> pending{source};
+        for (size_t index = 0; index < pending.size(); ++index) {
+            Handle node = pending[index];
+            unsigned char present{};
+            int count{};
+            if (!Read(valid, node.data.data(), present) || !present ||
+                !Read(countInputs, node.data.data(), count) || count < 0 || count > 32) return false;
+            for (int inputPort = 0; inputPort < count; ++inputPort) {
+                Handle child;
+                unsigned char empty{};
+                void* args[]{&inputPort};
+                if (!Read(getInput, node.data.data(), child, args) || !ReadNull(child, empty)) return false;
+                if (empty) continue;
+                if (child == physics) {
+                    Input edge{node, child, inputPort};
+                    if (!FindSourcePort(edge)) return false;
+                    port = edge.sourcePort;
+                    return true;
+                }
+                if (std::find(pending.begin(), pending.end(), child) != pending.end()) continue;
+                if (pending.size() >= 128) return false;
+                pending.push_back(child);
+            }
+        }
+        return false;
+    }
+
+    bool PreparePhysicsOutput(void* graph, Handle physics)
+    {
+        if (!getSourcePort || !setOutputSource) return false;
+        void* type = nullptr;
+        if (!NodeType(physics, type) || type != scriptClass) return false;
+        Handle original;
+        int originalPort{};
+        if (!ReadRoute(graph, original, originalPort) || originalPort < 0) return false;
+        int physicsPort = originalPort;
+        if (!(physics == original) && !FindPhysicsOutput(original, physics, physicsPort)) return false;
+        route = {original, physics, originalPort, physicsPort, true, false};
+        outputs.push_back(original);
+        jobs.push_back(physics);
+        return true;
+    }
+
     bool PlanInputConnections()
     {
         for (auto& input : inputs) {
@@ -182,7 +255,7 @@ class LiveActorInputIsolation
     }
 
 public:
-    bool Prepare(void* graphClass, void* graph, unsigned actorOutputCount)
+    bool Prepare(void* graphClass, void* graph, unsigned actorOutputCount, const void* actorPhysics)
     {
         *this = {};
         const auto metadata = GroundShadowProbeBootstrap::Resolve(g_gameAssembly).method;
@@ -209,6 +282,8 @@ public:
 
         getOutput = metadata.Find(graphClass, "GetOutputInternal", false, {0x02}, {{0x08}, {0x11, output, true}});
         getSource = metadata.Find(output, "GetSourcePlayable", false, {0x11, handle}, {});
+        getSourcePort = metadata.Find(output, "GetSourceOutputPort", false, {0x08}, {});
+        setOutputSource = metadata.Find(output, "SetSourcePlayable", false, {0x01}, {{0x11, handle}, {0x08}});
         isNull = metadata.Find(handle, "IsNull", false, {0x02}, {});
         valid = metadata.Find(handle, "IsValid", false, {0x02}, {});
         getType = metadata.Find(handle, "GetPlayableType", false, {0x12}, {});
@@ -225,7 +300,7 @@ public:
         const std::pair<const char*, const void*> methods[]{
             {"GetOutputInternal", getOutput}, {"GetSourcePlayable", getSource},
             {"PlayableHandle.IsValid", valid},
-            {"GetPlayableType", getType}, {"GetJobType", getJobType},
+            {"GetPlayableType", getType},
             {"GetInputCount", countInputs}, {"GetInputHandle", getInput},
             {"GetOutputHandle", getOutputHandle},
             {"ConnectInternal", connect}, {"DisconnectInternal", disconnect},
@@ -236,12 +311,17 @@ public:
         }
         if (!actorOutputCount) return Unavailable("no_actor_outputs");
 
-        unsigned visited = 0;
-        for (unsigned index = 0; index < actorOutputCount; ++index) {
-            Handle source;
-            if (!OutputSource(graph, static_cast<int>(index), source)) return Unavailable("actor_output_source");
-            if (!FindJobs(source, 0, visited, jobs)) return Unavailable("actor_output_job_chain");
-            outputs.push_back(source);
+        Handle physics;
+        if (actorPhysics) std::memcpy(physics.data.data(), actorPhysics, sizeof(physics));
+        if (actorOutputCount != 1 || physics == Handle{} || !PreparePhysicsOutput(graph, physics)) {
+            if (!getJobType) return Unavailable("GetJobType");
+            unsigned visited = 0;
+            for (unsigned index = 0; index < actorOutputCount; ++index) {
+                Handle source;
+                if (!OutputSource(graph, static_cast<int>(index), source)) return Unavailable("actor_output_source");
+                if (!FindJobs(source, 0, visited, jobs)) return Unavailable("actor_output_job_chain");
+                outputs.push_back(source);
+            }
         }
         for (auto& job : jobs) {
             int count{};
@@ -275,6 +355,10 @@ public:
             unsigned char empty{};
             if (ex || !InspectInput(input, source, empty) || !empty) return false;
         }
+        if (route.active && !(route.original == route.physics)) {
+            route.changed = true;
+            if (!WriteRoute(graph, route.physics, route.physicsPort)) return false;
+        }
         return true;
     }
 
@@ -282,15 +366,22 @@ public:
     {
         if (now < nextCheck) return true;
         nextCheck = now + 0.25;
-        unsigned visited = 0;
-        std::vector<Handle> currentJobs;
-        currentJobs.reserve(jobs.size());
-        for (size_t index = 0; index < outputs.size(); ++index) {
+        if (route.active) {
             Handle source;
-            if (!OutputSource(graph, static_cast<int>(index), source) || !(source == outputs[index]) ||
-                !FindJobs(source, 0, visited, currentJobs)) return false;
+            int port{};
+            if (!ReadRoute(graph, source, port) || !(source == route.physics) || port != route.physicsPort)
+                return false;
+        } else {
+            unsigned visited = 0;
+            std::vector<Handle> currentJobs;
+            currentJobs.reserve(jobs.size());
+            for (size_t index = 0; index < outputs.size(); ++index) {
+                Handle source;
+                if (!OutputSource(graph, static_cast<int>(index), source) || !(source == outputs[index]) ||
+                    !FindJobs(source, 0, visited, currentJobs)) return false;
+            }
+            if (currentJobs != jobs) return false;
         }
-        if (currentJobs != jobs) return false;
         Handle extraOutput;
         unsigned char found{};
         int index = static_cast<int>(outputs.size());
@@ -317,11 +408,20 @@ public:
         for (auto& input : inputs) {
             if (input.changed && !RestoreInput(graph, input)) restored = false;
         }
+        if (route.changed) {
+            Handle source;
+            int port{};
+            if (!ReadRoute(graph, source, port)) restored = false;
+            else if (source == route.physics && port == route.physicsPort)
+                restored = WriteRoute(graph, route.original, route.originalPort) && restored;
+            else if (!(source == route.original) || port != route.originalPort) restored = false;
+        }
         *this = {};
         return restored;
     }
 
     size_t JobCount() const { return jobs.size(); }
+    bool BypassedPlaybackOutput() const { return route.changed; }
     size_t DetachedCount() const
     {
         return std::count_if(inputs.begin(), inputs.end(), [](const Input& input) { return input.changed; });

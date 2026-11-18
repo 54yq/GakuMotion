@@ -7,6 +7,7 @@
 // modifies streams, or claims to provide a Swing checkpoint.
 template <int Slot> struct LiveActorClockState {
     alignas(16) static inline std::array<unsigned char,16> graph{};
+    alignas(16) static inline std::array<unsigned char,16> actorPhysicsPlayable{};
     static inline uintptr_t owner{}, actor{}, player{}; static inline int scene{};
     static inline bool offered{},active{}; static inline int originalMode{},originalPlaying{};
     static inline double started{};
@@ -112,7 +113,8 @@ template <int Slot> struct LiveActorClockState {
         raw=boxed&&!ex?g_safeBones.unbox(boxed):nullptr;if(!raw)return false;
         time=*static_cast<double*>(raw);return std::isfinite(time);
     }
-    static inline void Offer(void* value,void* klass,void* actorValue,void* playerValue,bool targetMatches) {
+    static inline void Offer(void* value,void* klass,void* actorValue,void* playerValue,bool targetMatches,
+                             const std::array<unsigned char,16>& physicsPlayable = {}) {
         auto& c=GakuMotion::Core::Instance();
         if(active)return;
         if(c.liveActorClockFault){Reject("上次恢复未确认，请重新进入 Live");return;}
@@ -182,7 +184,7 @@ template <int Slot> struct LiveActorClockState {
         setMode=modeClass?metadata.Find(klass,"SetTimeUpdateMode",false,{0x01},{{0x11,modeClass}}):nullptr;
         play=metadata.Find(klass,"Play",false,{0x01},{});stop=metadata.Find(klass,"Stop",false,{0x01},{});
         if(!valid||!playing||!mode||!setMode||!play||!stop){Reject("图播放或恢复接口未全部解析");return;}
-        std::memcpy(graph.data(),value,graph.size());graphClass=klass;
+        std::memcpy(graph.data(),value,graph.size());graphClass=klass;actorPhysicsPlayable=physicsPlayable;
         owner=c.liveOwnerToken;scene=c.liveOwnerScene;actor=reinterpret_cast<uintptr_t>(actorValue);player=reinterpret_cast<uintptr_t>(playerValue);
         const int v=Read(valid,true),m=Read(mode),p=Read(playing,true);
         offered=v==1 && ((m==3 && p==0) || (Slot==0 && c.liveTakeoverActive && m==1 && p==1));
@@ -203,7 +205,7 @@ template <int Slot> struct LiveActorClockState {
         const bool alreadyRunning = Slot==0 && forMmd && currentMode==1 && currentPlaying==1;
         if(!alreadyRunning && (currentMode!=3 || currentPlaying!=0))return false;
         if(forMmd){loops=0;nodes.clear();loopError=nullptr;}
-        if(forMmd && !inputIsolation.Prepare(graphClass, graph.data(), verifiedOutputs)) {
+        if(forMmd && !inputIsolation.Prepare(graphClass, graph.data(), verifiedOutputs, actorPhysicsPlayable.data())) {
             // Preparation only reads the graph. Keep the established native
             // clock available when this runtime cannot isolate its inputs.
             inputIsolation = {};
@@ -238,6 +240,7 @@ template <int Slot> struct LiveActorClockState {
 };
 struct LiveDynamicFollowerClock {
     alignas(16) std::array<unsigned char,16> graph{};
+    alignas(16) std::array<unsigned char,16> actorPhysicsPlayable{};
     uintptr_t owner{}, actor{}, player{}; int scene{};
     bool offered{},active{}; int originalMode{},originalPlaying{};
     double started{};
@@ -343,7 +346,8 @@ struct LiveDynamicFollowerClock {
         raw=boxed&&!ex?g_safeBones.unbox(boxed):nullptr;if(!raw)return false;
         time=*static_cast<double*>(raw);return std::isfinite(time);
     }
-    void Offer(void* value,void* klass,void* actorValue,void* playerValue,bool targetMatches) {
+    void Offer(void* value,void* klass,void* actorValue,void* playerValue,bool targetMatches,
+               const std::array<unsigned char,16>& physicsPlayable = {}) {
         auto& c=GakuMotion::Core::Instance();
         if(active)return;
         if(c.liveActorClockFault){Reject("上次恢复未确认，请重新进入 Live");return;}
@@ -413,7 +417,7 @@ struct LiveDynamicFollowerClock {
         setMode=modeClass?metadata.Find(klass,"SetTimeUpdateMode",false,{0x01},{{0x11,modeClass}}):nullptr;
         play=metadata.Find(klass,"Play",false,{0x01},{});stop=metadata.Find(klass,"Stop",false,{0x01},{});
         if(!valid||!playing||!mode||!setMode||!play||!stop){Reject("图播放或恢复接口未全部解析");return;}
-        std::memcpy(graph.data(),value,graph.size());graphClass=klass;
+        std::memcpy(graph.data(),value,graph.size());graphClass=klass;actorPhysicsPlayable=physicsPlayable;
         owner=c.liveOwnerToken;scene=c.liveOwnerScene;actor=reinterpret_cast<uintptr_t>(actorValue);player=reinterpret_cast<uintptr_t>(playerValue);
         const int v=Read(valid,true),m=Read(mode),p=Read(playing,true);
         offered=v==1 && m==3 && p==0;
@@ -431,7 +435,7 @@ struct LiveDynamicFollowerClock {
         if(active||c.liveActorClockFault||!offered||!SameOwner()||!c.liveObservation.confirmed||!c.liveObservation.paused||c.liveTakeoverActive!=forMmd||c.liveTakeoverFault||
             Read(valid,true)!=1||Read(mode)!=3||Read(playing,true)!=0)return false;
         if(forMmd){loops=0;nodes.clear();loopError=nullptr;}
-        if(forMmd && !inputIsolation.Prepare(graphClass, graph.data(), verifiedOutputs)) {
+        if(forMmd && !inputIsolation.Prepare(graphClass, graph.data(), verifiedOutputs, actorPhysicsPlayable.data())) {
             inputIsolation = {};
             loopError = "native_clock_without_animation_isolation";
         }

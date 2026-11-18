@@ -4652,9 +4652,10 @@ void MotionTick(void*, float)
 				if(g_hostContext.logInfo)g_hostContext.logInfo("[GakuMotion][ActorClockMVP] start=%d origin=%.3f",int(started),core.liveActorClockOrigin);
 				if(g_hostContext.logInfo)g_hostContext.logInfo("[GakuMotion][ActorClockLoop] mmd=%d prepared=%d nodes=%zu window=%.3f error=%s",int(mmdWanted),int(prepared),LiveActorClockMvp::nodes.size(),LiveActorClockMvp::loopWindow,LiveActorClockMvp::loopError?LiveActorClockMvp::loopError:"none");
 				if(started && mmdWanted && g_hostContext.logInfo)
-					g_hostContext.logInfo("[GakuMotion][LiveActorIsolation] slot=1 mode=%s jobs=%zu detached_ports=%zu",
+					g_hostContext.logInfo("[GakuMotion][LiveActorIsolation] slot=1 mode=%s jobs=%zu detached_ports=%zu direct_physics_output=%d",
 						LiveActorClockMvp::inputIsolation.JobCount() ? "isolated" : "native_compatibility",
-						LiveActorClockMvp::inputIsolation.JobCount(), LiveActorClockMvp::inputIsolation.DetachedCount());
+						LiveActorClockMvp::inputIsolation.JobCount(), LiveActorClockMvp::inputIsolation.DetachedCount(),
+						int(LiveActorClockMvp::inputIsolation.BypassedPlaybackOutput()));
 			}
 			if(LiveActorClockMvp::active&&now>=g_clockNextLog)RecordActorClockPhysics(false,now);
 			// Each bound follower must own an independently verified animation

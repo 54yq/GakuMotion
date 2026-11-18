@@ -44,8 +44,8 @@ struct Metadata {
   const char* loopNames[]{"GetRootPlayableCount","GetTime","GetRootPlayableInternal","GetInputCount","GetInputHandle","SetTime","SetDone"};
   for(uintptr_t i=0;i<7;++i)if(!std::strcmp(name,loopNames[i]))return reinterpret_cast<void*>(i+14);
   const char* isolationNames[]{"GetSourcePlayable","GetPlayableType","GetJobType","GetInputWeightFromIndex","SetInputWeightFromIndex",
-   "GetOutputCount","GetOutputHandle","ConnectInternal","DisconnectInternal"};
-  for(uintptr_t i=0;i<9;++i)if(!std::strcmp(name,isolationNames[i]))return reinterpret_cast<void*>(i+21);
+   "GetOutputCount","GetOutputHandle","ConnectInternal","DisconnectInternal","PlayableHandle.IsNull","GetSourceOutputPort","SetSourcePlayable"};
+  for(uintptr_t i=0;i<12;++i)if(!std::strcmp(name,isolationNames[i]))return reinterpret_cast<void*>(i+21);
   const char* names[]{"IsValid","IsPlaying","GetTimeUpdateMode","SetTimeUpdateMode","Play","Stop","GetOutputInternal","GetOutput","GetHandle","IsNull"};
   for(uintptr_t i=0;i<10;++i)if(!std::strcmp(name,names[i]))return i==6&&internalMissing?nullptr:reinterpret_cast<void*>(i+1);
   return nullptr;
@@ -64,6 +64,13 @@ float inputWeight=0.75f;
 int isolationWrites{};
 bool wrongJobType{}, failDisconnectReadback{}, inputConnected=true;
 int physicsInputCount=1;
+bool directPhysicsFixture{}, failRouteWrite{};
+int outputSource=7, outputPort=2;
+void* HandleReply(unsigned char id){
+ static std::array<unsigned char,16> handle{};
+ handle[0]=id;
+ return handle.data();
+}
 void* Invoke(const void* m,void* self,void** args,void** ex){
  *ex=nullptr;
  switch(reinterpret_cast<uintptr_t>(m)){
@@ -83,21 +90,26 @@ void* Invoke(const void* m,void* self,void** args,void** ex){
  case 14:reply=1;return &reply;
  case 15:{if(failNodeRead){*ex=reinterpret_cast<void*>(1);break;}int i{};std::memcpy(&i,self,4);return &times[i];}
  case 16:{static std::array<unsigned char,16> h{};return h.data();}
- case 17:{int i{};std::memcpy(&i,self,4);reply=i==0?physicsInputCount:0;return &reply;}
+ case 17:{int i{};std::memcpy(&i,self,4);
+          reply=directPhysicsFixture?(i==5||i==7):i==0?physicsInputCount:0;return &reply;}
  case 18:{if(!inputConnected&&failDisconnectReadback){failDisconnectReadback=false;return nullptr;}
-          static std::array<unsigned char,16> h{};h[0]=inputConnected?1:0;return h.data();}
+          if(directPhysicsFixture)return HandleReply(*static_cast<unsigned char*>(self)==7?5:inputConnected?6:0);
+          return HandleReply(inputConnected?1:0);}
  case 19:{++nodeWrites;if(failNodeWrite){*ex=reinterpret_cast<void*>(1);break;}int i{};std::memcpy(&i,self,4);times[i]=*static_cast<double*>(args[0]);break;}
  case 20:++nodeWrites;break;
- case 21:{static std::array<unsigned char,16> job{};return job.data();}
+ case 21:return HandleReply(directPhysicsFixture?static_cast<unsigned char>(outputSource):0);
  case 22:return reinterpret_cast<void*>(34);
  case 23:return reinterpret_cast<void*>(uintptr_t(wrongJobType?36:35));
  case 24:return &inputWeight;
  case 25:++isolationWrites;inputWeight=*static_cast<float*>(args[1]);break;
  case 26:reply=1;return &reply;
- case 27:{static std::array<unsigned char,16> job{};return job.data();}
+ case 27:return HandleReply(directPhysicsFixture?(*static_cast<unsigned char*>(self)==5?7:5):0);
  case 28:++isolationWrites;inputConnected=true;inputWeight=0.0f;reply=1;return &reply;
  case 29:++isolationWrites;inputConnected=false;break;
  case 30:reply=*static_cast<unsigned char*>(self)==0;return &reply;
+ case 31:reply=outputPort;return &reply;
+ case 32:outputSource=*static_cast<unsigned char*>(args[0]);outputPort=*static_cast<int*>(args[1]);
+         if(failRouteWrite){failRouteWrite=false;*ex=reinterpret_cast<void*>(1);}break;
  }return nullptr;
 }
 struct {void*(*invoke)(const void*,void*,void**,void**)=Invoke;} g_faceRuntime;
@@ -234,6 +246,17 @@ struct ClockTest : LiveActorClockMvp { static int Run(){
  const int writesBeforeAmbiguousSource=isolationWrites;
  CHECK(Start(32,true) && inputIsolation.JobCount()==0 && inputConnected && TickLoop(33));
  CHECK(RestoreGraph() && isolationWrites==writesBeforeAmbiguousSource && inputWeight==0.75f);
+ directPhysicsFixture=true; wrongJobType=true; outputCount=1;
+ const std::array<unsigned char,16> actorPhysics{5};
+ auto offerDirect=[&](){Offer(graph.data(),reinterpret_cast<void*>(1),reinterpret_cast<void*>(2),
+                             reinterpret_cast<void*>(3),true,actorPhysics);};
+ offerDirect();
+ CHECK(Start(34,true) && inputIsolation.BypassedPlaybackOutput() && !inputConnected &&
+       outputSource==5 && outputPort==0 && TickLoop(35));
+ CHECK(RestoreGraph() && inputConnected && inputWeight==0.75f && outputSource==7 && outputPort==2);
+ offerDirect();failRouteWrite=true;
+ CHECK(!Start(36,true) && active && !inputConnected && outputSource==5 && !playingValue);
+ CHECK(RestoreGraph() && inputConnected && outputSource==7 && outputPort==2);
  std::puts("actor clock MVP: gating, per-actor isolation, restoration and owner loss passed");return 0;
 }};
 int main(){ return ClockTest::Run(); }
