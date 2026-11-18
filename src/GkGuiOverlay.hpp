@@ -542,7 +542,8 @@ namespace GakuMotion
                             }
                             if(!ctx.liveAudioNotice.empty())ImGui::TextWrapped("%s",ctx.liveAudioNotice.c_str());
                             ImGui::Spacing();
-                            const char* physics=!ctx.physicsMonitorFresh?"待播放":ctx.physicsMonitor.actual==2?"原生运行中":ctx.physicsMonitor.actual==1?"内建物理":"未运行";
+                            const char* physics=!ctx.physicsMonitorFresh?"待播放":ctx.physicsMonitor.actual==2?"原生运行中":ctx.physicsMonitor.actual==1?"内建物理":
+                                ctx.physicsMonitor.requested==2?"等待原生任务":"未运行";
                             ImGui::TextWrapped("接管：%s    Live：%s    物理：%s",ctx.liveTakeoverAvailable?"可用":"等待确认",ctx.liveViewingConfirmed?"已识别":"等待确认",physics);
                             ImGui::Spacing();
                             ImGui::BeginDisabled(!ctx.liveTakeoverAvailable||!ctx.fnSetLiveTakeover);

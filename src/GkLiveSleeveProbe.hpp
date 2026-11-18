@@ -477,7 +477,7 @@ namespace LiveSleeveProbe
     {
         uint64_t token{}, generation{};
         int bodyFrame{-1}, nativeFrame{-1};
-        bool fallbackSeen{}, pendingBodySeen{}, nativeSeen{}, settledSeen{};
+        bool fallbackSeen{}, nativeWaitSeen{}, pendingBodySeen{}, nativeSeen{}, settledSeen{};
     };
     struct TimelineCapture
     {
@@ -623,6 +623,11 @@ namespace LiveSleeveProbe
             return;
         }
         if (observed.bodyFrame < 0 || role.physicsFrame != currentFrame) return;
+        if (role.actual == 0 && !observed.nativeWaitSeen)
+        {
+            observed.nativeWaitSeen = true;
+            RecordTimeline(core, actor, role, "after_native_wait");
+        }
         if (role.actual == 1 && !observed.fallbackSeen)
         {
             observed.fallbackSeen = true;

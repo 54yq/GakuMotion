@@ -3,6 +3,7 @@
 #endif
 #include <windows.h>
 #include "GkCostumePhysicsCapture.hpp"
+#include "GkPhysicsMonitor.hpp"
 #include <cassert>
 #include <iostream>
 
@@ -104,5 +105,36 @@ int main()
 	const auto discarded = stale.solver.ReleaseToNative(otherBinding, stale.controller);
 	assert(!discarded.restored && !discarded.preserved && !discarded.unreadable);
 	assert(stale.skirt.rotation.x == external.x && stale.skirt.rotation.w == external.w);
+
+	// A scrub-sized anchor jump can drive the old pending fallback straight to
+	// the cloth swing limit on an otherwise valid forearm sleeve chain.
+	Rig oldPending;
+	oldPending.skirt.name = "RightForeArmSleeve1_S";
+	oldPending.tip.name = "RightForeArmSleeve2_S";
+	assert(oldPending.solver.Publish(oldPending.binding, oldPending.controller, 0.f, 1));
+	oldPending.skirt.position.x = .12f;
+	assert(oldPending.solver.Publish(oldPending.binding, oldPending.controller, 1.f / 240.f, 2));
+	const float degrees = 2.f * std::acos(std::fabs(oldPending.skirt.rotation.w)) * 180.f / 3.14159265f;
+	assert(std::fabs(degrees - 25.f) < .01f && oldPending.solver.GetStats().clamps != 0);
+
+	Rig livePending;
+	livePending.skirt.name = oldPending.skirt.name;
+	livePending.tip.name = oldPending.tip.name;
+	livePending.skirt.rotation = external;
+	for (const char* reason : {"native_waiting_for_playback", "native_pending", "native_pending_stale",
+	                          "body_binding_pending", "discovering"})
+	{
+		const int actual = SelectSecondaryPhysicsBackend(2, false, true, reason);
+		assert(actual == 0);
+		if (actual == 1) livePending.solver.Publish(livePending.binding, livePending.controller, .02f, 2);
+	}
+	assert(!livePending.solver.HasCaptureWrites());
+	assert(livePending.skirt.rotation.x == external.x && livePending.skirt.rotation.w == external.w);
+	assert(SelectSecondaryPhysicsBackend(2, true, true, "native") == 2);
+	assert(SelectSecondaryPhysicsBackend(2, false, true, "companion_faulted") == 1);
+	assert(SelectSecondaryPhysicsBackend(2, false, true, "companion_missing") == 1);
+	assert(SelectSecondaryPhysicsBackend(2, false, false, "native_pending") == 1);
+	assert(SelectSecondaryPhysicsBackend(1, false, true, "fallback") == 1);
+	assert(SelectSecondaryPhysicsBackend(0, false, true, "off") == 0);
 	std::cout << "Costume capture contracts passed. Trace: " << path.filename().string() << '\n';
 }

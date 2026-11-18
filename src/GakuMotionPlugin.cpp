@@ -341,13 +341,15 @@ namespace
 			slot.lastTick = now;
 			const bool started = core.player.state == GakuMotion::PlaybackState::Playing || g_followerBridge.State(i).outstanding;
 			const bool native = requested == 2 && started && g_followerBridge.Publish(i, binding->second, ctrl, player.currentTime, frame, slot.quartz, slot.diagnostics);
-			if (native && slot.actual == 1)
-				ReleaseFallbackToNative(slot.fallback, binding->second, ctrl, static_cast<unsigned>(i + 2));
-			slot.actual = requested == 0 ? 0 : native ? 2 : 1;
-			if (slot.actual == 1) PublishFallbackPhysics(core, slot.fallback, binding->second, player, static_cast<unsigned>(i + 2), dt, frame);
 			const std::string reason = requested == 0 ? "off" : requested == 1 ? "fallback" :
 				!started ? "native_waiting_for_playback" : g_followerBridge.State(i).reason == "not_requested" ? g_followerBridge.reason : g_followerBridge.State(i).reason;
-			core.followerPhysicsStatus[i] = slot.actual == 2 ? "原生运行中" : slot.actual == 0 ? "已关闭" :
+			const int actual = GakuMotion::SelectSecondaryPhysicsBackend(requested, native, core.liveTakeoverActive, reason);
+			if (requested == 2 && actual != 1 && slot.actual == 1)
+				ReleaseFallbackToNative(slot.fallback, binding->second, ctrl, static_cast<unsigned>(i + 2));
+			slot.actual = actual;
+			if (slot.actual == 1) PublishFallbackPhysics(core, slot.fallback, binding->second, player, static_cast<unsigned>(i + 2), dt, frame);
+			core.followerPhysicsStatus[i] = slot.actual == 2 ? "原生运行中" :
+				slot.actual == 0 ? (requested == 2 ? "等待原生任务" : "已关闭") :
 				reason == "native_pending_stale" ? "内建（等待原生任务）" :
 				reason == "native_pending" || reason == "native_waiting_for_playback" ? "内建（原生待确认）" :
 				reason == "fallback" ? "内建运行中" : "内建（" + reason + "）";
@@ -3851,11 +3853,13 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 			                                                      player.currentTime, frame,
 			                                                      core.config.beforeQuartzExperiment,
 			                                                      core.config.sleeveMuscleDiagnostics);
-			if (native && g_physicsActual == 1)
+			const std::string reason = requested == 2 ? (nativeReadyToStart ? g_burstBridge.reason : "native_waiting_for_playback") : requested == 1 ? "fallback" : "off";
+			const int actual = GakuMotion::SelectSecondaryPhysicsBackend(requested, native, core.liveTakeoverActive, reason);
+			if (requested == 2 && actual != 1 && g_physicsActual == 1)
 			{
 				ReleaseFallbackToNative(g_fallbackPhysics, binding->second, player.controller, 1);
 			}
-			g_physicsActual = requested == 0 ? 0 : native ? 2 : 1;
+			g_physicsActual = actual;
 			if (g_physicsActual == 1)
 			{
 				// Original engine jobs have completed at this LateUpdate callback.
@@ -3896,7 +3900,6 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 			d.bridge_failures = perf.failed_passes;
 			d.bridge_expired_skips = perf.expired_skips;
 			d.bridge_identity_skips = perf.identity_skips;
-			const std::string reason = requested == 2 ? (nativeReadyToStart ? g_burstBridge.reason : "native_waiting_for_playback") : requested == 1 ? "fallback" : "off";
 			auto& monitor = core.physicsMonitor;
 			monitor.observed = true; monitor.live = core.liveTakeoverActive;
 			monitor.actor = reinterpret_cast<uintptr_t>(activeActor); monitor.session = core.injectionSession;
