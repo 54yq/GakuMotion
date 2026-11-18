@@ -30,6 +30,12 @@ class LiveActorInputIsolation
     std::vector<Input> inputs;
     double nextCheck{};
 
+    static bool Unavailable(const char* reason)
+    {
+        if (g_hostContext.logInfo) g_hostContext.logInfo("[GakuMotion][LiveActorIsolation] unavailable=%s", reason);
+        return false;
+    }
+
     static void* Call(const void* method, void* self, void** args = nullptr)
     {
         void* ex = nullptr;
@@ -175,7 +181,7 @@ public:
         uint32_t alignment{};
         if (!handle || !output || !scriptClass || !physicsClass || !size || !classFromType ||
             size(handle, &alignment) != sizeof(Handle) || size(output, &alignment) != sizeof(Handle))
-            return false;
+            return Unavailable("playable_handle_classes_or_size");
 
         getOutput = metadata.Find(graphClass, "GetOutputInternal", false, {0x02}, {{0x08}, {0x11, output, true}});
         getSource = metadata.Find(output, "GetSourcePlayable", false, {0x11, handle}, {});
@@ -192,26 +198,37 @@ public:
         disconnect = metadata.Find(graphClass, "DisconnectInternal", false, {0x01}, {{0x11, handle}, {0x08}});
         readWeight = metadata.Find(handle, "GetInputWeightFromIndex", false, {0x0c}, {{0x08}});
         writeWeight = metadata.Find(handle, "SetInputWeightFromIndex", false, {0x01}, {{0x08}, {0x0c}});
-        if (!getOutput || !getSource || !isNull || !valid || !getType || !getJobType ||
-            !countInputs || !getInput || !countOutputs || !getOutputHandle || !connect || !disconnect ||
-            !readWeight || !writeWeight || !actorOutputCount) return false;
+        const std::pair<const char*, const void*> methods[]{
+            {"GetOutputInternal", getOutput}, {"GetSourcePlayable", getSource},
+            {"PlayableHandle.IsNull", isNull}, {"PlayableHandle.IsValid", valid},
+            {"GetPlayableType", getType}, {"GetJobType", getJobType},
+            {"GetInputCount", countInputs}, {"GetInputHandle", getInput},
+            {"PlayableHandle.GetOutputCount", countOutputs}, {"GetOutputHandle", getOutputHandle},
+            {"ConnectInternal", connect}, {"DisconnectInternal", disconnect},
+            {"GetInputWeightFromIndex", readWeight}, {"SetInputWeightFromIndex", writeWeight}
+        };
+        for (const auto& [name, method] : methods) {
+            if (!method) return Unavailable(name);
+        }
+        if (!actorOutputCount) return Unavailable("no_actor_outputs");
 
         unsigned visited = 0;
         for (unsigned index = 0; index < actorOutputCount; ++index) {
             Handle source;
-            if (!OutputSource(graph, static_cast<int>(index), source) || !FindJobs(source, 0, visited, jobs))
-                return false;
+            if (!OutputSource(graph, static_cast<int>(index), source)) return Unavailable("actor_output_source");
+            if (!FindJobs(source, 0, visited, jobs)) return Unavailable("actor_output_job_chain");
             outputs.push_back(source);
         }
         for (auto& job : jobs) {
             int count{};
-            if (!Read(countInputs, job.data.data(), count) || count < 0 || count > 32) return false;
+            if (!Read(countInputs, job.data.data(), count) || count < 0 || count > 32)
+                return Unavailable("physics_job_input_count");
             for (int port = 0; port < count; ++port) {
                 Input input{job, {}, port};
                 unsigned char empty{};
-                if (!InspectInput(input, input.source, empty) ||
-                    (!empty && (!FindSourcePort(input) || !Weight(input, input.weight))))
-                    return false;
+                if (!InspectInput(input, input.source, empty)) return Unavailable("physics_job_input_handle");
+                if (!empty && !FindSourcePort(input)) return Unavailable("physics_job_source_port");
+                if (!empty && !Weight(input, input.weight)) return Unavailable("physics_job_input_weight");
                 inputs.push_back(input);
             }
         }

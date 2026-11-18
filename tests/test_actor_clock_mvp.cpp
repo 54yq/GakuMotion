@@ -172,7 +172,10 @@ struct ClockTest : LiveActorClockMvp { static int Run(){
  outputCount=2;offer();CHECK(offered&&c.liveActorClockNotice.find("不可用")==std::string::npos);
  CHECK(CaptureLoop(10,2.0)&&nodes.size()==2&&std::abs(loopWindow-1.85)<0.001);
  c.liveTakeoverActive=true;wrongJobType=true;
- CHECK(!Start(10,true) && !active && inputWeight==0.75f && isolationWrites==0);
+ CHECK(Start(10,true) && mmdSession && playingValue==1 && modeValue==1);
+ CHECK(inputIsolation.JobCount()==0 && inputConnected && inputWeight==0.75f && isolationWrites==0);
+ CHECK(TickLoop(11) && RestoreGraph() && playingValue==0 && modeValue==3 && isolationWrites==0);
+ offer();
  wrongJobType=false;failDisconnectReadback=true;
  CHECK(!Start(10,true) && active && playingValue==0 && !inputConnected);
  CHECK(RestoreGraph() && inputConnected && inputWeight==0.75f);
@@ -211,11 +214,16 @@ struct ClockTest : LiveActorClockMvp { static int Run(){
  c.liveOwnerToken=99;const int followerWrites=writes;
  CHECK(!LiveFollowerClock2::RestoreGraph() && writes==followerWrites && !LiveFollowerClock2::active);
  c.liveOwnerToken=42;
- modeValue=3; playingValue=0;
+ modeValue=3; playingValue=0; inputConnected=true; inputWeight=0.75f;
  LiveDynamicFollowerClock later;
  later.Offer(later.graph.data(),reinterpret_cast<void*>(1),reinterpret_cast<void*>(2),reinterpret_cast<void*>(3),true);
  CHECK(later.offered && later.Start(27,true) && later.active && !LiveFollowerClock1::active);
  CHECK(later.RestoreGraph() && !later.active && modeValue==3 && playingValue==0);
+ later.Offer(later.graph.data(),reinterpret_cast<void*>(1),reinterpret_cast<void*>(2),reinterpret_cast<void*>(3),true);
+ wrongJobType=true;
+ const int writesBeforeFollowerFallback=isolationWrites;
+ CHECK(later.Start(28,true) && later.TickLoop(29) && later.inputIsolation.JobCount()==0 && inputConnected);
+ CHECK(later.RestoreGraph() && isolationWrites==writesBeforeFollowerFallback && inputWeight==0.75f);
  std::puts("actor clock MVP: gating, per-actor isolation, restoration and owner loss passed");return 0;
 }};
 int main(){ return ClockTest::Run(); }

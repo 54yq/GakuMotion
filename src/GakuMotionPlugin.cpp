@@ -1847,8 +1847,13 @@ static void ResetPlacementDynamicBone(void* actor)
 			GakuMotion::Core::Instance().liveObservation.time,GakuMotion::Core::Instance().player.currentTime);
 		if(!begin){
 			auto& c=GakuMotion::Core::Instance();
+			const char* clockMode = "3 秒角色图实验运行中";
+			if (LiveActorClockMvp::mmdSession)
+				clockMode = LiveActorClockMvp::inputIsolation.JobCount()
+					? "原 Live 动画输入已隔离，角色图为原生物理运行"
+					: "原生物理兼容模式，原 Live 动画输入未隔离";
 			c.liveActorClockNotice=GakuMotion::detail::FormatMsg("%s；Swing 增量 %s；原生执行增量 %s；当前角色注入：%s。",
-				LiveActorClockMvp::mmdSession?"原 Live 动画输入已隔离，角色图为原生物理运行":"3 秒角色图实验运行中",
+				clockMode,
 				sd?std::to_string(s.swing_calls-g_clockStatusStart.swing_calls).c_str():"未知",
 				pd?std::to_string(p.native_passes-g_clockPerfStart.native_passes).c_str():"未知",consumed?"已观测":"待确认");
 		}
@@ -4635,7 +4640,11 @@ void MotionTick(void*, float)
 					LiveActorClockMvp::offered&&(mmdWanted||LiveActorClockMvp::CaptureLoop(now,core.liveObservation.duration-core.liveObservation.time));
 				const bool started=prepared&&LiveActorClockMvp::Start(now,mmdWanted);
 				core.liveActorClockActive=LiveActorClockMvp::active;
-				core.liveActorClockNotice=started?(mmdWanted?"原 Live 动画输入已隔离，角色图为原生物理运行。":"角色图使用 Unity 时钟运行中（最多 3 秒），接近结尾会仅循环角色图。"):"角色图归属或原 Live 动画输入隔离尚未确认，未启动独立时钟。";
+				if (!started) core.liveActorClockNotice = "角色图归属或启动未确认，独立时钟未启动。";
+				else if (!mmdWanted) core.liveActorClockNotice = "角色图使用 Unity 时钟运行中（最多 3 秒），接近结尾会仅循环角色图。";
+				else core.liveActorClockNotice = LiveActorClockMvp::inputIsolation.JobCount()
+					? "原 Live 动画输入已隔离，角色图为原生物理运行。"
+					: "原生物理兼容模式，原 Live 动画输入未隔离。";
 				if(started)RecordActorClockPhysics(true,now);
 				// Failed preparation must not be retried every tick without a user action.
 				if(!started&&LiveActorClockMvp::active)RestoreActorClockMvp("partial_start");
@@ -4643,7 +4652,8 @@ void MotionTick(void*, float)
 				if(g_hostContext.logInfo)g_hostContext.logInfo("[GakuMotion][ActorClockMVP] start=%d origin=%.3f",int(started),core.liveActorClockOrigin);
 				if(g_hostContext.logInfo)g_hostContext.logInfo("[GakuMotion][ActorClockLoop] mmd=%d prepared=%d nodes=%zu window=%.3f error=%s",int(mmdWanted),int(prepared),LiveActorClockMvp::nodes.size(),LiveActorClockMvp::loopWindow,LiveActorClockMvp::loopError?LiveActorClockMvp::loopError:"none");
 				if(started && mmdWanted && g_hostContext.logInfo)
-					g_hostContext.logInfo("[GakuMotion][LiveActorIsolation] slot=1 jobs=%zu detached_ports=%zu",
+					g_hostContext.logInfo("[GakuMotion][LiveActorIsolation] slot=1 mode=%s jobs=%zu detached_ports=%zu",
+						LiveActorClockMvp::inputIsolation.JobCount() ? "isolated" : "native_compatibility",
 						LiveActorClockMvp::inputIsolation.JobCount(), LiveActorClockMvp::inputIsolation.DetachedCount());
 			}
 			if(LiveActorClockMvp::active&&now>=g_clockNextLog)RecordActorClockPhysics(false,now);

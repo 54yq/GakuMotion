@@ -65,7 +65,7 @@ template <int Slot> struct LiveActorClockState {
     static inline bool TickLoop(double now) {
         if(!active||!SameOwner()||Read(valid,true)!=1)return false;
         if(mmdSession)return Read(mode,false)==1 && Read(playing,true)==1 &&
-            inputIsolation.Check(graph.data(), now);
+            (!inputIsolation.JobCount() || inputIsolation.Check(graph.data(), now));
         if(now-loopStarted<loopWindow)return true;
         // Reset only this actor's graph. Never seek the paused stage Director.
         for(auto& n:nodes){bool ok{};void* b=NodeCall(nodeValid,n.handle.data(),nullptr,ok);void* raw=ok&&b?g_safeBones.unbox(b):nullptr;if(!raw||!*static_cast<unsigned char*>(raw))return false;}
@@ -202,16 +202,19 @@ template <int Slot> struct LiveActorClockState {
         const int currentMode=Read(mode), currentPlaying=Read(playing,true);
         const bool alreadyRunning = Slot==0 && forMmd && currentMode==1 && currentPlaying==1;
         if(!alreadyRunning && (currentMode!=3 || currentPlaying!=0))return false;
+        if(forMmd){loops=0;nodes.clear();loopError=nullptr;}
         if(forMmd && !inputIsolation.Prepare(graphClass, graph.data(), verifiedOutputs)) {
-            loopError = "physics_job_or_input_ports_unverified";
-            return false;
+            // Preparation only reads the graph. Keep the established native
+            // clock available when this runtime cannot isolate its inputs.
+            inputIsolation = {};
+            loopError = "native_clock_without_animation_isolation";
         }
         originalMode=currentMode;originalPlaying=currentPlaying;
         borrowedRunningGraph=alreadyRunning;
         rootSampled=RootTime(rootStart);rootAdvancedKnown=false;rootDelta=0;
         // Mark before writes so every partial start takes the restoration path.
-        active=true;mmdSession=forMmd;started=now;if(forMmd){loops=0;nodes.clear();loopError=nullptr;}
-        if(forMmd && !inputIsolation.Detach(graph.data(), now)) {
+        active=true;mmdSession=forMmd;started=now;
+        if(forMmd && inputIsolation.JobCount() && !inputIsolation.Detach(graph.data(), now)) {
             loopError = "original_animation_input_detach_failed";
             return false;
         }
@@ -293,7 +296,7 @@ struct LiveDynamicFollowerClock {
     bool TickLoop(double now) {
         if(!active||!SameOwner()||Read(valid,true)!=1)return false;
         if(mmdSession)return Read(mode,false)==1 && Read(playing,true)==1 &&
-            inputIsolation.Check(graph.data(), now);
+            (!inputIsolation.JobCount() || inputIsolation.Check(graph.data(), now));
         if(now-loopStarted<loopWindow)return true;
         // Reset only this actor's graph. Never seek the paused stage Director.
         for(auto& n:nodes){bool ok{};void* b=NodeCall(nodeValid,n.handle.data(),nullptr,ok);void* raw=ok&&b?g_safeBones.unbox(b):nullptr;if(!raw||!*static_cast<unsigned char*>(raw))return false;}
@@ -427,15 +430,16 @@ struct LiveDynamicFollowerClock {
         auto& c=GakuMotion::Core::Instance();
         if(active||c.liveActorClockFault||!offered||!SameOwner()||!c.liveObservation.confirmed||!c.liveObservation.paused||c.liveTakeoverActive!=forMmd||c.liveTakeoverFault||
             Read(valid,true)!=1||Read(mode)!=3||Read(playing,true)!=0)return false;
+        if(forMmd){loops=0;nodes.clear();loopError=nullptr;}
         if(forMmd && !inputIsolation.Prepare(graphClass, graph.data(), verifiedOutputs)) {
-            loopError = "physics_job_or_input_ports_unverified";
-            return false;
+            inputIsolation = {};
+            loopError = "native_clock_without_animation_isolation";
         }
         originalMode=3;originalPlaying=0;
         rootSampled=RootTime(rootStart);rootAdvancedKnown=false;rootDelta=0;
         // Mark before writes so every partial start takes the restoration path.
-        active=true;mmdSession=forMmd;started=now;if(forMmd){loops=0;nodes.clear();loopError=nullptr;}int gameTime=1;void* args[]{&gameTime};
-        if(forMmd && !inputIsolation.Detach(graph.data(), now)) {
+        active=true;mmdSession=forMmd;started=now;int gameTime=1;void* args[]{&gameTime};
+        if(forMmd && inputIsolation.JobCount() && !inputIsolation.Detach(graph.data(), now)) {
             loopError = "original_animation_input_detach_failed";
             return false;
         }
