@@ -6,8 +6,15 @@ class LiveActorClipEnd
 {
     struct alignas(16) Handle {
         std::array<unsigned char, 16> bytes{};
+        bool Empty() const
+        {
+            uintptr_t pointer{};
+            std::memcpy(&pointer, bytes.data(), sizeof(pointer));
+            return pointer == 0;
+        }
         bool operator==(const Handle& other) const
         {
+            if (Empty() && other.Empty()) return true;
             return std::memcmp(bytes.data(), other.bytes.data(), sizeof(uintptr_t) + sizeof(uint32_t)) == 0;
         }
     };
@@ -21,6 +28,7 @@ class LiveActorClipEnd
     struct Queued {
         Handle handle;
         double inheritedAnimationLength{};
+        bool outputSource{};
     };
     std::vector<Clip> clips;
     std::vector<Handle> outputs;
@@ -186,13 +194,20 @@ public:
             Handle source;
             if (!ReadOutput(graph, static_cast<int>(index), source)) return Fail("actor_output");
             outputs.push_back(source);
-            pending.push_back({source, 0.0});
+            // A valid Animator output can have no source. Keep it in the
+            // ownership snapshot so a later connection is still detected.
+            if (!source.Empty()) pending.push_back({source, 0.0, true});
         }
+        if (g_hostContext.logInfo)
+            g_hostContext.logInfo("[GakuMotion][LiveActorClipEnd] actor_outputs=%u connected_outputs=%zu",
+                actorOutputCount, pending.size());
+        if (pending.empty()) return Fail("no_connected_actor_outputs");
         for (size_t index = 0; index < pending.size(); ++index) {
-            auto [node, inheritedAnimationLength] = pending[index];
+            auto [node, inheritedAnimationLength, isOutputSource] = pending[index];
             auto* value = node.bytes.data();
             unsigned char valid{};
-            if (!Read(nodeValid, value, valid) || !valid) return Fail("actor_graph_node");
+            if (!Read(nodeValid, value, valid) || !valid)
+                return Fail(isOutputSource ? "actor_output_source_invalid" : "actor_input_node_invalid");
             void* type = Call(nodeType, value);
             void* klass = type ? classFromType(type) : nullptr;
             if (!klass) return Fail("actor_graph_node_type");
@@ -206,12 +221,12 @@ public:
                 Handle child;
                 void* args[]{&port};
                 if (!Read(inputAt, value, child, args)) return Fail("actor_graph_input");
-                if (child == Handle{}) continue;
+                if (child.Empty()) continue;
                 if (std::find_if(pending.begin(), pending.end(), [&](const Queued& item) {
                     return item.handle == child && item.inheritedAnimationLength == inheritedAnimationLength;
                 }) != pending.end()) continue;
                 if (pending.size() >= 512) return Fail("actor_graph_size");
-                pending.push_back({child, inheritedAnimationLength});
+                pending.push_back({child, inheritedAnimationLength, false});
             }
         }
         return !clips.empty() || Fail("no_finite_animation_clips");
