@@ -1571,6 +1571,9 @@ static void ResetPlacementDynamicBone(void* actor)
 #endif
 
 #include "GkStageRuntime.hpp"
+#include "GkLiveIndependentActorGraph.hpp"
+	IndependentLiveActorGraph g_independentActorGraph;
+	bool g_primaryUsesIndependentGraph{};
 #include "GkLiveLetterboxProbe.hpp"
 #include "GkLiveWindProbe.hpp"
 #include "GkLiveWindOverride.hpp"
@@ -1841,10 +1844,15 @@ static void ResetPlacementDynamicBone(void* actor)
 		const bool pd=pk&&g_clockPerfKnown&&p.native_passes>=g_clockPerfStart.native_passes&&p.solver_calls>=g_clockPerfStart.solver_calls;
 		const bool consumed=sk&&pd&&s.actor==reinterpret_cast<void*>(LiveActorClockMvp::actor)&&s.injected&&s.writes&&
 			p.native_passes>g_clockPerfStart.native_passes&&p.solver_calls>g_clockPerfStart.solver_calls;
-		double root{};const bool rootKnown=LiveActorClockMvp::active&&LiveActorClockMvp::RootTime(root);
+		double root{};
+		const bool rootKnown=LiveActorClockMvp::active && (g_primaryUsesIndependentGraph
+			? g_independentActorGraph.RootTime(root) : LiveActorClockMvp::RootTime(root));
+		const int playing=LiveActorClockMvp::active ? (g_primaryUsesIndependentGraph
+			? g_independentActorGraph.State(LiveActorClockMvp::playing)
+			: LiveActorClockMvp::Read(LiveActorClockMvp::playing,true)) : -1;
 		if(g_hostContext.logInfo)g_hostContext.logInfo("[GakuMotion][ActorClockContinuous] root_known=%d root=%.3f start_known=%d start=%.3f stage=%.3f duration=%.3f playing=%d",
 			int(rootKnown),root,int(LiveActorClockMvp::rootSampled),LiveActorClockMvp::rootStart,GakuMotion::Core::Instance().liveObservation.time,
-			GakuMotion::Core::Instance().liveObservation.duration,LiveActorClockMvp::active?LiveActorClockMvp::Read(LiveActorClockMvp::playing,true):-1);
+			GakuMotion::Core::Instance().liveObservation.duration,playing);
 		if(g_hostContext.logInfo)g_hostContext.logInfo("[GakuMotion][ActorClockPhysics] begin=%d mmd=%d actor=%p status_actor=%p status_known=%d perf_known=%d swing_delta=%llu native_delta=%llu solver_delta=%llu matched=%llu writes=%u injected=%u loops=%llu stage=%.3f motion=%.3f",
 			int(begin),int(LiveActorClockMvp::mmdSession),reinterpret_cast<void*>(LiveActorClockMvp::actor),s.actor,int(sd),int(pd),
 			static_cast<unsigned long long>(sd?s.swing_calls-g_clockStatusStart.swing_calls:0),
@@ -1855,7 +1863,9 @@ static void ResetPlacementDynamicBone(void* actor)
 		if(!begin){
 			auto& c=GakuMotion::Core::Instance();
 			const char* clockMode = "3 秒角色图实验运行中";
-			if (LiveActorClockMvp::mmdSession)
+			if (g_primaryUsesIndependentGraph)
+				clockMode = g_independentActorGraph.confirmedSwing ? "独立角色图运行中，已确认原生 Swing 求解" : "独立角色图运行中，等待确认原生 Swing";
+			else if (LiveActorClockMvp::mmdSession)
 				clockMode = LiveActorClockMvp::clipEnd.ClipCount()
 					? "原 Live 动画停在片段末尾，原生物理时钟运行中"
 					: "原生物理兼容模式，原 Live 动画未停在末尾";
@@ -1866,6 +1876,70 @@ static void ResetPlacementDynamicBone(void* actor)
 		}
 		g_clockNextLog=now+1.0;
 	}
+
+	bool StartPrimaryActorClock(void* actor, double now, bool forMotion)
+	{
+		auto& core = GakuMotion::Core::Instance();
+		auto& graph = g_independentActorGraph;
+		using Clock = LiveActorClockMvp;
+		if (!forMotion || graph.fallbackSession == core.injectionSession)
+			return Clock::Start(now, forMotion);
+		if (!graph.Start(actor, now)) {
+			if (g_hostContext.logInfo) g_hostContext.logInfo(
+				"[GakuMotion][IndependentActorGraph] start=0 fallback=past_last_frame reason=%s", graph.reason);
+			graph.fallbackSession = core.injectionSession;
+			const bool mustCheckOriginal = graph.owned;
+			if (!graph.Release() || graph.originalRigChanged) {
+				g_primaryUsesIndependentGraph = true;
+				Clock::active = true;
+				return false;
+			}
+			if (mustCheckOriginal && !graph.OriginalPaused()) return false;
+			return Clock::Start(now, true);
+		}
+		g_primaryUsesIndependentGraph = Clock::active = Clock::mmdSession = true;
+		Clock::borrowedRunningGraph = Clock::rootAdvancedKnown = false;
+		Clock::started = now;
+		Clock::loops = 0;
+		Clock::nodes.clear();
+		Clock::loopError = nullptr;
+		Clock::rootSampled = graph.RootTime(Clock::rootStart);
+		if (g_hostContext.logInfo) g_hostContext.logInfo("[GakuMotion][IndependentActorGraph] start=1");
+		return true;
+	}
+
+	bool TickPrimaryActorClock(double now)
+	{
+		if (!g_primaryUsesIndependentGraph) return LiveActorClockMvp::TickLoop(now);
+		auto& core = GakuMotion::Core::Instance();
+		auto& graph = g_independentActorGraph;
+		const bool healthy = graph.Check(now);
+		if (healthy && graph.confirmedSwing) return true;
+		if (healthy) {
+			GbbStatus status{};
+			GbbPerf perf{};
+			if (g_clockStatusKnown && g_clockPerfKnown && g_burstBridge.ReadObservationStatus(status) &&
+				g_burstBridge.ReadObservationPerf(perf) && status.actor == reinterpret_cast<void*>(LiveActorClockMvp::actor) &&
+				status.injected && status.writes && status.matched_passes > g_clockStatusStart.matched_passes &&
+				perf.solver_calls > g_clockPerfStart.solver_calls) {
+				graph.confirmedSwing = true;
+				if (g_hostContext.logInfo) g_hostContext.logInfo("[GakuMotion][IndependentActorGraph] confirmed_swing=1 writes=%u", status.writes);
+				return true;
+			}
+			if (now - LiveActorClockMvp::started < 2.0) return true;
+		}
+		graph.fallbackSession = core.injectionSession;
+		if (!graph.Release() || !graph.OriginalPaused()) return false;
+		g_primaryUsesIndependentGraph = LiveActorClockMvp::active = false;
+		const bool started = LiveActorClockMvp::Start(now, true);
+		if (g_hostContext.logInfo) g_hostContext.logInfo(
+			"[GakuMotion][IndependentActorGraph] fallback=past_last_frame started=%d reason=%s",
+			int(started), healthy ? "swing_not_observed" : "graph_state_changed");
+		if (started) RecordActorClockPhysics(true, now);
+		else core.liveActorClockFault = true;
+		return started;
+	}
+
 	bool RestoreActorClockMvp(const char* reason, bool detached) {
 		auto& core=GakuMotion::Core::Instance();
 		if (!detached) RecordActorClockPhysics(false,0);
@@ -1873,6 +1947,25 @@ static void ResetPlacementDynamicBone(void* actor)
         for (size_t i=0;i<g_followerClocks.size();++i) followersRestored=RestoreFollowerClock(i)&&followersRestored;
 		const bool same=LiveActorClockMvp::SameOwner();
         const bool borrowed=LiveActorClockMvp::borrowedRunningGraph;
+		const bool independent = g_primaryUsesIndependentGraph;
+		if (independent) {
+			if (!g_independentActorGraph.Release()) {
+				core.liveActorClockFault = true;
+				core.liveActorClockNotice = "独立角色图未能确认停止。";
+				if (g_hostContext.logWarn) g_hostContext.logWarn("[GakuMotion][IndependentActorGraph] release_failed reason=%s", reason);
+				return false;
+			}
+			if (!detached && same && (g_independentActorGraph.originalRigChanged ||
+			    !CameraBridge::IsAlive(reinterpret_cast<void*>(LiveActorClockMvp::actor)) ||
+			    !g_independentActorGraph.OriginalPaused())) {
+				core.liveActorClockFault = true;
+				core.liveActorClockNotice = "原角色图或骨架恢复未确认，Live 保持暂停。";
+				return false;
+			}
+			g_primaryUsesIndependentGraph = false;
+			LiveActorClockMvp::active = LiveActorClockMvp::offered = false;
+			LiveActorClockMvp::rootAdvancedKnown = false;
+		}
 		if (detached) {
 			LiveActorClockMvp::active = false;
 			LiveActorClockMvp::offered = false;
@@ -1881,13 +1974,13 @@ static void ResetPlacementDynamicBone(void* actor)
 			LiveActorClockMvp::nodes.clear();
 			LiveActorClockMvp::clipEnd = {};
 		}
-		const bool graphRestored=detached||LiveActorClockMvp::RestoreGraph();
+		const bool graphRestored=detached || independent || LiveActorClockMvp::RestoreGraph();
 		bool timelineRestored=false;
 		if(same&&graphRestored) {
 			const auto access=LiveRuntimeAccess();void* scene=reinterpret_cast<void*>(core.liveOwnerToken);
             // An already-running graph was only observed, so do not seek the
             // stage as a side effect of releasing that observation.
-			const bool seekOk=detached || borrowed || GakuMotion::live_takeover::Seek(g_liveApi,access,scene,core.liveActorClockOrigin);
+			const bool seekOk=detached || borrowed || independent || GakuMotion::live_takeover::Seek(g_liveApi,access,scene,core.liveActorClockOrigin);
 			const auto after=GakuMotion::live_takeover::Observe(g_liveApi,access,scene);
 			timelineRestored=seekOk&&after.confirmed&&after.paused&&std::abs(after.time-core.liveActorClockOrigin)<0.1f;
 		}
@@ -4592,7 +4685,12 @@ void MotionTick(void*, float)
 					core.liveControlNotice = "风力恢复未确认，Live 保持暂停；请重试退出接管。";
 					return;
 				}
+				const bool independent = g_primaryUsesIndependentGraph;
 				const bool clockClean=!LiveActorClockMvp::active||RestoreActorClockMvp("takeover_disable");
+				if (independent && !clockClean) {
+					core.liveControlNotice = "独立角色图恢复未确认，Live 保持暂停。";
+					return;
+				}
 				g_liveDriver.Disable();
 				const bool clean = clockClean && g_liveDriver.State() == GakuMotion::live_takeover::Phase::Off &&
 					core.ReleaseRestoredLiveBinding();
@@ -4669,7 +4767,9 @@ void MotionTick(void*, float)
 			const bool mmdMatches=reinterpret_cast<void*>(LiveActorClockMvp::actor)==core.player.controller.targetActor;
 			const bool loopContext=LiveActorClockMvp::SameOwner()&&core.liveObservation.confirmed&&core.liveObservation.paused&&
 				std::abs(core.liveObservation.time-core.liveActorClockOrigin)<=0.1f&&core.injectionPolicy.Read().captureDepth==0&&GakuMotion::capture::LiveAutoPhotoIdle();
-			const bool loopOk=!LiveActorClockMvp::active||!loopContext||LiveActorClockMvp::TickLoop(now);
+			const bool independentContextOk = !g_primaryUsesIndependentGraph ||
+				(mmdMatches && !core.liveActorClockFault && CameraBridge::IsAlive(core.player.controller.targetActor));
+			const bool loopOk = independentContextOk && (!LiveActorClockMvp::active || !loopContext || TickPrimaryActorClock(now));
 			if(LiveActorClockMvp::active && ((request==2&&requestMatches) || (!LiveActorClockMvp::mmdSession&&now-LiveActorClockMvp::started>=3.0) ||
 				(LiveActorClockMvp::mmdSession&&(!mmdWanted||!mmdMatches)) || !LiveActorClockMvp::SameOwner() ||
 				!core.liveObservation.confirmed || !core.liveObservation.paused || std::abs(core.liveObservation.time-core.liveActorClockOrigin)>0.1f ||
@@ -4689,10 +4789,11 @@ void MotionTick(void*, float)
 					LiveAnimatorProbe::SampleActorGraph(clockActor,mmdWanted?3:1);
 				const bool prepared=actorValid&&LiveActorClockMvp::SameOwner()&&LiveActorClockMvp::actor==reinterpret_cast<uintptr_t>(clockActor)&&
 					LiveActorClockMvp::offered&&(mmdWanted||LiveActorClockMvp::CaptureLoop(now,core.liveObservation.duration-core.liveObservation.time));
-				const bool started=prepared&&LiveActorClockMvp::Start(now,mmdWanted);
+				const bool started=prepared&&StartPrimaryActorClock(clockActor,now,mmdWanted);
 				core.liveActorClockActive=LiveActorClockMvp::active;
 				if (!started) core.liveActorClockNotice = "角色图归属或启动未确认，独立时钟未启动。";
 				else if (!mmdWanted) core.liveActorClockNotice = "角色图使用 Unity 时钟运行中（最多 3 秒），接近结尾会仅循环角色图。";
+				else if (g_primaryUsesIndependentGraph) core.liveActorClockNotice = "原主角独立角色图已启动，等待原生 Swing 确认。";
 				else core.liveActorClockNotice = LiveActorClockMvp::clipEnd.ClipCount()
 					? "原 Live 动画停在片段末尾，原生物理时钟运行中。"
 					: "原生物理兼容模式，原 Live 动画未停在末尾。";
@@ -4702,7 +4803,7 @@ void MotionTick(void*, float)
 				if(!started&&mmdWanted)core.liveActorClockFault=true;
 				if(g_hostContext.logInfo)g_hostContext.logInfo("[GakuMotion][ActorClockMVP] start=%d origin=%.3f",int(started),core.liveActorClockOrigin);
 				if(g_hostContext.logInfo)g_hostContext.logInfo("[GakuMotion][ActorClockLoop] mmd=%d prepared=%d nodes=%zu window=%.3f error=%s",int(mmdWanted),int(prepared),LiveActorClockMvp::nodes.size(),LiveActorClockMvp::loopWindow,LiveActorClockMvp::loopError?LiveActorClockMvp::loopError:"none");
-				if(started && mmdWanted && g_hostContext.logInfo)
+				if(started && mmdWanted && !g_primaryUsesIndependentGraph && g_hostContext.logInfo)
 					g_hostContext.logInfo("[GakuMotion][LiveActorClipEnd] slot=1 mode=%s parked_clips=%zu outputs=%u",
 						LiveActorClockMvp::clipEnd.ClipCount() ? "past_last_frame" : "native_compatibility",
 						LiveActorClockMvp::clipEnd.ClipCount(), LiveActorClockMvp::verifiedOutputs);
@@ -4842,7 +4943,7 @@ extern "C" GAKU_PLUGIN_EXPORT GakuStatus GakuPlugin_Query(
 	if (!output) return GAKU_E_INVALID_ARGUMENT;
 	if (outputSize < sizeof(GakuPluginDescriptor)) return GAKU_E_SIZE;
 	const GakuPluginDescriptor descriptor{GAKU_ABI_VERSION, sizeof(GakuPluginDescriptor),
-		"gakumotion", "GakuMotion", "0.1.1+fork.4.2",
+		"gakumotion", "GakuMotion", "0.1.1+fork.4.2.1",
 		MotionActivate, MotionRuntimeReady, MotionTick, MotionActorTick,
 		RenderGmlMotion, MotionShutdown};
 	*output = descriptor;

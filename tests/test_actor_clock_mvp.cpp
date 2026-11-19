@@ -154,6 +154,18 @@ struct ClockTest : LiveActorClockMvp { static int Run(){
  CHECK(!CanPublish(false,false,true,false,true));
  CHECK(!ShouldRun(true,true,2,false,false,false,true,true));
  CHECK(!ShouldRun(true,false,1,false,false,false,true,true));
+ using GakuMotion::live_physics_clock::StopBeforeDestroy;
+ int independentPlaying = 1, stopCalls = 0, destroyCalls = 0;
+ const auto independentState = [&] { return independentPlaying; };
+ const auto destroyIndependent = [&] { ++destroyCalls; return independentPlaying == 0; };
+ CHECK(!StopBeforeDestroy(independentState, [&] { ++stopCalls; return false; }, destroyIndependent));
+ CHECK(stopCalls == 1 && destroyCalls == 0);
+ CHECK(!StopBeforeDestroy(independentState, [&] { return true; }, destroyIndependent));
+ CHECK(destroyCalls == 0);
+ CHECK(StopBeforeDestroy(independentState, [&] { ++stopCalls; independentPlaying = 0; return true; }, destroyIndependent));
+ CHECK(stopCalls == 2 && destroyCalls == 1);
+ CHECK(StopBeforeDestroy(independentState, [&] { ++stopCalls; return false; }, destroyIndependent));
+ CHECK(stopCalls == 2 && destroyCalls == 2);
  GakuMotion::live_arm_snapshot::Schedule samples;
  void* sampleA=reinterpret_cast<void*>(1); void* sampleB=reinterpret_cast<void*>(2);
  CHECK(samples.Due(42,7,sampleA,10.0) && !samples.Due(42,7,sampleA,10.9));
