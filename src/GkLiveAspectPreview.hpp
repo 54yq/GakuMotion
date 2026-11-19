@@ -26,6 +26,11 @@ namespace LiveAspectPreview
     inline StageLoader::Handle projectedCamera{};
     inline Projection originalProjection{}, writtenProjection{};
     inline bool projectionObserved{};
+    using SetupParaffin = void (*)(void*, void*, float, void*, const void*);
+    using ValidParaffinAspect = bool (*)(void*, float, const void*);
+    inline SetupParaffin setupParaffin{};
+    inline ValidParaffinAspect validParaffinAspect{};
+    inline bool flareHooksAttempted{}, flareAspectObserved{};
 
     inline bool Invoke(const void* method, void* object, void* argument)
     {
@@ -37,6 +42,46 @@ namespace LiveAspectPreview
     }
 
     inline bool Matches(float a, float b) { return std::abs(a - b) < 0.005f; }
+
+    inline float ParaffinAspect(float aspect)
+    {
+        if (!CameraBridge::OnUnityThread() || !projectedCamera || !Matches(aspect, previewRatio))
+            return aspect;
+        if (!flareAspectObserved && g_hostContext.logInfo) {
+            flareAspectObserved = true;
+            g_hostContext.logInfo("[GakuMotion][LiveAspectPreview] paraffin_aspect=%.4f target_aspect=%.4f",
+                lease.originalCameraAspect, aspect);
+        }
+        return lease.originalCameraAspect;
+    }
+
+    inline void SetupParaffinWithOriginalAspect(void* self, void* cmd, float aspect, void* volume, const void* method)
+    {
+        setupParaffin(self, cmd, ParaffinAspect(aspect), volume, method);
+    }
+
+    inline bool CheckOriginalParaffinAspect(void* self, float aspect, const void* method)
+    {
+        return validParaffinAspect(self, ParaffinAspect(aspect), method);
+    }
+
+    inline void PrepareParaffin(const GakuMotion::ExactMethodMetadata& md)
+    {
+        if (flareHooksAttempted) return;
+        flareHooksAttempted = true;
+        void* pass = FindClass("vl-unity.Runtime.dll", "VL.Rendering.Internal", "VLPostProcessPass");
+        void* volume = FindClass("vl-unity.Runtime.dll", "VL.Rendering", "VLParaffin");
+        void* command = FindClass("UnityEngine.CoreModule.dll", "UnityEngine.Rendering", "CommandBuffer");
+        const bool setup = pass && volume && command &&
+            md.Find(pass, "SetupVLParaffin", false, {0x01}, {{0x12, command}, {0x0c}, {0x12, volume}}) &&
+            CameraBridge::InstallHook("VLPostProcessPass.SetupVLParaffin", FindMethodPointer(pass, "SetupVLParaffin", 3),
+                reinterpret_cast<void*>(SetupParaffinWithOriginalAspect), reinterpret_cast<void**>(&setupParaffin));
+        const bool check = volume && md.Find(volume, "IsValidAspect", false, {0x02}, {{0x0c}}) &&
+            CameraBridge::InstallHook("VLParaffin.IsValidAspect", FindMethodPointer(volume, "IsValidAspect", 1),
+                reinterpret_cast<void*>(CheckOriginalParaffinAspect), reinterpret_cast<void**>(&validParaffinAspect));
+        if ((!setup || !check) && g_hostContext.logWarn)
+            g_hostContext.logWarn("[GakuMotion][LiveAspectPreview] paraffin hooks incomplete setup=%d aspect_check=%d", int(setup), int(check));
+    }
 
     inline bool ReleaseProjection(void* renderedCamera = nullptr)
     {
@@ -158,6 +203,7 @@ namespace LiveAspectPreview
 
         const auto md = GroundShadowProbeBootstrap::Resolve(g_gameAssembly).method;
         if (!PrepareProjection(md)) return false;
+        PrepareParaffin(md);
         float originalCameraAspect{};
         void* camera = CameraBridge::getMain ? CameraBridge::getMain(nullptr) : nullptr;
         if (!CameraBridge::IsAlive(camera) ||
@@ -192,6 +238,7 @@ namespace LiveAspectPreview
             return false;
         }
         projectionObserved = false;
+        flareAspectObserved = false;
         CameraBridge::projectionBegin = BeforeCamera;
         return true;
     }

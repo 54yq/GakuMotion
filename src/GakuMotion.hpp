@@ -949,9 +949,10 @@ namespace GakuMotion
                     } else ensembleNotice = "模型显隐未完成：角色、场景或原生渲染接口不可用";
                     break;
 				case GuiAction::SetActorPropHidden:
-					if (CanControlActorProps() && sceneActorRegistry.Resolve(cmd.actorToken, cmd.actorEpoch) &&
+					if (CanControlActorProps() && cmd.actorEpoch == sceneActorRegistry.Epoch() &&
 						std::any_of(actorProps.begin(), actorProps.end(), [&](const auto& prop) {
-							return prop.controllable && prop.actorToken == cmd.actorToken && ActorPropKey(prop) == cmd.key;
+							return prop.controllable && prop.actorToken == cmd.actorToken && ActorPropKey(prop) == cmd.key &&
+								(prop.timeline || sceneActorRegistry.Resolve(cmd.actorToken, cmd.actorEpoch));
 						}))
 					{
 						if (cmd.flag) actorPropHidden.insert(cmd.key);

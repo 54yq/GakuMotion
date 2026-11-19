@@ -65,6 +65,7 @@ namespace GakuMotion
 		if (ImGui::CollapsingHeader("场景道具", ImGuiTreeNodeFlags_DefaultOpen))
 		{
 			if (ctx.fnScanActorProps && ImGui::Button("重新扫描道具")) ctx.fnScanActorProps(ctx.self);
+			if (ctx.ensembleNotice.starts_with("该时间轴道具")) ImGui::TextWrapped("%s", ctx.ensembleNotice.c_str());
 			if (ctx.actorProps.empty()) ImGui::TextDisabled("当前没有识别到可列出的角色道具。");
 			if (!ctx.actorPropsEditable) ImGui::TextDisabled("可查看已识别的道具，当前场景暂不可调整显隐。");
 			for (const auto& prop : ctx.actorProps)

@@ -1582,6 +1582,7 @@ static void ResetPlacementDynamicBone(void* actor)
 #include "GkLiveActorProps.hpp"
 #include "GkLiveAspectPreview.hpp"
 #include "GkModelRendererMask.hpp"
+#include "GkLiveTimelineProps.hpp"
 #include "GkActorModelVisibility.hpp"
 #include "GkLiveArmSnapshot.hpp"
 #include "GkActorGroundShadow.hpp"
@@ -3214,7 +3215,7 @@ static bool RefreshSceneActors(GakuMotion::Core& core, bool force, bool refreshP
 
 	const bool propWritable = motionReady && core.CanControlActorProps() &&
 		(!liveViewing || GakuMotion::capture::LiveAutoPhotoIdle());
-	const auto propInterval = LiveActorProps::saved.empty()
+	const auto propInterval = !LiveActorProps::HasSaved()
 		? std::chrono::seconds(2) : std::chrono::milliseconds(500);
 	const bool propScanDue = refreshProps && propsScene && (force || !lastPropOwner.SameOwner(g_sceneOwner) ||
 		core.actorPropScanRequested || lastPropWritable != propWritable || now - lastPropScan >= propInterval);
@@ -3236,7 +3237,7 @@ static bool RefreshSceneActors(GakuMotion::Core& core, bool force, bool refreshP
 	auto unavailable = [&]
 	{
 		core.actorProps.clear();
-		if (core.ensemble.HasActiveFollowers() || !LiveActorProps::saved.empty())
+		if (core.ensemble.HasActiveFollowers() || LiveActorProps::HasSaved())
 		{
 			// A failed scan is not proof of destruction. Retain ownership without
 			// touching actor pointers; block further injection and native capture.
@@ -4977,7 +4978,7 @@ extern "C" GAKU_PLUGIN_EXPORT GakuStatus GakuPlugin_Query(
 	if (!output) return GAKU_E_INVALID_ARGUMENT;
 	if (outputSize < sizeof(GakuPluginDescriptor)) return GAKU_E_SIZE;
 	const GakuPluginDescriptor descriptor{GAKU_ABI_VERSION, sizeof(GakuPluginDescriptor),
-		"gakumotion", "GakuMotion", "0.1.1+fork.4.3.1",
+		"gakumotion", "GakuMotion", "0.1.1+fork.4.3.2",
 		MotionActivate, MotionRuntimeReady, MotionTick, MotionActorTick,
 		RenderGmlMotion, MotionShutdown};
 	*output = descriptor;

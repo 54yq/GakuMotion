@@ -1,5 +1,13 @@
 #pragma once
 // Discover attached props within actors in the verified scene.
+namespace LiveTimelineProps
+{
+    bool RestoreAll();
+    void Abandon();
+    bool HasSaved();
+    void Scan(GakuMotion::Core& core, const std::vector<void*>& actorTransforms, bool canWrite);
+    void RestoreUnselected(const GakuMotion::Core& core);
+}
 namespace LiveActorProps
 {
     struct TargetState {
@@ -32,7 +40,9 @@ namespace LiveActorProps
     inline void Abandon() {
         for (auto& item : saved) Release(item.second);
         saved.clear();
+        LiveTimelineProps::Abandon();
     }
+    inline bool HasSaved() { return !saved.empty() || LiveTimelineProps::HasSaved(); }
 
     inline bool ReadActive(void* go, bool& active) {
         if(!go || !StageLoader::activeSelf || !g_faceRuntime.invoke || !g_safeBones.unbox) return false;
@@ -117,7 +127,8 @@ namespace LiveActorProps
             Release(item.second);
             return true;
         });
-        return saved.empty();
+        const bool timelineRestored = LiveTimelineProps::RestoreAll();
+        return saved.empty() && timelineRestored;
     }
     inline bool SaveTarget(void* object, TargetState& state) {
         state.instanceId = StageLoader::ReadInt(StageLoader::instanceId, object);
@@ -204,6 +215,7 @@ namespace LiveActorProps
                 core.actorProps.push_back(std::move(prop));
             }
         }
+        LiveTimelineProps::Scan(core, actorTransforms, canWrite);
         if (!canWrite) return;
         std::erase_if(core.actorPropHidden, [&](const auto& key) {
             return std::none_of(core.actorProps.begin(), core.actorProps.end(), [&](const auto& prop) {
@@ -215,5 +227,6 @@ namespace LiveActorProps
             Release(item.second);
             return true;
         });
+        LiveTimelineProps::RestoreUnselected(core);
     }
 }
