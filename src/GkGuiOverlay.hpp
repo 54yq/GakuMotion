@@ -100,9 +100,6 @@ namespace GakuMotion
 		void (*fnActorClockTrial)(void*,bool){nullptr};
 		void (*fnSetLiveLoopLead)(void*,float){nullptr};
 		void (*fnSetLiveLoop)(void*, bool){nullptr};
-		bool liveDofDisabled{false};
-		int liveDofDisableStatus{0};
-		void (*fnSetLiveDofDisabled)(void*, bool){nullptr};
 		float liveTime{0}, liveDuration{0};
 		bool liveAudioAvailable{false};float liveAudioTime{0},liveAudioDuration{0};unsigned liveAudioSources{0};
 		std::string liveAudioNotice;void (*fnSeekLiveAudio)(void*,float){nullptr};

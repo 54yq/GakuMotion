@@ -126,8 +126,6 @@ namespace GakuMotion
 		bool liveAspectPreviewRequested{true};
 		PhysicsMonitor physicsMonitor;
 		std::chrono::steady_clock::time_point physicsMonitorAt{};
-		bool liveDofDisabled{false};
-		int liveDofDisableStatus{0};
 		bool liveTakeoverFault{false};
 		uint64_t liveAlignmentLoggedSession{~uint64_t{0}}, liveAlignmentLoggedMotion{~uint64_t{0}};
 		void* liveAlignmentLoggedActor{nullptr}; // identity only
@@ -164,6 +162,11 @@ namespace GakuMotion
 		uintptr_t liveTakeoverRequestOwner{0};
 		std::string liveControlNotice;
 		bool (*fnBeforeInjection)(){nullptr};
+		bool ShouldDisableLiveDof() const
+		{
+			return liveTakeoverActive && camera.settings.enabled && camera.settings.mode == CameraMode::Track;
+		}
+
 		bool InjectionAllowed() const { return !enforceInjectionPolicy || injectionPolicy.CanInject(); }
 		Vector3 LiveCameraTrackAnchor(void* actor) const
 		{
@@ -488,7 +491,7 @@ namespace GakuMotion
 			Select, Cycle, Play, Pause, Resume, Stop, Seek,
 			ScrubBegin, ScrubUpdate, ScrubEnd, Refresh, Move,
 			SaveList, LoadList, Mode, Mute, Speed, Import, ClearTarget, NextTarget, PickTarget,
-			InitialPosition, InitialYaw, LiveDofDisabled, SaveInitialPosition, SaveFacialWeights, MusicVolume, SaveMusicVolume, PhysicsBackend,
+			InitialPosition, InitialYaw, SaveInitialPosition, SaveFacialWeights, MusicVolume, SaveMusicVolume, PhysicsBackend,
 			CameraSettings, SaveCameraSettings, CameraImport, ReloadCamera,
 			SoleSettings, SaveSoleSettings, LoadSoleSettings, ExperimentalSolePitch, ExperimentalWaistSupport,
 			BeforeQuartzExperiment, CostumePhysicsCapture, AuxDriveMode, WristDiagnostic, WristTwistShare, ForearmAxisAdjustment, ForearmAxisLock,
@@ -1089,10 +1092,6 @@ namespace GakuMotion
 				case GuiAction::InitialPosition:
                     ensembleAutoAlignPending=false;
 					if (IsCurrentPlacementTarget(cmd) && player.controller.SetInitialPositionOffset(cmd.position)) RememberCurrentPlacement();
-					break;
-				case GuiAction::LiveDofDisabled:
-					if (liveTakeoverActive && cmd.actorToken == liveOwnerToken && cmd.sceneSession == injectionSession)
-						liveDofDisabled = cmd.flag;
 					break;
 				case GuiAction::InitialYaw:
                     ensembleAutoAlignPending=false;
@@ -3856,15 +3855,6 @@ namespace GakuMotion
 				core->liveLoopCycles=0;
 				core->liveLoopOwner = enabled ? core->liveOwnerToken : 0;
 				core->liveLoopScene = enabled ? core->liveOwnerScene : 0;
-			};
-			ctx.liveDofDisabled = liveDofDisabled;
-			ctx.liveDofDisableStatus = liveDofDisableStatus;
-			ctx.fnSetLiveDofDisabled = [](void* self, bool disabled)
-			{
-				auto* core = static_cast<Core*>(self);
-				GuiCommand cmd{GuiAction::LiveDofDisabled, 0, disabled};
-				cmd.actorToken = core->liveOwnerToken; cmd.sceneSession = core->injectionSession;
-				core->QueueGui(std::move(cmd));
 			};
 			ctx.liveTakeoverAvailable = liveTakeoverAvailable;
 			ctx.liveControlNotice = liveControlNotice;

@@ -2602,18 +2602,22 @@ static void TestLiveDofControl()
 {
 	BeginTest("Live depth of field disable and restore");
 	Core core;
-	core.liveTakeoverActive = true; core.liveOwnerToken = 9; core.injectionSession = 12;
 	dofRenderCalls = 0;
 	Check(InvokeDofRender(false, &FakeDofRender, 7) && dofRenderCalls == 1, "normal rendering calls native pass once");
 	Check(!InvokeDofRender(true, &FakeDofRender, 7) && dofRenderCalls == 1, "experimental disable skips native pass");
 	Check(InvokeDofRender(false, &FakeDofRender, 7) && dofRenderCalls == 2, "release returns to native rendering");
-	Core::GuiCommand disable{Core::GuiAction::LiveDofDisabled, 0, true};
-	disable.actorToken = 9; disable.sceneSession = 12;
-	core.QueueGui(disable); core.ProcessPendingGuiCommands();
-	Check(core.liveDofDisabled, "current Live session can request depth of field disable");
-	disable.actorToken = 10; disable.flag = false;
-	core.QueueGui(disable); core.ProcessPendingGuiCommands();
-	Check(core.liveDofDisabled, "stale owner cannot alter depth of field request");
+	core.camera.settings.mode = CameraMode::Track;
+	core.camera.settings.enabled = true;
+	Check(!core.ShouldDisableLiveDof(), "VMD outside Live preserves native depth of field");
+	core.liveTakeoverActive = true;
+	Check(core.ShouldDisableLiveDof(), "Live takeover with VMD disables depth of field");
+	core.camera.settings.mode = CameraMode::Follow;
+	Check(!core.ShouldDisableLiveDof(), "follow camera restores depth of field");
+	core.camera.settings.mode = CameraMode::Hold;
+	Check(!core.ShouldDisableLiveDof(), "fixed camera restores depth of field");
+	core.camera.settings.mode = CameraMode::Track;
+	core.camera.settings.enabled = false;
+	Check(!core.ShouldDisableLiveDof(), "game camera restores depth of field");
 }
 
 static void TestLiveSeekCommand()

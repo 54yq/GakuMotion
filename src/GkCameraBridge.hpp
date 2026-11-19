@@ -898,14 +898,15 @@ namespace CameraBridge
 		}
 
 		auto& liveCore = GakuMotion::Core::Instance();
+		const bool disableLiveDof = liveCore.ShouldDisableLiveDof();
+		if (!disableLiveDof) independentDofDisabled.store(false, std::memory_order_release);
 		if (liveCore.liveTakeoverActive)
 		{
 			TraceCameraFocus(camera);
-			if (liveCore.liveDofDisabled)
+			if (disableLiveDof)
 			{
 				const bool available = InstallIndependentDof();
 				independentDofDisabled.store(available, std::memory_order_release);
-				liveCore.liveDofDisableStatus = available ? 1 : -1;
 				static auto lastDofTrace = std::chrono::steady_clock::time_point{};
 				const auto now = std::chrono::steady_clock::now();
 				if (g_hostContext.logInfo && now - lastDofTrace >= std::chrono::seconds(4))
@@ -916,7 +917,6 @@ namespace CameraBridge
 					lastDofTrace = now;
 				}
 			}
-			else { independentDofDisabled.store(false, std::memory_order_release); liveCore.liveDofDisableStatus = 0; }
 		}
 		else if (focalDistance >= 0.2f && focalDistance <= 50.0f)
 			WritePhotographyDoFFocalPoint(focalDistance);

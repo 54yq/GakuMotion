@@ -58,7 +58,6 @@
 				",\"propsScanning\":" + JBool(core_.actorPropScanRequested) +
 				",\"propsNotice\":" + JString(ctx.ensembleNotice.starts_with("该时间轴道具") ? ctx.ensembleNotice : "") +
 				",\"followYaw\":" + JBool(core_.camera.settings.followPlacementYaw) +
-				",\"liveDof\":" + JBool(ctx.liveDofDisabled) +
 				",\"liveClock\":" + JBool(ctx.liveActorClockActive) + ",\"liveClockAvailable\":" + JBool(ctx.liveActorClockAvailable) +
 				",\"liveDiagnostics\":" + JBool(ctx.liveContinuousArmDiagnostics) +
 				",\"liveFps\":" + JNum(ctx.liveFrameMonitor.available ? ctx.liveFrameMonitor.fps : 0) +
@@ -107,8 +106,6 @@
 				else if (action == "live.seek" && ctx.liveViewingConfirmed && !ctx.liveTakeoverActive &&
 					NumberParam(params, "value", number) && number >= 0 && number < ctx.liveDuration)
 					ctx.fnSeekLive(ctx.self, static_cast<float>(number));
-				else if (action == "live.dof" && ctx.liveTakeoverActive && BoolParam(params, "value", enable))
-					ctx.fnSetLiveDofDisabled(ctx.self, enable);
 				else if (action == "live.record" && ctx.liveViewingConfirmed)
 					ctx.fnRecordLiveState(ctx.self);
 				else if (action == "live.swingReport") ctx.fnLoadSwingReport(ctx.self);

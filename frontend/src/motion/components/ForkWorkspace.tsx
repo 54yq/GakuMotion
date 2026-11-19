@@ -25,7 +25,7 @@ const mockState: ForkState = {
     { key: 'sample-baton', actorToken: 0, actor: '舞台灯柱', name: 'Geo_baton_01', hidden: false, editable: true, active: true, timeline: true },
   ],
   propsCanScan: true, propsScanning: false, propsNotice: '',
-  propsEditable: true, followYaw: false, liveDof: false, liveClock: false, liveClockAvailable: true,
+  propsEditable: true, followYaw: false, liveClock: false, liveClockAvailable: true,
   liveDiagnostics: false, liveClockNotice: '',
   liveFps: 59.8, liveStalls: 0, swingReportLoaded: false,
   folders: [], folderNotice: '',
@@ -80,7 +80,6 @@ export function useForkWorkspace(preview = false) {
       if (action === 'motion.auxMode') setState({ ...current, auxMode: Number(fields.value) })
       if (action === 'motion.wristReport') setState({ ...current, wristStatus: 2 })
       if (action === 'camera.followYaw') setState({ ...current, followYaw: Boolean(fields.value) })
-      if (action === 'live.dof') setState({ ...current, liveDof: Boolean(fields.value) })
       if (action === 'live.clock') setState({ ...current, liveClock: Boolean(fields.value) })
       if (action === 'live.armDiagnostics') setState({ ...current, liveDiagnostics: Boolean(fields.value) })
       if (action === 'live.swingReport') setState({ ...current, swingReportLoaded: true })

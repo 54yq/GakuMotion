@@ -567,7 +567,6 @@ export interface ForkState {
   propsScanning: boolean
   propsNotice: string
   followYaw: boolean
-  liveDof: boolean
   liveClock: boolean
   liveClockAvailable: boolean
   liveDiagnostics: boolean

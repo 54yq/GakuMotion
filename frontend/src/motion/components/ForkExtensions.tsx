@@ -150,9 +150,5 @@ export function ForkCameraOptions({ state, command }: { state: ForkState; comman
       <Checkbox aria-label="镜头随主角色朝向" checked={state.followYaw}
         onCheckedChange={value => void command('camera.followYaw', { value: value === true })} />
     </PropertyRow>
-    {state.active && <PropertyRow label="关闭 Live 景深（测试）">
-      <Checkbox aria-label="关闭 Live 景深" checked={state.liveDof}
-        onCheckedChange={value => void command('live.dof', { value: value === true })} />
-    </PropertyRow>}
   </>
 }

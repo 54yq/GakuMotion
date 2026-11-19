@@ -4695,7 +4695,6 @@ void MotionTick(void*, float)
 				g_liveTakeoverScene = requestedScene;
 				g_liveDriver.Enable();
 				core.liveTakeoverActive = g_liveDriver.MayInject();
-				if (core.liveTakeoverActive) { core.liveDofDisabled = false; core.liveDofDisableStatus = 0; }
 				g_liveTakeoverEnabled.store(core.liveTakeoverActive, std::memory_order_release);
 				core.liveTakeoverFault = g_liveDriver.State() == GakuMotion::live_takeover::Phase::Failed;
 				if (core.liveTakeoverFault) core.liveFaultOwner = requestedOwner;
