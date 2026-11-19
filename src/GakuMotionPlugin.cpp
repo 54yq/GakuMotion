@@ -1044,7 +1044,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.9-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.10-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -1603,6 +1603,7 @@ static void ResetPlacementDynamicBone(void* actor)
 	}
 
 #include "GkSceneOwnerRuntime.hpp"
+#include "GkFixedActorLighting.hpp"
 #include "GkStageLoadOverride.hpp"
 #include "GkPageObservation.hpp"
 
@@ -1690,6 +1691,8 @@ static void ResetPlacementDynamicBone(void* actor)
 	{
 		auto& core = GakuMotion::Core::Instance();
 		std::lock_guard<std::recursive_mutex> lock(core.stateMutex);
+		core.fixedActorLighting = false;
+		if (!FixedActorLighting::Release()) g_capturePhysicsUnconfirmed = true;
 		if (!LiveActorProps::RestoreAll(core)) g_capturePhysicsUnconfirmed = true;
         if (!ActorModelVisibility::RestoreAll(core)) g_capturePhysicsUnconfirmed = true;
 		if (!LiveWindOverride::Restore(g_liveTakeoverOwner, g_liveTakeoverScene)) g_capturePhysicsUnconfirmed = true;
@@ -1713,7 +1716,7 @@ static void ResetPlacementDynamicBone(void* actor)
 		auto& core = GakuMotion::Core::Instance();
 		std::lock_guard<std::recursive_mutex> lock(core.stateMutex);
 		RefreshProtectedContext(true);
-		if (!LiveActorProps::RestoreAll(core)) return false;
+		if (!FixedActorLighting::Release() || !LiveActorProps::RestoreAll(core)) return false;
 		if (!LiveWindOverride::Restore(g_liveTakeoverOwner, g_liveTakeoverScene)) return false;
 		if(LiveActorClockMvp::active&&!RestoreActorClockMvp("capture_begin"))return false;
 		const bool rosterConfirmed = !core.ensemble.HasActiveFollowers() || RefreshSceneActors(core, true, false);
@@ -3556,7 +3559,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
         StageLoadOverride::Shutdown();
         const bool hookReleased=StageLoadOverride::target==nullptr;
         if(props)core.actorPropHidden.clear();
-        if(props&&models&&stage&&hookReleased)GakuMotion::visual_handoff::released.store(true,std::memory_order_release);
+        if(props&&models&&stage&&hookReleased&&FixedActorLighting::Release())GakuMotion::visual_handoff::released.store(true,std::memory_order_release);
     } else if (!GakuMotion::visual_handoff::Requested() && !StageLoadOverride::attempted) {
         StageLoadOverride::Install();
     }
@@ -4425,6 +4428,7 @@ void MotionTick(void*, float)
 		RefreshProtectedContext();
 		auto& core = GakuMotion::Core::Instance();
 		std::lock_guard<std::recursive_mutex> lock(core.stateMutex);
+		FixedActorLighting::Tick(core);
 		PollCostumeCapture(core);
         const bool frameLog = core.liveFrameMonitor.Update(GakuMotion::LiveFrameMonitor::Clock::now(),
             core.liveViewingConfirmed && core.liveObservation.confirmed, core.liveOwnerToken, core.liveOwnerScene);

@@ -57,6 +57,8 @@
 				",\"propsCanScan\":" + JBool(ctx.injectionAllowed || ctx.liveViewingConfirmed) +
 				",\"propsScanning\":" + JBool(core_.actorPropScanRequested) +
 				",\"propsNotice\":" + JString(ctx.ensembleNotice.starts_with("该时间轴道具") ? ctx.ensembleNotice : "") +
+				",\"fixedActorLighting\":" + JBool(core_.fixedActorLighting) +
+				",\"fixedActorLightingNotice\":" + JString(core_.fixedActorLightingNotice) +
 				",\"followYaw\":" + JBool(core_.camera.settings.followPlacementYaw) +
 				",\"liveClock\":" + JBool(ctx.liveActorClockActive) + ",\"liveClockAvailable\":" + JBool(ctx.liveActorClockAvailable) +
 				",\"liveDiagnostics\":" + JBool(ctx.liveContinuousArmDiagnostics) +
@@ -93,6 +95,12 @@
 				if (action == "live.takeover" && BoolParam(params, "value", enable) &&
 					(enable ? ctx.liveTakeoverAvailable && !ctx.liveTakeoverActive : ctx.liveTakeoverActive))
 					ctx.fnSetLiveTakeover(ctx.self, enable);
+				else if (action == "live.fixedActorLighting" && ctx.liveTakeoverActive &&
+					!visual_handoff::Requested() && BoolParam(params, "value", enable))
+				{
+					core_.fixedActorLighting = enable;
+					core_.fixedActorLightingNotice.clear();
+				}
 				else if (action == "live.aspect" && BoolParam(params, "value", enable))
 					ctx.fnSetLiveAspectPreview(ctx.self, enable);
 				else if (action == "live.pause" && ctx.liveViewingConfirmed && !ctx.liveTakeoverActive &&

@@ -274,6 +274,25 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
           />
         </div>
 
+        {fork && forkCommand && fork.fixedActorLighting !== undefined && (
+          <div className="flex items-center justify-between gap-3 px-3.5 py-2.5">
+            <div className="space-y-0.5">
+              <Label htmlFor="stage-fixed-actor-lighting" className="text-[13px] font-medium">角色固定打光</Label>
+              <span className="block text-xs text-muted-foreground">
+                {fork.fixedActorLightingNotice || (fork.active
+                  ? '为 Live 角色应用统一的主光、补光与轮廓光'
+                  : '接管 Live 后可开启')}
+              </span>
+            </div>
+            <Checkbox
+              id="stage-fixed-actor-lighting"
+              checked={fork.fixedActorLighting}
+              disabled={!fork.active}
+              onCheckedChange={(checked) => void forkCommand('live.fixedActorLighting', { value: checked === true }, true)}
+            />
+          </div>
+        )}
+
         <div
           className="flex items-center justify-between gap-3 px-3.5 py-2.5"
           title="关闭时自动隐藏场景网格并应用纯色背景"

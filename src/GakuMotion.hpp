@@ -126,6 +126,8 @@ namespace GakuMotion
 		bool liveAspectPreviewRequested{true};
 		PhysicsMonitor physicsMonitor;
 		std::chrono::steady_clock::time_point physicsMonitorAt{};
+		bool fixedActorLighting{false};
+		std::string fixedActorLightingNotice;
 		bool liveTakeoverFault{false};
 		uint64_t liveAlignmentLoggedSession{~uint64_t{0}}, liveAlignmentLoggedMotion{~uint64_t{0}};
 		void* liveAlignmentLoggedActor{nullptr}; // identity only

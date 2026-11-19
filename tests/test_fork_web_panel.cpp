@@ -70,7 +70,16 @@ int main()
 		!core.liveTakeoverRequest, "A previous Live owner cannot start takeover");
 	check(ok(request("fork.command", R"({"action":"live.takeover","session":12,"owner":19,"value":true})")) &&
 		core.liveTakeoverRequest == 1 && core.liveTakeoverRequestOwner == 19, "Web starts takeover through the existing owner-scoped command");
+	check(!ok(request("fork.command", R"({"action":"live.fixedActorLighting","session":12,"owner":19,"value":true})")),
+		"Fixed actor lighting requires active takeover");
 	core.liveTakeoverActive = true;
+	check(!ok(request("fork.command", R"({"action":"live.fixedActorLighting","session":12,"owner":18,"value":true})")),
+		"A stale Live owner cannot change the actor lighting");
+	check(ok(request("fork.command", R"({"action":"live.fixedActorLighting","session":12,"owner":19,"value":true})")) &&
+		request("fork.get").BoolPath("result.fixedActorLighting", false),
+		"Web exposes the current Live actor lighting request");
+	check(ok(request("fork.command", R"({"action":"live.fixedActorLighting","session":12,"owner":19,"value":false})")) &&
+		!core.fixedActorLighting, "The current Live owner can clear the actor lighting request");
 	check(ok(request("fork.command", R"({"action":"live.takeover","session":12,"owner":19,"value":false})")) &&
 		core.liveTakeoverRequest == 2, "Web exits takeover through the existing restoration request");
 	const auto epoch = std::to_string(core.sceneActorRegistry.Epoch());
