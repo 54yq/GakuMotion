@@ -873,7 +873,7 @@ export class MotionStore {
       stage: snapshot.stage,
       facial: snapshot.facial,
       position: snapshot.position,
-      ensemble: snapshot.ensemble,
+      ensemble: snapshot.ensemble ?? this.state.ensemble,
       physicsBackend: snapshot.physicsBackend,
       musicVolumeSupport: snapshot.musicVolumeSupport,
       musicVolumeNotice: snapshot.musicVolumeNotice,
@@ -893,7 +893,7 @@ export class MotionStore {
     if (raw.solePitch) patch.solePitch = normalizeSolePitchState(raw.solePitch)
     if (raw.studio) this.onStudioChanged(normalizeStudioState(raw.studio))
     this.set(patch)
-    this.syncEnsembleDraft(snapshot.ensemble)
+    if (snapshot.ensemble) this.syncEnsembleDraft(snapshot.ensemble)
   }
 
   private onCameraChanged(camera: CameraState): void {

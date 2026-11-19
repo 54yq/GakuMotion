@@ -15,6 +15,21 @@ afterEach(() => {
 })
 
 describe('MotionStore startup', () => {
+  it('starts with a native snapshot that omits the legacy ensemble section', async () => {
+    const bridge = new MotionMockBridgeClient({ capabilityProfile: 'phase1' })
+    const request = bridge.request.bind(bridge)
+    vi.spyOn(bridge, 'request').mockImplementation(async (...args) => {
+      const reply = await request(...args)
+      if (args[0] === 'state.get' && reply && typeof reply === 'object') Reflect.deleteProperty(reply, 'ensemble')
+      return reply
+    })
+    const store = new MotionStore(bridge)
+    await store.start()
+    expect(store.getState().ready).toBe(true)
+    expect(store.getState().ensemble.settings.enabled).toBe(false)
+    expect(store.getState().library.entries.length).toBeGreaterThan(0)
+    bridge.close()
+  })
   it('negotiates full capabilities by default and supports phase1 degradation profile', async () => {
     const { bridge, store } = await startedStore('full')
     const state = store.getState()
