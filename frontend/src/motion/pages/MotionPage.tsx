@@ -268,7 +268,7 @@ export function MotionPage({ fork, forkCommand }: { fork?: ForkState | null; for
           </PropertySection>
 
           {/* Facial Weight Mixer */}
-          <PropertySection
+          <CollapsiblePropertySection
             title={
               <span className="inline-flex items-center gap-1.5">
                 <RiEmotionHappyFill className="size-3.5 text-primary" />
@@ -277,36 +277,35 @@ export function MotionPage({ fork, forkCommand }: { fork?: ForkState | null; for
             }
             description="分项与整体倍率相乘；通常限制在 0–100%。眼骨视线不受影响。"
             badge={!supports('facial.setWeights') ? <PendingBadge /> : undefined}
-            actions={
-              <>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 px-2 text-xs"
-                  disabled={!supports('facial.setWeights')}
-                  onClick={() => motionStore.resetFacialWeights()}
-                >
-                  重置表情幅度
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  className="h-7 px-2 text-xs"
-                  disabled={!supports('facial.save')}
-                  onClick={() => void motionStore.saveFacialWeights()}
-                >
-                  保存表情幅度
-                </Button>
-              </>
-            }
+            className="self-start"
           >
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                disabled={!supports('facial.setWeights')}
+                onClick={() => motionStore.resetFacialWeights()}
+              >
+                重置表情幅度
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                disabled={!supports('facial.save')}
+                onClick={() => void motionStore.saveFacialWeights()}
+              >
+                保存表情幅度
+              </Button>
+            </div>
             {FACIAL_SLIDERS.map((slider) => (
               <FacialSliderRow key={slider.key} facet={slider.key} label={slider.label} hint={slider.hint} />
             ))}
             {facial.notice && (
               <div className="px-3.5 py-2 text-xs text-primary">{facial.notice}</div>
             )}
-          </PropertySection>
+          </CollapsiblePropertySection>
         </div>
       )}
 

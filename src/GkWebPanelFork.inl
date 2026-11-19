@@ -61,6 +61,9 @@
 				",\"actorLightingStrengths\":{\"key\":" + JNum(core_.actorLightingStrengths.key) +
 					",\"fill\":" + JNum(core_.actorLightingStrengths.fill) +
 					",\"rim\":" + JNum(core_.actorLightingStrengths.rim) + "}" +
+				",\"actorLightingLimits\":{\"key\":" + JNum(core_.actorLightingLimits.key) +
+					",\"fill\":" + JNum(core_.actorLightingLimits.fill) +
+					",\"rim\":" + JNum(core_.actorLightingLimits.rim) + "}" +
 				",\"fixedActorLightingNotice\":" + JString(core_.fixedActorLightingNotice) +
 				",\"followYaw\":" + JBool(core_.camera.settings.followPlacementYaw) +
 				",\"liveClock\":" + JBool(ctx.liveActorClockActive) + ",\"liveClockAvailable\":" + JBool(ctx.liveActorClockAvailable) +
@@ -108,8 +111,10 @@
 					core_.fixedActorLighting && !visual_handoff::Requested())
 				{
 					std::string channel;
-					if (!StringParam(params, "channel", channel) || !NumberParam(params, "value", number) ||
-						number < 0.0 || number > (channel == "key" ? 1.0 : 0.25))
+					if (!StringParam(params, "channel", channel)) return CmdResult::Err("invalid_params", "缺少角色光照通道");
+					const auto& limits = core_.actorLightingLimits;
+					const float limit = channel == "key" ? limits.key : channel == "fill" ? limits.fill : limits.rim;
+					if (!NumberParam(params, "value", number) || number < 0.0 || number > limit + .00001)
 						return CmdResult::Err("invalid_params", "角色光照强度超出范围");
 					const auto value = static_cast<float>(number);
 					if (channel == "key") core_.actorLightingStrengths.key = value;
@@ -119,7 +124,21 @@
 				}
 				else if (action == "live.actorLightingReset" && ctx.liveTakeoverActive &&
 					core_.fixedActorLighting && !visual_handoff::Requested())
+				{
 					core_.actorLightingStrengths = {};
+					core_.actorLightingLimits = {1.f, .25f, .25f};
+					core_.actorLightingSampled = false;
+					core_.actorLightingSampleActor = 0;
+					core_.fixedActorLightingNotice.clear();
+				}
+				else if (action == "live.actorLightingSample" && ctx.liveTakeoverActive && !visual_handoff::Requested())
+				{
+					const auto* actor = core_.sceneActorRegistry.Find(core_.player.controller.targetActor);
+					if (!actor) return CmdResult::Err("not_ready", "当前未绑定主角色");
+					core_.actorLightingSampleActor = actor->token;
+					core_.actorLightingSampleOwner = core_.liveOwnerToken;
+					core_.fixedActorLightingNotice = "正在读取主角色所在 Live 的打光…";
+				}
 				else if (action == "live.aspect" && BoolParam(params, "value", enable))
 					ctx.fnSetLiveAspectPreview(ctx.self, enable);
 				else if (action == "live.pause" && ctx.liveViewingConfirmed && !ctx.liveTakeoverActive &&

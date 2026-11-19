@@ -128,10 +128,14 @@ namespace GakuMotion
 		std::chrono::steady_clock::time_point physicsMonitorAt{};
 		struct ActorLightingStrengths
 		{
-			float key{0.65f}, fill{0.035f}, rim{0.03f};
+			float key{0.40f}, fill{0.035f}, rim{0.25f};
 			bool operator==(const ActorLightingStrengths&) const = default;
 		};
 		ActorLightingStrengths actorLightingStrengths;
+		ActorLightingStrengths actorLightingLimits{1.f, .25f, .25f};
+		uint64_t actorLightingSampleActor{};
+		uintptr_t actorLightingSampleOwner{};
+		bool actorLightingSampled{};
 		bool fixedActorLighting{false};
 		std::string fixedActorLightingNotice;
 		bool liveTakeoverFault{false};

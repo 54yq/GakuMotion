@@ -6,6 +6,15 @@ namespace FixedActorLighting
 	using Type = GakuMotion::ExactMethodMetadata::Type;
 	struct Color { float r, g, b, a; };
 	struct Angles { float x, y; };
+	struct Sample {
+		Color key, shade, fill, rim;
+		Angles keyAngle, rimAngle;
+		float rimPower;
+	};
+	inline Sample sampledLight{};
+	inline uintptr_t sampledOwner{};
+	inline int sampledScene{};
+	inline bool appliedSampled{};
 	struct Root {
 		StageLoader::Handle handle{};
 		void* Get() const { return handle ? SceneOwnerRuntime::handleTarget(handle) : nullptr; }
@@ -138,31 +147,131 @@ namespace FixedActorLighting
 		g_faceRuntime.writeField(object, field, const_cast<void*>(value));
 		return true;
 	}
-	inline bool Parameter(const char* name, Type type, const void* value)
+	inline void* FindParameter(void* actor, const char* name)
 	{
-		void* actor = parameterObject.Get();
+		if (!actor) return nullptr;
 		void* field = g_faceRuntime.InstanceField(actor, name, 0x12);
 		if (!field) field = g_faceRuntime.InstanceField(actor, name, 0x15);
-		if (!field) return false;
+		if (!field) return nullptr;
 		void* parameter = nullptr;
 		g_faceRuntime.readField(actor, field, &parameter);
+		return parameter;
+	}
+	inline bool Parameter(const char* name, Type type, const void* value)
+	{
 		Root root;
 		const bool overrideState = true;
-		return root.Keep(parameter) && Write(root.Get(), "m_Value", type, value) &&
+		return root.Keep(FindParameter(parameterObject.Get(), name)) && Write(root.Get(), "m_Value", type, value) &&
 			Write(root.Get(), "m_OverrideState", {0x02}, &overrideState);
 	}
-	inline bool ApplyStrengths(const GakuMotion::Core::ActorLightingStrengths& strengths)
+	template<class T>
+	inline bool ReadParameter(void* actor, const char* name, Type type, T& value)
 	{
-		const auto gray = [](float value) { return Color{value, value, value, 1.f}; };
-		const Color key = gray(strengths.key), fill = gray(strengths.fill), rim = gray(strengths.rim);
-		if (!Parameter("lightColor", {0x11, colorClass}, &key) ||
-			!Parameter("shadeColorMultiply", {0x11, colorClass}, &key) ||
-			!Parameter("shadeColorAdditive", {0x11, colorClass}, &fill) ||
-			!Parameter("rimColor", {0x11, colorClass}, &rim)) return false;
-		appliedStrengths = strengths;
+		Root parameter;
+		if (!parameter.Keep(FindParameter(actor, name))) return false;
+		void* field = g_faceRuntime.InstanceField(parameter.Get(), "m_Value", type.code);
+		if (!field || !StageLoader::metadata.Matches(g_faceRuntime.fieldType(field), type)) return false;
+		g_faceRuntime.readField(parameter.Get(), field, &value);
 		return true;
 	}
-	inline bool Create(int targetLayer, const GakuMotion::Core::ActorLightingStrengths& strengths)
+	inline float Strength(Color value)
+	{
+		return (std::max)({std::fabs(value.r), std::fabs(value.g), std::fabs(value.b)});
+	}
+	inline bool ReadNativeSample(Sample& sample)
+	{
+		if (!Resolve()) return false;
+		const auto rendering = [](const char* name) {
+			return FindClass("Unity.RenderPipelines.Core.Runtime.dll", "UnityEngine.Rendering", name);
+		};
+		auto& m = StageLoader::metadata;
+		void* managerClass = rendering("VolumeManager");
+		void* stackClass = rendering("VolumeStack");
+		void* componentClass = rendering("VolumeComponent");
+		void* typeClass = FindClass("mscorlib.dll", "System", "Type");
+		void* maskClass = FindClass("UnityEngine.CoreModule.dll", "UnityEngine", "LayerMask");
+		void* transformClass = StageLoader::transformClass;
+		if (!managerClass || !stackClass || !componentClass || !typeClass || !maskClass || !transformClass) return false;
+		const auto instance = m.Find(managerClass, "get_instance", true, {0x12, managerClass}, {});
+		const auto create = m.Find(managerClass, "CreateStack", false, {0x12, stackClass}, {});
+		const auto dispose = m.Find(managerClass, "DestroyStack", false, {0x01}, {{0x12, stackClass}});
+		const auto update = m.Find(managerClass, "Update", false, {0x01},
+			{{0x12, stackClass}, {0x12, transformClass}, {0x11, maskClass}});
+		const auto getActor = m.Find(stackClass, "GetComponent", false, {0x12, componentClass}, {{0x12, typeClass}});
+		const auto getTrigger = m.Find(cameraDataClass, "get_volumeTrigger", false, {0x12, transformClass}, {});
+		if (!instance || !create || !dispose || !update || !getActor || !getTrigger) return false;
+		Root camera, go, cameraType, data, trigger, manager, stack, actorType, actor;
+		if (!camera.Keep(StageLoader::Invoke(StageLoader::cameraMain)) ||
+			!go.Keep(StageLoader::Invoke(StageLoader::componentGo, camera.Get())) ||
+			!cameraType.Keep(ManagedType(cameraDataClass))) return false;
+		void* cameraArgs[]{cameraType.Get()};
+		if (!data.Keep(StageLoader::Invoke(getComponent, go.Get(), cameraArgs))) return false;
+		void* boxed = StageLoader::Invoke(getVolumeMask, data.Get());
+		const auto* maskBits = boxed ? static_cast<const uint32_t*>(g_safeBones.unbox(boxed)) : nullptr;
+		if (!maskBits || !*maskBits) return false;
+		uint32_t mask = *maskBits;
+		void* customTrigger = nullptr;
+		if (!Call(getTrigger, data.Get(), nullptr, &customTrigger) ||
+			!trigger.Keep(customTrigger ? customTrigger : StageLoader::Invoke(StageLoader::goTransform, go.Get())) ||
+			!manager.Keep(StageLoader::Invoke(instance)) || !actorType.Keep(ManagedType(actorClass))) return false;
+		// Use an independent stack in this tick and exclude only our owned Volume.
+		void* own = volumeObject.Get();
+		bool disabled = false, enabled = true;
+		void* disableArgs[]{&disabled};
+		void* enableArgs[]{&enabled};
+		if (own && !Call(StageLoader::setActive, own, disableArgs)) return false;
+		const bool created = stack.Keep(StageLoader::Invoke(create, manager.Get()));
+		void* updateArgs[]{stack.Get(), trigger.Get(), &mask};
+		void* actorArgs[]{actorType.Get()};
+		const bool read = created && Call(update, manager.Get(), updateArgs) &&
+			actor.Keep(StageLoader::Invoke(getActor, stack.Get(), actorArgs)) &&
+			ReadParameter(actor.Get(), "lightColor", {0x11, colorClass}, sample.key) &&
+			ReadParameter(actor.Get(), "shadeColorMultiply", {0x11, colorClass}, sample.shade) &&
+			ReadParameter(actor.Get(), "shadeColorAdditive", {0x11, colorClass}, sample.fill) &&
+			ReadParameter(actor.Get(), "rimColor", {0x11, colorClass}, sample.rim) &&
+			ReadParameter(actor.Get(), "mainLightAngle", {0x11, anglesClass}, sample.keyAngle) &&
+			ReadParameter(actor.Get(), "rimAngle", {0x11, anglesClass}, sample.rimAngle) &&
+			ReadParameter(actor.Get(), "rimPower", {0x0c}, sample.rimPower);
+		void* disposeArgs[]{stack.Get()};
+		const bool disposed = !created || Call(dispose, manager.Get(), disposeArgs);
+		const bool restored = !own || Call(StageLoader::setActive, own, enableArgs);
+		if (!restored) Release();
+		const auto finiteColor = [](Color c) {
+			return std::isfinite(c.r) && std::isfinite(c.g) && std::isfinite(c.b) && std::isfinite(c.a);
+		};
+		return read && disposed && restored && finiteColor(sample.key) && finiteColor(sample.shade) &&
+			finiteColor(sample.fill) && finiteColor(sample.rim) && std::isfinite(sample.keyAngle.x) &&
+			std::isfinite(sample.keyAngle.y) && std::isfinite(sample.rimAngle.x) &&
+			std::isfinite(sample.rimAngle.y) && std::isfinite(sample.rimPower);
+	}
+	inline bool ApplyStrengths(const GakuMotion::Core::ActorLightingStrengths& strengths, bool sampled)
+	{
+		const auto gray = [](float value) { return Color{value, value, value, 1.f}; };
+		const auto scaled = [&](Color color, float next) {
+			const float original = Strength(color);
+			if (original == next) return color;
+			if (!original) return gray(next);
+			return Color{color.r / original * next, color.g / original * next, color.b / original * next, color.a};
+		};
+		const Color key = sampled ? scaled(sampledLight.key, strengths.key) : gray(strengths.key);
+		const Color shade = sampled ? sampledLight.shade : key;
+		const Color fill = sampled ? scaled(sampledLight.fill, strengths.fill) : gray(strengths.fill);
+		const Color rim = sampled ? scaled(sampledLight.rim, strengths.rim) : gray(strengths.rim);
+		const Angles keyAngle = sampled ? sampledLight.keyAngle : Angles{-15.f, 25.f};
+		const Angles rimAngle = sampled ? sampledLight.rimAngle : Angles{35.f, 15.f};
+		const float rimPower = sampled ? sampledLight.rimPower : 8.f;
+		if (!Parameter("lightColor", {0x11, colorClass}, &key) ||
+			!Parameter("shadeColorMultiply", {0x11, colorClass}, &shade) ||
+			!Parameter("shadeColorAdditive", {0x11, colorClass}, &fill) ||
+			!Parameter("rimColor", {0x11, colorClass}, &rim) ||
+			!Parameter("mainLightAngle", {0x11, anglesClass}, &keyAngle) ||
+			!Parameter("rimAngle", {0x11, anglesClass}, &rimAngle) ||
+			!Parameter("rimPower", {0x0c}, &rimPower)) return false;
+		appliedStrengths = strengths;
+		appliedSampled = sampled;
+		return true;
+	}
+	inline bool Create(int targetLayer, const GakuMotion::Core::ActorLightingStrengths& strengths, bool sampled)
 	{
 		Root name, profileType, parameterType, volumeType;
 		if (!name.Keep(StageLoader::stringNew("GakuMotion Fixed Actor Lighting")) ||
@@ -181,12 +290,8 @@ namespace FixedActorLighting
 		void* addArgs[]{parameterType.Get(), &overrideAll};
 		void* parameter = nullptr;
 		if (!Call(addParameter, profileObject.Get(), addArgs, &parameter) || !parameterObject.Keep(parameter)) return false;
-		const Angles keyAngle{-15.f, 25.f}, rimAngle{35.f, 15.f};
-		const float noStageAdditive = 0.f, rimPower = 8.f;
-		if (!ApplyStrengths(strengths) ||
-			!Parameter("mainLightAngle", {0x11, anglesClass}, &keyAngle) ||
-			!Parameter("rimAngle", {0x11, anglesClass}, &rimAngle) ||
-			!Parameter("rimPower", {0x0c}, &rimPower) ||
+		const float noStageAdditive = 0.f;
+		if (!ApplyStrengths(strengths, sampled) ||
 			!Parameter("additiveLightScale", {0x0c}, &noStageAdditive)) return false;
 		void* volumeArgs[]{volumeType.Get()};
 		Root volume;
@@ -208,12 +313,37 @@ namespace FixedActorLighting
 			!GakuMotion::visual_handoff::Requested();
 		if (!eligible || (owner && (owner != core.liveOwnerToken || scene != core.liveOwnerScene)))
 			core.fixedActorLighting = false;
+		if (core.actorLightingSampled && (sampledOwner != core.liveOwnerToken || sampledScene != core.liveOwnerScene)) {
+			core.actorLightingSampled = false;
+			core.actorLightingStrengths = {};
+			core.actorLightingLimits = {1.f, .25f, .25f};
+		}
+		if (const auto requestedActor = core.actorLightingSampleActor) {
+			core.actorLightingSampleActor = 0;
+			const auto* selected = core.sceneActorRegistry.Find(core.player.controller.targetActor);
+			Sample next{};
+			if (eligible && core.liveOwnerToken == core.actorLightingSampleOwner && selected &&
+				selected->token == requestedActor && ReadNativeSample(next)) {
+				sampledLight = next;
+				sampledOwner = core.liveOwnerToken; sampledScene = core.liveOwnerScene;
+				core.actorLightingStrengths = {Strength(next.key), Strength(next.fill), Strength(next.rim)};
+				const auto upper = [](float standard, float value) {
+					return (std::max)(standard, std::ceil(value * 1000.f) / 1000.f);
+				};
+				const auto& value = core.actorLightingStrengths;
+				core.actorLightingLimits = {upper(1.f, value.key), upper(.25f, value.fill), upper(.25f, value.rim)};
+				core.actorLightingSampled = true;
+				appliedSampled = false;
+				core.fixedActorLighting = true;
+				core.fixedActorLightingNotice = "已读取当前 Live 的角色光照";
+			} else core.fixedActorLightingNotice = "读取原生角色光照失败";
+		}
 		if (!core.fixedActorLighting) {
 			if (!Release()) core.fixedActorLightingNotice = "角色光照覆盖清理失败，正在重试";
 			return;
 		}
-		if (volumeObject.handle && core.actorLightingStrengths != appliedStrengths &&
-			!ApplyStrengths(core.actorLightingStrengths)) {
+		if (volumeObject.handle && (core.actorLightingStrengths != appliedStrengths || core.actorLightingSampled != appliedSampled) &&
+			!ApplyStrengths(core.actorLightingStrengths, core.actorLightingSampled)) {
 			core.fixedActorLighting = false;
 			core.fixedActorLightingNotice = Release() ? "无法更新角色光照，已恢复原打光" : "角色光照覆盖清理失败，正在重试";
 			return;
@@ -225,13 +355,12 @@ namespace FixedActorLighting
 			nextCameraCheck = now + std::chrono::milliseconds(500);
 			return;
 		}
-		if (!Release() || targetLayer < 0 || !Create(targetLayer, core.actorLightingStrengths)) {
+		if (!Release() || targetLayer < 0 || !Create(targetLayer, core.actorLightingStrengths, core.actorLightingSampled)) {
 			core.fixedActorLighting = false;
 			core.fixedActorLightingNotice = Release() ? "当前 Live 的角色光照接口不可用" : "角色光照覆盖清理失败，正在重试";
 			return;
 		}
 		owner = core.liveOwnerToken; scene = core.liveOwnerScene; layer = targetLayer;
 		nextCameraCheck = now + std::chrono::milliseconds(500);
-		core.fixedActorLightingNotice.clear();
 	}
 }

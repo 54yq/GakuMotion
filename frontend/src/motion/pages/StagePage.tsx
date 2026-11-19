@@ -287,6 +287,12 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
                     : '接管 Live 后可开启')}
                 </span>
               </div>
+              {fork.actorLightingLimits && (
+                <Button size="sm" variant="outline" disabled={!fork.active}
+                  onClick={() => void forkCommand('live.actorLightingSample')}>
+                  读取并应用主角色打光
+                </Button>
+              )}
               <Checkbox
                 id="stage-fixed-actor-lighting"
                 checked={fork.fixedActorLighting}
@@ -305,7 +311,7 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
                     ariaLabel={label}
                     unit="%"
                     min={0}
-                    max={max}
+                    max={Math.max(max, Math.round((fork.actorLightingLimits?.[channel] ?? 0) * 1000) / 10)}
                     step={0.5}
                     decimals={1}
                     value={lightingStrengths[channel] * 100}
