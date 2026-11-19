@@ -48,6 +48,22 @@ int main()
 
 	const auto snapshot = request("fork.get");
 	check(ok(snapshot) && snapshot.IntPath("result.owner", 0) == 19, "Live state exposes its opaque owner token");
+	check(snapshot.StringPath("result.primaryPhysics", "") == "等待播放", "Primary physics waits for a runtime sample");
+	core.player.state = PlaybackState::Playing;
+	core.physicsMonitor.observed = true;
+	core.physicsMonitor.actor = reinterpret_cast<uintptr_t>(&primary);
+	core.physicsMonitor.session = core.injectionSession;
+	core.physicsMonitor.requested = core.guiPhysicsBackend.load();
+	core.physicsMonitor.actual = 2;
+	core.physicsMonitorAt = std::chrono::steady_clock::now();
+	check(request("fork.get").StringPath("result.primaryPhysics", "") == "原生物理运行中",
+		"Primary physics reflects a current native sample");
+	core.physicsMonitor.actual = 1;
+	check(request("fork.get").StringPath("result.primaryPhysics", "") == "原生待确认，当前内建",
+		"Primary physics reports the current fallback while native is pending");
+	core.player.state = PlaybackState::Stopped;
+	check(request("fork.get").StringPath("result.primaryPhysics", "") == "暂无当前数据",
+		"Primary physics stops reporting a sample when playback stops");
 	check(request("state.get").StringPath("result.library.notice", "") == core.playlistNotice,
 		"Upstream state snapshot remains available with the fork bridge");
 	check(!ok(request("fork.command", R"({"action":"live.takeover","session":12,"owner":18,"value":true})")) &&

@@ -11,7 +11,7 @@ const mockState: ForkState = {
   session: 1, owner: 1, epoch: 1, revision: 1, observed: true, viewing: true,
   paused: true, active: true, available: true, aspect: true, loop: false, loopLead: 1, liveTime: 42, duration: 155,
   liveNotice: 'Live 已暂停，可以为场景角色选择动作。',
-  position: zero, yaw: 0, formationNotice: '',
+  position: zero, yaw: 0, primaryPhysics: '原生物理运行中', formationNotice: '',
   placementReset: true, initializeBones: true, auxMode: 0, wristStatus: 0, armNotice: '',
   arms: [
     { token: 101, share: 0, degrees: 45, locked: false, bound: true, primary: true },
@@ -263,13 +263,23 @@ export function ForkEnsembleControls({ state, command }: { state: ForkState; com
       </div>
       {bindingLocked && <p className="text-xs text-muted-foreground">停止播放后可新增或解除动作绑定；当前仍可调整已绑定角色的站位。</p>}
       <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
-      <section className="min-w-0 space-y-2 rounded-lg border border-primary/40 bg-background/70 p-3">
-        <div className="flex items-center justify-between gap-2">
+      <section aria-label="主角色" className="min-w-0 space-y-2 rounded-lg border border-primary/40 bg-background/70 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-medium">主角色{primary ? ` · ${primary.label}` : ''}</h3>
-          <Button size="sm" variant="ghost" disabled={!primary} onClick={() => void command('formation.savePrimary')}>保存主角站位</Button>
+          <span className="text-xs text-muted-foreground">物理：{state.primaryPhysics || '暂无当前数据'}</span>
         </div>
-        <ForkPlacementFields key={primary?.token} slot={-1} token={primary?.token ?? 0} generation={0}
-          initial={state.position} yaw={state.yaw} command={command} />
+        <dl className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+          {(['x', 'y', 'z'] as const).map(axis => (
+            <div className="flex items-baseline gap-2" key={axis}>
+              <dt className="text-muted-foreground">{axis.toUpperCase()}</dt>
+              <dd className="tabular-nums">{state.position[axis].toFixed(2)}</dd>
+            </div>
+          ))}
+          <div className="flex items-baseline gap-2">
+            <dt className="text-muted-foreground">朝向</dt>
+            <dd className="tabular-nums">{state.yaw.toFixed(1)}°</dd>
+          </div>
+        </dl>
         {primary && <ModelVisibility actor={primary} command={command} />}
       </section>
       {Array.from({ length: slots }, (_, slot) => {

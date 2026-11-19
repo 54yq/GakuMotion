@@ -552,6 +552,7 @@ export interface ForkState {
   followers: ForkFollower[]
   position: Vector3
   yaw: number
+  primaryPhysics: string
   formationNotice: string
   placementReset: boolean
   initializeBones: boolean

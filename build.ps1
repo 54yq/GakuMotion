@@ -220,5 +220,12 @@ try {
     New-Item -ItemType Directory -Path (Join-Path $OutputRoot $fixture) -Force | Out-Null
     & $coreExe $fixture
     if ($LASTEXITCODE -ne 0) { throw ('Synthetic core tests failed: ' + $LASTEXITCODE) }
+    $webForkExe = Join-Path $OutputRoot 'fork_web_panel_contracts.exe'
+    & $compiler /nologo /std:c++20 /utf-8 /EHsc /MT /W3 `
+        "/I$(Join-Path $repo 'src')" "/I$(Join-Path $repo 'include')" "/I$(Join-Path $repo 'deps/KineTexture/src')" `
+        (Join-Path $repo 'tests/test_fork_web_panel.cpp') "/Fe:$webForkExe" "/Fo:$(Join-Path $OutputRoot 'fork_web_panel_contracts.obj')" winmm.lib user32.lib
+    if ($LASTEXITCODE -ne 0) { throw ('Web/fork bridge contract build failed: ' + $LASTEXITCODE) }
+    & $webForkExe
+    if ($LASTEXITCODE -ne 0) { throw ('Web/fork bridge contract tests failed: ' + $LASTEXITCODE) }
 } finally { Pop-Location }
 Write-Host 'Synthetic contracts passed.'

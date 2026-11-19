@@ -61,6 +61,7 @@
 				",\"liveClockNotice\":" + JString(ctx.liveActorClockNotice) +
 				",\"position\":" + JVec(core_.player.controller.initialPositionOffset) +
 				",\"yaw\":" + JNum(core_.player.controller.initialYawDegrees) +
+				",\"primaryPhysics\":" + JString(PrimaryPhysicsLabel(ctx)) +
 				",\"formationNotice\":" + JString(ctx.ensembleNotice) + ",\"folders\":" + strings(ctx.folderLibraryRoots) +
 				",\"folderNotice\":" + JString(ctx.folderLibraryNotice) + "}";
 		}

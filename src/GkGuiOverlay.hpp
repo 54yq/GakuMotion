@@ -279,6 +279,20 @@ namespace GakuMotion
 		                          bool* outWorld, bool* outEnabled){nullptr};
 	};
 
+	inline const char* PrimaryPhysicsLabel(const GuiContext& ctx)
+	{
+		switch (ClassifyPhysicsMonitor(ctx.physicsMonitor, ctx.physicsMonitorFresh))
+		{
+		case PhysicsMonitorState::Native: return "原生物理运行中";
+		case PhysicsMonitorState::Builtin: return "内建物理运行中";
+		case PhysicsMonitorState::Waiting: return ctx.physicsMonitor.actual == 1 ? "原生待确认，当前内建" : "原生待确认";
+		case PhysicsMonitorState::Fault: return ctx.physicsMonitor.actual == 1 ? "原生异常，当前内建" : "原生异常";
+		case PhysicsMonitorState::Off: return "已关闭";
+		case PhysicsMonitorState::Stale: return "暂无当前数据";
+		default: return "等待播放";
+		}
+	}
+
 	class GuiOverlay;
 	void DrawShell(GuiOverlay& overlay, const GuiContext& ctx);
 	void DrawLibraryPage(GuiOverlay& overlay, const GuiContext& ctx);

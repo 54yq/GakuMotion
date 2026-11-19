@@ -28,14 +28,7 @@ namespace GakuMotion
 
 		ImGui::TextUnformatted("驱动角色");
 		if (ImGui::GetContentRegionAvail().x >= ImGui::CalcTextSize("物理：原生待确认，当前内建").x + ImGui::GetStyle().ItemSpacing.x) ImGui::SameLine();
-		const auto physicalState = ClassifyPhysicsMonitor(ctx.physicsMonitor, ctx.physicsMonitorFresh);
-		const char* physicalLabel = physicalState == PhysicsMonitorState::Native ? "原生物理运行中" :
-			physicalState == PhysicsMonitorState::Builtin ? "内建物理运行中" :
-			physicalState == PhysicsMonitorState::Waiting ? (ctx.physicsMonitor.actual == 1 ? "原生待确认，当前内建" : "原生待确认") :
-			physicalState == PhysicsMonitorState::Fault ? (ctx.physicsMonitor.actual == 1 ? "原生异常，当前内建" : "原生异常") :
-			physicalState == PhysicsMonitorState::Off ? "已关闭" :
-			physicalState == PhysicsMonitorState::Stale ? "暂无当前数据" : "等待播放";
-		ImGui::TextDisabled("物理：%s", physicalLabel);
+		ImGui::TextDisabled("物理：%s", PrimaryPhysicsLabel(ctx));
 		const std::string targetLabel = ctx.sceneActors.empty() ? "当前场景没有可驱动角色" :
 			(ctx.targetActorLabel.empty() ? "正在识别角色" : ctx.targetActorLabel);
 		ImGui::SetNextItemWidth((std::min)(360.0f, ImGui::GetContentRegionAvail().x));
