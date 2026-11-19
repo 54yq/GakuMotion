@@ -29,6 +29,7 @@
 				props += "{\"key\":" + JString(ActorPropKey(prop)) + ",\"actorToken\":" + JNum(prop.actorToken) +
 					",\"actor\":" + JString(prop.actorLabel) +
 					",\"name\":" + JString(live_actor_props::DisplayName(prop.propName)) +
+					",\"modelId\":" + JNum(prop.modelId) + ",\"modelName\":" + JString(prop.modelName) +
 					",\"hidden\":" + JBool(prop.hidden) + ",\"editable\":" + JBool(prop.controllable) +
 					",\"active\":" + JBool(prop.active) + ",\"timeline\":" + JBool(prop.timeline) + "}";
 			}
@@ -184,7 +185,7 @@
 				ctx.fnSetSceneArm(ctx.self, static_cast<uint64_t>(token), ctx.actorRosterEpoch,
 					static_cast<int>(op), static_cast<float>(value));
 			}
-			else if (action == "stage.prop")
+			else if (action == "stage.prop" || action == "stage.propGroup")
 			{
 				std::string key;
 				int64_t token = -1;
@@ -192,14 +193,31 @@
 				bool hidden = false;
 				const bool timelineCurrent = ctx.liveViewingConfirmed && ctx.liveTakeoverActive &&
 					IntParam(params, "owner", owner) && owner > 0 && static_cast<uint64_t>(owner) == core_.liveOwnerToken;
-				if (!ctx.actorPropsEditable || !IntParam(params, "actorToken", token) || token < 0 ||
-					!StringParam(params, "key", key) || !BoolParam(params, "value", hidden) ||
-					!std::any_of(ctx.actorProps.begin(), ctx.actorProps.end(), [&](const auto& prop) {
-						return prop.actorToken == static_cast<uint64_t>(token) && prop.controllable && ActorPropKey(prop) == key &&
-							(prop.timeline ? timelineCurrent : core_.sceneActorRegistry.Resolve(prop.actorToken, ctx.actorRosterEpoch) != nullptr);
-					}))
+				if (!ctx.actorPropsEditable || !BoolParam(params, "value", hidden))
 					return CmdResult::Err("stale_token", "道具不可编辑或已变化");
-				ctx.fnSetActorPropHidden(ctx.self, static_cast<uint64_t>(token), ctx.actorRosterEpoch, key.c_str(), hidden);
+				std::vector<const GuiActorProp*> targets;
+				const auto add = [&](const std::string& id, int64_t expectedToken) {
+					const auto found = std::find_if(ctx.actorProps.begin(), ctx.actorProps.end(), [&](const auto& prop) {
+						return (expectedToken < 0 || prop.actorToken == static_cast<uint64_t>(expectedToken)) &&
+							prop.controllable && ActorPropKey(prop) == id &&
+							(prop.timeline ? timelineCurrent : core_.sceneActorRegistry.Resolve(prop.actorToken, ctx.actorRosterEpoch) != nullptr);
+					});
+					if (found == ctx.actorProps.end()) return false;
+					targets.push_back(&*found);
+					return true;
+				};
+				if (action == "stage.propGroup") {
+					const auto* keys = params.Find("keys");
+					if (!keys || !keys->IsArray() || keys->Empty() || keys->Size() > ctx.actorProps.size())
+						return CmdResult::Err("invalid_params", "道具列表无效");
+					for (const auto& id : keys->arrayItems)
+						if (!id.IsString() || !add(id.stringValue, -1))
+							return CmdResult::Err("stale_token", "道具组已变化，请重新扫描");
+				} else if (!IntParam(params, "actorToken", token) || token < 0 ||
+					!StringParam(params, "key", key) || !add(key, token))
+					return CmdResult::Err("stale_token", "道具不可编辑或已变化");
+				for (const auto* prop : targets)
+					ctx.fnSetActorPropHidden(ctx.self, prop->actorToken, ctx.actorRosterEpoch, ActorPropKey(*prop).c_str(), hidden);
 			}
 			else if (action == "actor.hideModel")
 			{

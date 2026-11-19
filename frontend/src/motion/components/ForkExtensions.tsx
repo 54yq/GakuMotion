@@ -71,48 +71,77 @@ export function ForkPropNodes({ state, command, timelineOnly = false }: {
 }) {
   const [filter, setFilter] = useState('')
   const query = filter.trim().toLowerCase()
-  const groups = [
-    { title: '角色道具', items: state.props.filter(prop => !prop.timeline) },
-    { title: '时间轴道具', items: state.props.filter(prop => prop.timeline) },
-  ].filter((group, index) => timelineOnly ? index === 1 : index === 0 || state.viewing || group.items.length > 0)
-  const count = groups.reduce((total, group) => total + group.items.length, 0)
+  const models = new Map<string, { label: string; fixed: boolean; parts: ForkState['props'] }>()
+  for (const prop of state.props) {
+    if (timelineOnly && !prop.timeline) continue
+    const name = prop.modelName || prop.name
+    const identity = [prop.actor, name, prop.name].join(' ')
+    const penlight = /penlight|荧光棒/i.test(identity)
+    const key = penlight ? 'penlight' : prop.modelId ? String(prop.modelId) : prop.key
+    const existing = models.get(key)
+    if (existing) { existing.parts.push(prop); continue }
+    const label = penlight ? '荧光棒' : /trolley/i.test(name) ? '移动箱' : /dolly/i.test(name) ? '轨道摄影车'
+      : /crane/i.test(name) ? '摇臂' : /baton|灯柱/i.test(identity) ? '舞台灯柱' : name
+    const fixed = prop.timeline && !penlight && !/手持|移动|轨道|摇臂|trolley|dolly|crane|角色位|constraint/i.test(identity)
+    models.set(key, { label, fixed, parts: [prop] })
+  }
+  const canEdit = (prop: ForkState['props'][number]) => !timelineOnly && state.propsEditable && prop.editable && (!prop.timeline || state.active)
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   return (
-    <CollapsiblePropertySection title={timelineOnly ? '时间轴道具' : '自定义道具节点'}
-      summary={`已识别 ${count} 项`} defaultOpen={!timelineOnly}>
-      <div className="space-y-2">
+    <CollapsiblePropertySection title="物品管理" summary={`已识别 ${models.size} 项`} defaultOpen={!timelineOnly}>
+      <div className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" variant="outline" disabled={!state.propsCanScan || state.propsScanning}
             onClick={() => void command('stage.propsScan')}>{state.propsScanning ? '正在扫描道具…' : '重新扫描道具'}</Button>
-          <Input className="h-7 max-w-60 text-xs" placeholder="过滤道具或角色" aria-label="过滤道具节点"
+          <Input className="h-8 max-w-60 text-xs" placeholder="搜索物品或部件" aria-label="搜索物品或部件"
             value={filter} onChange={event => setFilter(event.currentTarget.value)} />
         </div>
-        {!state.propsEditable && <p className="text-xs text-muted-foreground">当前场景可查看道具，显隐调整暂不可用。</p>}
-        {state.propsNotice && <p role="status" className="text-xs text-warning">{state.propsNotice}</p>}
-        {groups.map(group => {
-          const items = group.items.filter(prop => `${prop.actor} ${prop.name}`.toLowerCase().includes(query))
-          return (
-            <section aria-label={group.title} key={group.title} className="space-y-1">
-              {!timelineOnly && <h3 className="text-xs font-medium">{group.title}</h3>}
-              <div className="max-h-56 divide-y overflow-auto rounded-md border bg-background/60">
-                {!items.length && <p className="p-3 text-xs text-muted-foreground">{query ? '没有匹配道具。' : '尚未识别到道具。'}</p>}
-                {items.map(prop => (
-                  <label className="flex items-center justify-between gap-3 px-3 py-2 text-xs" key={prop.key}>
-                    <span className="min-w-0">
-                      {prop.actor} <span className={prop.timeline ? 'break-all text-muted-foreground' : ''}>/ {prop.name}</span>
-                      {!prop.active && !prop.hidden && <span className="ml-2 text-muted-foreground">未启用</span>}
-                    </span>
-                    <span className="flex shrink-0 items-center gap-2 text-muted-foreground">
-                      <Checkbox aria-label={`隐藏 ${prop.actor} ${prop.name}`} checked={prop.hidden}
-                        disabled={!state.propsEditable || !prop.editable || (prop.timeline && !state.active)} onCheckedChange={value =>
-                          void command('stage.prop', { actorToken: prop.actorToken, key: prop.key, value: value === true })} />
-                      隐藏
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </section>
-          )
-        })}
+        {(timelineOnly || !state.propsEditable) && <p className="text-xs text-muted-foreground">当前可查看和扫描，接管后可调整显隐。</p>}
+        {state.propsNotice && <p role="status" className="text-xs text-muted-foreground">{state.propsNotice}</p>}
+        <div className="grid gap-3 lg:grid-cols-2">
+          {[true, false].map(fixed => {
+            const title = fixed ? '固定资产' : '移动资产'
+            const items = [...models].filter(([, model]) => model.fixed === fixed &&
+              [model.label, ...model.parts.flatMap(prop => [prop.actor, prop.name])].some(value => value.toLowerCase().includes(query)))
+            return (
+              <section key={title} aria-label={title} className="space-y-2 rounded-md border bg-card p-3">
+                <h3 className="text-sm font-medium">{title} <span className="text-xs text-muted-foreground">{items.length} 项</span></h3>
+                {!items.length && <p className="text-xs text-muted-foreground">{query ? '没有匹配的物品。' : '尚未识别到物品。'}</p>}
+                {items.map(([key, model]) => {
+                  const hidden = model.parts.filter(part => part.hidden).length
+                  return (
+                    <div key={key} className="rounded-md border bg-background/60 px-2">
+                      <div className="flex flex-wrap items-center gap-2 py-1 text-xs">
+                        <Button size="sm" variant="ghost" className="mr-auto h-auto min-w-0 whitespace-normal px-1"
+                          aria-expanded={!!expanded[key]} onClick={() => setExpanded(current => ({ ...current, [key]: !current[key] }))}>
+                          {expanded[key] ? '▾' : '▸'} {model.label} · {model.parts.length} 个部件
+                        </Button>
+                        <span className="text-muted-foreground">{hidden === model.parts.length ? '已隐藏' : hidden ? '部分隐藏' : '显示'}</span>
+                        <label className="flex items-center gap-1.5">
+                          <Checkbox aria-label={`隐藏整组 ${model.label}`} disabled={!model.parts.every(canEdit)}
+                            checked={hidden === model.parts.length || (hidden > 0 && 'indeterminate')}
+                            onCheckedChange={value => void command('stage.propGroup', { keys: model.parts.map(part => part.key), value: value === true })} />
+                          隐藏整组
+                        </label>
+                      </div>
+                      {expanded[key] && model.parts.map(prop => (
+                        <label key={prop.key} className="flex items-center justify-between gap-2 border-t py-2 pl-2 text-xs">
+                          <span className="min-w-0 break-all">{prop.name} <span className="text-muted-foreground">{prop.actor}</span></span>
+                          <span className="flex shrink-0 items-center gap-1.5">
+                            <Checkbox aria-label={`隐藏 ${prop.actor} ${prop.name}`} checked={prop.hidden}
+                              disabled={!canEdit(prop)} onCheckedChange={value =>
+                                void command('stage.prop', { actorToken: prop.actorToken, key: prop.key, value: value === true })} />
+                            隐藏
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  )
+                })}
+              </section>
+            )
+          })}
+        </div>
       </div>
     </CollapsiblePropertySection>
   )

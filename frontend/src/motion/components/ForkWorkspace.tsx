@@ -20,7 +20,7 @@ const mockState: ForkState = {
   ],
   props: [
     { key: 'sample-mic', actorToken: 101, actor: '咲季', name: '麦克风', hidden: false, editable: true, active: true, timeline: false },
-    { key: 'sample-light', actorToken: 102, actor: '凛', name: '荧光棒', hidden: true, editable: true, active: true, timeline: false },
+    { key: 'sample-light', actorToken: 102, actor: '凛', name: '荧光棒', hidden: false, editable: true, active: true, timeline: false },
     { key: 'sample-handheld', actorToken: 0, actor: '手持荧光棒', name: 'Geo_Penlightleft', hidden: false, editable: true, active: true, timeline: true },
     { key: 'sample-baton', actorToken: 0, actor: '舞台灯柱', name: 'Geo_baton_01', hidden: false, editable: true, active: true, timeline: true },
   ],
@@ -85,8 +85,11 @@ export function useForkWorkspace(preview = false) {
       if (action === 'live.armDiagnostics') setState({ ...current, liveDiagnostics: Boolean(fields.value) })
       if (action === 'live.swingReport') setState({ ...current, swingReportLoaded: true })
       if (action === 'stage.propsScan') setState({ ...current, propsNotice: '重新扫描完成' })
-      if (action === 'stage.prop') setState({ ...current, props: current.props.map(item =>
-        item.key === fields.key ? { ...item, hidden: Boolean(fields.value) } : item) })
+      if (action === 'stage.prop' || action === 'stage.propGroup') {
+        const keys = Array.isArray(fields.keys) ? fields.keys : [fields.key]
+        setState({ ...current, props: current.props.map(item =>
+          keys.includes(item.key) ? { ...item, hidden: Boolean(fields.value) } : item) })
+      }
       if (action === 'motion.arm') setState({ ...current, arms: current.arms.map(item => {
         if (item.token !== fields.actorToken) return item
         switch (fields.operation) {
