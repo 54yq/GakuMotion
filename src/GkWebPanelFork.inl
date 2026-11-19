@@ -86,6 +86,16 @@
 				return CmdResult::Err("stale_token", "角色名单已变化，请重新选择");
 			if (action == "formation.align") ctx.fnAlignEnsemble(ctx.self);
 			else if (action == "formation.auto") ctx.fnAutoAssignEnsemble(ctx.self);
+			else if (action == "actor.hideModel")
+			{
+				int64_t token = -1;
+				bool hidden = false;
+				if (!IntParam(params, "actorToken", token) || token <= 0 ||
+					!core_.sceneActorRegistry.Resolve(static_cast<uint64_t>(token), ctx.actorRosterEpoch) ||
+					!BoolParam(params, "value", hidden))
+					return CmdResult::Err("stale_token", "角色已变化，请重新选择");
+				ctx.fnSetActorModelHidden(ctx.self, static_cast<uint64_t>(token), ctx.actorRosterEpoch, hidden);
+			}
 			else if (action == "formation.savePrimary") ctx.fnSaveInitialPosition(ctx.self);
 			else if (action == "formation.save" || action == "formation.load")
 			{

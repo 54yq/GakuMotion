@@ -2145,7 +2145,8 @@ namespace GakuMotion::webpanel
 				if (i) actors += ",";
 				actors += "{\"token\":" + JNum(static_cast<double>(item.token)) +
 					",\"label\":" + JString(label) +
-					",\"selected\":" + JBool(item.actor == core_.player.controller.targetActor) + "}";
+					",\"selected\":" + JBool(item.actor == core_.player.controller.targetActor) +
+					",\"modelHidden\":" + JBool(core_.actorModelHidden.contains(item.token)) + "}";
 			}
 			actors += "]";
 			const auto labelFor = [&](void* actor) -> std::string {

@@ -22,6 +22,8 @@ import { motionStore, useMotionStore } from '../store'
 import { formatMmSs } from '../time'
 import { BoneSection } from '../components/BoneSection'
 import { EnsembleSection } from '../components/EnsembleSection'
+import { ForkEnsembleControls, type ForkCommand } from '../components/ForkWorkspace'
+import type { ForkState } from '../protocol'
 import { Vector3Field } from '../components/NumberField'
 import { CollapsiblePropertySection, PropertyRow, PropertySection } from '../components/PropertyGroup'
 import { PendingBadge } from '../components/Unsupported'
@@ -67,7 +69,7 @@ function FacialSliderRow({ facet, label, hint }: { facet: keyof FacialWeights; l
   )
 }
 
-export function MotionPage({ hideUpstreamEnsemble = false }: { hideUpstreamEnsemble?: boolean }) {
+export function MotionPage({ fork, forkCommand }: { fork?: ForkState | null; forkCommand?: ForkCommand } = {}) {
   const actors = useMotionStore((state) => state.actors)
   const facial = useMotionStore((state) => state.facial)
   const position = useMotionStore((state) => state.position)
@@ -78,6 +80,7 @@ export function MotionPage({ hideUpstreamEnsemble = false }: { hideUpstreamEnsem
   const boneCount = useMotionStore((state) => state.bone.overrides.length)
   const capabilities = useMotionStore((state) => state.capabilities)
   const supports = (method: string) => capabilities.includes(method)
+  const forkBound = fork?.followers.filter(follower => follower.actorToken > 0).length ?? 0
 
   const selectedActor = actors.actors.find((actor) => actor.selected)
   const actorLabel = actors.actors.length === 0 ? '当前场景没有可驱动角色' : actors.targetLabel || '正在识别角色'
@@ -303,12 +306,12 @@ export function MotionPage({ hideUpstreamEnsemble = false }: { hideUpstreamEnsem
         title={
           <span className="inline-flex items-center gap-1.5">
             <RiGroup2Fill className="size-3.5 text-primary" />
-            <span>多人舞台（最多3人）</span>
+            <span>{fork ? '多人舞台' : '多人舞台（最多3人）'}</span>
           </span>
         }
-        description="编排最多 3 名角色同台演出，独立指定动作、站位偏移与朝向"
+        description={fork ? '按场景识别的模型添加角色槽，独立指定动作、站位与朝向' : '编排最多 3 名角色同台演出，独立指定动作、站位偏移与朝向'}
         badge={
-          !supports('ensemble.set') ? (
+          !fork && !supports('ensemble.set') ? (
             <PendingBadge />
           ) : ensemble.active ? (
             <Badge variant="outline" className="rounded-[4px] border-success/40 bg-success/10 text-success">
@@ -316,10 +319,11 @@ export function MotionPage({ hideUpstreamEnsemble = false }: { hideUpstreamEnsem
             </Badge>
           ) : undefined
         }
-        summary={ensemble.active ? '当前运行中' : '最多 3 槽位'}
-        defaultOpen={ensemble.active}
+        summary={fork ? `已识别 ${actors.actors.length} · 副角色 ${forkBound}` : ensemble.active ? '当前运行中' : '最多 3 槽位'}
+        defaultOpen={ensemble.active || forkBound > 0}
+        testId="motion-ensemble"
       >
-        {!hideUpstreamEnsemble && <EnsembleSection />}
+        {fork && forkCommand ? <ForkEnsembleControls state={fork} command={forkCommand} /> : <EnsembleSection />}
       </CollapsiblePropertySection>
 
       {/* Advanced Bone Tuning */}

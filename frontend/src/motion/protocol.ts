@@ -66,6 +66,7 @@ export interface SceneActor {
   token: number
   label: string
   selected: boolean
+  modelHidden?: boolean
 }
 
 export interface ActorsState {

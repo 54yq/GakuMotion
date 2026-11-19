@@ -393,9 +393,13 @@ export class MotionMockBridgeClient implements MotionBridgeClient {
   private actors = {
     epoch: 1,
     actors: [
-      { token: 101, label: '咲季', selected: true },
-      { token: 102, label: '凛', selected: false },
-      { token: 103, label: '手毬', selected: false },
+      { token: 101, label: '咲季', selected: true, modelHidden: false },
+      { token: 102, label: '凛', selected: false, modelHidden: false },
+      { token: 103, label: '手毬', selected: false, modelHidden: false },
+      ...(import.meta.env.MODE === 'preview' ? [
+        { token: 104, label: '新模型 A', selected: false, modelHidden: false },
+        { token: 105, label: '新模型 B', selected: false, modelHidden: false },
+      ] : []),
     ],
     targetLabel: '咲季',
     boundLabel: '咲季',

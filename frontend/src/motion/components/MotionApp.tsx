@@ -9,7 +9,7 @@ import {
 } from '@remixicon/react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { FormationControls, LiveControls, useForkWorkspace, type ForkCommand } from './ForkWorkspace'
+import { LiveControls, useForkWorkspace, type ForkCommand } from './ForkWorkspace'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -71,7 +71,7 @@ function ActivePage({ fork, command }: { fork: ReturnType<typeof useForkWorkspac
     case 'library':
       return <LibraryPage fork={fork} forkCommand={command} />
     case 'motion':
-      return <MotionPage hideUpstreamEnsemble={Boolean(fork)} />
+      return <MotionPage fork={fork} forkCommand={command} />
     case 'camera':
       return <CameraPage />
     case 'stage':
@@ -380,8 +380,7 @@ export default function MotionApp() {
   const textInputSupported = useMotionStore((state) => state.capabilities.includes('shell.setTextInputActive'))
   const standalonePreview = isStandalonePreview()
   const fork = useForkWorkspace(standalonePreview && bridgeKind === 'mock')
-  const [forkPage, setForkPage] = React.useState<'live' | 'formation' | null>(() =>
-    isStandalonePreview() && new URLSearchParams(window.location.search).get('panel') === 'formation' ? 'formation' : null)
+  const [forkPage, setForkPage] = React.useState<'live' | null>(null)
   const mainScrollRef = React.useRef<HTMLDivElement>(null)
 
   React.useEffect(() => {
@@ -427,13 +426,11 @@ export default function MotionApp() {
                   <MotionSidebar onNavigate={() => setForkPage(null)} />
                   <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
                     <MotionStatusBar />
-                    {fork.state && (
+                    {fork.state && (fork.state.observed || fork.error) && (
                       <div className="flex flex-wrap items-center gap-2 border-b bg-card/60 px-5 py-2">
                         {forkPage && <Button size="sm" variant="ghost" onClick={() => setForkPage(null)}>返回{page === 'library' ? '曲库' : '当前页面'}</Button>}
                         {fork.state.observed && <Button size="sm" variant={forkPage === 'live' ? 'secondary' : 'outline'}
                           onClick={() => setForkPage('live')}>{fork.state.active ? 'Live 接管中' : 'Live 接管'}</Button>}
-                        <Button size="sm" variant={forkPage === 'formation' ? 'secondary' : 'outline'}
-                          onClick={() => setForkPage('formation')}>多人站位</Button>
                         {fork.error && <span role="alert" className="text-xs text-destructive">{fork.error}</span>}
                       </div>
                     )}
@@ -445,8 +442,7 @@ export default function MotionApp() {
                         onNavigateLibrary={() => motionStore.setPage('library')}
                       >
                         {forkPage === 'live' && fork.state?.observed ? <LiveControls state={fork.state} command={fork.command} />
-                          : forkPage === 'formation' && fork.state ? <FormationControls state={fork.state} command={fork.command} />
-                            : <ActivePage fork={fork.state} command={fork.command} />}
+                          : <ActivePage fork={fork.state} command={fork.command} />}
                       </MotionErrorBoundary>
                     </div>
                   </main>

@@ -141,11 +141,14 @@ function Placement({ slot, token, generation, initial, yaw, command }: {
 function Follower({ slot, follower, command }: { slot: number; follower?: ForkFollower; command: ForkCommand }) {
   const actors = useMotionStore(state => state.actors.actors)
   const entries = useMotionStore(state => state.library.entries)
+  const playback = useMotionStore(state => state.player.state)
+  const bindingLocked = playback === 'playing' || playback === 'paused'
   const [actor, setActor] = useState(follower?.actorToken ?? 0)
   const [key, setKey] = useState(follower?.motionKey ?? '')
   const [offset, setOffset] = useState(follower?.offsetSeconds ?? 0)
+  const boundActor = actors.find(item => item.token === follower?.actorToken)
   return (
-    <section className="rounded-lg border bg-card p-4">
+    <section className="min-w-0 space-y-2 rounded-lg border bg-background/70 p-3">
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-sm font-medium">副角色 {slot + 1}</h3>
         <span className="text-xs text-muted-foreground">{follower?.physics || '尚未绑定'}</span>
@@ -167,45 +170,60 @@ function Follower({ slot, follower, command }: { slot: number; follower?: ForkFo
           <Input className="mt-1 h-8 text-foreground" type="number" step={0.05} value={Number.isFinite(offset) ? offset : ''}
             onChange={event => setOffset(event.currentTarget.valueAsNumber)} />
         </label>
-        <Button size="sm" disabled={!actor || !key || !Number.isFinite(offset)}
+        <Button size="sm" disabled={bindingLocked || !actor || !key || !Number.isFinite(offset)}
           onClick={() => void command('formation.bind', { slot, actorToken: actor, motionKey: key, offsetSeconds: offset })}>绑定</Button>
-        {Boolean(follower?.actorToken) && <Button size="sm" variant="ghost" onClick={() => void command('formation.clear', { slot })}>解除</Button>}
+        {Boolean(follower?.actorToken) && <Button size="sm" variant="ghost" disabled={bindingLocked}
+          onClick={() => void command('formation.clear', { slot })}>解除</Button>}
       </div>
       {follower?.generation ? <Placement slot={slot} token={follower.actorToken} generation={follower.generation}
         initial={follower.position} yaw={follower.yaw} command={command} /> : null}
+      {boundActor && <ModelVisibility actor={boundActor} command={command} />}
     </section>
   )
 }
 
-export function FormationControls({ state, command }: { state: ForkState; command: ForkCommand }) {
+function ModelVisibility({ actor, command }: { actor: { token: number; modelHidden?: boolean }; command: ForkCommand }) {
+  if (actor.modelHidden === undefined) return null
+  return <label className="flex items-center gap-2 text-xs text-muted-foreground">
+    <input type="checkbox" checked={actor.modelHidden}
+      onChange={event => void command('actor.hideModel', { actorToken: actor.token, value: event.currentTarget.checked })} />
+    隐藏角色模型
+  </label>
+}
+
+export function ForkEnsembleControls({ state, command }: { state: ForkState; command: ForkCommand }) {
   const primary = useMotionStore(model => model.actors.actors.find(actor => actor.selected))
-  const playing = useMotionStore(model => model.player.state === 'playing')
-  const [extraSlot, setExtraSlot] = useState(false)
+  const playback = useMotionStore(model => model.player.state)
+  const bindingLocked = playback === 'playing' || playback === 'paused'
+  const [draftSlotCount, setDraftSlotCount] = useState(0)
   const [preset, setPreset] = useState('')
-  const slots = state.followers.length + Number(extraSlot)
-  useEffect(() => { setExtraSlot(false) }, [state.followers.length, state.epoch])
+  const slots = Math.max(state.followers.length, draftSlotCount)
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold">多人站位</h2>
+        <span className="text-xs text-muted-foreground">主角色提供播放时钟和镜头</span>
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" disabled={playing} onClick={() => void command('formation.auto')}>按名称自动分配</Button>
+          <Button size="sm" variant="outline" disabled={bindingLocked} onClick={() => void command('formation.auto')}>按名称自动分配</Button>
           <Button size="sm" variant="outline" onClick={() => void command('formation.align')}>对齐原曲队形</Button>
-          <Button size="sm" disabled={extraSlot || slots >= 64} onClick={() => setExtraSlot(true)}>添加副角色</Button>
+          <Button size="sm" disabled={slots >= 64} onClick={() => setDraftSlotCount(slots + 1)}>添加副角色</Button>
         </div>
       </div>
-      <section className="rounded-lg border bg-card p-4">
+      {bindingLocked && <p className="text-xs text-muted-foreground">停止播放后可新增或解除动作绑定；当前仍可调整已绑定角色的站位。</p>}
+      <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+      <section className="min-w-0 space-y-2 rounded-lg border border-primary/40 bg-background/70 p-3">
         <div className="flex items-center justify-between gap-2">
-          <h3 className="text-sm font-medium">{primary?.label ?? '主角色'}</h3>
+          <h3 className="text-sm font-medium">主角色{primary ? ` · ${primary.label}` : ''}</h3>
           <Button size="sm" variant="ghost" disabled={!primary} onClick={() => void command('formation.savePrimary')}>保存主角站位</Button>
         </div>
         <Placement key={primary?.token} slot={-1} token={primary?.token ?? 0} generation={0}
           initial={state.position} yaw={state.yaw} command={command} />
+        {primary && <ModelVisibility actor={primary} command={command} />}
       </section>
       {Array.from({ length: slots }, (_, slot) => {
         const follower = state.followers[slot]
         return <Follower key={`${state.epoch}:${slot}:${follower?.generation ?? 0}`} slot={slot} follower={follower} command={command} />
       })}
+      </div>
       <div className="flex flex-wrap items-end gap-2 rounded-lg border bg-card p-4">
         <label className="text-xs text-muted-foreground">队形预设
           <Input className="mt-1 h-8 text-foreground" list="formation-presets" value={preset} onChange={event => setPreset(event.currentTarget.value)} />

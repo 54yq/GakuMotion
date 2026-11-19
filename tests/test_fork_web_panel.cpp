@@ -65,9 +65,19 @@ int main()
 	check(ok(request("fork.command", R"({"action":"formation.place","session":12,"epoch":)" + epoch + placement)) &&
 		queued(Core::GuiAction::InitialPosition) && queued(Core::GuiAction::InitialYaw),
 		"Placement queues both position and yaw through the existing Core");
+	check(ok(request("fork.command", R"({"action":"actor.hideModel","session":12,"epoch":)" + epoch +
+		R"(,"actorToken":)" + token + R"(,"value":true})")) && queued(Core::GuiAction::SetActorModelHidden),
+		"Model visibility uses the current recognized actor");
 	check(ok(request("player.setSpeed", R"({"speed":1.25})")) && queued(Core::GuiAction::Speed),
 		"The upstream Web transport uses the existing Core speed control");
 	const auto libraryRevision = std::to_string(core.libraryRevision);
+	const auto extraRole = std::to_string(core.sceneActorRegistry.Find(&secondary)->token);
+	check(ok(request("fork.command", R"({"action":"formation.bind","session":12,"epoch":)" + epoch +
+		R"(,"slot":3,"revision":)" + libraryRevision + R"(,"actorToken":)" + extraRole +
+		R"(,"motionKey":"fixture","offsetSeconds":0})")) &&
+		std::any_of(core.guiCommands.begin(), core.guiCommands.end(), [](const auto& command) {
+			return command.action == Core::GuiAction::SetEnsembleFollower && command.candidateIndex == 3;
+		}), "The fourth follower is queued without an upstream three-slot limit");
 	check(ok(request("library.select", R"({"key":"fixture","autoplay":false,"revision":)" + libraryRevision + "}")),
 		"The upstream Web library can select a track from an external folder");
 	check(!ok(request("library.delete", R"({"key":"fixture","revision":)" + libraryRevision + "}")) &&
