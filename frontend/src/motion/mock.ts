@@ -114,6 +114,7 @@ const PHASE2_METHODS: MotionMethodName[] = [
   'gaze.get',
   'gaze.set',
   'stage.scan',
+  'stage.refreshRendering',
   'stage.toggleNode',
   'stage.setLoadReplacement',
   'experiments.get',
@@ -1151,6 +1152,9 @@ export class MotionMockBridgeClient implements MotionBridgeClient {
         this.requireCapability('gaze.set')
         this.gaze = { ...this.gaze, settings: { ...(p.settings as GazeState['settings']) } }
         this.emit('gaze.changed', { ...this.gaze })
+        return {} as MotionMethods[M]['result']
+      case 'stage.refreshRendering':
+        this.requireCapability('stage.refreshRendering')
         return {} as MotionMethods[M]['result']
       case 'stage.scan':
         this.requireCapability('stage.scan')

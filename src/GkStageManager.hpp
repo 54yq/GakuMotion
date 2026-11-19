@@ -523,6 +523,49 @@ namespace GakuMotion
 			}
 		}
 
+		// Caller holds stageMutex. Re-enable only active effects, without changing visibility overrides.
+		void RefreshStageRenderingLocked(const std::vector<unsigned char>& ownership)
+		{
+			if (stageLoadRequested || stageUnloadRequested) {
+				statusNotice = "舞台正在切换，暂时无法刷新渲染";
+				return;
+			}
+			StageAccessScope access(api);
+			if (!access.ready || !api.fnSetActive || !api.fnTryGetActiveSelf || !api.fnMatches) {
+				statusNotice = "场景未就绪，暂时无法刷新渲染";
+				return;
+			}
+			const auto isActive = [&](const StageCandidate& node) {
+				bool active = false;
+				return node.gameObject && api.fnMatches(node.gameObject, node.instanceId, node.generation) &&
+					api.fnTryGetActiveSelf(node.gameObject, active) && active;
+			};
+			int refreshed = 0;
+			bool failed = false;
+			for (size_t i = 0; i < candidates.size(); ++i) {
+				auto& node = candidates[i];
+				const auto& name = node.displayName;
+				if (name != "LightMap" && name != "AudiencePenlight" && name != "PostEffect") continue;
+				if (ownership[i] || node.isColliderLocked || node.userMuted || !isActive(node)) continue;
+				bool parentsActive = true;
+				for (int parent = node.parentIndex; parent >= 0; parent = candidates[parent].parentIndex) {
+					if (!isActive(candidates[parent])) { parentsActive = false; break; }
+				}
+				if (!parentsActive) continue;
+				if (!api.fnSetActive(node.gameObject, false)) { failed = true; continue; }
+				if (!api.fnSetActive(node.gameObject, true) && !api.fnSetActive(node.gameObject, true)) {
+					node.currentlyActive = false;
+					node.injectionTouched = true;
+					failed = true;
+					continue;
+				}
+				++refreshed;
+			}
+			if (failed) statusNotice = "部分舞台光影节点刷新失败";
+			else if (refreshed) statusNotice = "已重新启用舞台光影节点";
+			else statusNotice = "当前场景没有可刷新的启用中光影节点";
+		}
+
 		void RescanCandidates(void* activeActor)
 		{
 			std::lock_guard<std::mutex> lock(stageMutex);

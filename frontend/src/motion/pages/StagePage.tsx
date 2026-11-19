@@ -74,6 +74,7 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
   const rawNodes = useMotionStore((state) => state.stageNodes)
   const safeNodes = Array.isArray(rawNodes) ? rawNodes : []
   const supported = useMotionStore((state) => state.capabilities.includes('stage.set'))
+  const refreshSupported = useMotionStore((state) => state.capabilities.includes('stage.refreshRendering'))
   const scanSupported = useMotionStore((state) => state.capabilities.includes('stage.scan'))
   const actorSelectSupported = useMotionStore((state) => state.capabilities.includes('actors.selectTarget'))
   const [scanning, setScanning] = React.useState(false)
@@ -367,6 +368,16 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
                 />
                 <Label className="text-xs" htmlFor="stage-custom-nodes">手动管理固定资产</Label>
               </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs"
+                disabled={!refreshSupported}
+                onClick={() => void motionStore.refreshStageRendering()}
+              >
+                <RiRefreshFill className="size-3.5" />
+                刷新舞台渲染
+              </Button>
             </div>
 
             {settings.customNodeControl ? (

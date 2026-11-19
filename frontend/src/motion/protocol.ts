@@ -664,6 +664,7 @@ export interface MotionMethods {
   'bone.saveToGlobal': { params: void; result: Record<string, never> }
   'gaze.get': { params: void; result: GazeState }
   'gaze.set': { params: { settings: GazeSettings }; result: Record<string, never> }
+  'stage.refreshRendering': { params: void; result: Record<string, never> }
   'stage.scan': { params: void; result: { nodes: StageNode[] } }
   'stage.toggleNode': { params: { index: number; active: boolean }; result: Record<string, never> }
   'stage.setLoadReplacement': { params: { key: string }; result: { notice: string } }

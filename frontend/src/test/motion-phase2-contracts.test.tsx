@@ -56,6 +56,7 @@ const PHASE2_CAPABILITIES: MotionMethodName[] = [
   'camera.save',
   'stage.set',
   'stage.scan',
+  'stage.refreshRendering',
   'stage.toggleNode',
   'stage.setLoadReplacement',
   'settings.setPhysics',
@@ -375,6 +376,10 @@ describe('Phase 2 C++ wire contract & crash resilience', () => {
     await waitFor(() => expect(screen.getByTestId('library-page')).toBeInTheDocument())
     await user.click(screen.getByRole('button', { name: '舞台' }))
     await user.click(screen.getByText('高级场景编辑'))
+    bridge.calls.length = 0
+    await user.click(screen.getByRole('button', { name: '刷新舞台渲染' }))
+    expect(bridge.calls.map(({ method }) => method)).toEqual(['stage.refreshRendering'])
+
     await user.click(screen.getByLabelText('手动管理固定资产'))
 
     const group = await screen.findByRole('button', { name: /StageRoot/ })
