@@ -58,6 +58,9 @@
 				",\"propsScanning\":" + JBool(core_.actorPropScanRequested) +
 				",\"propsNotice\":" + JString(ctx.ensembleNotice.starts_with("该时间轴道具") ? ctx.ensembleNotice : "") +
 				",\"fixedActorLighting\":" + JBool(core_.fixedActorLighting) +
+				",\"actorLightingStrengths\":{\"key\":" + JNum(core_.actorLightingStrengths.key) +
+					",\"fill\":" + JNum(core_.actorLightingStrengths.fill) +
+					",\"rim\":" + JNum(core_.actorLightingStrengths.rim) + "}" +
 				",\"fixedActorLightingNotice\":" + JString(core_.fixedActorLightingNotice) +
 				",\"followYaw\":" + JBool(core_.camera.settings.followPlacementYaw) +
 				",\"liveClock\":" + JBool(ctx.liveActorClockActive) + ",\"liveClockAvailable\":" + JBool(ctx.liveActorClockAvailable) +
@@ -101,6 +104,22 @@
 					core_.fixedActorLighting = enable;
 					core_.fixedActorLightingNotice.clear();
 				}
+				else if (action == "live.actorLightingStrength" && ctx.liveTakeoverActive &&
+					core_.fixedActorLighting && !visual_handoff::Requested())
+				{
+					std::string channel;
+					if (!StringParam(params, "channel", channel) || !NumberParam(params, "value", number) ||
+						number < 0.0 || number > (channel == "key" ? 1.0 : 0.25))
+						return CmdResult::Err("invalid_params", "角色光照强度超出范围");
+					const auto value = static_cast<float>(number);
+					if (channel == "key") core_.actorLightingStrengths.key = value;
+					else if (channel == "fill") core_.actorLightingStrengths.fill = value;
+					else if (channel == "rim") core_.actorLightingStrengths.rim = value;
+					else return CmdResult::Err("invalid_params", "无效的角色光照通道");
+				}
+				else if (action == "live.actorLightingReset" && ctx.liveTakeoverActive &&
+					core_.fixedActorLighting && !visual_handoff::Requested())
+					core_.actorLightingStrengths = {};
 				else if (action == "live.aspect" && BoolParam(params, "value", enable))
 					ctx.fnSetLiveAspectPreview(ctx.self, enable);
 				else if (action == "live.pause" && ctx.liveViewingConfirmed && !ctx.liveTakeoverActive &&

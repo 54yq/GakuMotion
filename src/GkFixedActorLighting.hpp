@@ -26,6 +26,7 @@ namespace FixedActorLighting
 	inline uintptr_t owner{};
 	inline int scene{}, layer{-1};
 	inline bool ready{};
+	inline GakuMotion::Core::ActorLightingStrengths appliedStrengths;
 	inline std::chrono::steady_clock::time_point nextCameraCheck{};
 	inline void *actorClass{}, *volumeClass{}, *profileClass{}, *colorClass{}, *anglesClass{}, *cameraDataClass{};
 	inline void* (*objectNew)(void*){};
@@ -150,7 +151,18 @@ namespace FixedActorLighting
 		return root.Keep(parameter) && Write(root.Get(), "m_Value", type, value) &&
 			Write(root.Get(), "m_OverrideState", {0x02}, &overrideState);
 	}
-	inline bool Create(int targetLayer)
+	inline bool ApplyStrengths(const GakuMotion::Core::ActorLightingStrengths& strengths)
+	{
+		const auto gray = [](float value) { return Color{value, value, value, 1.f}; };
+		const Color key = gray(strengths.key), fill = gray(strengths.fill), rim = gray(strengths.rim);
+		if (!Parameter("lightColor", {0x11, colorClass}, &key) ||
+			!Parameter("shadeColorMultiply", {0x11, colorClass}, &key) ||
+			!Parameter("shadeColorAdditive", {0x11, colorClass}, &fill) ||
+			!Parameter("rimColor", {0x11, colorClass}, &rim)) return false;
+		appliedStrengths = strengths;
+		return true;
+	}
+	inline bool Create(int targetLayer, const GakuMotion::Core::ActorLightingStrengths& strengths)
 	{
 		Root name, profileType, parameterType, volumeType;
 		if (!name.Keep(StageLoader::stringNew("GakuMotion Fixed Actor Lighting")) ||
@@ -169,14 +181,10 @@ namespace FixedActorLighting
 		void* addArgs[]{parameterType.Get(), &overrideAll};
 		void* parameter = nullptr;
 		if (!Call(addParameter, profileObject.Get(), addArgs, &parameter) || !parameterObject.Keep(parameter)) return false;
-		const Color key{1.f, 1.f, 1.f, 1.f}, fill{.14f, .14f, .14f, 1.f}, rim{.18f, .18f, .18f, 1.f};
 		const Angles keyAngle{-15.f, 25.f}, rimAngle{35.f, 15.f};
 		const float noStageAdditive = 0.f, rimPower = 8.f;
-		if (!Parameter("lightColor", {0x11, colorClass}, &key) ||
-			!Parameter("shadeColorMultiply", {0x11, colorClass}, &key) ||
-			!Parameter("shadeColorAdditive", {0x11, colorClass}, &fill) ||
+		if (!ApplyStrengths(strengths) ||
 			!Parameter("mainLightAngle", {0x11, anglesClass}, &keyAngle) ||
-			!Parameter("rimColor", {0x11, colorClass}, &rim) ||
 			!Parameter("rimAngle", {0x11, anglesClass}, &rimAngle) ||
 			!Parameter("rimPower", {0x0c}, &rimPower) ||
 			!Parameter("additiveLightScale", {0x0c}, &noStageAdditive)) return false;
@@ -204,6 +212,12 @@ namespace FixedActorLighting
 			if (!Release()) core.fixedActorLightingNotice = "角色光照覆盖清理失败，正在重试";
 			return;
 		}
+		if (volumeObject.handle && core.actorLightingStrengths != appliedStrengths &&
+			!ApplyStrengths(core.actorLightingStrengths)) {
+			core.fixedActorLighting = false;
+			core.fixedActorLightingNotice = Release() ? "无法更新角色光照，已恢复原打光" : "角色光照覆盖清理失败，正在重试";
+			return;
+		}
 		const auto now = std::chrono::steady_clock::now();
 		if (volumeObject.handle && now < nextCameraCheck) return;
 		const int targetLayer = Resolve() ? CameraLayer() : -1;
@@ -211,7 +225,7 @@ namespace FixedActorLighting
 			nextCameraCheck = now + std::chrono::milliseconds(500);
 			return;
 		}
-		if (!Release() || targetLayer < 0 || !Create(targetLayer)) {
+		if (!Release() || targetLayer < 0 || !Create(targetLayer, core.actorLightingStrengths)) {
 			core.fixedActorLighting = false;
 			core.fixedActorLightingNotice = Release() ? "当前 Live 的角色光照接口不可用" : "角色光照覆盖清理失败，正在重试";
 			return;

@@ -126,6 +126,12 @@ namespace GakuMotion
 		bool liveAspectPreviewRequested{true};
 		PhysicsMonitor physicsMonitor;
 		std::chrono::steady_clock::time_point physicsMonitorAt{};
+		struct ActorLightingStrengths
+		{
+			float key{0.65f}, fill{0.035f}, rim{0.03f};
+			bool operator==(const ActorLightingStrengths&) const = default;
+		};
+		ActorLightingStrengths actorLightingStrengths;
 		bool fixedActorLighting{false};
 		std::string fixedActorLightingNotice;
 		bool liveTakeoverFault{false};

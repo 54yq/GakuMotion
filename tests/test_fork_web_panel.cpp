@@ -78,6 +78,14 @@ int main()
 	check(ok(request("fork.command", R"({"action":"live.fixedActorLighting","session":12,"owner":19,"value":true})")) &&
 		request("fork.get").BoolPath("result.fixedActorLighting", false),
 		"Web exposes the current Live actor lighting request");
+	const auto defaults = core.actorLightingStrengths;
+	check(ok(request("fork.command", R"({"action":"live.actorLightingStrength","session":12,"owner":19,"channel":"rim","value":0})")) &&
+		core.actorLightingStrengths.rim == 0 && core.actorLightingStrengths.key == defaults.key &&
+		core.actorLightingStrengths.fill == defaults.fill, "Rim light can be turned off independently");
+	check(!ok(request("fork.command", R"({"action":"live.actorLightingStrength","session":12,"owner":19,"channel":"fill","value":0.9})")) &&
+		core.actorLightingStrengths.fill == defaults.fill, "Out-of-range fill is rejected");
+	check(ok(request("fork.command", R"({"action":"live.actorLightingReset","session":12,"owner":19})")) &&
+		core.actorLightingStrengths == defaults, "Reset restores all three light strengths");
 	check(ok(request("fork.command", R"({"action":"live.fixedActorLighting","session":12,"owner":19,"value":false})")) &&
 		!core.fixedActorLighting, "The current Live owner can clear the actor lighting request");
 	check(ok(request("fork.command", R"({"action":"live.takeover","session":12,"owner":19,"value":false})")) &&

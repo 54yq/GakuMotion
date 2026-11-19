@@ -568,6 +568,7 @@ export interface ForkState {
   propsScanning: boolean
   propsNotice: string
   fixedActorLighting?: boolean
+  actorLightingStrengths?: { key: number; fill: number; rim: number }
   fixedActorLightingNotice?: string
   followYaw: boolean
   liveClock: boolean

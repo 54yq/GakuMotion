@@ -25,6 +25,7 @@ const mockState: ForkState = {
     { key: 'sample-baton', actorToken: 0, actor: '舞台灯柱', name: 'Geo_baton_01', hidden: false, editable: true, active: true, timeline: true },
   ],
   propsCanScan: true, propsScanning: false, propsNotice: '',
+  actorLightingStrengths: { key: 0.65, fill: 0.035, rim: 0.03 },
   propsEditable: true, fixedActorLighting: false, followYaw: false, liveClock: false, liveClockAvailable: true,
   liveDiagnostics: false, liveClockNotice: '',
   liveFps: 59.8, liveStalls: 0, swingReportLoaded: false,
@@ -71,6 +72,10 @@ export function useForkWorkspace(preview = false) {
           props: active ? current.props : current.props.map(item => ({ ...item, hidden: false })) })
       }
       if (action === 'live.fixedActorLighting') setState({ ...current, fixedActorLighting: Boolean(fields.value) })
+      if (action === 'live.actorLightingStrength' && current.actorLightingStrengths)
+        setState({ ...current, actorLightingStrengths: { ...current.actorLightingStrengths, [String(fields.channel)]: Number(fields.value) } })
+      if (action === 'live.actorLightingReset')
+        setState({ ...current, actorLightingStrengths: mockState.actorLightingStrengths })
       if (action === 'live.aspect') setState({ ...current, aspect: Boolean(fields.value) })
       if (action === 'live.loop') setState({ ...current, loop: Boolean(fields.value) })
       if (action === 'live.loopLead') setState({ ...current, loopLead: Number(fields.value) })

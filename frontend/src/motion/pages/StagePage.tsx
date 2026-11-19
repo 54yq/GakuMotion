@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils'
 import { ENSEMBLE_SLOT_NAMES, type ForkState, type StageNode } from '../protocol'
 import { motionStore, useMotionStore } from '../store'
 import { CollapsiblePropertySection, PropertyRow, PropertySection } from '../components/PropertyGroup'
+import { NumberField } from '../components/NumberField'
 import { PendingBadge } from '../components/Unsupported'
 import { ForkPropNodes } from '../components/ForkExtensions'
 import type { ForkCommand } from '../components/ForkWorkspace'
@@ -80,6 +81,7 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
   const [nodeFilter, setNodeFilter] = React.useState('')
   const [expandedNodes, setExpandedNodes] = React.useState<Set<number>>(() => new Set())
 
+  const lightingStrengths = fork?.actorLightingStrengths
   const settings = stage.settings
   const sceneBgEnabled = !settings.hideBackground
   const customNodeActive = settings.customNodeControl
@@ -275,22 +277,48 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
         </div>
 
         {fork && forkCommand && fork.fixedActorLighting !== undefined && (
-          <div className="flex items-center justify-between gap-3 px-3.5 py-2.5">
-            <div className="space-y-0.5">
-              <Label htmlFor="stage-fixed-actor-lighting" className="text-[13px] font-medium">角色固定打光</Label>
-              <span className="block text-xs text-muted-foreground">
-                {fork.fixedActorLightingNotice || (fork.active
-                  ? '为 Live 角色应用统一的主光、补光与轮廓光'
-                  : '接管 Live 后可开启')}
-              </span>
+          <>
+            <div className="flex items-center justify-between gap-3 px-3.5 py-2.5">
+              <div className="space-y-0.5">
+                <Label htmlFor="stage-fixed-actor-lighting" className="text-[13px] font-medium">角色固定打光</Label>
+                <span className="block text-xs text-muted-foreground">
+                  {fork.fixedActorLightingNotice || (fork.active
+                    ? '为 Live 角色应用统一的主光、补光与轮廓光'
+                    : '接管 Live 后可开启')}
+                </span>
+              </div>
+              <Checkbox
+                id="stage-fixed-actor-lighting"
+                checked={fork.fixedActorLighting}
+                disabled={!fork.active}
+                onCheckedChange={(checked) => void forkCommand('live.fixedActorLighting', { value: checked === true }, true)}
+              />
             </div>
-            <Checkbox
-              id="stage-fixed-actor-lighting"
-              checked={fork.fixedActorLighting}
-              disabled={!fork.active}
-              onCheckedChange={(checked) => void forkCommand('live.fixedActorLighting', { value: checked === true }, true)}
-            />
-          </div>
+            {fork.active && fork.fixedActorLighting && lightingStrengths && (
+              <div className="flex flex-wrap items-center gap-3 px-3.5 pb-2.5">
+                {([{ channel: 'key', label: '主光', max: 100 },
+                  { channel: 'fill', label: '暗部补光', max: 25 },
+                  { channel: 'rim', label: '轮廓光', max: 25 }] as const).map(({ channel, label, max }) => (
+                  <NumberField
+                    key={channel}
+                    label={label}
+                    ariaLabel={label}
+                    unit="%"
+                    min={0}
+                    max={max}
+                    step={0.5}
+                    decimals={1}
+                    value={lightingStrengths[channel] * 100}
+                    onChange={(value) => void forkCommand('live.actorLightingStrength', { channel, value: value / 100 }, true)}
+                    onCommit={(value) => void forkCommand('live.actorLightingStrength', { channel, value: value / 100 })}
+                  />
+                ))}
+                <Button size="sm" variant="outline" onClick={() => void forkCommand('live.actorLightingReset')}>
+                  恢复默认打光
+                </Button>
+              </div>
+            )}
+          </>
         )}
 
         <div
