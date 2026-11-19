@@ -71,24 +71,24 @@ export function ForkPropNodes({ state, command, timelineOnly = false }: {
 }) {
   const [filter, setFilter] = useState('')
   const query = filter.trim().toLowerCase()
-  const models = new Map<string, { label: string; fixed: boolean; parts: ForkState['props'] }>()
+  const models = new Map<string, { label: string; parts: ForkState['props'] }>()
   for (const prop of state.props) {
     if (timelineOnly && !prop.timeline) continue
     const name = prop.modelName || prop.name
     const identity = [prop.actor, name, prop.name].join(' ')
     const penlight = /penlight|荧光棒/i.test(identity)
+    if (prop.timeline && !penlight && !/手持|移动|轨道|摇臂|trolley|dolly|crane|角色位|constraint|baton|灯柱|movable/i.test(identity)) continue
     const key = penlight ? 'penlight' : prop.modelId ? String(prop.modelId) : prop.key
     const existing = models.get(key)
     if (existing) { existing.parts.push(prop); continue }
     const label = penlight ? '荧光棒' : /trolley/i.test(name) ? '移动箱' : /dolly/i.test(name) ? '轨道摄影车'
       : /crane/i.test(name) ? '摇臂' : /baton|灯柱/i.test(identity) ? '舞台灯柱' : name
-    const fixed = prop.timeline && !penlight && !/手持|移动|轨道|摇臂|trolley|dolly|crane|角色位|constraint/i.test(identity)
-    models.set(key, { label, fixed, parts: [prop] })
+    models.set(key, { label, parts: [prop] })
   }
   const canEdit = (prop: ForkState['props'][number]) => !timelineOnly && state.propsEditable && prop.editable && (!prop.timeline || state.active)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   return (
-    <CollapsiblePropertySection title="物品管理" summary={`已识别 ${models.size} 项`} defaultOpen={!timelineOnly}>
+    <CollapsiblePropertySection title="移动资产" summary={`已识别 ${models.size} 项`} defaultOpen={!timelineOnly}>
       <div className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" variant="outline" disabled={!state.propsCanScan || state.propsScanning}
@@ -98,14 +98,11 @@ export function ForkPropNodes({ state, command, timelineOnly = false }: {
         </div>
         {(timelineOnly || !state.propsEditable) && <p className="text-xs text-muted-foreground">当前可查看和扫描，接管后可调整显隐。</p>}
         {state.propsNotice && <p role="status" className="text-xs text-muted-foreground">{state.propsNotice}</p>}
-        <div className="grid gap-3 lg:grid-cols-2">
-          {[true, false].map(fixed => {
-            const title = fixed ? '固定资产' : '移动资产'
-            const items = [...models].filter(([, model]) => model.fixed === fixed &&
+        <section aria-label="移动资产" className="space-y-2">
+          {(() => {
+            const items = [...models].filter(([, model]) =>
               [model.label, ...model.parts.flatMap(prop => [prop.actor, prop.name])].some(value => value.toLowerCase().includes(query)))
-            return (
-              <section key={title} aria-label={title} className="space-y-2 rounded-md border bg-card p-3">
-                <h3 className="text-sm font-medium">{title} <span className="text-xs text-muted-foreground">{items.length} 项</span></h3>
+            return (<>
                 {!items.length && <p className="text-xs text-muted-foreground">{query ? '没有匹配的物品。' : '尚未识别到物品。'}</p>}
                 {items.map(([key, model]) => {
                   const hidden = model.parts.filter(part => part.hidden).length
@@ -138,10 +135,9 @@ export function ForkPropNodes({ state, command, timelineOnly = false }: {
                     </div>
                   )
                 })}
-              </section>
-            )
-          })}
-        </div>
+            </>)
+          })()}
+        </section>
       </div>
     </CollapsiblePropertySection>
   )

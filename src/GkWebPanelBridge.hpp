@@ -251,6 +251,11 @@ namespace GakuMotion::webpanel
 
 		void OnShow()
 		{
+			if (!visible_) {
+				std::lock_guard<std::recursive_mutex> lock(core_.stateMutex);
+				core_.actorPropScanRequested = true;
+				core_.timelinePropDiscoveryRequested = true;
+			}
 			visible_ = true;
 			baselinePending_ = true;
 		}

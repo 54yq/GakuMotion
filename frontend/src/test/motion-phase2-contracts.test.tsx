@@ -377,7 +377,9 @@ describe('Phase 2 C++ wire contract & crash resilience', () => {
     await user.click(screen.getByText('高级场景编辑'))
     await user.click(screen.getByLabelText('自定义场景节点 [开关]'))
 
-    await waitFor(() => expect(screen.getByText('StageRoot')).toBeInTheDocument())
+    const group = await screen.findByRole('button', { name: /StageRoot/ })
+    expect(screen.queryByText('Collider')).not.toBeInTheDocument()
+    await user.click(group)
     expect(screen.getByText('Collider')).toBeInTheDocument()
 
     // Even if a bridge returns {}, StagePage normalizes nodes to [] instead of throwing.

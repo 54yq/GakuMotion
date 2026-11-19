@@ -35,7 +35,7 @@ const mockState: ForkState = {
   ],
 }
 
-export type ForkCommand = (action: string, fields?: Record<string, unknown>) => Promise<void>
+export type ForkCommand = (action: string, fields?: Record<string, unknown>, live?: boolean) => Promise<void>
 
 export function useForkWorkspace(preview = false) {
   const supported = useMotionStore(state => state.capabilities.includes('fork.get'))
@@ -61,7 +61,7 @@ export function useForkWorkspace(preview = false) {
     return () => { disposed = true; window.clearInterval(timer) }
   }, [supported, preview])
   const current = supported || preview ? state ?? (preview ? mockState : null) : null
-  const command: ForkCommand = async (action, fields = {}) => {
+  const command: ForkCommand = async (action, fields = {}, live = false) => {
     if (!current) return
     setError('')
     if (preview) {
@@ -116,7 +116,7 @@ export function useForkWorkspace(preview = false) {
       const bridge = getMotionBridge()
       if (!bridge) return
       await bridge.request('fork.command', { ...fields, action, session: current.session, owner: current.owner, epoch: current.epoch, revision: current.revision })
-      setState(await bridge.request('fork.get'))
+      if (!live) setState(await bridge.request('fork.get'))
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
   }
   return { state: current, command, error }
@@ -193,13 +193,14 @@ export function LiveControls({ state, command }: { state: ForkState; command: Fo
 export function ForkPlacementFields({ slot, token, generation, initial, yaw, command, labelPrefix }: {
   slot: number; token: number; generation: number; initial: Vector3; yaw: number; command: ForkCommand; labelPrefix?: string
 }) {
-  const apply = (patch: { position?: Vector3; yaw?: number }) =>
-    void command('formation.place', { slot, actorToken: token, generation, ...patch })
+  const apply = (patch: { position?: Vector3; yaw?: number }, live = false) =>
+    void command('formation.place', { slot, actorToken: token, generation, ...patch }, live)
   return (
     <Vector3Field labelPrefix={labelPrefix ?? (slot < 0 ? '主角色站位' : `副角色 ${slot + 1} 站位`)}
       value={initial} min={-256} max={256} step={0.01} disabled={!token}
+      onChange={position => apply({ position }, true)}
       onCommit={position => apply({ position })}
-      heading={{ value: yaw, onCommit: value => apply({ yaw: value }) }} />
+      heading={{ value: yaw, onChange: value => apply({ yaw: value }, true), onCommit: value => apply({ yaw: value }) }} />
   )
 }
 

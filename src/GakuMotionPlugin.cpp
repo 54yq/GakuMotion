@@ -3202,7 +3202,6 @@ static const char* RestoreForLiveRosterChange(GakuMotion::Core& core,
 static bool RefreshSceneActors(GakuMotion::Core& core, bool force, bool refreshProps)
 {
 	static auto lastScan = std::chrono::steady_clock::time_point{};
-	static auto lastPropScan = std::chrono::steady_clock::time_point{};
 	static GakuMotion::injection::OwnerSnapshot lastPropOwner;
 	static bool lastPropWritable = false;
 	const auto now = std::chrono::steady_clock::now();
@@ -3219,10 +3218,8 @@ static bool RefreshSceneActors(GakuMotion::Core& core, bool force, bool refreshP
 
 	const bool propWritable = motionReady && core.CanControlActorProps() &&
 		(!liveViewing || GakuMotion::capture::LiveAutoPhotoIdle());
-	const auto propInterval = !LiveActorProps::HasSaved()
-		? std::chrono::seconds(2) : std::chrono::milliseconds(500);
 	const bool propScanDue = refreshProps && propsScene && (force || !lastPropOwner.SameOwner(g_sceneOwner) ||
-		core.actorPropScanRequested || lastPropWritable != propWritable || now - lastPropScan >= propInterval);
+		core.actorPropScanRequested || lastPropWritable != propWritable);
 	if (!force && !propScanDue && (!motionReady ||
 		(!core.HasPendingTargetSelection() && now - lastScan < std::chrono::milliseconds(250)))) return motionReady;
 	lastScan = now;
@@ -3235,7 +3232,6 @@ static bool RefreshSceneActors(GakuMotion::Core& core, bool force, bool refreshP
 				g_sceneOwner.sceneHandle, actors.size(), core.actorProps.size(), elapsed);
 		core.actorPropScanRequested = false;
 		lastPropOwner = g_sceneOwner;
-		lastPropScan = now;
 		lastPropWritable = propWritable;
 	};
 	auto unavailable = [&]
@@ -3267,7 +3263,6 @@ static bool RefreshSceneActors(GakuMotion::Core& core, bool force, bool refreshP
 			core.actorProps.clear();
 			core.actorPropScanRequested = false;
 			lastPropOwner = g_sceneOwner;
-			lastPropScan = now;
 			lastPropWritable = propWritable;
 		}
 		return motionReady ? unavailable() : false;

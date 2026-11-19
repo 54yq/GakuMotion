@@ -179,7 +179,7 @@ export function DragFloat({
       setPreviewValue(null)
       if (moved) {
         setDraftText(latestValue.toFixed(decimals))
-        if (latestValue !== startValue) {
+        if (latestValue !== startValue || onChangeRef.current) {
           onCommitRef.current(latestValue)
         }
       } else {
@@ -291,7 +291,7 @@ export function Vector3DragFloat({
   labelPrefix: string
   onChange?: (next: { x: number; y: number; z: number }) => void
   onCommit: (next: { x: number; y: number; z: number }) => void
-  heading?: { value: number; onCommit: (next: number) => void }
+  heading?: { value: number; onCommit: (next: number) => void; onChange?: (next: number) => void }
 }) {
   return (
     <div className="flex flex-wrap items-center gap-3">
@@ -324,6 +324,7 @@ export function Vector3DragFloat({
           unit="°"
           disabled={disabled}
           inputClassName="w-16"
+          onChange={heading.onChange}
           onCommit={heading.onCommit}
         />
       )}

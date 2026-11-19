@@ -50,6 +50,7 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
   const actorSelectSupported = useMotionStore((state) => state.capabilities.includes('actors.selectTarget'))
   const [scanning, setScanning] = React.useState(false)
   const [nodeFilter, setNodeFilter] = React.useState('')
+  const [expandedNodes, setExpandedNodes] = React.useState<Set<number>>(() => new Set())
 
   const settings = stage.settings
   const sceneBgEnabled = !settings.hideBackground
@@ -74,6 +75,27 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
       (node) => node.displayName.toLowerCase().includes(needle) || node.name.toLowerCase().includes(needle),
     )
   }, [safeNodes, nodeFilter])
+  const nodesByIndex = new Map(safeNodes.map(node => [node.index, node]))
+  const parents = new Set(safeNodes.map(node => node.parentIndex))
+  const matchingNodes = new Set(filteredNodes.map(node => node.index))
+  if (nodeFilter.trim()) {
+    for (const node of filteredNodes) {
+      let parent = nodesByIndex.get(node.parentIndex)
+      while (parent && !matchingNodes.has(parent.index)) {
+        matchingNodes.add(parent.index)
+        parent = nodesByIndex.get(parent.parentIndex)
+      }
+    }
+  }
+  const visibleNodes = safeNodes.filter(node => {
+    if (nodeFilter.trim()) return matchingNodes.has(node.index)
+    let parent = nodesByIndex.get(node.parentIndex)
+    for (let depth = node.depth; parent && depth > 0; depth--) {
+      if (!expandedNodes.has(parent.index)) return false
+      parent = nodesByIndex.get(parent.parentIndex)
+    }
+    return true
+  })
 
   return (
     <div className="mx-auto max-w-5xl space-y-4" data-testid="stage-page">
@@ -341,7 +363,7 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
                   {filteredNodes.length === 0 ? (
                     <p className="py-4 text-center text-xs text-muted-foreground">尚未扫描或没有候选节点。</p>
                   ) : (
-                    filteredNodes.map((node) => {
+                    visibleNodes.map((node) => {
                       const parentInactive = safeNodes.some(
                         (candidate) => candidate.index === node.parentIndex && !candidate.currentlyActive,
                       )
@@ -351,15 +373,32 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
                           className="flex items-center gap-2 rounded px-2 py-1 hover:bg-accent/45"
                           style={{ paddingLeft: `${8 + node.depth * 14}px` }}
                         >
-                          <Checkbox
-                            checked={node.currentlyActive}
-                            disabled={node.isColliderLocked || parentInactive || !scanSupported}
-                            onCheckedChange={(checked) => void motionStore.toggleStageNode(node.index, checked === true)}
-                          />
-                          <span className="text-xs text-foreground">{node.displayName}</span>
+                          {parents.has(node.index) ? (
+                            <Button variant="ghost" size="sm" className="h-auto px-1 text-xs"
+                              aria-expanded={expandedNodes.has(node.index) || Boolean(nodeFilter.trim())}
+                              disabled={Boolean(nodeFilter.trim())}
+                              onClick={() => setExpandedNodes(current => {
+                                const next = new Set(current)
+                                if (next.has(node.index)) next.delete(node.index)
+                                else next.add(node.index)
+                                return next
+                              })}>
+                              {expandedNodes.has(node.index) || nodeFilter.trim() ? '▾' : '▸'} {node.displayName}
+                            </Button>
+                          ) : <span className="pl-4 text-xs text-foreground">{node.displayName}</span>}
                           {node.isLightingRoot && <Badge variant="secondary" className="rounded-[4px]">光影</Badge>}
                           {node.isIdentifiedBackground && <Badge variant="secondary" className="rounded-[4px]">背景</Badge>}
                           {node.isColliderLocked && <Badge variant="outline" className="rounded-[4px]">碰撞锁定</Badge>}
+                          <label className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+                            {node.currentlyActive ? '显示' : '已隐藏'}
+                            <Checkbox
+                              aria-label={`隐藏 ${node.displayName}`}
+                              checked={!node.currentlyActive}
+                              disabled={node.isColliderLocked || parentInactive || !scanSupported}
+                              onCheckedChange={(checked) => void motionStore.toggleStageNode(node.index, checked !== true)}
+                            />
+                            隐藏
+                          </label>
                         </div>
                       )
                     })
