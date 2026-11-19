@@ -10,6 +10,22 @@ namespace LiveTimelineProps
         std::vector<ModelRendererMask::Entry> renderers;
     };
     inline std::unordered_map<std::string, Saved> saved;
+    inline constexpr const char* penlightPrefab = "mdl_prp_penlightset-env-00_penlightset";
+    inline constexpr const char* penlightPrefabClone = "mdl_prp_penlightset-env-00_penlightset(Clone)";
+    inline constexpr const char* penlightMeshes[]{"Geo_Penlightleft", "Geo_Penlightright"};
+    inline constexpr const char* batonMesh = "Geo_baton_01";
+    inline constexpr const char* batonPrefab = "mdl_env_cmn-parts_live-panel-00_baton0";
+    inline GakuMotion::injection::OwnerSnapshot knownOwner;
+    inline int knownActiveScene{};
+    inline std::vector<StageLoader::Handle> knownObjects, stageBatons;
+
+    inline void ClearKnownObjects()
+    {
+        for (auto* list : {&knownObjects, &stageBatons}) {
+            for (const auto handle : *list) StageLoader::freeHandle(handle);
+            list->clear();
+        }
+    }
 
     struct Root {
         StageLoader::Handle handle{};
@@ -60,6 +76,18 @@ namespace LiveTimelineProps
         const int length = ArrayLength(list);
         if (length >= 0) {
             if (length == 0) return;
+            static const auto* get = [] {
+                void* array = FindClass("mscorlib.dll", "System", "Array");
+                if (!array) array = FindClass("System.Private.CoreLib.dll", "System", "Array");
+                return StageLoader::metadata.Find(array, "GetValue", false, {0x1c}, {{0x08}});
+            }();
+            if (get) {
+                for (int i = 0; i < length; ++i) {
+                    void* args[]{&i};
+                    if (void* value = StageLoader::Invoke(get, list, args)) visit(value);
+                }
+                return;
+            }
             using HeaderSize = size_t (*)();
             const auto header = reinterpret_cast<HeaderSize>(GetProcAddress(g_gameAssembly, "il2cpp_array_object_header_size"));
             if (!header || header() != 32) return;
@@ -103,8 +131,8 @@ namespace LiveTimelineProps
         void* object = target(item.object);
         if (CameraBridge::IsAlive(object) &&
             (StageLoader::ReadInt(StageLoader::instanceId, object) != item.id ||
-             StageLoader::SceneOfFreshGo(object) != item.scene ||
-             !ModelRendererMask::ApplyMeshMask(item.renderers, false))) return false;
+             StageLoader::SceneOfFreshGo(object) != item.scene)) return false;
+        if (!ModelRendererMask::ApplyMeshMask(item.renderers, false)) return false;
         ModelRendererMask::Release(item.renderers);
         StageLoader::freeHandle(item.object);
         return true;
@@ -116,7 +144,12 @@ namespace LiveTimelineProps
         return saved.empty();
     }
 
-    inline void Abandon() { RestoreAll(); }
+    inline void Abandon() {
+        RestoreAll();
+        ClearKnownObjects();
+        knownOwner = {};
+        knownActiveScene = 0;
+    }
     inline bool HasSaved() { return !saved.empty(); }
 
     inline void RestoreUnselected(const GakuMotion::Core& core)
@@ -167,22 +200,121 @@ namespace LiveTimelineProps
         return false;
     }
 
-    inline void Hide(GakuMotion::Core& core, const GakuMotion::GuiActorProp& prop, void* object, void* transform, int scene)
+    inline bool IsPenlightMesh(const std::string& name)
+    {
+        return std::any_of(std::begin(penlightMeshes), std::end(penlightMeshes),
+            [&](const char* known) { return name == known; });
+    }
+
+    // The handheld prefab and the baton meshes are separate assets. The
+    // latter are copied into several Timeline branches for individual shots.
+    inline void FindKnownModels()
+    {
+        const auto& md = StageLoader::metadata;
+        const auto remember = [](void* go, auto& list) {
+            if (CameraBridge::IsAlive(go))
+                if (auto handle = StageLoader::newHandle(go, false)) list.push_back(handle);
+        };
+        static const auto* find = md.Find(StageLoader::goClass, "Find", true, {0x12, StageLoader::goClass}, {{0x0e}});
+        const auto findObject = [](const char* name) -> void* {
+            if (!find || !StageLoader::stringNew) return nullptr;
+            void* text = StageLoader::stringNew(name);
+            void* args[]{text};
+            return text ? StageLoader::Invoke(find, nullptr, args) : nullptr;
+        };
+        for (const char* name : {penlightPrefabClone, penlightPrefab}) {
+            void* go = findObject(name);
+            void* transform = CameraBridge::IsAlive(go) ? StageLoader::Invoke(StageLoader::goTransform, go) : nullptr;
+            std::vector<ModelRendererMask::Entry> renderers;
+            if (transform && ModelRendererMask::Capture(transform, renderers, IsMeshRenderer) && renderers.size() >= 2)
+                remember(go, knownObjects);
+            ModelRendererMask::Release(renderers);
+        }
+        void* stage = findObject("livestg-fktn004_liveparts");
+        if (!stage) stage = findObject("livestg-fktn004_liveparts(Clone)");
+        if (CameraBridge::IsAlive(stage)) {
+            void* root = StageLoader::Invoke(StageLoader::goTransform, stage);
+            const auto rememberBaton = [&](void* baton) {
+                void* geometry = LiveActorProps::UniqueChild(baton, batonMesh);
+                if (geometry) remember(StageLoader::Invoke(StageLoader::componentGo, geometry), stageBatons);
+            };
+            void* other = LiveActorProps::UniqueChild(root, "Other");
+            for (void* group : LiveActorProps::Children(other))
+                for (void* baton : LiveActorProps::Children(group))
+                    if (HelperGetTransformName(baton).starts_with("baton0-")) rememberBaton(baton);
+            void* sample = LiveActorProps::UniqueChild(root, "Sample");
+            for (void* baton : LiveActorProps::Children(sample))
+                if (HelperGetTransformName(baton).starts_with(batonPrefab)) rememberBaton(baton);
+        }
+        const bool needHandheld = knownObjects.empty(), needBatons = stageBatons.empty();
+        if (!needHandheld && !needBatons) return;
+        if (!il2cpp_class_get_type || !il2cpp_type_get_object || !StageLoader::findAll ||
+            !StageLoader::arrayLength || !g_getNameNative) return;
+        static void* filter = FindClass("UnityEngine.CoreModule.dll", "UnityEngine", "MeshFilter");
+        static void* mesh = FindClass("UnityEngine.CoreModule.dll", "UnityEngine", "Mesh");
+        static const auto* sharedMesh = md.Find(filter, "get_sharedMesh", false, {0x12, mesh}, {});
+        if (!sharedMesh) return;
+        void* type = il2cpp_class_get_type(filter);
+        void* managedType = type ? il2cpp_type_get_object(type) : nullptr;
+        bool includeInactive = true;
+        void* args[]{managedType, &includeInactive};
+        void* filters = managedType ? StageLoader::Invoke(StageLoader::findAll, nullptr, args) : nullptr;
+        Root pinned(filters);
+        if (!pinned.handle) return;
+        const auto count = StageLoader::arrayLength(filters);
+        if (count > 12000) return;
+        // StageLoader::findAll is the same typed Unity finder used for scene objects.
+        auto items = reinterpret_cast<void**>(static_cast<char*>(filters) + 32);
+        for (uintptr_t i = 0; i < count; ++i) {
+            void* component = items[i];
+            if (!component) continue;
+            const auto name = Il2CppStringToUtf8(g_getNameNative(component));
+            const bool baton = needBatons && name == batonMesh && stageBatons.size() < 64;
+            const bool handheld = needHandheld && IsPenlightMesh(name) && knownObjects.size() < 8;
+            if (!baton && !handheld) continue;
+            void* asset = StageLoader::Invoke(sharedMesh, component);
+            if (!asset || Il2CppStringToUtf8(g_getNameNative(asset)) != name) continue;
+            void* go = StageLoader::Invoke(StageLoader::componentGo, component);
+            void* transform = go ? StageLoader::Invoke(StageLoader::goTransform, go) : nullptr;
+            if (baton) {
+                void* parent = transform ? g_getParentNative(transform) : nullptr;
+                const auto parentName = parent ? HelperGetTransformName(parent) : std::string{};
+                if (!parentName.starts_with("baton0-") && !parentName.starts_with(batonPrefab)) continue;
+            }
+            remember(go, baton ? stageBatons : knownObjects);
+        }
+    }
+
+    inline void Hide(GakuMotion::Core& core, const GakuMotion::GuiActorProp& prop, void* object, void* transform, int scene,
+        const std::vector<void*>* group)
     {
         const auto key = GakuMotion::ActorPropKey(prop);
         if (!core.actorPropHidden.contains(key)) return;
         auto found = saved.find(key);
         if (found == saved.end()) {
             Saved state{StageLoader::newHandle(object, false), prop.instanceId, scene};
-            if (state.object && ModelRendererMask::Capture(transform, state.renderers, IsMeshRenderer))
+            const auto capture = [&](void* node) {
+                std::vector<ModelRendererMask::Entry> meshes;
+                if (!ModelRendererMask::Capture(node, meshes, IsMeshRenderer)) {
+                    ModelRendererMask::Release(meshes);
+                    return false;
+                }
+                state.renderers.insert(state.renderers.end(), meshes.begin(), meshes.end());
+                return true;
+            };
+            if (state.object && (group ? std::all_of(group->begin(), group->end(), capture) : capture(transform)))
                 found = saved.emplace(key, std::move(state)).first;
-            else if (state.object) StageLoader::freeHandle(state.object);
+            else {
+                ModelRendererMask::Release(state.renderers);
+                if (state.object) StageLoader::freeHandle(state.object);
+            }
         }
         if (found != saved.end() && LiveActorProps::Target()(found->second.object) == object &&
             found->second.scene == scene && ModelRendererMask::ApplyMeshMask(found->second.renderers, true)) return;
         core.actorPropHidden.erase(key);
         core.ensembleNotice = "该时间轴道具的网格显隐未确认。";
-        if (g_hostContext.logWarn) g_hostContext.logWarn("[GakuMotion][LiveTimelineProp] hide unconfirmed: %s", prop.propName.c_str());
+        if (g_hostContext.logWarn) g_hostContext.logWarn("[GakuMotion][LiveTimelineProp] hide unconfirmed: %s (%s)",
+            prop.propName.c_str(), ModelRendererMask::lastFailure);
     }
 
     inline void Scan(GakuMotion::Core& core, const std::vector<void*>& actors, bool canWrite)
@@ -209,8 +341,34 @@ namespace LiveTimelineProps
         const int slots = ListCount(virtualActors);
         const int count = std::clamp(slots >= 0 ? slots : static_cast<int>(actors.size()), 0, 12);
 
+        const auto target = LiveActorProps::Target();
+        const bool newOwner = !knownOwner.SameOwner(g_sceneOwner);
+        if (newOwner) {
+            ClearKnownObjects();
+            knownOwner = g_sceneOwner;
+        }
+        if (target) for (auto* list : {&knownObjects, &stageBatons})
+            std::erase_if(*list, [&](auto handle) {
+                if (CameraBridge::IsAlive(target(handle))) return false;
+                StageLoader::freeHandle(handle);
+                return true;
+            });
+        int activeScene = g_verifiedActiveSceneHandle;
+        if (target && (newOwner || knownActiveScene != activeScene ||
+            (stageBatons.empty() && core.actorPropScanRequested))) {
+            knownActiveScene = activeScene;
+            void* args[]{&activeScene};
+            const auto sceneName = activeScene
+                ? Il2CppStringToUtf8(StageLoader::Invoke(StageLoader::sceneName, nullptr, args)) : "";
+            if (core.actorPropScanRequested || sceneName.starts_with("env_3d_live_fktn004-")) {
+                ClearKnownObjects();
+                FindKnownModels();
+            }
+        }
+
         std::vector<void*> modelRoots;
-        auto add = [&](void* item, int slot) {
+        unsigned readProps{}, readConstraints{};
+        auto add = [&](void* item, int slot, bool known = false, const std::vector<void*>* group = nullptr) {
             void* klass = g_faceRuntime.objectClass(item);
             if (!klass || (klass != StageLoader::goClass &&
                 !StageLoader::assignable(StageLoader::componentClass, klass))) return;
@@ -219,7 +377,7 @@ namespace LiveTimelineProps
                 StageLoader::Invoke(StageLoader::componentGo, item);
             void* transform = object ? StageLoader::Invoke(StageLoader::goTransform, object) : nullptr;
             if (!transform || std::any_of(actors.begin(), actors.end(), [&](void* actor) {
-                return actor && (IsBelow(transform, actor) || IsBelow(actor, transform));
+                return actor && (IsBelow(actor, transform) || (!known && IsBelow(transform, actor)));
             }) || std::any_of(modelRoots.begin(), modelRoots.end(), [&](void* root) {
                 return IsBelow(transform, root) || IsBelow(root, transform);
             })) return;
@@ -228,28 +386,47 @@ namespace LiveTimelineProps
             if (!scene || !StageLoader::ReadBool(StageLoader::sceneLoaded, nullptr, false, sceneArgs)) return;
             const int id = StageLoader::ReadInt(StageLoader::instanceId, object);
             if (!id || std::any_of(core.actorProps.begin(), core.actorProps.end(),
-                [&](const auto& prop) { return prop.instanceId == id; }) || !HasMesh(transform)) return;
+                [&](const auto& prop) { return prop.instanceId == id; }) || (!known && !HasMesh(transform))) return;
             const auto name = HelperGetTransformName(transform);
             bool active{};
             if (name.empty() || !LiveActorProps::ReadActive(object, active)) return;
-            GakuMotion::GuiActorProp prop{0, "Timeline", name, "时间轴道具 · 角色位 " + std::to_string(slot + 1),
-                id, active, canWrite, false, true};
-            if (canWrite) Hide(core, prop, object, transform, scene);
-            modelRoots.push_back(transform);
+            const auto label = known ? std::string(group ? "舞台灯柱" : "手持荧光棒") : "时间轴道具 · 角色位 " + std::to_string(slot + 1);
+            GakuMotion::GuiActorProp prop{0, "Timeline", name, label,
+                id, group || active, canWrite, false, true};
+            if (canWrite) Hide(core, prop, object, transform, scene, group);
+            if (group) modelRoots.insert(modelRoots.end(), group->begin(), group->end());
+            else modelRoots.push_back(transform);
             core.actorProps.push_back(std::move(prop));
         };
+        if (target && !stageBatons.empty()) {
+            std::vector<void*> group;
+            void* anchor = nullptr;
+            int anchorId = 0;
+            for (auto handle : stageBatons) {
+                void* go = target(handle);
+                void* transform = go ? StageLoader::Invoke(StageLoader::goTransform, go) : nullptr;
+                if (!transform) continue;
+                const int id = StageLoader::ReadInt(StageLoader::instanceId, go);
+                if (!id) continue;
+                group.push_back(transform);
+                if (!anchor || id < anchorId) { anchor = go; anchorId = id; }
+            }
+            if (anchor) add(anchor, 0, true, &group);
+        }
+        if (target) for (auto handle : knownObjects)
+            if (auto* go = target(handle)) add(go, 0, true);
         for (int slot = 0; slot < count; ++slot) {
             void* args[]{&slot};
-            VisitList(StageLoader::Invoke(props, live, args), [&](void* item) { add(item, slot); });
+            VisitList(StageLoader::Invoke(props, live, args), [&](void* item) { ++readProps; add(item, slot); });
         }
         for (int slot = 0; controller && slot < count; ++slot) {
             void* args[]{&slot};
-            VisitList(StageLoader::Invoke(constraints, controller, args), [&](void* item) { add(item, slot); });
+            VisitList(StageLoader::Invoke(constraints, controller, args), [&](void* item) { ++readConstraints; add(item, slot); });
         }
         if (core.actorPropScanRequested && g_hostContext.logInfo) {
             const auto found = std::count_if(core.actorProps.begin(), core.actorProps.end(), [](const auto& prop) { return prop.timeline; });
-            g_hostContext.logInfo("[GakuMotion][LiveTimelineProp] slots=%d timeline_props=%d constraint_targets=%d found=%zu",
-                count, int(props != nullptr), int(controller && constraints), static_cast<size_t>(found));
+            g_hostContext.logInfo("[GakuMotion][LiveTimelineProp] slots=%d props=%u constraints=%u handheld=%zu batons=%zu found=%zu",
+                count, readProps, readConstraints, knownObjects.size(), stageBatons.size(), static_cast<size_t>(found));
         }
     }
 }

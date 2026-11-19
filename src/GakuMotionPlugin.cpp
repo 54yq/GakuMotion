@@ -1668,7 +1668,7 @@ static void ResetPlacementDynamicBone(void* actor)
 		auto& core = GakuMotion::Core::Instance();
 		std::lock_guard<std::recursive_mutex> lock(core.stateMutex);
 		return core.player.state != GakuMotion::PlaybackState::Stopped ||
-			core.camera.owned || core.stageManager.injectionEnabled || !LiveActorProps::saved.empty() ||
+			core.camera.owned || core.stageManager.injectionEnabled || LiveActorProps::HasSaved() ||
 			(core.liveTakeoverFault && core.liveOwnerToken && core.liveOwnerToken == core.liveFaultOwner);
 	}
 
@@ -4978,7 +4978,7 @@ extern "C" GAKU_PLUGIN_EXPORT GakuStatus GakuPlugin_Query(
 	if (!output) return GAKU_E_INVALID_ARGUMENT;
 	if (outputSize < sizeof(GakuPluginDescriptor)) return GAKU_E_SIZE;
 	const GakuPluginDescriptor descriptor{GAKU_ABI_VERSION, sizeof(GakuPluginDescriptor),
-		"gakumotion", "GakuMotion", "0.1.1+fork.4.3.2",
+		"gakumotion", "GakuMotion", "0.1.1+fork.4.3.3",
 		MotionActivate, MotionRuntimeReady, MotionTick, MotionActorTick,
 		RenderGmlMotion, MotionShutdown};
 	*output = descriptor;

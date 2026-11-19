@@ -69,8 +69,9 @@ namespace LiveAspectPreview
     {
         if (flareHooksAttempted) return;
         flareHooksAttempted = true;
-        void* pass = FindClass("vl-unity.Runtime.dll", "VL.Rendering.Internal", "VLPostProcessPass");
-        void* volume = FindClass("vl-unity.Runtime.dll", "VL.Rendering", "VLParaffin");
+        constexpr const char* pipeline = "Unity.RenderPipelines.Universal.Runtime.dll";
+        void* pass = FindClass(pipeline, "VL.Rendering.Internal", "VLPostProcessPass");
+        void* volume = FindClass(pipeline, "VL.Rendering", "VLParaffin");
         void* command = FindClass("UnityEngine.CoreModule.dll", "UnityEngine.Rendering", "CommandBuffer");
         const bool setup = pass && volume && command &&
             md.Find(pass, "SetupVLParaffin", false, {0x01}, {{0x12, command}, {0x0c}, {0x12, volume}}) &&
@@ -79,8 +80,8 @@ namespace LiveAspectPreview
         const bool check = volume && md.Find(volume, "IsValidAspect", false, {0x02}, {{0x0c}}) &&
             CameraBridge::InstallHook("VLParaffin.IsValidAspect", FindMethodPointer(volume, "IsValidAspect", 1),
                 reinterpret_cast<void*>(CheckOriginalParaffinAspect), reinterpret_cast<void**>(&validParaffinAspect));
-        if ((!setup || !check) && g_hostContext.logWarn)
-            g_hostContext.logWarn("[GakuMotion][LiveAspectPreview] paraffin hooks incomplete setup=%d aspect_check=%d", int(setup), int(check));
+        const auto log = setup && check ? g_hostContext.logInfo : g_hostContext.logWarn;
+        if (log) log("[GakuMotion][LiveAspectPreview] paraffin hooks setup=%d aspect_check=%d", int(setup), int(check));
     }
 
     inline bool ReleaseProjection(void* renderedCamera = nullptr)

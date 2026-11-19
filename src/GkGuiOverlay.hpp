@@ -762,6 +762,7 @@ namespace GakuMotion
 
 #include "gui/GuiTransportBar.hpp"
 #include "gui/GuiLibraryPage.hpp"
+#include "gui/GuiSceneProps.hpp"
 #include "gui/GuiMotionPage.hpp"
 #include "gui/GuiCameraPage.hpp"
 #include "gui/GuiStagePage.hpp"

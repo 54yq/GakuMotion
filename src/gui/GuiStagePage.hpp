@@ -213,6 +213,8 @@ namespace GakuMotion
 
 		ImGui::EndDisabled(); // !customNodeActive
 
+		if (ctx.liveViewingConfirmed) DrawSceneProps(ctx, true);
+
 		ImGui::Spacing();
 		ImGui::Separator();
 		ImGui::Spacing();
