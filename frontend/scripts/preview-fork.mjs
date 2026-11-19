@@ -74,6 +74,8 @@ try {
   await ensemble.getByRole('button', { name: '添加副角色' }).click()
   await ensemble.getByRole('button', { name: '添加副角色' }).click()
   await ensemble.getByRole('heading', { name: '副角色 4', exact: true }).waitFor()
+  await ensemble.getByRole('button', { name: '删除副角色 4', exact: true }).click()
+  await ensemble.getByRole('heading', { name: '副角色 4', exact: true }).waitFor({ state: 'detached' })
   await ensemble.getByRole('option', { name: '新模型 B' }).first().waitFor({ state: 'attached' })
   await ensemble.getByLabel('副角色 1 站位 朝向', { exact: true }).waitFor()
   const lateral = ensemble.getByLabel('副角色 1 站位 X', { exact: true })

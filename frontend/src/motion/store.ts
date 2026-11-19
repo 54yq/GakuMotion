@@ -948,7 +948,7 @@ export class MotionStore {
 
   play = async (): Promise<void> => {
     try {
-      if (this.state.player.state === 'paused' || this.state.player.state === 'preview') {
+      if (this.state.player.state === 'paused') {
         await this.client().request('player.resume')
       } else {
         await this.client().request('player.play')

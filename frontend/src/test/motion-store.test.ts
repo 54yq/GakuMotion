@@ -53,6 +53,18 @@ describe('MotionStore startup', () => {
 })
 
 describe('MotionStore transport', () => {
+  it('starts the first-frame preview with play and resumes a paused motion with resume', async () => {
+    const { bridge, store } = await startedStore()
+    const request = vi.spyOn(bridge, 'request')
+    await store.selectMotion('hikari-no-saki', false)
+    expect(store.getState().player.state).toBe('preview')
+    await store.play()
+    expect(request.mock.calls.some(([method]) => method === 'player.play')).toBe(true)
+    await store.pause()
+    await store.play()
+    expect(request.mock.calls.some(([method]) => method === 'player.resume')).toBe(true)
+    bridge.close()
+  })
   it('plays, pauses and stops a loaded motion', async () => {
     const { bridge, store } = await startedStore()
     await store.selectMotion('hikari-no-saki', true)

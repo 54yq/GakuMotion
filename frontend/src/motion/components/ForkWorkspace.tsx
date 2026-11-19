@@ -90,6 +90,7 @@ export function useForkWorkspace(preview = false) {
         setState({ ...current, props: current.props.map(item =>
           keys.includes(item.key) ? { ...item, hidden: Boolean(fields.value) } : item) })
       }
+      if (action === 'formation.clear') setState({ ...current, followers: current.followers.filter(item => item.slot !== fields.slot) })
       if (action === 'motion.arm') setState({ ...current, arms: current.arms.map(item => {
         if (item.token !== fields.actorToken) return item
         switch (fields.operation) {
@@ -202,7 +203,7 @@ export function ForkPlacementFields({ slot, token, generation, initial, yaw, com
   )
 }
 
-function Follower({ slot, follower, command }: { slot: number; follower?: ForkFollower; command: ForkCommand }) {
+function Follower({ slot, follower, command, remove }: { slot: number; follower?: ForkFollower; command: ForkCommand; remove: () => void }) {
   const actors = useMotionStore(state => state.actors.actors)
   const entries = useMotionStore(state => state.library.entries)
   const playback = useMotionStore(state => state.player.state)
@@ -216,6 +217,8 @@ function Follower({ slot, follower, command }: { slot: number; follower?: ForkFo
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-sm font-medium">副角色 {slot + 1}</h3>
         <span className="text-xs text-muted-foreground">{follower?.physics || '尚未绑定'}</span>
+        <Button size="sm" variant="ghost" disabled={!!follower?.actorToken && bindingLocked}
+          aria-label={`删除副角色 ${slot + 1}`} onClick={remove}>删除</Button>
       </div>
       <div className="mt-3 flex flex-wrap items-end gap-2">
         <label className="min-w-32 text-xs text-muted-foreground">角色
@@ -262,8 +265,10 @@ export function ForkEnsembleControls({ state, command }: { state: ForkState; com
   const primary = useMotionStore(model => model.actors.actors.find(actor => actor.selected))
   const playback = useMotionStore(model => model.player.state)
   const bindingLocked = playback === 'playing' || playback === 'paused'
-  const [draftSlotCount, setDraftSlotCount] = useState(0)
-  const slots = Math.max(state.followers.length, draftSlotCount)
+  const [draftSlots, setDraftSlots] = useState<number[]>([])
+  const bound = state.followers.filter(follower => follower.actorToken)
+  const slots = [...new Set([...draftSlots, ...bound.map(follower => follower.slot)])].sort((a, b) => a - b)
+  const addSlot = Array.from({ length: 64 }, (_, slot) => slot).find(slot => !slots.includes(slot))
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -271,7 +276,9 @@ export function ForkEnsembleControls({ state, command }: { state: ForkState; com
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="outline" disabled={bindingLocked} onClick={() => void command('formation.auto')}>按名称自动分配</Button>
           <Button size="sm" variant="outline" onClick={() => void command('formation.align')}>对齐原曲队形</Button>
-          <Button size="sm" disabled={slots >= 64} onClick={() => setDraftSlotCount(slots + 1)}>添加副角色</Button>
+          <Button size="sm" disabled={addSlot === undefined} onClick={() => {
+            if (addSlot !== undefined) setDraftSlots(current => [...current, addSlot])
+          }}>添加副角色</Button>
         </div>
       </div>
       {bindingLocked && <p className="text-xs text-muted-foreground">停止播放后可新增或解除动作绑定；当前仍可调整已绑定角色的站位。</p>}
@@ -295,9 +302,13 @@ export function ForkEnsembleControls({ state, command }: { state: ForkState; com
         </dl>
         {primary && <ModelVisibility actor={primary} command={command} />}
       </section>
-      {Array.from({ length: slots }, (_, slot) => {
-        const follower = state.followers[slot]
-        return <Follower key={`${state.epoch}:${slot}:${follower?.generation ?? 0}`} slot={slot} follower={follower} command={command} />
+      {slots.map(slot => {
+        const follower = bound.find(item => item.slot === slot)
+        return <Follower key={`${state.epoch}:${slot}:${follower?.generation ?? 0}`} slot={slot} follower={follower} command={command}
+          remove={() => {
+            setDraftSlots(current => current.filter(item => item !== slot))
+            if (follower) void command('formation.clear', { slot })
+          }} />
       })}
       </div>
       {state.formationNotice && <p className="text-xs text-muted-foreground">{state.formationNotice}</p>}
