@@ -1,0 +1,2540 @@
+import { useSyncExternalStore } from 'react'
+import { getMotionBridge, MotionMockBridgeClient, setMotionBridge } from './bridge'
+import { cameraControlModeIndex, setCameraControlMode, syncLegacyTransforms } from './cameraMode'
+import {
+  BridgeError,
+  DEFAULT_CAMERA_SETTINGS,
+  DEFAULT_FACIAL_WEIGHTS,
+  DEFAULT_PLAYER_STATE,
+  DEFAULT_STAGE_SETTINGS,
+  DEFAULT_EXPERIMENT_SETTINGS,
+  DEFAULT_GAZE_SETTINGS,
+  DEFAULT_SOLE_PITCH_SETTINGS,
+  ENSEMBLE_MAX_ACTORS,
+  IMPORT_SLOT,
+  defaultImportRequest,
+  defaultPerformanceTiming,
+  defaultSoleSettings,
+  defaultStudioSettings,
+  isSlotPlaceholder,
+  boneNameByHid,
+  type ActorsState,
+  type BoneState,
+  type CameraSettings,
+  type CameraState,
+  type EditEntryInfo,
+  type EnsembleSnapshot,
+  type EnsembleSettings,
+  type ExperimentsState,
+  type FacialWeights,
+  type GazeSettings,
+  type GazeState,
+  type ImportProgress,
+  type ImportRequest,
+  type PerformanceTiming,
+  type LibraryState,
+  type LoadedState,
+  type MotionAppearance,
+  type MotionBridgeClient,
+  type MotionMethodName,
+  type MotionMethods,
+  type MotionStateSnapshot,
+  type PermissionState,
+  type PlayerState,
+  type SolePitchState,
+  type SoleSettings,
+  type SoleState,
+  type StageState,
+  type StageNode,
+  type StudioSettings,
+  type StudioState,
+  type TelemetrySnapshot,
+  type TrackTiming,
+  type Vector3,
+  type VmdProbe,
+} from './protocol'
+import { parseTransportFrame, parseTransportTime } from './time'
+import { deepEqual } from './utils'
+import {
+  classifyImportFiles,
+  ensembleUiError,
+  isSupportedLibraryFile,
+  validateImportForm,
+  validateSole,
+  validateStudio,
+} from './validation'
+
+export type MotionPage = 'library' | 'motion' | 'camera' | 'stage' | 'settings' | 'developer'
+
+export type LibraryFilter = 'all' | 'camera' | 'audio' | 'facial' | 'motionOnly'
+export type LibrarySort = 'default' | 'title' | 'durationDesc' | 'durationAsc'
+
+export interface PendingDelete {
+  key: string
+  directory: string
+  revision: number
+}
+
+export type ImportSlotKey = 'motion' | 'facial' | 'camera' | 'audio'
+
+export interface ImportSlotState {
+  candidates: string[]
+  selection: number
+}
+
+export interface ImportFormState {
+  open: boolean
+  mode: 'new' | 'edit'
+  editKey: string
+  editRevision: number
+  editInfo: EditEntryInfo | null
+  title: string
+  subtitle: string
+  sourceFps: number
+  fps: number
+  timing: PerformanceTiming
+  slots: Record<ImportSlotKey, ImportSlotState>
+  unsupportedAudio: number
+  probes: Record<string, VmdProbe>
+  activeTrackWarning: string
+  pendingStopAndSave: boolean
+}
+
+export interface ImportUiState {
+  visible: boolean
+  awaitingStart: boolean
+  startTime: number
+  minDisplayUntil: number
+  displayProgress: number
+  displayStatus: string
+  indeterminate: boolean
+  lastProgress: ImportProgress | null
+  errorModalOpen: boolean
+  errorDetail: string
+}
+
+export type DialogTarget = 'library-add' | 'append' | ImportSlotKey | 'video'
+
+export interface DropUiState {
+  visual: 'none' | 'armed' | 'hover' | 'invalid'
+  fileCount: number
+  accepted: number
+  hostElevated: boolean
+  hostBlocked: boolean
+}
+
+function emptyImportForm(): ImportFormState {
+  return {
+    open: false,
+    mode: 'new',
+    editKey: '',
+    editRevision: 0,
+    editInfo: null,
+    title: '',
+    subtitle: '',
+    sourceFps: 0,
+    fps: 0,
+    timing: defaultPerformanceTiming(),
+    slots: {
+      motion: { candidates: [], selection: 0 },
+      facial: { candidates: [], selection: 0 },
+      camera: { candidates: [], selection: 0 },
+      audio: { candidates: [], selection: 0 },
+    },
+    unsupportedAudio: 0,
+    probes: {},
+    activeTrackWarning: '',
+    pendingStopAndSave: false,
+  }
+}
+
+function emptyImportUi(): ImportUiState {
+  return {
+    visible: false,
+    awaitingStart: false,
+    startTime: 0,
+    minDisplayUntil: 0,
+    displayProgress: 0,
+    displayStatus: '',
+    indeterminate: false,
+    lastProgress: null,
+    errorModalOpen: false,
+    errorDetail: '',
+  }
+}
+
+function emptyEnsembleSettings(): EnsembleSettings {
+  return {
+    enabled: false,
+    masterSlot: 0,
+    cameraSlot: 0,
+    slots: Array.from({ length: ENSEMBLE_MAX_ACTORS }, () => ({
+      enabled: false,
+      actorToken: 0,
+      actorHint: '',
+      motionKey: '',
+      offset: { x: 0, y: 0, z: 0 },
+      yawDegrees: 0,
+    })),
+  }
+}
+
+function asObj(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+}
+
+function asBool(value: unknown, fallback = false): boolean {
+  return typeof value === 'boolean' ? value : fallback
+}
+
+function asNum(value: unknown, fallback = 0): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+}
+
+function asStr(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback
+}
+
+function asVec3(value: unknown, fallback: Vector3 = { x: 0, y: 0, z: 0 }): Vector3 {
+  const obj = asObj(value)
+  return {
+    x: asNum(obj.x, fallback.x),
+    y: asNum(obj.y, fallback.y),
+    z: asNum(obj.z, fallback.z),
+  }
+}
+
+function normalizeStageNodes(raw: unknown): StageNode[] {
+  if (!Array.isArray(raw)) return []
+  return raw.map((item, idx) => {
+    const o = asObj(item)
+    const name = asStr(o.name, `Node_${idx}`)
+    return {
+      index: asNum(o.index, idx),
+      name,
+      displayName: asStr(o.displayName, name) || name,
+      parentIndex: asNum(o.parentIndex, -1),
+      depth: asNum(o.depth, 0),
+      hasChildren: asBool(o.hasChildren, false),
+      currentlyActive: asBool(o.currentlyActive, true),
+      isColliderLocked: asBool(o.isColliderLocked, false),
+      isIdentifiedBackground: asBool(o.isIdentifiedBackground, false),
+      isLightingRoot: asBool(o.isLightingRoot, false),
+      isLightingNode: asBool(o.isLightingNode, false),
+    }
+  })
+}
+
+function normalizeBoneState(raw: unknown): BoneState {
+  const obj = asObj(raw)
+  const list = Array.isArray(obj.overrides) ? obj.overrides : []
+  return {
+    masterEnabled: asBool(obj.masterEnabled, true),
+    overrides: list.map((entry) => {
+      const o = asObj(entry)
+      const humanoidId = asNum(o.humanoidId ?? o.hid, 0)
+      return {
+        humanoidId,
+        boneName: asStr(o.boneName ?? o.name, boneNameByHid(humanoidId)),
+        enabled: asBool(o.enabled, true),
+        spaceWorld: asBool(o.spaceWorld, false),
+        eulerDeg: asVec3(o.eulerDeg),
+        isDynamic: asBool(o.isDynamic, false),
+      }
+    }),
+    notice: asStr(obj.notice),
+  }
+}
+
+function normalizeGazeState(raw: unknown): GazeState {
+  const obj = asObj(raw)
+  const settingsObj = obj.settings && typeof obj.settings === 'object' ? asObj(obj.settings) : obj
+  return {
+    settings: {
+      mode: asNum(settingsObj.mode, DEFAULT_GAZE_SETTINGS.mode),
+      desktopLookAtEnabled: asBool(
+        settingsObj.desktopLookAtEnabled ?? settingsObj.desktopEnabled,
+        DEFAULT_GAZE_SETTINGS.desktopLookAtEnabled,
+      ),
+      eyeWeight: asNum(settingsObj.eyeWeight, DEFAULT_GAZE_SETTINGS.eyeWeight),
+      headWeight: asNum(settingsObj.headWeight, DEFAULT_GAZE_SETTINGS.headWeight),
+      bodyWeight: asNum(settingsObj.bodyWeight, DEFAULT_GAZE_SETTINGS.bodyWeight),
+    },
+    runtimeAvailable: asBool(obj.runtimeAvailable, false),
+    vrifyQueryAvailable: asBool(obj.vrifyQueryAvailable, false),
+    vrifyLiveGazeActive: asBool(obj.vrifyLiveGazeActive, false),
+    notice: asStr(obj.notice),
+  }
+}
+
+function normalizeExperimentsState(raw: unknown): ExperimentsState {
+  const obj = asObj(raw)
+  const s = asObj(obj.settings)
+  return {
+    settings: {
+      mikuMouthFit: asBool(s.mikuMouthFit, DEFAULT_EXPERIMENT_SETTINGS.mikuMouthFit),
+      mikuEyeFit: asBool(s.mikuEyeFit, DEFAULT_EXPERIMENT_SETTINGS.mikuEyeFit),
+      mikuFitAllowUnverified: asBool(
+        s.mikuFitAllowUnverified,
+        DEFAULT_EXPERIMENT_SETTINGS.mikuFitAllowUnverified,
+      ),
+      waistSupport: asBool(s.waistSupport, DEFAULT_EXPERIMENT_SETTINGS.waistSupport),
+      beforeQuartz: asBool(s.beforeQuartz, DEFAULT_EXPERIMENT_SETTINGS.beforeQuartz),
+      muteNativeSoundEffects: asBool(
+        s.muteNativeSoundEffects,
+        DEFAULT_EXPERIMENT_SETTINGS.muteNativeSoundEffects,
+      ),
+    },
+    mouthFitStatus: asStr(obj.mouthFitStatus, '尚未接管'),
+    eyeFitStatus: asStr(obj.eyeFitStatus, '尚未接管'),
+    fittedFaceLabel: asStr(obj.fittedFaceLabel),
+    notice: asStr(obj.notice),
+  }
+}
+
+function normalizeSoleState(raw: unknown): SoleState {
+  const defaults = defaultSoleSettings()
+  const obj = asObj(raw)
+  const s = asObj(obj.settings)
+  const snap = asObj(obj.snapshot)
+  const rawPoints = Array.isArray(s.points) ? s.points : []
+  const points: Vector3[][] = [0, 1].map((side) => {
+    const sideArr = Array.isArray(rawPoints[side]) ? (rawPoints[side] as unknown[]) : []
+    return [0, 1, 2].map((ptIdx) => asVec3(sideArr[ptIdx], defaults.points[side][ptIdx]))
+  })
+  return {
+    settings: {
+      enabled: asBool(s.enabled, defaults.enabled),
+      useBootProxy: asBool(s.useBootProxy, defaults.useBootProxy),
+      planeCalibrated: asBool(s.planeCalibrated, defaults.planeCalibrated),
+      shoeCalibrated: asBool(s.shoeCalibrated, defaults.shoeCalibrated),
+      planeNormal: asVec3(s.planeNormal, defaults.planeNormal),
+      planeOffsetM: asNum(s.planeOffsetM, defaults.planeOffsetM),
+      displayBandM: asNum(s.displayBandM, defaults.displayBandM),
+      points,
+    },
+    snapshot: {
+      available: asBool(snap.available, false),
+      calibrated: asBool(snap.calibrated, false),
+      clipTime: asNum(snap.clipTime, 0),
+      feet: Array.isArray(snap.feet) ? (snap.feet as SoleState['snapshot']['feet']) : [],
+    },
+    generation: asNum(obj.generation ?? obj.calibrationGeneration, 0),
+    notice: asStr(obj.notice),
+  }
+}
+
+function normalizeSolePitchState(raw: unknown): SolePitchState {
+  const obj = asObj(raw)
+  const s = asObj(obj.settings)
+  const legacySnap = asObj(obj.snapshot)
+  const rawFeet = Array.isArray(obj.feet)
+    ? obj.feet
+    : Array.isArray(legacySnap.feet)
+      ? legacySnap.feet
+      : []
+  return {
+    settings: {
+      enabled: asBool(s.enabled ?? s.experimentalSolePitchCorrection, DEFAULT_SOLE_PITCH_SETTINGS.enabled),
+      maxPitchDegrees: asNum(s.maxPitchDegrees, DEFAULT_SOLE_PITCH_SETTINGS.maxPitchDegrees),
+      useMeshEnvelope: asBool(s.useMeshEnvelope, DEFAULT_SOLE_PITCH_SETTINGS.useMeshEnvelope),
+    },
+    clipTime: asNum(obj.clipTime ?? legacySnap.clipTime, 0),
+    feet: rawFeet.map((foot) => {
+      const f = asObj(foot)
+      const sol = asObj(f.solution)
+      return {
+        status: asStr(f.status),
+        applied: asBool(f.applied, false),
+        setterReadbackMatches: asBool(f.setterReadbackMatches, false),
+        measuredAfterValid: asBool(f.measuredAfterValid, false),
+        measuredAfterMinimumDistanceM: asNum(f.measuredAfterMinimumDistanceM, 0),
+        solution: {
+          valid: asBool(sol.valid, false),
+          pitchDegrees: asNum(sol.pitchDegrees, 0),
+          usedMeshEnvelope: asBool(sol.usedMeshEnvelope, false),
+          beforePenetrationM: asNum(sol.beforePenetrationM, 0),
+        },
+      }
+    }),
+    notice: asStr(obj.notice),
+  }
+}
+
+function normalizeStudioState(raw: unknown): StudioState {
+  const defaults = defaultStudioSettings()
+  const obj = asObj(raw)
+  const s = asObj(obj.settings)
+  const l = asObj(s.lighting)
+  const v = asObj(s.video)
+  const rgb = (value: unknown, fallback: [number, number, number]): [number, number, number] =>
+    Array.isArray(value) && value.length === 3
+      ? [asNum(value[0], fallback[0]), asNum(value[1], fallback[1]), asNum(value[2], fallback[2])]
+      : fallback
+  return {
+    settings: {
+      lighting: {
+        enabled: asBool(l.enabled, defaults.lighting.enabled),
+        actorStyle: asBool(l.actorStyle, defaults.lighting.actorStyle),
+        decalEnabled: asBool(l.decalEnabled, defaults.lighting.decalEnabled),
+        keyColor: rgb(l.keyColor, defaults.lighting.keyColor),
+        fillColor: rgb(l.fillColor, defaults.lighting.fillColor),
+        rimColor: rgb(l.rimColor, defaults.lighting.rimColor),
+        decalTint: rgb(l.decalTint, defaults.lighting.decalTint),
+        keyIntensity: asNum(l.keyIntensity, defaults.lighting.keyIntensity),
+        fillIntensity: asNum(l.fillIntensity, defaults.lighting.fillIntensity),
+        rimIntensity: asNum(l.rimIntensity, defaults.lighting.rimIntensity),
+        keyYaw: asNum(l.keyYaw, defaults.lighting.keyYaw),
+        keyPitch: asNum(l.keyPitch, defaults.lighting.keyPitch),
+        fillYaw: asNum(l.fillYaw, defaults.lighting.fillYaw),
+        fillPitch: asNum(l.fillPitch, defaults.lighting.fillPitch),
+        rimYaw: asNum(l.rimYaw, defaults.lighting.rimYaw),
+        rimPitch: asNum(l.rimPitch, defaults.lighting.rimPitch),
+        actorIntensity: asNum(l.actorIntensity, defaults.lighting.actorIntensity),
+        rimPower: asNum(l.rimPower, defaults.lighting.rimPower),
+        decalIntensityScale: asNum(l.decalIntensityScale, defaults.lighting.decalIntensityScale),
+      },
+      video: {
+        enabled: asBool(v.enabled, defaults.video.enabled),
+        paused: asBool(v.paused, defaults.video.paused),
+        loop: asBool(v.loop, defaults.video.loop),
+        path: asStr(v.path, defaults.video.path),
+        distance: asNum(v.distance, defaults.video.distance),
+        width: asNum(v.width, defaults.video.width),
+        offsetX: asNum(v.offsetX, defaults.video.offsetX),
+        offsetY: asNum(v.offsetY, defaults.video.offsetY),
+      },
+    },
+    revision: asNum(obj.revision, 0),
+    lightingNotice: asStr(obj.lightingNotice),
+    videoNotice: asStr(obj.videoNotice),
+  }
+}
+
+function normalizeTiming(raw: unknown): PerformanceTiming {
+  const defaults = defaultPerformanceTiming()
+  const obj = asObj(raw)
+  const track = (key: keyof PerformanceTiming): TrackTiming => {
+    const t = asObj(obj[key])
+    return {
+      speed: asNum(t.speed, defaults[key].speed),
+      offsetSeconds: asNum(t.offsetSeconds, defaults[key].offsetSeconds),
+    }
+  }
+  return {
+    motion: track('motion'),
+    facial: track('facial'),
+    camera: track('camera'),
+    audio: track('audio'),
+  }
+}
+
+function normalizeEditEntryInfo(raw: unknown, fallbackKey: string): EditEntryInfo {
+  const obj = asObj(raw)
+  const entry = obj.entry && typeof obj.entry === 'object' ? asObj(obj.entry) : obj
+  return {
+    key: asStr(obj.key ?? entry.editKey, fallbackKey),
+    title: asStr(obj.title ?? entry.title, fallbackKey),
+    subtitle: asStr(obj.subtitle ?? entry.subtitle, ''),
+    hasFacial: asBool(obj.hasFacial, false),
+    hasCamera: asBool(obj.hasCamera, false),
+    hasAudio: asBool(obj.hasAudio, false),
+    timing: normalizeTiming(obj.timing ?? entry.timing),
+  }
+}
+
+function normalizeTelemetrySnapshot(raw: unknown): TelemetrySnapshot | null {
+  if (!raw || typeof raw !== 'object') return null
+  const obj = asObj(raw)
+  const p = asObj(obj.player)
+  const a = asObj(obj.actor)
+  const stateNum = asNum(p.state, 0)
+  const fallbackStateName =
+    stateNum === 1 ? '播放中' : stateNum === 2 ? '已暂停' : stateNum === 3 ? '预览中' : '已停止'
+  return {
+    statusLine: asStr(obj.statusLine),
+    player: {
+      state: stateNum,
+      stateName: asStr(p.stateName, fallbackStateName),
+      time: asNum(p.time, 0),
+      duration: asNum(p.duration, 0),
+      totalFrames: asNum(p.totalFrames, 0),
+      fps: asNum(p.fps, 60),
+      boneCount: asNum(p.boneCount, 0),
+      loadedMotionFile: asStr(p.loadedMotionFile),
+    },
+    actor: {
+      actorLabel: asStr(a.actorLabel, '尚未绑定角色'),
+      boundBoneCount: asNum(a.boundBoneCount, 0),
+      totalBoneCount: asNum(a.totalBoneCount, 0),
+    },
+  }
+}
+
+function normalizeDropPeek(raw: unknown): DropUiState {
+  const obj = asObj(raw)
+  const visualRaw = obj.visual
+  const visual =
+    visualRaw === 'armed' || visualRaw === 'hover' || visualRaw === 'invalid' ? visualRaw : 'none'
+  return {
+    visual,
+    fileCount: asNum(obj.fileCount ?? obj.pendingCount, 0),
+    accepted: asNum(obj.accepted, 0),
+    hostElevated: asBool(obj.hostElevated, false),
+    hostBlocked: asBool(obj.hostBlocked, false),
+  }
+}
+
+export interface MotionAppState {
+  ready: boolean
+  connected: boolean
+  bridgeKind: 'webview2' | 'mock'
+  pluginVersion: string
+  capabilities: string[]
+  permission: PermissionState
+  player: PlayerState
+  library: LibraryState
+  loaded: LoadedState
+  playlist: { mode: number; notice: string }
+  actors: ActorsState
+  camera: CameraState
+  stage: StageState
+  facial: { weights: FacialWeights; notice: string }
+  position: { offset: Vector3; notice: string }
+  ensemble: EnsembleSnapshot
+  physicsBackend: number
+  musicVolumeSupport: number
+  musicVolumeNotice: string
+  importProgress: ImportProgress | null
+  motionsRoot: string
+  appearance: MotionAppearance | null
+  // ---- Phase 2 domain snapshots ----
+  bone: BoneState
+  gaze: GazeState
+  stageNodes: StageNode[]
+  experiments: ExperimentsState
+  telemetry: TelemetrySnapshot | null
+  sole: SoleState
+  solePitch: SolePitchState
+  studio: StudioState
+  // ---- UI-local state (never persisted by the bridge) ----
+  page: MotionPage
+  developerMode: boolean
+  selectedLibraryKey: string | null
+  librarySearch: string
+  libraryFilter: LibraryFilter
+  librarySort: LibrarySort
+  seekStepSeconds: number
+  precisionPanelOpen: boolean
+  precisionPanelPinned: boolean
+  pendingDelete: PendingDelete | null
+  deleteStale: boolean
+  importDialogOpen: boolean
+  navigationError: string | null
+  actionError: string | null
+  scrub: { active: boolean; value: number }
+  cameraDraft: CameraSettings
+  cameraExpected: CameraSettings | null
+  cameraPending: boolean
+  cameraLastSnapshot: CameraSettings
+  error: string | null
+  // ---- Phase 2 UI-local state ----
+  importForm: ImportFormState
+  importUi: ImportUiState
+  dialogBusy: boolean
+  drop: DropUiState
+  dropNotice: string
+  ensembleDraft: EnsembleSettings
+  ensembleDraftRevision: number
+  ensembleDraftEpoch: number
+  ensembleDraftDirty: boolean
+  ensemblePresetName: string
+  selectedBoneHid: number
+  boneSymmetrical: boolean
+  soleDraft: SoleSettings
+  soleDraftGeneration: number
+  solePlotSpanM: number
+  studioDraft: StudioSettings
+  studioDraftRevision: number
+  studioVideoPath: string
+  stageLoadNotice: string
+  probeScrubBegin: number
+  probeScrubUpdate: number
+  probeScrubEnd: number
+  probeLastScrubValue: number
+}
+
+function initialState(): MotionAppState {
+  return {
+    ready: false,
+    connected: false,
+    bridgeKind: 'mock',
+    pluginVersion: '',
+    capabilities: [],
+    permission: { injectionAllowed: false, notice: '' },
+    player: { ...DEFAULT_PLAYER_STATE },
+    library: { revision: 0, entries: [], refreshing: false, notice: '' },
+    loaded: { motionKey: '', generation: 0, injectionSession: 0, sourceMissing: false, sourceChanged: false },
+    playlist: { mode: 1, notice: '' },
+    actors: { epoch: 0, actors: [], targetLabel: '', boundLabel: '' },
+    camera: {
+      settings: { ...DEFAULT_CAMERA_SETTINGS },
+      available: false,
+      owned: false,
+      hasTrack: false,
+      error: '',
+      followTargetError: '',
+      notice: '',
+    },
+    stage: { settings: { ...DEFAULT_STAGE_SETTINGS }, sceneName: '', statusNotice: '' },
+    facial: { weights: { ...DEFAULT_FACIAL_WEIGHTS }, notice: '' },
+    position: { offset: { x: 0, y: 0, z: 0 }, notice: '' },
+    ensemble: {
+      settings: { enabled: false, masterSlot: 0, cameraSlot: 0, slots: [] },
+      revision: 0,
+      actorEpoch: 0,
+      available: false,
+      verified: false,
+      probeEnabled: false,
+      active: false,
+      notice: '',
+      physics: [],
+    },
+    physicsBackend: 2,
+    musicVolumeSupport: 0,
+    musicVolumeNotice: '',
+    importProgress: null,
+    motionsRoot: 'gakumas-local/motions',
+    appearance: null,
+    bone: { masterEnabled: true, overrides: [], notice: '' },
+    gaze: {
+      settings: { ...DEFAULT_GAZE_SETTINGS },
+      runtimeAvailable: false,
+      vrifyQueryAvailable: false,
+      vrifyLiveGazeActive: false,
+      notice: '',
+    },
+    stageNodes: [],
+    experiments: {
+      settings: { ...DEFAULT_EXPERIMENT_SETTINGS },
+      mouthFitStatus: '尚未接管',
+      eyeFitStatus: '尚未接管',
+      fittedFaceLabel: '',
+      notice: '',
+    },
+    telemetry: null,
+    sole: { settings: defaultSoleSettings(), snapshot: { available: false, calibrated: false, clipTime: 0, feet: [] }, generation: 0, notice: '' },
+    solePitch: { settings: { ...DEFAULT_SOLE_PITCH_SETTINGS }, clipTime: 0, feet: [], notice: '' },
+    studio: { settings: defaultStudioSettings(), revision: 0, lightingNotice: '', videoNotice: '' },
+    page: 'library',
+    developerMode: false,
+    selectedLibraryKey: null,
+    librarySearch: '',
+    libraryFilter: 'all',
+    librarySort: 'default',
+    seekStepSeconds: 5,
+    precisionPanelOpen: false,
+    precisionPanelPinned: false,
+    pendingDelete: null,
+    deleteStale: false,
+    importDialogOpen: false,
+    navigationError: null,
+    actionError: null,
+    scrub: { active: false, value: 0 },
+    cameraDraft: { ...DEFAULT_CAMERA_SETTINGS },
+    cameraExpected: null,
+    cameraPending: false,
+    cameraLastSnapshot: { ...DEFAULT_CAMERA_SETTINGS },
+    error: null,
+    importForm: emptyImportForm(),
+    importUi: emptyImportUi(),
+    dialogBusy: false,
+    drop: { visual: 'none', fileCount: 0, accepted: 0, hostElevated: false, hostBlocked: false },
+    dropNotice: '',
+    ensembleDraft: emptyEnsembleSettings(),
+    ensembleDraftRevision: -1,
+    ensembleDraftEpoch: -1,
+    ensembleDraftDirty: false,
+    ensemblePresetName: '',
+    selectedBoneHid: 0,
+    boneSymmetrical: false,
+    soleDraft: defaultSoleSettings(),
+    soleDraftGeneration: -1,
+    solePlotSpanM: 1,
+    studioDraft: defaultStudioSettings(),
+    studioDraftRevision: -1,
+    studioVideoPath: '',
+    stageLoadNotice: '',
+    probeScrubBegin: 0,
+    probeScrubUpdate: 0,
+    probeScrubEnd: 0,
+    probeLastScrubValue: 0,
+  }
+}
+
+type Listener = () => void
+
+export class MotionStore {
+  private state: MotionAppState = initialState()
+  private readonly listeners = new Set<Listener>()
+  private bridge: MotionBridgeClient | null
+  private started = false
+  private unsubs: Array<() => void> = []
+  private volumeTimer: ReturnType<typeof setTimeout> | null = null
+  private pendingVolume: number | null = null
+  private facialTimer: ReturnType<typeof setTimeout> | null = null
+  private pendingFacial: FacialWeights | null = null
+  private dialogTimer: ReturnType<typeof setInterval> | null = null
+  private dialogId = 0
+  private dialogTarget: DialogTarget | null = null
+  private dropTimer: ReturnType<typeof setInterval> | null = null
+  private dropTargetActive = false
+  private importUiTimer: ReturnType<typeof setInterval> | null = null
+  private soleTimer: ReturnType<typeof setInterval> | null = null
+  private solePitchTimer: ReturnType<typeof setInterval> | null = null
+
+  constructor(bridge?: MotionBridgeClient) {
+    this.bridge = bridge ?? null
+  }
+
+  getState = (): MotionAppState => this.state
+
+  subscribe = (listener: Listener): (() => void) => {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
+
+  private set(partial: Partial<MotionAppState>): void {
+    this.state = { ...this.state, ...partial }
+    for (const listener of this.listeners) listener()
+  }
+
+  supports = (method: MotionMethodName): boolean => this.state.capabilities.includes(method)
+
+  private client(): MotionBridgeClient {
+    if (!this.bridge) throw new BridgeError('closed', 'The bridge is unavailable')
+    return this.bridge
+  }
+
+  private reportActionError(error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error)
+    this.set({ actionError: message })
+  }
+
+  async start(): Promise<void> {
+    if (this.started) return
+    this.started = true
+    this.bridge = this.bridge ?? getMotionBridge()
+    const bridge = this.bridge
+    if (!bridge) {
+      this.set({ ready: true, connected: false, error: '未在 WebView2 中运行，且当前构建不提供开发 Mock。' })
+      return
+    }
+    this.unsubs.push(
+      bridge.on('player.stateChanged', (player) => this.onPlayerStateChanged(player)),
+      bridge.on('permission.changed', (permission) => {
+        // Permission loss drops an in-flight scrub without committing it.
+        const patch: Partial<MotionAppState> = { permission }
+        if (!permission.injectionAllowed) {
+          patch.scrub = { active: false, value: 0 }
+          patch.navigationError = null
+          patch.precisionPanelOpen = false
+        }
+        this.set(patch)
+      }),
+      bridge.on('library.changed', (library) => {
+        const selectedKey = this.state.selectedLibraryKey
+        const stillPresent = selectedKey !== null && library.entries.some((entry) => entry.id === selectedKey)
+        this.set({ library, selectedLibraryKey: stillPresent ? selectedKey : null })
+      }),
+      bridge.on('loaded.changed', (loaded) => {
+        const previous = this.state.loaded
+        const identityChanged =
+          loaded.motionKey !== previous.motionKey ||
+          loaded.generation !== previous.generation ||
+          loaded.injectionSession !== previous.injectionSession
+        this.set({
+          loaded,
+          scrub: identityChanged ? { active: false, value: 0 } : this.state.scrub,
+          navigationError: identityChanged ? null : this.state.navigationError,
+        })
+      }),
+      bridge.on('playlist.changed', (playlist) => this.set({ playlist })),
+      bridge.on('actors.changed', (actors) => this.set({ actors })),
+      bridge.on('camera.changed', (camera) => this.onCameraChanged(camera)),
+      bridge.on('stage.changed', (stage) => this.set({ stage })),
+      bridge.on('facial.changed', (facial) => this.set({ facial })),
+      bridge.on('position.changed', (position) => this.set({ position })),
+      bridge.on('ensemble.changed', (ensemble) => this.set({ ensemble })),
+      bridge.on('settings.changed', (settings) => this.set({ physicsBackend: settings.physicsBackend })),
+      bridge.on('import.progress', (importProgress) => this.onImportProgress(importProgress)),
+      bridge.on('appearance.changed', (appearance) => this.set({ appearance })),
+      bridge.on('bone.changed', (bone) => this.set({ bone: normalizeBoneState(bone) })),
+      bridge.on('gaze.changed', (gaze) => this.set({ gaze: normalizeGazeState(gaze) })),
+      bridge.on('stage.nodesChanged', (payload) =>
+        this.set({ stageNodes: normalizeStageNodes(asObj(payload).nodes ?? payload) }),
+      ),
+      bridge.on('experiments.changed', (experiments) =>
+        this.set({ experiments: normalizeExperimentsState(experiments) }),
+      ),
+      bridge.on('sole.changed', (sole) => this.onSoleChanged(normalizeSoleState(sole))),
+      bridge.on('solePitch.changed', (solePitch) =>
+        this.set({ solePitch: normalizeSolePitchState(solePitch) }),
+      ),
+      bridge.on('studio.changed', (studio) => this.onStudioChanged(normalizeStudioState(studio))),
+      bridge.on('bridge.closed', () => {
+        this.stopWatchers()
+        this.set({ connected: false, error: '原生桥已关闭', scrub: { active: false, value: 0 } })
+      }),
+    )
+    await this.performHandshake()
+  }
+
+  private async performHandshake(): Promise<void> {
+    const bridge = this.client()
+    try {
+      await bridge.request('bridge.hello')
+      const hello = await bridge.request('motion.hello')
+      const snapshot = await bridge.request('state.get')
+      this.applySnapshot(snapshot)
+      this.set({
+        ready: true,
+        connected: true,
+        bridgeKind: bridge.kind,
+        pluginVersion: hello.pluginVersion,
+        capabilities: hello.supportedMethods,
+        error: null,
+        actionError: null,
+      })
+      if (hello.supportedMethods.includes('appearance.get')) {
+        try {
+          this.set({ appearance: await bridge.request('appearance.get') })
+        } catch {
+          // Appearance is optional; keep the default theme.
+        }
+      }
+      await this.loadPhase2Domains()
+    } catch (error) {
+      this.set({ ready: true, connected: false, error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  resync = async (): Promise<void> => {
+    if (!this.bridge) return
+    await this.performHandshake()
+  }
+
+  restart = async (): Promise<void> => {
+    for (const unsub of this.unsubs) unsub()
+    this.unsubs = []
+    this.stopWatchers()
+    this.started = false
+    if (!this.state.connected && this.bridge) {
+      this.bridge.close()
+      this.bridge = null
+      setMotionBridge(null)
+    }
+    await this.start()
+  }
+
+  private async loadPhase2Domains(): Promise<void> {
+    const bridge = this.client()
+    const loads: Array<Promise<void>> = []
+    const fetch = async <M extends MotionMethodName>(method: M, apply: (result: MotionMethods[M]['result']) => void) => {
+      if (!this.supports(method)) return
+      try {
+        apply(await bridge.request(method))
+      } catch (error) {
+        this.reportActionError(error)
+      }
+    }
+    loads.push(fetch('bone.get', (bone) => this.set({ bone: normalizeBoneState(bone) })))
+    loads.push(fetch('gaze.get', (gaze) => this.set({ gaze: normalizeGazeState(gaze) })))
+    loads.push(fetch('experiments.get', (experiments) => this.set({ experiments: normalizeExperimentsState(experiments) })))
+    loads.push(fetch('sole.get', (sole) => this.onSoleChanged(normalizeSoleState(sole))))
+    loads.push(fetch('solePitch.get', (solePitch) => this.set({ solePitch: normalizeSolePitchState(solePitch) })))
+    loads.push(fetch('studio.get', (studio) => this.onStudioChanged(normalizeStudioState(studio))))
+    await Promise.all(loads)
+  }
+
+  private applySnapshot(snapshot: MotionStateSnapshot): void {
+    const raw = asObj(snapshot)
+    const cameraSettings = syncLegacyTransforms(snapshot.camera.settings)
+    const stageRaw = asObj(raw.stage)
+    const stageNodesRaw = raw.stageNodes ?? stageRaw.candidates
+    const patch: Partial<MotionAppState> = {
+      permission: snapshot.permission,
+      player: snapshot.player,
+      library: snapshot.library,
+      loaded: snapshot.loaded,
+      playlist: snapshot.playlist,
+      actors: snapshot.actors,
+      camera: snapshot.camera,
+      stage: snapshot.stage,
+      facial: snapshot.facial,
+      position: snapshot.position,
+      ensemble: snapshot.ensemble,
+      physicsBackend: snapshot.physicsBackend,
+      musicVolumeSupport: snapshot.musicVolumeSupport,
+      musicVolumeNotice: snapshot.musicVolumeNotice,
+      importProgress: snapshot.importProgress,
+      motionsRoot: snapshot.motionsRoot,
+      cameraDraft: cameraSettings,
+      cameraLastSnapshot: cameraSettings,
+      cameraExpected: null,
+      cameraPending: false,
+      scrub: { active: false, value: 0 },
+    }
+    if (Array.isArray(stageNodesRaw)) patch.stageNodes = normalizeStageNodes(stageNodesRaw)
+    if (raw.bone) patch.bone = normalizeBoneState(raw.bone)
+    if (raw.gaze) patch.gaze = normalizeGazeState(raw.gaze)
+    if (raw.experiments) patch.experiments = normalizeExperimentsState(raw.experiments)
+    if (raw.sole) this.onSoleChanged(normalizeSoleState(raw.sole))
+    if (raw.solePitch) patch.solePitch = normalizeSolePitchState(raw.solePitch)
+    if (raw.studio) this.onStudioChanged(normalizeStudioState(raw.studio))
+    this.set(patch)
+    this.syncEnsembleDraft(snapshot.ensemble)
+  }
+
+  private onCameraChanged(camera: CameraState): void {
+    const settings = syncLegacyTransforms(camera.settings)
+    const patch: Partial<MotionAppState> = { camera: { ...camera, settings } }
+    if (this.state.cameraPending && this.state.cameraExpected && deepEqual(settings, this.state.cameraExpected)) {
+      patch.cameraPending = false
+      patch.cameraExpected = null
+      patch.cameraDraft = settings
+      patch.cameraLastSnapshot = settings
+    } else if (!this.state.cameraPending && !deepEqual(settings, this.state.cameraLastSnapshot)) {
+      patch.cameraDraft = settings
+      patch.cameraLastSnapshot = settings
+    }
+    this.set(patch)
+  }
+
+  // ---- UI-local actions ----
+
+  setPage = (page: MotionPage): void => {
+    if (page === 'developer' && !this.state.developerMode) return
+    this.set({ page })
+  }
+
+  setDeveloperMode = (enabled: boolean): void => {
+    this.set({
+      developerMode: enabled,
+      page: !enabled && this.state.page === 'developer' ? 'library' : this.state.page,
+    })
+  }
+
+  selectLibrary = (key: string | null): void => this.set({ selectedLibraryKey: key })
+
+  setLibrarySearch = (search: string): void => this.set({ librarySearch: search })
+
+  setLibraryFilter = (libraryFilter: LibraryFilter): void => this.set({ libraryFilter })
+
+  setLibrarySort = (librarySort: LibrarySort): void => this.set({ librarySort })
+
+  setSeekStepSeconds = (seconds: number): void =>
+    this.set({ seekStepSeconds: [1, 5, 10, 15].includes(seconds) ? seconds : 5 })
+
+  setPrecisionPanelOpen = (precisionPanelOpen: boolean): void => this.set({ precisionPanelOpen })
+
+  setPrecisionPanelPinned = (precisionPanelPinned: boolean): void => this.set({ precisionPanelPinned })
+
+  setImportDialogOpen = (open: boolean): void => this.set({ importDialogOpen: open })
+
+  clearActionError = (): void => this.set({ actionError: null })
+
+  // ---- Transport ----
+
+  play = async (): Promise<void> => {
+    try {
+      if (this.state.player.state === 'paused' || this.state.player.state === 'preview') {
+        await this.client().request('player.resume')
+      } else {
+        await this.client().request('player.play')
+      }
+      this.set({ actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  pause = async (): Promise<void> => {
+    try {
+      await this.client().request('player.pause')
+      this.set({ actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  stop = async (): Promise<void> => {
+    try {
+      await this.client().request('player.stop')
+      this.set({ actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  cycle = async (delta: number): Promise<void> => {
+    try {
+      await this.client().request('player.cycle', { delta })
+      this.set({ actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  stepFrame = async (delta: number): Promise<void> => {
+    try {
+      await this.client().request('player.stepFrame', { delta })
+      this.set({ actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  scrubStart = (seconds: number): void => {
+    this.set({
+      scrub: { active: true, value: seconds },
+      probeScrubBegin: this.state.probeScrubBegin + 1,
+      probeLastScrubValue: seconds,
+    })
+    void this.client().request('player.scrubBegin', { seconds }).catch((error) => this.reportActionError(error))
+  }
+
+  scrubMove = (seconds: number): void => {
+    if (!this.state.scrub.active) return
+    this.set({
+      scrub: { active: true, value: seconds },
+      probeScrubUpdate: this.state.probeScrubUpdate + 1,
+      probeLastScrubValue: seconds,
+    })
+    void this.client().request('player.scrubUpdate', { seconds }).catch((error) => this.reportActionError(error))
+  }
+
+  scrubCommit = (seconds: number): void => {
+    if (!this.state.scrub.active) return
+    this.set({
+      scrub: { active: false, value: seconds },
+      probeScrubEnd: this.state.probeScrubEnd + 1,
+      probeLastScrubValue: seconds,
+    })
+    void this.client().request('player.scrubEnd', { seconds }).catch((error) => this.reportActionError(error))
+  }
+
+  seekTime = async (input: string): Promise<void> => {
+    const seconds = parseTransportTime(input)
+    if (seconds === null) {
+      this.set({ navigationError: '时间格式无效：请输入非负秒数或 mm:ss.mmm。' })
+      return
+    }
+    if (seconds > this.state.player.duration) {
+      this.set({ navigationError: '时间超出演出时长；可用动作帧输入检查末采样。' })
+      return
+    }
+    try {
+      await this.client().request('player.seek', { seconds })
+      this.set({ navigationError: null, actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  seekRelative = async (deltaSeconds: number): Promise<void> => {
+    const { totalFrames, duration, time } = this.state.player
+    if (totalFrames <= 0 || duration <= 0) return
+    const target = Math.min(Math.max(time + deltaSeconds, 0), duration)
+    try {
+      await this.client().request('player.seek', { seconds: target })
+      this.set({ navigationError: null, actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  seekFrame = async (input: string): Promise<void> => {
+    const frame = parseTransportFrame(input)
+    if (frame === null) {
+      this.set({ navigationError: '帧号格式无效：请输入从 0 开始的非负整数。' })
+      return
+    }
+    const { totalFrames } = this.state.player
+    if (totalFrames <= 0 || frame >= totalFrames) {
+      this.set({ navigationError: '帧号超出范围；末帧为总采样帧数减 1。' })
+      return
+    }
+    try {
+      await this.client().request('player.seekFrame', { frame })
+      this.set({ navigationError: null, actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  setSpeed = async (speed: number): Promise<void> => {
+    try {
+      await this.client().request('player.setSpeed', { speed })
+      this.set({ actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  setPlayMode = async (mode: number): Promise<void> => {
+    try {
+      await this.client().request('playlist.setMode', { mode })
+      this.set({ actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  cyclePlayMode = async (): Promise<void> => {
+    const maxModes = this.state.ensemble.active ? 2 : 4
+    const current = this.state.player.playMode
+    const normalized = current >= 0 && current < maxModes ? current : 1
+    const next = (normalized + 1) % maxModes
+    await this.setPlayMode(next)
+  }
+
+  // Dragging sends throttled updates; releasing commits and saves (ImGui saves
+  // on IsItemDeactivatedAfterEdit, never mid-drag).
+  setVolume = (percent: number): void => {
+    const volume = Math.min(Math.max(percent, 0), 100) / 100
+    this.pendingVolume = volume
+    if (this.volumeTimer) return
+    this.volumeTimer = setTimeout(() => {
+      this.volumeTimer = null
+      this.flushVolume()
+    }, 80)
+  }
+
+  private flushVolume(): void {
+    if (this.pendingVolume === null) return
+    const volume = this.pendingVolume
+    this.pendingVolume = null
+    void this.client().request('player.setVolume', { volume }).catch((error) => this.reportActionError(error))
+  }
+
+  commitVolume = (percent: number): void => {
+    if (this.volumeTimer) {
+      clearTimeout(this.volumeTimer)
+      this.volumeTimer = null
+    }
+    this.pendingVolume = Math.min(Math.max(percent, 0), 100) / 100
+    this.flushVolume()
+    void this.client().request('player.saveVolume').catch((error) => this.reportActionError(error))
+  }
+
+  setCameraQuickMode = async (selection: number): Promise<void> => {
+    const base = this.state.cameraPending ? this.state.cameraDraft : this.state.camera.settings
+    const next = setCameraControlMode(base, selection)
+    this.set({ cameraDraft: next, cameraExpected: next, cameraPending: true })
+    try {
+      await this.client().request('camera.set', { settings: next })
+    } catch (error) {
+      this.set({ cameraPending: false, cameraExpected: null, cameraDraft: this.state.cameraLastSnapshot })
+      this.reportActionError(error)
+    }
+  }
+
+  reloadMotion = async (): Promise<void> => {
+    try {
+      await this.client().request('player.reload')
+      this.set({ actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  // ---- Library ----
+
+  refreshLibrary = async (): Promise<void> => {
+    try {
+      await this.client().request('library.refresh')
+      this.set({ actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  openLibraryFolder = async (): Promise<void> => {
+    try {
+      await this.client().request('library.openFolder')
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  selectMotion = async (key: string, autoplay: boolean): Promise<void> => {
+    try {
+      await this.client().request('library.select', { key, autoplay, revision: this.state.library.revision })
+      this.set({ selectedLibraryKey: key, actionError: null })
+    } catch (error) {
+      if (error instanceof BridgeError && error.code === 'stale_revision') {
+        this.set({ actionError: '曲库已变化，请刷新后重试。' })
+      } else {
+        this.reportActionError(error)
+      }
+    }
+  }
+
+  requestDelete = (key: string): void => {
+    const entry = this.state.library.entries.find((candidate) => candidate.id === key)
+    if (!entry || this.state.library.refreshing) return
+    this.set({
+      pendingDelete: { key, directory: entry.directory, revision: this.state.library.revision },
+      deleteStale: false,
+    })
+  }
+
+  cancelDelete = (): void => this.set({ pendingDelete: null, deleteStale: false })
+
+  deleteGuardChanged = (): boolean => {
+    const pending = this.state.pendingDelete
+    if (!pending) return false
+    if (this.state.deleteStale) return true
+    if (pending.revision !== this.state.library.revision) return true
+    const entry = this.state.library.entries.find((candidate) => candidate.id === pending.key)
+    return !entry || entry.directory !== pending.directory
+  }
+
+  confirmDelete = async (): Promise<void> => {
+    const pending = this.state.pendingDelete
+    if (!pending || this.deleteGuardChanged()) return
+    try {
+      await this.client().request('library.delete', { key: pending.key, revision: pending.revision })
+      this.set({ pendingDelete: null, deleteStale: false, actionError: null })
+    } catch (error) {
+      if (error instanceof BridgeError && error.code === 'stale_revision') {
+        this.set({ deleteStale: true })
+      } else {
+        this.reportActionError(error)
+      }
+    }
+  }
+
+  // ---- Motion page ----
+
+  selectActor = async (token: number): Promise<void> => {
+    try {
+      await this.client().request('actors.selectTarget', { token, epoch: this.state.actors.epoch })
+      this.set({ actionError: null })
+    } catch (error) {
+      if (error instanceof BridgeError && error.code === 'stale_token') {
+        this.set({ actionError: '角色名单已变化，请重新选择。' })
+      } else {
+        this.reportActionError(error)
+      }
+    }
+  }
+
+  setFacialWeights = (weights: FacialWeights): void => {
+    this.pendingFacial = weights
+    if (this.facialTimer) return
+    this.facialTimer = setTimeout(() => {
+      this.facialTimer = null
+      this.flushFacial()
+    }, 80)
+  }
+
+  private flushFacial(): void {
+    if (!this.pendingFacial) return
+    const weights = this.pendingFacial
+    this.pendingFacial = null
+    void this.client().request('facial.setWeights', weights).catch((error) => this.reportActionError(error))
+  }
+
+  commitFacialWeights = (weights: FacialWeights): void => {
+    if (this.facialTimer) {
+      clearTimeout(this.facialTimer)
+      this.facialTimer = null
+    }
+    this.pendingFacial = weights
+    this.flushFacial()
+  }
+
+  resetFacialWeights = (): void => {
+    this.commitFacialWeights({ ...DEFAULT_FACIAL_WEIGHTS })
+  }
+
+  saveFacialWeights = async (): Promise<void> => {
+    try {
+      await this.client().request('facial.save')
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  setPosition = async (offset: Vector3): Promise<void> => {
+    try {
+      await this.client().request('position.set', offset)
+      this.set({ actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  resetPosition = (): void => {
+    void this.setPosition({ x: 0, y: 0, z: 0 })
+  }
+
+  savePosition = async (): Promise<void> => {
+    try {
+      await this.client().request('position.save')
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  // ---- Camera page ----
+
+  patchCameraDraft = (patch: Partial<CameraSettings>): void => {
+    const next = { ...this.state.cameraDraft, ...patch }
+    this.set({ cameraDraft: next, cameraExpected: next, cameraPending: true })
+    void this.client()
+      .request('camera.set', { settings: next })
+      .catch((error) => {
+        this.set({ cameraPending: false, cameraExpected: null, cameraDraft: this.state.cameraLastSnapshot })
+        this.reportActionError(error)
+      })
+  }
+
+  saveCamera = async (): Promise<void> => {
+    try {
+      await this.client().request('camera.save')
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  cameraQuickModeIndex = (): number => {
+    const settings = this.state.cameraPending ? this.state.cameraDraft : this.state.camera.settings
+    return cameraControlModeIndex(settings)
+  }
+
+  // ---- Stage page ----
+
+  patchStage = (patch: Partial<MotionStateSnapshot['stage']['settings']>): void => {
+    const next = { ...this.state.stage.settings, ...patch }
+    this.set({ stage: { ...this.state.stage, settings: next } })
+    void this.client()
+      .request('stage.set', { settings: next })
+      .catch((error) => this.reportActionError(error))
+  }
+
+  // ---- Settings page ----
+
+  setPhysicsBackend = async (backend: number): Promise<void> => {
+    try {
+      await this.client().request('settings.setPhysics', { backend })
+      this.set({ actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  // ---- Ensemble (phase 2) ----
+
+  private syncEnsembleDraft(snapshot: EnsembleSnapshot): void {
+    if (this.state.ensembleDraftRevision !== snapshot.revision) {
+      this.set({
+        ensembleDraft: snapshot.settings,
+        ensembleDraftRevision: snapshot.revision,
+        ensembleDraftEpoch: snapshot.actorEpoch,
+        ensembleDraftDirty: false,
+      })
+    } else if (this.state.ensembleDraftEpoch !== snapshot.actorEpoch) {
+      const draft = {
+        ...this.state.ensembleDraft,
+        slots: this.state.ensembleDraft.slots.map((slot) => ({ ...slot, actorToken: 0 })),
+      }
+      this.set({ ensembleDraft: draft, ensembleDraftEpoch: snapshot.actorEpoch, ensembleDraftDirty: true })
+    }
+  }
+
+  patchEnsembleDraft = (patch: Partial<EnsembleSettings>): void => {
+    this.set({ ensembleDraft: { ...this.state.ensembleDraft, ...patch }, ensembleDraftDirty: true })
+  }
+
+  patchEnsembleSlot = (index: number, patch: Partial<EnsembleSettings['slots'][number]>): void => {
+    const slots = this.state.ensembleDraft.slots.map((slot, slotIndex) =>
+      slotIndex === index ? { ...slot, ...patch } : slot,
+    )
+    this.set({ ensembleDraft: { ...this.state.ensembleDraft, slots }, ensembleDraftDirty: true })
+  }
+
+  copyMasterMotionToAllSlots = (): void => {
+    const draft = this.state.ensembleDraft
+    const motionKey = draft.slots[draft.masterSlot]?.motionKey ?? ''
+    if (motionKey === '') return
+    this.set({
+      ensembleDraft: { ...draft, slots: draft.slots.map((slot) => ({ ...slot, motionKey })) },
+      ensembleDraftDirty: true,
+    })
+  }
+
+  resetEnsemblePlacements = (): void => {
+    const draft = this.state.ensembleDraft
+    this.set({
+      ensembleDraft: {
+        ...draft,
+        slots: draft.slots.map((slot) => ({ ...slot, offset: { x: 0, y: 0, z: 0 }, yawDegrees: 0 })),
+      },
+      ensembleDraftDirty: true,
+    })
+  }
+
+  ensembleDraftError = (): string | null => {
+    const tokens = new Set(this.state.actors.actors.map((actor) => actor.token))
+    return ensembleUiError(this.state.ensembleDraft, tokens)
+  }
+
+  applyEnsemble = async (): Promise<void> => {
+    const { ensembleDraft, ensembleDraftRevision, ensembleDraftEpoch, ensemble } = this.state
+    if (this.ensembleDraftError()) return
+    if (ensembleDraft.enabled && !(ensemble.available && ensemble.verified)) return
+    try {
+      await this.client().request('ensemble.set', {
+        settings: ensembleDraft,
+        revision: ensembleDraftRevision,
+        actorEpoch: ensembleDraftEpoch,
+      })
+      this.set({ ensembleDraftDirty: false, actionError: null })
+    } catch (error) {
+      this.reportEnsembleError(error)
+    }
+  }
+
+  disableEnsemble = async (): Promise<void> => {
+    const { ensemble } = this.state
+    if (!ensemble.active) return
+    try {
+      await this.client().request('ensemble.set', {
+        settings: { ...ensemble.settings, enabled: false },
+        revision: ensemble.revision,
+        actorEpoch: ensemble.actorEpoch,
+      })
+      this.set({ actionError: null })
+    } catch (error) {
+      this.reportEnsembleError(error)
+    }
+  }
+
+  private reportEnsembleError(error: unknown): void {
+    if (error instanceof BridgeError && error.code === 'stale_revision') {
+      this.set({ actionError: '多人舞台配置已变化，请重新载入后重试。' })
+    } else if (error instanceof BridgeError && error.code === 'stale_token') {
+      this.set({ actionError: '角色名单已变化，请重新绑定角色。' })
+    } else {
+      this.reportActionError(error)
+    }
+  }
+
+  setEnsembleProbe = async (enabled: boolean): Promise<void> => {
+    try {
+      await this.client().request('ensemble.probe', { enabled })
+      this.set({ actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  setEnsemblePresetName = (name: string): void => this.set({ ensemblePresetName: name })
+
+  saveEnsemblePreset = async (): Promise<void> => {
+    const { ensemblePresetName, ensembleDraft } = this.state
+    if (ensemblePresetName === '' || this.ensembleDraftError()) return
+    try {
+      await this.client().request('ensemble.presetSave', { name: ensemblePresetName, settings: ensembleDraft })
+      this.set({ actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  loadEnsemblePreset = async (): Promise<void> => {
+    const { ensemblePresetName } = this.state
+    if (ensemblePresetName === '') return
+    try {
+      const { settings } = await this.client().request('ensemble.presetLoad', { name: ensemblePresetName })
+      // Preset load never binds live actors (ensemble::Load semantics).
+      const draft = { ...settings, slots: settings.slots.map((slot) => ({ ...slot, actorToken: 0 })) }
+      this.set({ ensembleDraft: draft, ensembleDraftDirty: true, actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  // ---- Import form (phase 2) ----
+
+  private probePaths = async (paths: string[]): Promise<VmdProbe[]> => {
+    const targets = paths.filter((path) => /\.(vmd|gkcamera)$/i.test(path) && !this.state.importForm.probes[path])
+    if (targets.length === 0 || !this.supports('library.probeFiles')) return []
+    try {
+      const { probes } = await this.client().request('library.probeFiles', { paths: targets })
+      const merged = { ...this.state.importForm.probes }
+      for (const probe of probes) merged[probe.path] = probe
+      this.set({ importForm: { ...this.state.importForm, probes: merged } })
+      return probes
+    } catch (error) {
+      this.reportActionError(error)
+      return []
+    }
+  }
+
+  openImportNew = async (files: string[]): Promise<void> => {
+    const form = emptyImportForm()
+    form.open = true
+    form.mode = 'new'
+    form.slots.motion.candidates = [IMPORT_SLOT.empty]
+    form.slots.facial.candidates = [IMPORT_SLOT.autoFacial]
+    form.slots.camera.candidates = [IMPORT_SLOT.empty]
+    form.slots.audio.candidates = [IMPORT_SLOT.autoAudio]
+    this.set({ importForm: form })
+    await this.probePaths(files)
+    const probes = Object.values(this.state.importForm.probes)
+    const classification = classifyImportFiles(files, probes)
+    const next = this.state.importForm
+    const appendUnique = (list: string[], item: string) => {
+      if (!list.includes(item)) list.push(item)
+    }
+    const slots = {
+      motion: { ...next.slots.motion, candidates: [...next.slots.motion.candidates] },
+      facial: { ...next.slots.facial, candidates: [...next.slots.facial.candidates] },
+      camera: { ...next.slots.camera, candidates: [...next.slots.camera.candidates] },
+      audio: { ...next.slots.audio, candidates: [...next.slots.audio.candidates] },
+    }
+    for (const file of files) {
+      const ext = file.slice(file.lastIndexOf('.')).toLowerCase()
+      if (ext === '.vmd') {
+        appendUnique(slots.motion.candidates, file)
+        appendUnique(slots.facial.candidates, file)
+        appendUnique(slots.camera.candidates, file)
+      } else if (ext === '.gkcamera') {
+        appendUnique(slots.camera.candidates, file)
+      } else if (ext === '.wav') {
+        appendUnique(slots.audio.candidates, file)
+      }
+    }
+    slots.facial.candidates.push(IMPORT_SLOT.skip)
+    slots.audio.candidates.push(IMPORT_SLOT.skip)
+    const findIndex = (list: string[], path: string): number => {
+      if (path === '') return 0
+      const index = list.indexOf(path)
+      return index > 0 ? index : 0
+    }
+    slots.motion.selection = findIndex(slots.motion.candidates, classification.motionCandidate)
+    slots.facial.selection = findIndex(slots.facial.candidates, classification.facialCandidate)
+    slots.camera.selection = findIndex(slots.camera.candidates, classification.cameraCandidate)
+    slots.audio.selection = findIndex(slots.audio.candidates, classification.audioCandidate)
+    this.set({
+      importForm: {
+        ...this.state.importForm,
+        title: classification.suggestedTitle,
+        slots,
+        unsupportedAudio: classification.unsupportedAudioCount,
+      },
+    })
+  }
+
+  openImportEdit = async (key: string): Promise<void> => {
+    if (!this.supports('library.startEdit')) return
+    const revision = this.state.library.revision
+    try {
+      const raw = await this.client().request('library.startEdit', { key, revision })
+      const info = normalizeEditEntryInfo(raw, key)
+      const form = emptyImportForm()
+      form.open = true
+      form.mode = 'edit'
+      form.editKey = info.key
+      form.editRevision = revision
+      form.editInfo = info
+      form.title = info.title
+      form.subtitle = info.subtitle ?? ''
+      form.timing = info.timing
+      form.slots.motion.candidates = [IMPORT_SLOT.keepMotion]
+      form.slots.facial.candidates = [IMPORT_SLOT.clear]
+      form.slots.camera.candidates = [IMPORT_SLOT.clear]
+      form.slots.audio.candidates = [IMPORT_SLOT.clear]
+      if (info.hasFacial) {
+        form.slots.facial.candidates.push(IMPORT_SLOT.keepTrack)
+        form.slots.facial.selection = 1
+      }
+      if (info.hasCamera) {
+        form.slots.camera.candidates.push(IMPORT_SLOT.keepTrack)
+        form.slots.camera.selection = 1
+      }
+      if (info.hasAudio) {
+        form.slots.audio.candidates.push(IMPORT_SLOT.keepTrack)
+        form.slots.audio.selection = 1
+      }
+      this.set({ importForm: form, actionError: null })
+    } catch (error) {
+      if (error instanceof BridgeError && error.code === 'stale_revision') {
+        this.set({ actionError: '曲库已变化，请刷新后重试。' })
+      } else {
+        this.reportActionError(error)
+      }
+    }
+  }
+
+  closeImportForm = (): void => {
+    this.set({ importForm: emptyImportForm() })
+  }
+
+  importAppendFiles = async (files: string[]): Promise<void> => {
+    await this.probePaths(files)
+    const next = { ...this.state.importForm }
+    const slots = {
+      motion: { ...next.slots.motion, candidates: [...next.slots.motion.candidates] },
+      facial: { ...next.slots.facial, candidates: [...next.slots.facial.candidates] },
+      camera: { ...next.slots.camera, candidates: [...next.slots.camera.candidates] },
+      audio: { ...next.slots.audio, candidates: [...next.slots.audio.candidates] },
+    }
+    const appendUnique = (list: string[], item: string) => {
+      if (!list.includes(item)) list.push(item)
+    }
+    for (const file of files) {
+      const ext = file.slice(file.lastIndexOf('.')).toLowerCase()
+      if (ext === '.vmd') {
+        appendUnique(slots.motion.candidates, file)
+        appendUnique(slots.facial.candidates, file)
+        appendUnique(slots.camera.candidates, file)
+      } else if (ext === '.gkcamera') {
+        appendUnique(slots.camera.candidates, file)
+      } else if (ext === '.wav') {
+        appendUnique(slots.audio.candidates, file)
+      }
+    }
+    this.set({ importForm: { ...next, slots } })
+  }
+
+  importPickSlotFile = async (slot: ImportSlotKey, file: string): Promise<void> => {
+    await this.probePaths([file])
+    const slotState = this.state.importForm.slots[slot]
+    const candidates = [...slotState.candidates]
+    let selection = candidates.indexOf(file)
+    if (selection < 0) {
+      candidates.push(file)
+      selection = candidates.length - 1
+    }
+    this.set({
+      importForm: {
+        ...this.state.importForm,
+        slots: { ...this.state.importForm.slots, [slot]: { candidates, selection } },
+      },
+    })
+  }
+
+  setImportSelection = (slot: ImportSlotKey, selection: number): void => {
+    this.set({
+      importForm: {
+        ...this.state.importForm,
+        slots: { ...this.state.importForm.slots, [slot]: { ...this.state.importForm.slots[slot], selection } },
+      },
+    })
+  }
+
+  setImportTitle = (title: string): void => {
+    this.set({ importForm: { ...this.state.importForm, title } })
+  }
+
+  setImportSubtitle = (subtitle: string): void => {
+    this.set({ importForm: { ...this.state.importForm, subtitle } })
+  }
+
+  setImportSourceFps = (sourceFps: number): void => {
+    const normalized = sourceFps === 25 || sourceFps === 30 || sourceFps === 60 ? sourceFps : 0
+    this.set({ importForm: { ...this.state.importForm, sourceFps: normalized } })
+  }
+
+  setImportOutputFps = (fps: number): void => {
+    const normalized = fps === 30 || fps === 60 ? fps : 0
+    this.set({ importForm: { ...this.state.importForm, fps: normalized } })
+  }
+
+  setImportTiming = (slot: ImportSlotKey, patch: Partial<TrackTiming>): void => {
+    const timing = { ...this.state.importForm.timing, [slot]: { ...this.state.importForm.timing[slot], ...patch } }
+    const track = timing[slot]
+    if (!Number.isFinite(track.speed) || track.speed < 0) track.speed = track.speed === 0 ? 0 : 1
+    if (!Number.isFinite(track.offsetSeconds)) track.offsetSeconds = 0
+    this.set({ importForm: { ...this.state.importForm, timing } })
+  }
+
+  importFormPicks = () => {
+    const form = this.state.importForm
+    const pick = (slot: ImportSlotKey): string => {
+      const slotState = form.slots[slot]
+      return slotState.candidates[slotState.selection] ?? ''
+    }
+    return {
+      isEditMode: form.mode === 'edit',
+      motion: pick('motion'),
+      facial: pick('facial'),
+      camera: pick('camera'),
+      audio: pick('audio'),
+      title: form.title,
+    }
+  }
+
+  importFormError = (): string | null => {
+    const form = this.state.importForm
+    const editMissing =
+      form.mode === 'edit' && !this.state.library.entries.some((entry) => entry.id === form.editKey)
+    return validateImportForm(
+      this.importFormPicks(),
+      (path) => this.state.importForm.probes[path] ?? null,
+      this.state.importProgress?.active === true,
+      editMissing,
+    )
+  }
+
+  isEditingActiveTrack = (): boolean => {
+    const form = this.state.importForm
+    const { loaded, player } = this.state
+    return (
+      form.mode === 'edit' &&
+      form.editKey !== '' &&
+      loaded.motionKey === form.editKey &&
+      (player.state === 'playing' || player.state === 'paused')
+    )
+  }
+
+  buildImportRequest = (): ImportRequest => {
+    const form = this.state.importForm
+    const picks = this.importFormPicks()
+    const request = defaultImportRequest()
+    request.title = form.title.trim() !== '' ? form.title : '未命名演出'
+    request.subtitle = form.subtitle.trim()
+    request.fps = form.fps
+    request.sourceFps = form.sourceFps
+    request.rebakeOutput = form.mode === 'edit' && form.fps > 0
+    request.timing = form.timing
+    const isDisk = (path: string) => !isSlotPlaceholder(path)
+    if (form.mode === 'edit') {
+      request.editKey = form.editKey
+      if (isDisk(picks.motion)) request.motionFile = picks.motion
+      if (picks.facial === IMPORT_SLOT.clear || picks.facial === IMPORT_SLOT.empty || picks.facial === IMPORT_SLOT.skip) {
+        request.disableMorph = true
+      } else if (isDisk(picks.facial)) {
+        request.facialFile = picks.facial
+      }
+      if (picks.camera === IMPORT_SLOT.clear || picks.camera === IMPORT_SLOT.empty) {
+        request.clearCamera = true
+      } else if (isDisk(picks.camera)) {
+        request.cameraFile = picks.camera
+      }
+      if (picks.audio === IMPORT_SLOT.clear || picks.audio === IMPORT_SLOT.empty || picks.audio === IMPORT_SLOT.skip) {
+        request.clearAudio = true
+      } else if (isDisk(picks.audio)) {
+        request.audioFile = picks.audio
+      }
+    } else {
+      request.motionFile = picks.motion
+      if (picks.facial === IMPORT_SLOT.skip) request.disableMorph = true
+      else if (isDisk(picks.facial)) request.facialFile = picks.facial
+      if (isDisk(picks.camera)) request.cameraFile = picks.camera
+      if (picks.audio === IMPORT_SLOT.skip) request.clearAudio = true
+      else if (isDisk(picks.audio)) request.audioFile = picks.audio
+    }
+    return request
+  }
+
+  submitImport = async (): Promise<void> => {
+    if (this.importFormError()) return
+    if (this.isEditingActiveTrack()) {
+      this.set({
+        importForm: {
+          ...this.state.importForm,
+          activeTrackWarning: '当前曲目正在播放，无法替换其资源文件。请停止播放后重试。你的修改尚未丢失。',
+        },
+      })
+      return
+    }
+    const request = this.buildImportRequest()
+    try {
+      await this.client().request('library.import', { request })
+    } catch (error) {
+      this.reportActionError(error)
+      return
+    }
+    const now = Date.now()
+    this.set({
+      importForm: emptyImportForm(),
+      importUi: {
+        ...emptyImportUi(),
+        visible: true,
+        awaitingStart: true,
+        startTime: now,
+        minDisplayUntil: now + 550,
+        displayStatus: '正在启动导入流程...',
+        lastProgress: this.state.importProgress,
+      },
+      actionError: null,
+    })
+    this.startImportUiTimer()
+  }
+
+  stopPlaybackAndSave = async (): Promise<void> => {
+    if (!this.isEditingActiveTrack()) return
+    this.set({ importForm: { ...this.state.importForm, pendingStopAndSave: true } })
+    try {
+      await this.client().request('player.stop')
+    } catch (error) {
+      this.set({ importForm: { ...this.state.importForm, pendingStopAndSave: false } })
+      this.reportActionError(error)
+      return
+    }
+    this.maybeAutoSubmitAfterStop()
+  }
+
+  private onPlayerStateChanged(player: PlayerState): void {
+    this.set({ player })
+    this.maybeAutoSubmitAfterStop()
+  }
+
+  private maybeAutoSubmitAfterStop(): void {
+    const form = this.state.importForm
+    if (!form.open || !form.pendingStopAndSave) return
+    if (this.isEditingActiveTrack()) return
+    if (this.importFormError()) return
+    void this.submitImport()
+  }
+
+  // ---- Global import progress modal (fix-issue-5 semantics) ----
+
+  private onImportProgress(importProgress: ImportProgress): void {
+    this.set({ importProgress })
+    const ui = this.state.importUi
+    if (!ui.visible) return
+    const now = Date.now()
+    const next = { ...ui, lastProgress: importProgress }
+    if (importProgress.active) next.awaitingStart = false
+    const staleSuccess =
+      ui.awaitingStart && importProgress.finished && importProgress.succeeded && now < ui.startTime + 250
+    if (!staleSuccess && importProgress.finished) {
+      next.awaitingStart = false
+      if (importProgress.succeeded) {
+        if (now >= ui.minDisplayUntil) {
+          next.visible = false
+        } else {
+          next.displayProgress = 1
+          next.displayStatus = importProgress.statusText !== '' ? importProgress.statusText : '导入完成'
+          next.indeterminate = false
+        }
+      } else {
+        next.visible = false
+        next.errorModalOpen = true
+        next.errorDetail =
+          importProgress.errorDetail !== ''
+            ? importProgress.errorDetail
+            : this.state.playlist.notice !== ''
+              ? this.state.playlist.notice
+              : '原生导入遇到未知错误，请查看导入日志'
+      }
+    } else if (!staleSuccess) {
+      next.displayProgress = importProgress.progress
+      next.displayStatus =
+        importProgress.statusText !== ''
+          ? importProgress.statusText
+          : importProgress.stage !== ''
+            ? importProgress.stage
+            : '正在处理演出数据...'
+      next.indeterminate = false
+    }
+    this.set({ importUi: next })
+    if (!next.visible) this.stopImportUiTimer()
+  }
+
+  private startImportUiTimer(): void {
+    if (this.importUiTimer) return
+    this.importUiTimer = setInterval(() => this.tickImportUi(), 100)
+  }
+
+  private stopImportUiTimer(): void {
+    if (this.importUiTimer) {
+      clearInterval(this.importUiTimer)
+      this.importUiTimer = null
+    }
+  }
+
+  private tickImportUi(): void {
+    const ui = this.state.importUi
+    if (!ui.visible) {
+      this.stopImportUiTimer()
+      return
+    }
+    const now = Date.now()
+    const progress = ui.lastProgress
+    const importBusy = this.state.importProgress?.active === true
+    if (progress) {
+      if (progress.active || importBusy) {
+        if (ui.awaitingStart) this.set({ importUi: { ...ui, awaitingStart: false } })
+        return
+      }
+      if (progress.finished) {
+        // Completion handling happened in onImportProgress; only min-display
+        // expiry for an already-finished success remains.
+        if (progress.succeeded && now >= ui.minDisplayUntil) {
+          this.set({ importUi: { ...ui, visible: false } })
+          this.stopImportUiTimer()
+        }
+        return
+      }
+      return
+    }
+    if (!importBusy && (!ui.awaitingStart || now >= ui.minDisplayUntil)) {
+      this.set({ importUi: { ...ui, visible: false } })
+      this.stopImportUiTimer()
+      return
+    }
+    if (!ui.indeterminate || ui.displayStatus === '') {
+      this.set({
+        importUi: {
+          ...ui,
+          indeterminate: true,
+          displayProgress: 0.5,
+          displayStatus: ui.displayStatus !== '' ? ui.displayStatus : '正在导入演出曲目...',
+        },
+      })
+    }
+  }
+
+  closeImportError = (): void => {
+    this.set({ importUi: { ...this.state.importUi, errorModalOpen: false, errorDetail: '' } })
+  }
+
+  // ---- Preview-only modal & state triggers ----
+
+  previewImportFlow = (outcome: 'success' | 'error'): void => {
+    const now = Date.now()
+    this.set({
+      importUi: {
+        ...emptyImportUi(),
+        visible: true,
+        awaitingStart: true,
+        startTime: now,
+        minDisplayUntil: now + (outcome === 'success' ? 1350 : 550),
+        displayProgress: 0.15,
+        displayStatus: outcome === 'error' ? '正在启动模拟导入（将触发出错）...' : '正在启动模拟导入流程...',
+        lastProgress: null,
+      },
+      actionError: null,
+    })
+    this.startImportUiTimer()
+    if (this.bridge instanceof MotionMockBridgeClient) {
+      this.bridge.simulateImportProgress(outcome)
+    }
+  }
+
+  previewImportErrorDirect = (
+    detail = "System.IO.IOException: The process cannot access the file 'audio.wav' because it is being used by another process.",
+  ): void => {
+    this.stopImportUiTimer()
+    this.set({
+      importUi: {
+        ...emptyImportUi(),
+        errorModalOpen: true,
+        errorDetail: detail,
+      },
+    })
+  }
+
+  previewDeleteDialog = (stale = false): void => {
+    const entries = this.state.library.entries
+    const target =
+      entries.find((item) => item.id === this.state.selectedLibraryKey) ??
+      entries[0] ??
+      null
+    if (!target) return
+    this.set({
+      page: 'library',
+      selectedLibraryKey: target.id,
+      pendingDelete: {
+        key: target.id,
+        directory: target.directory,
+        revision: this.state.library.revision,
+      },
+      deleteStale: stale,
+    })
+  }
+
+  previewDropOverlay = (drop: DropUiState): void => {
+    this.set({ drop })
+    if (this.bridge instanceof MotionMockBridgeClient) {
+      this.bridge.setDropPeekPreview(drop)
+    }
+  }
+
+  previewActionError = (actionError: string | null): void => {
+    this.set({ actionError })
+  }
+
+  previewDisconnect = (message = '模拟原生桥接异常断开（可用于验收断连重连界面）'): void => {
+    this.set({ ready: true, connected: false, error: message })
+  }
+
+  // ---- File dialog (dialog.pickFile / dialog.poll) ----
+
+  browseFiles = async (target: DialogTarget): Promise<void> => {
+    if (this.state.dialogBusy || !this.supports('dialog.pickFile')) return
+    const kind =
+      target === 'library-add' || target === 'append'
+        ? 0
+        : target === 'motion'
+          ? 1
+          : target === 'facial'
+            ? 2
+            : target === 'camera'
+              ? 3
+              : target === 'audio'
+                ? 4
+                : 5
+    const multiple = target === 'library-add' || target === 'append'
+    try {
+      const { dialogId } = await this.client().request('dialog.pickFile', { kind, multiple })
+      this.dialogId = dialogId
+      this.dialogTarget = target
+      this.set({ dialogBusy: true })
+      this.dialogTimer = setInterval(() => void this.pollDialog(), 200)
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  private async pollDialog(): Promise<void> {
+    if (!this.state.dialogBusy) return
+    try {
+      const result = await this.client().request('dialog.poll', { dialogId: this.dialogId })
+      if (result.state === 'pending') return
+      this.finishDialog()
+      if (result.state === 'accepted' && result.paths.length > 0) {
+        const target = this.dialogTarget
+        this.dialogTarget = null
+        if (target === 'library-add') await this.openImportNew(result.paths)
+        else if (target === 'append') await this.importAppendFiles(result.paths)
+        else if (target === 'video') this.set({ studioVideoPath: result.paths[0] })
+        else if (target) await this.importPickSlotFile(target, result.paths[0])
+      } else if (result.state === 'failed' && result.notice !== '') {
+        this.set({ actionError: result.notice })
+      }
+    } catch (error) {
+      this.finishDialog()
+      this.reportActionError(error)
+    }
+  }
+
+  private finishDialog(): void {
+    if (this.dialogTimer) {
+      clearInterval(this.dialogTimer)
+      this.dialogTimer = null
+    }
+    this.set({ dialogBusy: false })
+  }
+
+  // ---- Whole-window drop (drop.setTarget / poll / peek) ----
+
+  canAcceptDrop = (): boolean => {
+    const state = this.state
+    return (
+      state.permission.injectionAllowed &&
+      state.page === 'library' &&
+      state.importProgress?.active !== true &&
+      !state.library.refreshing &&
+      !state.dialogBusy &&
+      !state.importForm.open &&
+      state.pendingDelete === null
+    )
+  }
+
+  startDropWatch = (): void => {
+    if (this.dropTimer || !this.supports('drop.setTarget') || !this.supports('drop.poll')) return
+    this.dropTimer = setInterval(() => void this.tickDrop(), 200)
+    void this.tickDrop()
+  }
+
+  stopDropWatch = (): void => {
+    if (this.dropTimer) {
+      clearInterval(this.dropTimer)
+      this.dropTimer = null
+    }
+    if (this.dropTargetActive) {
+      this.dropTargetActive = false
+      void this.client().request('drop.setTarget', { enabled: false }).catch(() => {})
+    }
+    if (this.state.drop.visual !== 'none') {
+      this.set({ drop: { visual: 'none', fileCount: 0, accepted: 0, hostElevated: false, hostBlocked: false } })
+    }
+  }
+
+  syncDropTarget = (): void => {
+    if (!this.dropTimer) return
+    if (this.canAcceptDrop() !== this.dropTargetActive) {
+      void this.tickDrop()
+    }
+  }
+
+  private async tickDrop(): Promise<void> {
+    const ready = this.canAcceptDrop()
+    if (ready !== this.dropTargetActive) {
+      this.dropTargetActive = ready
+      if (!ready && this.state.drop.visual !== 'none') {
+        this.set({ drop: { visual: 'none', fileCount: 0, accepted: 0, hostElevated: false, hostBlocked: false } })
+      }
+      try {
+        await this.client().request('drop.setTarget', { enabled: ready })
+      } catch {
+        this.dropTargetActive = false
+      }
+    }
+    if (!ready) return
+    try {
+      const peek = normalizeDropPeek(await this.client().request('drop.peek'))
+      this.set({ drop: peek })
+      const poll = await this.client().request('drop.poll')
+      const files = Array.isArray(poll?.files) ? poll.files : []
+      if (files.length > 0) this.handleDropFiles(files)
+    } catch {
+      // Transient polling failures are non-fatal; the next tick retries.
+    }
+  }
+
+  handleDropFiles = (files: string[]): void => {
+    const accepted: string[] = []
+    let ignored = 0
+    for (const file of files) {
+      if (!isSupportedLibraryFile(file)) {
+        ignored += 1
+        continue
+      }
+      if (!accepted.includes(file)) accepted.push(file)
+    }
+    if (accepted.length === 0) {
+      this.set({ dropNotice: '未找到可添加的文件。请拖入 VMD、GKCamera 或 WAV 文件；不支持拖入文件夹。' })
+      return
+    }
+    this.set({ dropNotice: ignored > 0 ? `已忽略 ${ignored} 个不支持或无法读取的文件。` : '' })
+    void this.openImportNew(accepted)
+  }
+
+  // ---- Bone overrides (phase 2) ----
+
+  selectBone = (hid: number): void => this.set({ selectedBoneHid: hid })
+
+  setBoneSymmetrical = (enabled: boolean): void => this.set({ boneSymmetrical: enabled })
+
+  boneOverrideFor = (hid: number) => this.state.bone.overrides.find((entry) => entry.humanoidId === hid) ?? null
+
+  setBoneOverride = async (
+    hid: number,
+    pitch: number,
+    yaw: number,
+    roll: number,
+    spaceWorld: boolean,
+    enabled: boolean,
+  ): Promise<void> => {
+    try {
+      await this.client().request('bone.set', {
+        humanoidId: hid,
+        boneName: boneNameByHid(hid),
+        pitch,
+        yaw,
+        roll,
+        spaceWorld,
+        enabled,
+        symmetrical: this.state.boneSymmetrical,
+      })
+      this.set({ actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  resetBoneOverride = async (hid: number): Promise<void> => {
+    try {
+      await this.client().request('bone.reset', {
+        humanoidId: hid,
+        boneName: boneNameByHid(hid),
+        symmetrical: this.state.boneSymmetrical,
+      })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  resetAllBoneOverrides = async (): Promise<void> => {
+    try {
+      await this.client().request('bone.resetAll')
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  setBoneMaster = async (enabled: boolean): Promise<void> => {
+    try {
+      await this.client().request('bone.setMaster', { enabled })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  reloadBoneOverrides = async (): Promise<void> => {
+    try {
+      await this.client().request('bone.reload')
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  saveBoneOverridesToMotion = async (): Promise<void> => {
+    try {
+      await this.client().request('bone.saveToMotion')
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  saveBoneOverridesToGlobal = async (): Promise<void> => {
+    try {
+      await this.client().request('bone.saveToGlobal')
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  // ---- Gaze (phase 2) ----
+
+  setGazeSettings = async (patch: Partial<GazeSettings>): Promise<void> => {
+    const settings = { ...this.state.gaze.settings, ...patch }
+    try {
+      await this.client().request('gaze.set', { settings })
+      this.set({ actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  cycleGazeMode = (): void => {
+    void this.setGazeSettings({ mode: (this.state.gaze.settings.mode + 1) % 3 })
+  }
+
+  // ---- Stage nodes / replacement (phase 2) ----
+
+  scanStageNodes = async (): Promise<void> => {
+    if (!this.supports('stage.scan')) return
+    try {
+      const res = await this.client().request('stage.scan')
+      this.set({ stageNodes: normalizeStageNodes(asObj(res).nodes), actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  toggleStageNode = async (index: number, active: boolean): Promise<void> => {
+    try {
+      await this.client().request('stage.toggleNode', { index, active })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  setStageLoadReplacement = async (key: string): Promise<void> => {
+    if (!this.supports('stage.setLoadReplacement')) return
+    try {
+      const res = await this.client().request('stage.setLoadReplacement', { key })
+      this.set({ stageLoadNotice: asStr(asObj(res).notice), actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  // ---- Experiments / telemetry (phase 2) ----
+
+  setExperiment = async (patch: Partial<ExperimentsState['settings']>): Promise<void> => {
+    try {
+      await this.client().request('experiments.set', { patch })
+      this.set({ actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  refreshTelemetry = async (): Promise<void> => {
+    if (!this.supports('telemetry.get')) return
+    try {
+      const raw = await this.client().request('telemetry.get')
+      this.set({ telemetry: normalizeTelemetrySnapshot(raw), actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  // ---- Sole measurement v2 (phase 2) ----
+
+  private onSoleChanged(sole: SoleState): void {
+    const patch: Partial<MotionAppState> = { sole }
+    if (this.state.soleDraftGeneration !== sole.generation) {
+      patch.soleDraftGeneration = sole.generation
+      patch.soleDraft = { ...sole.settings, planeCalibrated: false, shoeCalibrated: false }
+    }
+    this.set(patch)
+  }
+
+  patchSoleDraft = (patch: Partial<SoleSettings>): void => {
+    this.set({ soleDraft: { ...this.state.soleDraft, ...patch } })
+  }
+
+  patchSoleDraftPoint = (side: number, index: number, point: Vector3): void => {
+    const points = this.state.soleDraft.points.map((foot, footIndex) =>
+      footIndex === side ? foot.map((existing, pointIndex) => (pointIndex === index ? point : existing)) : foot,
+    )
+    this.set({ soleDraft: { ...this.state.soleDraft, points } })
+  }
+
+  enableSoleBootProxy = (): void => {
+    const draft = { ...this.state.soleDraft, enabled: true, useBootProxy: true, shoeCalibrated: false }
+    this.set({ soleDraft: draft })
+    void this.applySoleSettings(draft)
+  }
+
+  useSoleManualFallback = (): void => {
+    const draft = { ...this.state.soleDraft, useBootProxy: false, shoeCalibrated: false }
+    this.set({ soleDraft: draft })
+    void this.applySoleSettings(draft)
+  }
+
+  normalizeSolePlaneNormal = (): void => {
+    const normal = this.state.soleDraft.planeNormal
+    const norm = Math.hypot(normal.x, normal.y, normal.z)
+    if (!Number.isFinite(norm) || norm < 1e-4) return
+    this.patchSoleDraft({ planeNormal: { x: normal.x / norm, y: normal.y / norm, z: normal.z / norm } })
+  }
+
+  setSoleHorizontalPlane = (): void => {
+    this.patchSoleDraft({ planeNormal: { x: 0, y: 1, z: 0 } })
+  }
+
+  applySoleSettings = async (settings?: SoleSettings): Promise<void> => {
+    const draft = settings ?? this.state.soleDraft
+    const error = validateSole(draft)
+    if (error) {
+      this.set({ actionError: error })
+      return
+    }
+    try {
+      await this.client().request('sole.set', { settings: draft })
+      this.set({ actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  reloadSoleDraft = (): void => {
+    this.set({ soleDraft: { ...this.state.sole.settings } })
+  }
+
+  saveSoleSettings = async (): Promise<void> => {
+    try {
+      await this.client().request('sole.save')
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  loadSoleSettings = async (): Promise<void> => {
+    try {
+      await this.client().request('sole.load')
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  setSolePlotSpan = (span: number): void => {
+    this.set({ solePlotSpanM: Math.min(Math.max(span, 0.25), 2) })
+  }
+
+  startSolePolling = (): void => {
+    if (this.soleTimer || !this.supports('sole.get')) return
+    this.soleTimer = setInterval(() => {
+      void this.client().request('sole.get').then((sole) => this.onSoleChanged(normalizeSoleState(sole))).catch(() => {})
+    }, 500)
+  }
+
+  stopSolePolling = (): void => {
+    if (this.soleTimer) {
+      clearInterval(this.soleTimer)
+      this.soleTimer = null
+    }
+  }
+
+  // ---- Pitch demo (phase 2) ----
+
+  setSolePitchSettings = async (patch: Partial<SolePitchState['settings']>): Promise<void> => {
+    const settings = { ...this.state.solePitch.settings, ...patch }
+    settings.maxPitchDegrees = Math.min(Math.max(settings.maxPitchDegrees, 0), 35)
+    try {
+      await this.client().request('solePitch.set', { settings })
+      this.set({ actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  startSolePitchPolling = (): void => {
+    if (this.solePitchTimer || !this.supports('solePitch.get')) return
+    this.solePitchTimer = setInterval(() => {
+      void this.client()
+        .request('solePitch.get')
+        .then((solePitch) => this.set({ solePitch: normalizeSolePitchState(solePitch) }))
+        .catch(() => {})
+    }, 500)
+  }
+
+  stopSolePitchPolling = (): void => {
+    if (this.solePitchTimer) {
+      clearInterval(this.solePitchTimer)
+      this.solePitchTimer = null
+    }
+  }
+
+  // ---- Studio lighting & video (phase 2) ----
+
+  private onStudioChanged(studio: StudioState): void {
+    const patch: Partial<MotionAppState> = { studio }
+    const draft = this.state.studioDraft
+    if (this.state.studioDraftRevision !== studio.revision) {
+      const nextDraft = { ...draft }
+      if (!deepEqual(draft.lighting, studio.settings.lighting)) nextDraft.lighting = studio.settings.lighting
+      if (!deepEqual(draft.video, studio.settings.video)) {
+        nextDraft.video = studio.settings.video
+        patch.studioVideoPath = studio.settings.video.path
+      }
+      patch.studioDraft = nextDraft
+      patch.studioDraftRevision = studio.revision
+    }
+    this.set(patch)
+  }
+
+  patchStudioLighting = (patch: Partial<StudioSettings['lighting']>): void => {
+    this.set({ studioDraft: { ...this.state.studioDraft, lighting: { ...this.state.studioDraft.lighting, ...patch } } })
+  }
+
+  patchStudioVideo = (patch: Partial<StudioSettings['video']>): void => {
+    this.set({ studioDraft: { ...this.state.studioDraft, video: { ...this.state.studioDraft.video, ...patch } } })
+  }
+
+  setStudioVideoPath = (path: string): void => {
+    this.set({ studioVideoPath: path, studioDraft: { ...this.state.studioDraft, video: { ...this.state.studioDraft.video, path } } })
+  }
+
+  studioVideoError = (): string | null => {
+    const next = { ...this.state.studio.settings, video: { ...this.state.studioDraft.video, path: this.state.studioVideoPath } }
+    return validateStudio(next)
+  }
+
+  applyStudioLighting = async (): Promise<void> => {
+    const next = { ...this.state.studio.settings, lighting: this.state.studioDraft.lighting }
+    const error = validateStudio(next)
+    if (error) {
+      this.set({ actionError: error })
+      return
+    }
+    try {
+      await this.client().request('studio.set', { settings: next })
+      this.set({ actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  disableStudioLighting = async (): Promise<void> => {
+    const next = { ...this.state.studio.settings, lighting: { ...this.state.studio.settings.lighting, enabled: false } }
+    this.set({ studioDraft: { ...this.state.studioDraft, lighting: { ...this.state.studioDraft.lighting, enabled: false } } })
+    try {
+      await this.client().request('studio.set', { settings: next })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  applyStudioVideo = async (): Promise<void> => {
+    const next = { ...this.state.studio.settings, video: { ...this.state.studioDraft.video, path: this.state.studioVideoPath } }
+    const error = validateStudio(next)
+    if (error) {
+      this.set({ actionError: error })
+      return
+    }
+    try {
+      await this.client().request('studio.set', { settings: next })
+      this.set({ actionError: null })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  disableStudioVideo = async (): Promise<void> => {
+    const next = { ...this.state.studio.settings, video: { ...this.state.studio.settings.video, enabled: false } }
+    this.set({ studioDraft: { ...this.state.studioDraft, video: { ...this.state.studioDraft.video, enabled: false } } })
+    try {
+      await this.client().request('studio.set', { settings: next })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  resetStudioSettings = async (): Promise<void> => {
+    try {
+      await this.client().request('studio.reset')
+      this.set({ studioDraftRevision: -1 })
+    } catch (error) {
+      this.reportActionError(error)
+    }
+  }
+
+  private stopWatchers(): void {
+    this.stopImportUiTimer()
+    this.stopSolePolling()
+    this.stopSolePitchPolling()
+    if (this.dialogTimer) {
+      clearInterval(this.dialogTimer)
+      this.dialogTimer = null
+    }
+    if (this.dropTimer) {
+      clearInterval(this.dropTimer)
+      this.dropTimer = null
+    }
+    this.dropTargetActive = false
+    this.dialogTarget = null
+  }
+
+  // ---- Lifecycle ----
+
+  reset(): void {
+    for (const unsub of this.unsubs) unsub()
+    this.unsubs = []
+    this.stopWatchers()
+    if (this.volumeTimer) clearTimeout(this.volumeTimer)
+    if (this.facialTimer) clearTimeout(this.facialTimer)
+    this.volumeTimer = null
+    this.facialTimer = null
+    this.pendingVolume = null
+    this.pendingFacial = null
+    this.bridge = null
+    this.started = false
+    this.state = initialState()
+    for (const listener of this.listeners) listener()
+  }
+}
+
+export const motionStore = new MotionStore()
+
+export function useMotionStore<T>(selector: (state: MotionAppState) => T): T {
+  return useSyncExternalStore(motionStore.subscribe, () => selector(motionStore.getState()))
+}
+
+export function useSupported(method: MotionMethodName): boolean {
+  return useMotionStore((state) => state.capabilities.includes(method))
+}

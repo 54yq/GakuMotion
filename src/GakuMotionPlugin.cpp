@@ -5,6 +5,8 @@
 #include "GkCaptureSafety.hpp"
 #include "GkGmlClient.hpp"
 #include "GakuMotion.hpp"
+#include "GkWebPanelBridge.hpp"
+#include <shellapi.h>
 #include "GkLog.hpp"
 #include "GkCsharpImport.hpp"
 #include "GkHotkey.hpp"
@@ -1040,6 +1042,8 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
+	constexpr char kPluginVersion[] = "0.1.1+fork.4.3-web";
+	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
 		const auto ticket = g_fileDialogTicket;
@@ -4260,6 +4264,7 @@ void MotionShutdown(void*)
 	std::lock_guard<std::mutex> lifecycleLock(g_lifecycleMutex);
 	if (!g_pluginInitialized) return;
 	g_runtimeReady.store(false, std::memory_order_release);
+	if (g_webPanelBridge) g_webPanelBridge->Invalidate("plugin-shutdown");
 	GakuMotion::host::UnregisterHotkey(kShowGuiActionId);
 	GakuMotion::host::UnregisterHotkey(kReloadOverridesActionId);
 	GakuMotion::host::UnregisterHotkey(kToggleOverridesActionId);
@@ -4320,6 +4325,8 @@ namespace {
 // Native activation: connect the loader services, publish the playback contract,
 // fill the host adapter and initialize config/audio/import. Runs before Unity
 // exists, so it must not call managed code.
+#include "GkWebPanelHost.inl"
+
 GakuStatus MotionActivate(const GakuHostApi* host, void** pluginState)
 {
 	if (!pluginState) return GAKU_E_INVALID_ARGUMENT;
@@ -4347,6 +4354,16 @@ GakuStatus MotionActivate(const GakuHostApi* host, void** pluginState)
 
 	if (!InitializeMotion()) return GAKU_E_INTERNAL;
 	*pluginState = &GakuMotion::Core::Instance();
+
+	if (g_webPanelBridge) g_webPanelBridge->Invalidate("plugin-reactivation");
+	wchar_t nativePanel[4]{};
+	if (GetEnvironmentVariableW(L"GAKUMOTION_NATIVE_PANEL", nativePanel, std::size(nativePanel)) != 1 || nativePanel[0] != L'1')
+	{
+		g_webPanelBridge = new GakuMotion::webpanel::Bridge(GakuMotion::Core::Instance(), MakeWebPanelHooks());
+		const auto webPanelStatus = PublishWebPanelApi();
+		if (webPanelStatus != GAKU_OK)
+			MotionLogWarn("[GakuMotion] Web panel service unavailable (%d)", webPanelStatus);
+	}
 
 	const auto hotkey = GakuMotion::host::RegisterHotkey(kShowGuiActionId, "Show Motion controls",
 		'M', GAKU_HOTKEY_MOD_CTRL, ShowGuiHotkey);
@@ -4951,7 +4968,7 @@ extern "C" GAKU_PLUGIN_EXPORT GakuStatus GakuPlugin_Query(
 	if (!output) return GAKU_E_INVALID_ARGUMENT;
 	if (outputSize < sizeof(GakuPluginDescriptor)) return GAKU_E_SIZE;
 	const GakuPluginDescriptor descriptor{GAKU_ABI_VERSION, sizeof(GakuPluginDescriptor),
-		"gakumotion", "GakuMotion", "0.1.1+fork.4.3",
+		"gakumotion", "GakuMotion", kPluginVersion,
 		MotionActivate, MotionRuntimeReady, MotionTick, MotionActorTick,
 		RenderGmlMotion, MotionShutdown};
 	*output = descriptor;
