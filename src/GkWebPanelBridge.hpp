@@ -1399,6 +1399,8 @@ namespace GakuMotion::webpanel
 			if (index < 0 || index >= static_cast<int64_t>(candidates.size()))
 				return CmdResult::Err("invalid_params", "场景节点索引无效，请重新扫描");
 			const StageCandidate& candidate = candidates[static_cast<size_t>(index)];
+			if (core_.StagePropOwnership(candidates)[static_cast<size_t>(index)])
+				return CmdResult::Err("protected", "该节点由移动资产管理或包含移动资产");
 			if (candidate.isColliderLocked)
 				return CmdResult::Err("protected", "安全保护：碰撞与相机活动边界锁定开启，禁止修改");
 			int ancestor = candidate.parentIndex;
@@ -2237,10 +2239,12 @@ namespace GakuMotion::webpanel
 				candidates = core_.stageManager.candidates;
 			}
 			std::string nodes = "[";
+			const auto ownership = core_.StagePropOwnership(candidates);
 			for (size_t i = 0; i < candidates.size(); ++i)
 			{
 				const auto& candidate = candidates[i];
-				if (i) nodes += ",";
+				if (ownership[i] == 1) continue;
+				if (nodes.size() > 1) nodes += ",";
 				nodes += "{\"index\":" + JNum(static_cast<double>(i)) +
 					",\"instanceId\":" + JNum(candidate.instanceId) +
 					",\"name\":" + JString(candidate.name) +
@@ -2253,6 +2257,7 @@ namespace GakuMotion::webpanel
 					",\"userMuted\":" + JBool(candidate.userMuted) +
 					",\"isIdentifiedBackground\":" + JBool(candidate.isIdentifiedBackground) +
 					",\"isColliderLocked\":" + JBool(candidate.isColliderLocked) +
+					",\"containsMovingAsset\":" + JBool(ownership[i] == 2) +
 					",\"isLightingRoot\":" + JBool(candidate.isLightingRoot) +
 					",\"isLightingNode\":" + JBool(candidate.isLightingNode) + "}";
 			}

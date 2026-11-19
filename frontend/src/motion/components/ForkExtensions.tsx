@@ -1,3 +1,4 @@
+import { RiRefreshFill, RiSearchFill } from '@remixicon/react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -77,7 +78,7 @@ export function ForkPropNodes({ state, command, timelineOnly = false }: {
     const name = prop.modelName || prop.name
     const identity = [prop.actor, name, prop.name].join(' ')
     const penlight = /penlight|荧光棒/i.test(identity)
-    if (prop.timeline && !penlight && !/手持|移动|轨道|摇臂|trolley|dolly|crane|角色位|constraint|baton|灯柱|movable/i.test(identity)) continue
+    if (prop.moving === false || (prop.moving === undefined && prop.timeline && !penlight && !/手持|移动|轨道|摇臂|trolley|dolly|crane|角色位|constraint|baton|灯柱|movable/i.test(identity))) continue
     const key = penlight ? 'penlight' : prop.modelId ? String(prop.modelId) : prop.key
     const existing = models.get(key)
     if (existing) { existing.parts.push(prop); continue }
@@ -92,9 +93,10 @@ export function ForkPropNodes({ state, command, timelineOnly = false }: {
       <div className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" variant="outline" disabled={!state.propsCanScan || state.propsScanning}
-            onClick={() => void command('stage.propsScan')}>{state.propsScanning ? '正在扫描道具…' : '重新扫描道具'}</Button>
-          <Input className="h-8 max-w-60 text-xs" placeholder="搜索物品或部件" aria-label="搜索物品或部件"
-            value={filter} onChange={event => setFilter(event.currentTarget.value)} />
+            onClick={() => void command('stage.propsScan')}><RiRefreshFill className="size-3.5" />{state.propsScanning ? '正在扫描道具…' : '重新扫描道具'}</Button>
+          <div className="relative"><RiSearchFill className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input className="h-8 w-60 max-w-full pl-7 text-xs" placeholder="搜索物品或部件" aria-label="搜索物品或部件"
+              value={filter} onChange={event => setFilter(event.currentTarget.value)} /></div>
         </div>
         {(timelineOnly || !state.propsEditable) && <p className="text-xs text-muted-foreground">当前可查看和扫描，接管后可调整显隐。</p>}
         {state.propsNotice && <p role="status" className="text-xs text-muted-foreground">{state.propsNotice}</p>}

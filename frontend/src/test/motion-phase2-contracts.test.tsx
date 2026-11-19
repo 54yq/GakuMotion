@@ -375,7 +375,7 @@ describe('Phase 2 C++ wire contract & crash resilience', () => {
     await waitFor(() => expect(screen.getByTestId('library-page')).toBeInTheDocument())
     await user.click(screen.getByRole('button', { name: '舞台' }))
     await user.click(screen.getByText('高级场景编辑'))
-    await user.click(screen.getByLabelText('自定义场景节点 [开关]'))
+    await user.click(screen.getByLabelText('手动管理固定资产'))
 
     const group = await screen.findByRole('button', { name: /StageRoot/ })
     expect(screen.queryByText('Collider')).not.toBeInTheDocument()

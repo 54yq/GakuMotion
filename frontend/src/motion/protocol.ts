@@ -346,6 +346,7 @@ export interface StageNode {
   isIdentifiedBackground: boolean
   isLightingRoot: boolean
   isLightingNode: boolean
+  containsMovingAsset?: boolean
 }
 
 export interface ExperimentSettings {
@@ -560,7 +561,7 @@ export interface ForkState {
   wristStatus: number
   armNotice: string
   arms: { token: number; share: number; degrees: number; locked: boolean; bound: boolean; primary: boolean }[]
-  props: { key: string; actorToken: number; actor: string; name: string; hidden: boolean; editable: boolean; active: boolean; timeline: boolean; modelId?: number; modelName?: string }[]
+  props: { key: string; actorToken: number; actor: string; name: string; hidden: boolean; editable: boolean; active: boolean; timeline: boolean; modelId?: number; modelName?: string; moving?: boolean }[]
   propsEditable: boolean
   propsCanScan: boolean
   propsScanning: boolean

@@ -96,6 +96,19 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
     }
     return true
   })
+  const category = (node: (typeof safeNodes)[number]) => {
+    const path = []
+    for (let current = node, depth = node.depth; current && depth >= 0; depth--) {
+      path.push(current)
+      const parent = nodesByIndex.get(current.parentIndex)
+      if (!parent) break
+      current = parent
+    }
+    if (path.some(item => item.isLightingRoot || item.isLightingNode || /light|posteffect|dof/i.test(item.name))) return '灯光与后处理'
+    if (path.some(item => item.isIdentifiedBackground || /decal|background/i.test(item.name))) return '背景与装饰'
+    return '舞台结构'
+  }
+
 
   return (
     <div className="mx-auto max-w-5xl space-y-4" data-testid="stage-page">
@@ -311,7 +324,7 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
         summary={safeNodes.length > 0 ? `已扫描 ${safeNodes.length} 个节点` : '未扫描'}
       >
         <div className="space-y-3">
-          <CollapsiblePropertySection title="自定义场景节点" bodyClassName="space-y-3" defaultOpen>
+          <CollapsiblePropertySection title="固定资产" bodyClassName="space-y-3" defaultOpen>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <Checkbox
@@ -324,46 +337,49 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
                     if (enabled && safeNodes.length === 0 && scanSupported) void triggerScan()
                   }}
                 />
-                <Label htmlFor="stage-custom-nodes">自定义场景节点 [开关]</Label>
+                <Label className="text-xs" htmlFor="stage-custom-nodes">手动管理固定资产</Label>
               </div>
+            </div>
 
-              {settings.customNodeControl && (
+            {settings.customNodeControl ? (
+              <>
+                <p className="text-xs text-warning">
+                  开启后，自动光影、场景背景和背景颜色预设暂时锁定。
+                </p>
                 <div className="flex flex-wrap items-center gap-2">
-                  <div className="relative">
-                    <RiSearchFill className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      className="h-7 w-44 pl-7 text-xs"
-                      placeholder="过滤场景节点..."
-                      aria-label="过滤场景节点"
-                      value={nodeFilter}
-                      onChange={(event) => setNodeFilter(event.target.value)}
-                    />
-                  </div>
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-7 text-xs"
+                    className="h-8 text-xs"
                     disabled={!scanSupported || scanning}
                     onClick={() => void triggerScan()}
                   >
                     <RiRefreshFill className={cn('size-3.5', scanning && 'animate-spin')} />
                     {scanning ? '正在扫描…' : '扫描场景节点'}
                   </Button>
+                  <div className="relative">
+                    <RiSearchFill className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      className="h-8 w-60 max-w-full pl-7 text-xs"
+                      placeholder="搜索场景节点"
+                      aria-label="搜索场景节点"
+                      value={nodeFilter}
+                      onChange={(event) => setNodeFilter(event.target.value)}
+                    />
+                  </div>
+
                   {!scanSupported && <PendingBadge />}
                 </div>
-              )}
-            </div>
-
-            {settings.customNodeControl ? (
-              <>
-                <p className="text-xs text-warning">
-                  启用后将停止 GakuMotion 对场景节点的自动管理。仅建议在需要手工定制场景时使用。
-                </p>
-                <div className="max-h-72 divide-y divide-border/40 overflow-y-auto rounded-md border bg-background/60 p-1.5" data-testid="stage-node-tree">
+                <div className="max-h-96 space-y-2 overflow-y-auto" data-testid="stage-node-tree">
                   {filteredNodes.length === 0 ? (
                     <p className="py-4 text-center text-xs text-muted-foreground">尚未扫描或没有候选节点。</p>
                   ) : (
-                    visibleNodes.map((node) => {
+                    ['舞台结构', '背景与装饰', '灯光与后处理'].map(title => {
+                      const nodes = visibleNodes.filter(node => category(node) === title)
+                      if (!nodes.length) return null
+                      return <section key={title} aria-label={title} className="rounded-md border bg-background/60 p-1">
+                        <h3 className="px-2 py-1 text-xs font-medium">{title}</h3>
+                        {nodes.map((node) => {
                       const parentInactive = safeNodes.some(
                         (candidate) => candidate.index === node.parentIndex && !candidate.currentlyActive,
                       )
@@ -386,28 +402,34 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
                               {expandedNodes.has(node.index) || nodeFilter.trim() ? '▾' : '▸'} {node.displayName}
                             </Button>
                           ) : <span className="pl-4 text-xs text-foreground">{node.displayName}</span>}
-                          {node.isLightingRoot && <Badge variant="secondary" className="rounded-[4px]">光影</Badge>}
-                          {node.isIdentifiedBackground && <Badge variant="secondary" className="rounded-[4px]">背景</Badge>}
+                          {<Badge variant="secondary" className="rounded-[4px]">
+                            {/dof/i.test(node.name) ? '景深' : /posteffect/i.test(node.name) && !node.isLightingRoot ? '后处理'
+                              : node.isLightingRoot || node.isLightingNode || /light/i.test(node.name) ? '光影'
+                              : node.isIdentifiedBackground || /decal|background/i.test(node.name) ? '背景与装饰' : '场景结构'}
+                          </Badge>}
+                          {node.containsMovingAsset && <Badge variant="outline">包含移动资产</Badge>}
                           {node.isColliderLocked && <Badge variant="outline" className="rounded-[4px]">碰撞锁定</Badge>}
                           <label className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
                             {node.currentlyActive ? '显示' : '已隐藏'}
                             <Checkbox
                               aria-label={`隐藏 ${node.displayName}`}
                               checked={!node.currentlyActive}
-                              disabled={node.isColliderLocked || parentInactive || !scanSupported}
+                              disabled={node.containsMovingAsset || node.isColliderLocked || parentInactive || !scanSupported}
                               onCheckedChange={(checked) => void motionStore.toggleStageNode(node.index, checked !== true)}
                             />
                             隐藏
                           </label>
                         </div>
                       )
+                    })}
+                      </section>
                     })
                   )}
                 </div>
               </>
             ) : (
               <p className="text-xs text-muted-foreground">
-                开启自定义场景节点后，可手工逐项勾选/隐藏场景里的特定 Mesh 或物件。
+                开启后可逐项管理固定场景节点。
               </p>
             )}
           </CollapsiblePropertySection>

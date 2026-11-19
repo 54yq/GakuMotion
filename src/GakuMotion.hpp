@@ -376,6 +376,44 @@ namespace GakuMotion
 		std::unordered_map<uint64_t, bool> actorModelHidden;
 		bool (*fnApplyActorModelHidden)(uint64_t, uint64_t, bool){nullptr};
 		std::vector<GuiActorProp> actorProps;
+		static bool IsMovingStageProp(const GuiActorProp& prop)
+		{
+			if (!prop.timeline) return true;
+			auto name = prop.actorLabel + " " + prop.modelName + " " + prop.propName;
+			std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+			for (const auto* marker : {"手持", "移动", "轨道", "摇臂", "角色位", "灯柱", "penlight", "trolley",
+				"dolly", "crane", "constraint", "baton", "movable", "suitcase", "microphone"})
+				if (name.find(marker) != std::string::npos) return true;
+			return false;
+		}
+		// The caller holds the stage mutex. 1 = moving subtree, 2 = shared ancestor.
+		std::vector<unsigned char> StagePropOwnership(const std::vector<StageCandidate>& nodes) const
+		{
+			std::unordered_set<int> ids;
+			for (const auto& prop : actorProps) {
+				if (!IsMovingStageProp(prop)) continue;
+				if (prop.instanceId) ids.insert(prop.instanceId);
+				if (prop.modelId) ids.insert(prop.modelId);
+			}
+			std::vector<unsigned char> ownership(nodes.size());
+			for (size_t i = 0; i < nodes.size(); ++i) {
+				if (!ids.contains(nodes[i].instanceId)) continue;
+				ownership[i] = 1;
+				int parent = nodes[i].parentIndex;
+				for (size_t depth = 0; parent >= 0 && static_cast<size_t>(parent) < nodes.size() && depth < nodes.size(); ++depth) {
+					if (!ownership[parent]) ownership[parent] = 2;
+					parent = nodes[parent].parentIndex;
+				}
+			}
+			for (size_t i = 0; i < nodes.size(); ++i) {
+				int parent = nodes[i].parentIndex;
+				for (size_t depth = 0; parent >= 0 && static_cast<size_t>(parent) < nodes.size() && depth < nodes.size(); ++depth) {
+					if (ownership[parent] == 1) { ownership[i] = 1; break; }
+					parent = nodes[parent].parentIndex;
+				}
+			}
+			return ownership;
+		}
 		bool actorPropScanRequested{};
 		bool timelinePropDiscoveryRequested{};
 		bool (*fnBeforeTargetChange)(){nullptr};
@@ -1087,8 +1125,17 @@ namespace GakuMotion
 					stageManager.ApplyPreset(cmd.stagePresetIndex);
 					break;
 				case GuiAction::ToggleStageCandidate:
-					stageManager.ToggleCandidate(cmd.candidateIndex, cmd.flag);
+				{
+					bool allowed = false;
+					{
+						std::lock_guard<std::mutex> lock(stageManager.stageMutex);
+						const auto& nodes = stageManager.candidates;
+						const auto index = static_cast<size_t>(cmd.candidateIndex);
+						allowed = index < nodes.size() && !StagePropOwnership(nodes)[index];
+					}
+					if (allowed) stageManager.ToggleCandidate(cmd.candidateIndex, cmd.flag);
 					break;
+				}
 				case GuiAction::ScanStageCandidates:
 					stageManager.RescanCandidates(currentActor);
 					break;

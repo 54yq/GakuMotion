@@ -31,7 +31,8 @@
 					",\"name\":" + JString(live_actor_props::DisplayName(prop.propName)) +
 					",\"modelId\":" + JNum(prop.modelId) + ",\"modelName\":" + JString(prop.modelName) +
 					",\"hidden\":" + JBool(prop.hidden) + ",\"editable\":" + JBool(prop.controllable) +
-					",\"active\":" + JBool(prop.active) + ",\"timeline\":" + JBool(prop.timeline) + "}";
+					",\"active\":" + JBool(prop.active) + ",\"timeline\":" + JBool(prop.timeline) +
+					",\"moving\":" + JBool(core_.IsMovingStageProp(prop)) + "}";
 			}
 			props += "]";
 			const auto strings = [](const auto& values) {

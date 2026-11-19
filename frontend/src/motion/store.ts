@@ -221,6 +221,7 @@ function normalizeStageNodes(raw: unknown): StageNode[] {
       isIdentifiedBackground: asBool(o.isIdentifiedBackground, false),
       isLightingRoot: asBool(o.isLightingRoot, false),
       isLightingNode: asBool(o.isLightingNode, false),
+      containsMovingAsset: asBool(o.containsMovingAsset, false),
     }
   })
 }

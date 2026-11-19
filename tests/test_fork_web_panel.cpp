@@ -99,6 +99,16 @@ int main()
 	core.guiCommands.clear();
 	GuiActorProp timeline{0, "Timeline", "Geo_baton_01", "舞台灯柱", 83, true, true, false, true};
 	core.actorProps.push_back(timeline);
+	std::vector<StageCandidate> stageNodes(4);
+	stageNodes[0].instanceId = 80;
+	stageNodes[1].instanceId = 83;
+	stageNodes[1].parentIndex = 0;
+	stageNodes[2].instanceId = 84;
+	stageNodes[2].parentIndex = 1;
+	stageNodes[3].instanceId = 85;
+	stageNodes[3].parentIndex = 0;
+	check(core.StagePropOwnership(stageNodes) == std::vector<unsigned char>{2, 1, 1, 0},
+		"Fixed assets exclude moving subtrees and protect their shared ancestors");
 	const auto propsReply = request("fork.get");
 	const auto* result = propsReply.Find("result");
 	const auto* props = result ? result->Find("props") : nullptr;
