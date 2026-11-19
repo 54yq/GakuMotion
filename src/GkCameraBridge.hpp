@@ -34,6 +34,7 @@ namespace CameraBridge
 	inline GetBool getOrthographic = nullptr;
 	inline SetBool setOrthographic = nullptr;
 	inline Render render = nullptr, managerRender = nullptr;
+	inline void (*projectionBegin)(void*) = nullptr;
 	inline std::vector<void*> installed;
 	inline thread_local bool writing = false;
 	inline bool ready = false;
@@ -1137,8 +1138,10 @@ namespace CameraBridge
 
 	inline void SharedCameraBegin(void*, void* camera)
 	{
-		if (sharedBeginEnabled.load(std::memory_order_acquire) && OnUnityThread())
+		if (sharedBeginEnabled.load(std::memory_order_acquire) && OnUnityThread()) {
 			Controller().BeforeRender(camera);
+			if (projectionBegin) projectionBegin(camera);
+		}
 	}
 	// selected=false keeps independent leases. A present but invalid provider
 	// fails visibly rather than requesting the same exclusive leases.
@@ -1183,13 +1186,19 @@ namespace CameraBridge
 	{
 		if (render) render(context, camera, method);
 		// Event handlers and the host run first, then the MMD pose wins at render.
-		if (OnUnityThread()) Controller().BeforeRender(camera);
+		if (OnUnityThread()) {
+			Controller().BeforeRender(camera);
+			if (projectionBegin) projectionBegin(camera);
+		}
 	}
 
 	inline void BeforeCameraRenderingManager(void* context, void* camera, void* method)
 	{
 		if (managerRender) managerRender(context, camera, method);
-		if (OnUnityThread()) Controller().BeforeRender(camera);
+		if (OnUnityThread()) {
+			Controller().BeforeRender(camera);
+			if (projectionBegin) projectionBegin(camera);
+		}
 	}
 
 	using AddRenderPassesFn = void (*)(void*, void*, void*, void*);
@@ -1353,6 +1362,7 @@ namespace CameraBridge
 
 	inline void Shutdown()
 	{
+		projectionBegin = nullptr;
 		independentDofDisabled.store(false, std::memory_order_release);
 		sharedBeginEnabled.store(false, std::memory_order_release);
 		if (sharedBeginSubscribed) sharedBegin.unsubscribe(sharedBegin.context, SharedCameraBegin, nullptr);

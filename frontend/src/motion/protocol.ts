@@ -560,8 +560,11 @@ export interface ForkState {
   wristStatus: number
   armNotice: string
   arms: { token: number; share: number; degrees: number; locked: boolean; bound: boolean; primary: boolean }[]
-  props: { key: string; actorToken: number; actor: string; name: string; hidden: boolean; editable: boolean }[]
+  props: { key: string; actorToken: number; actor: string; name: string; hidden: boolean; editable: boolean; active: boolean; timeline: boolean }[]
   propsEditable: boolean
+  propsCanScan: boolean
+  propsScanning: boolean
+  propsNotice: string
   followYaw: boolean
   liveDof: boolean
   liveClock: boolean

@@ -216,6 +216,7 @@ namespace GakuMotion
 		void (*fnSetActorModelHidden)(void*, uint64_t token, uint64_t epoch, bool hidden){nullptr};
 		bool actorPropsEditable{false};
 		std::vector<GuiActorProp> actorProps;
+		void (*fnScanActorProps)(void*){nullptr};
 		void (*fnSetActorPropHidden)(void*, uint64_t, uint64_t, const char*, bool){nullptr};
 		void (*fnClearTargetActor)(void* self){nullptr}; // Legacy developer callback: reselect bound/first actor
 		void (*fnNextTargetActor)(void* self){nullptr}; // Legacy developer callback: cycle current actors
@@ -775,6 +776,7 @@ namespace GakuMotion
 
 #include "gui/GuiTransportBar.hpp"
 #include "gui/GuiLibraryPage.hpp"
+#include "gui/GuiSceneProps.hpp"
 #include "gui/GuiMotionPage.hpp"
 #include "gui/GuiCameraPage.hpp"
 #include "gui/GuiStagePage.hpp"

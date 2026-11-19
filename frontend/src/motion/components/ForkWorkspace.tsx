@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { ForkPropNodes } from './ForkExtensions'
 import { Vector3Field } from './NumberField'
 import { getMotionBridge } from '../bridge'
 import { useMotionStore } from '../store'
@@ -18,9 +19,12 @@ const mockState: ForkState = {
     { token: 102, share: 0.2, degrees: 45, locked: false, bound: true, primary: false },
   ],
   props: [
-    { key: 'sample-mic', actorToken: 101, actor: '咲季', name: '麦克风', hidden: false, editable: true },
-    { key: 'sample-light', actorToken: 102, actor: '凛', name: '荧光棒', hidden: true, editable: true },
+    { key: 'sample-mic', actorToken: 101, actor: '咲季', name: '麦克风', hidden: false, editable: true, active: true, timeline: false },
+    { key: 'sample-light', actorToken: 102, actor: '凛', name: '荧光棒', hidden: true, editable: true, active: true, timeline: false },
+    { key: 'sample-handheld', actorToken: 0, actor: '手持荧光棒', name: 'Geo_Penlightleft', hidden: false, editable: true, active: true, timeline: true },
+    { key: 'sample-baton', actorToken: 0, actor: '舞台灯柱', name: 'Geo_baton_01', hidden: false, editable: true, active: true, timeline: true },
   ],
+  propsCanScan: true, propsScanning: false, propsNotice: '',
   propsEditable: true, followYaw: false, liveDof: false, liveClock: false, liveClockAvailable: true,
   liveDiagnostics: false, liveClockNotice: '',
   liveFps: 59.8, liveStalls: 0, swingReportLoaded: false,
@@ -61,7 +65,11 @@ export function useForkWorkspace(preview = false) {
     if (!current) return
     setError('')
     if (preview) {
-      if (action === 'live.takeover') setState({ ...current, active: Boolean(fields.value) })
+      if (action === 'live.takeover') {
+        const active = Boolean(fields.value)
+        setState({ ...current, active, propsEditable: active,
+          props: active ? current.props : current.props.map(item => ({ ...item, hidden: false })) })
+      }
       if (action === 'live.aspect') setState({ ...current, aspect: Boolean(fields.value) })
       if (action === 'live.loop') setState({ ...current, loop: Boolean(fields.value) })
       if (action === 'live.loopLead') setState({ ...current, loopLead: Number(fields.value) })
@@ -76,6 +84,7 @@ export function useForkWorkspace(preview = false) {
       if (action === 'live.clock') setState({ ...current, liveClock: Boolean(fields.value) })
       if (action === 'live.armDiagnostics') setState({ ...current, liveDiagnostics: Boolean(fields.value) })
       if (action === 'live.swingReport') setState({ ...current, swingReportLoaded: true })
+      if (action === 'stage.propsScan') setState({ ...current, propsNotice: '重新扫描完成' })
       if (action === 'stage.prop') setState({ ...current, props: current.props.map(item =>
         item.key === fields.key ? { ...item, hidden: Boolean(fields.value) } : item) })
       if (action === 'motion.arm') setState({ ...current, arms: current.arms.map(item => {
@@ -138,7 +147,7 @@ export function LiveControls({ state, command }: { state: ForkState; command: Fo
         </label>
         <label className="flex items-center gap-2 text-xs">
           <input type="checkbox" checked={state.aspect} onChange={event => void command('live.aspect', { value: event.currentTarget.checked })} />
-          接管时使用 16:9（测试）
+          接管时使用 16:9
         </label>
         <label className="flex items-center gap-2 text-xs">
           <input type="checkbox" checked={state.loop} disabled={!canSeek}
@@ -172,6 +181,7 @@ export function LiveControls({ state, command }: { state: ForkState; command: Fo
           {state.swingReportLoaded && ' · 已读取 Swing 报告'}
         </p>
       </details>
+      {state.viewing && !state.active && <ForkPropNodes state={state} command={command} timelineOnly />}
     </section>
   )
 }

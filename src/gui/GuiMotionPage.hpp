@@ -55,27 +55,7 @@ namespace GakuMotion
             ImGui::TextWrapped("%s", ctx.ensembleNotice.c_str());
 		ImGui::TextWrapped("表情随驱动角色自动适配。");
 
-		if (!ctx.actorProps.empty() && ImGui::CollapsingHeader("场景道具", ImGuiTreeNodeFlags_DefaultOpen))
-		{
-			if (!ctx.actorPropsEditable) ImGui::TextDisabled("可查看已识别的道具，当前场景暂不可调整显隐。");
-			for (const auto& prop : ctx.actorProps)
-			{
-				const auto key = ActorPropKey(prop);
-				const auto label = prop.actorLabel + " / " + live_actor_props::DisplayName(prop.propName) + "##" + key;
-				bool hidden = prop.hidden;
-				ImGui::BeginDisabled(!ctx.actorPropsEditable || !prop.controllable || !ctx.fnSetActorPropHidden);
-				if (ImGui::Checkbox(label.c_str(), &hidden))
-					ctx.fnSetActorPropHidden(ctx.self, prop.actorToken, ctx.actorRosterEpoch, key.c_str(), hidden);
-				ImGui::EndDisabled();
-				if (!prop.active && !prop.hidden)
-				{
-					ImGui::SameLine();
-					ImGui::TextDisabled("未启用");
-				}
-			}
-			if (ctx.actorPropsEditable) ImGui::TextDisabled("勾选可隐藏道具。");
-			ImGui::Spacing();
-		}
+		DrawSceneProps(ctx);
 
 		// =========================================================================
 		// 3. 初始角色位置偏移

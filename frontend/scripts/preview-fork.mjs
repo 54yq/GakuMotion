@@ -105,8 +105,15 @@ try {
   await page.getByRole('checkbox', { name: '关闭 Live 景深', exact: true }).check()
   await page.getByRole('navigation', { name: '主导航' }).getByRole('button', { name: '舞台', exact: true }).click()
   await page.getByRole('button', { name: /高级场景编辑/ }).click()
+  await page.getByRole('button', { name: '重新扫描道具', exact: true }).click()
+  await page.getByText('重新扫描完成', { exact: true }).waitFor()
   await page.getByRole('checkbox', { name: '隐藏 咲季 麦克风', exact: true }).check()
-  await page.getByRole('button', { name: /高级场景编辑/ }).evaluate(element => element.scrollIntoView({ block: 'start' }))
+  const timeline = page.getByRole('region', { name: '时间轴道具', exact: true })
+  const baton = timeline.getByRole('checkbox', { name: /隐藏 舞台灯柱/ })
+  await timeline.getByRole('checkbox', { name: /隐藏 手持荧光棒/ }).check()
+  await baton.check()
+  await baton.uncheck()
+  await page.getByRole('button', { name: /自定义道具节点/ }).evaluate(element => element.scrollIntoView({ block: 'start' }))
   await page.screenshot({ path: join(outputDir, '07-stage-prop-nodes.png') })
   await page.getByRole('button', { name: 'Live 接管中', exact: true }).click()
   await page.getByRole('button', { name: '退出接管并恢复 Live', exact: true }).waitFor()
@@ -116,8 +123,14 @@ try {
   await page.screenshot({ path: join(outputDir, '03-live-takeover.png') })
   await page.getByRole('button', { name: '退出接管并恢复 Live', exact: true }).click()
   await page.getByRole('button', { name: '启动 Live 接管', exact: true }).waitFor()
+  await page.getByRole('button', { name: /时间轴道具/ }).click()
+  const restoredPenlight = page.getByRole('region', { name: '时间轴道具', exact: true })
+    .getByRole('checkbox', { name: /隐藏 手持荧光棒/ })
+  if (!(await restoredPenlight.isDisabled()) || await restoredPenlight.isChecked()) {
+    throw new Error('Timeline props must be restored and read-only after takeover.')
+  }
   if (errors.length) throw new Error(errors.join('\n'))
-  console.log('Design smoke: library, transport, read-only primary placement and physics, follower placement, dynamic slots, advanced motion, camera, props and Live diagnostics verified.')
+  console.log('Design smoke: library, transport, ensemble, motion, camera, prop rescan, Timeline visibility and Live takeover verified.')
 } finally {
   await browser.close()
 }

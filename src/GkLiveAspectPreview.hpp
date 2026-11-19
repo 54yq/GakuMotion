@@ -1,7 +1,7 @@
 #pragma once
 
-// Temporary A/B test. Change the native Live render target, then fit the Live
-// UI to the same ratio. Leave the game's camera lens and gate fit in control.
+// Use the native 16:9 target and fit the UI to it. Extend the original camera
+// framing vertically for rendering and leave the animated lens under native control.
 namespace LiveAspectPreview
 {
     constexpr float normalRatio = 2.35f;
@@ -16,24 +16,159 @@ namespace LiveAspectPreview
         const void* setCamera{};
         const void* setRatio{};
         const void* getRatio{};
-        float originalRatio{};
+        float originalRatio{}, originalCameraAspect{};
     };
 
     inline Lease lease;
+    using Projection = GakuMotion::live_aspect::Projection;
+    inline const void *getProjection{}, *setProjection{}, *resetProjection{}, *getAspect{}, *getStereo{};
+    inline CameraBridge::Render managerEnd{};
+    inline StageLoader::Handle projectedCamera{};
+    inline Projection originalProjection{}, writtenProjection{};
+    inline bool projectionObserved{};
+    using SetupParaffin = void (*)(void*, void*, float, void*, const void*);
+    using ValidParaffinAspect = bool (*)(void*, float, const void*);
+    inline SetupParaffin setupParaffin{};
+    inline ValidParaffinAspect validParaffinAspect{};
+    inline bool flareHooksAttempted{}, flareAspectObserved{};
 
     inline bool Invoke(const void* method, void* object, void* argument)
     {
         if (!method || !object || !g_faceRuntime.invoke) return false;
         void* exception = nullptr;
         void* args[]{argument};
-        g_faceRuntime.invoke(method, object, args, &exception);
+        g_faceRuntime.invoke(method, object, argument ? args : nullptr, &exception);
         return exception == nullptr;
     }
 
     inline bool Matches(float a, float b) { return std::abs(a - b) < 0.005f; }
 
+    inline float ParaffinAspect(float aspect)
+    {
+        if (!CameraBridge::OnUnityThread() || !projectedCamera || !Matches(aspect, previewRatio))
+            return aspect;
+        if (!flareAspectObserved && g_hostContext.logInfo) {
+            flareAspectObserved = true;
+            g_hostContext.logInfo("[GakuMotion][LiveAspectPreview] paraffin_aspect=%.4f target_aspect=%.4f",
+                lease.originalCameraAspect, aspect);
+        }
+        return lease.originalCameraAspect;
+    }
+
+    inline void SetupParaffinWithOriginalAspect(void* self, void* cmd, float aspect, void* volume, const void* method)
+    {
+        setupParaffin(self, cmd, ParaffinAspect(aspect), volume, method);
+    }
+
+    inline bool CheckOriginalParaffinAspect(void* self, float aspect, const void* method)
+    {
+        return validParaffinAspect(self, ParaffinAspect(aspect), method);
+    }
+
+    inline void PrepareParaffin(const GakuMotion::ExactMethodMetadata& md)
+    {
+        if (flareHooksAttempted) return;
+        flareHooksAttempted = true;
+        constexpr const char* pipeline = "Unity.RenderPipelines.Universal.Runtime.dll";
+        void* pass = FindClass(pipeline, "VL.Rendering.Internal", "VLPostProcessPass");
+        void* volume = FindClass(pipeline, "VL.Rendering", "VLParaffin");
+        void* command = FindClass("UnityEngine.CoreModule.dll", "UnityEngine.Rendering", "CommandBuffer");
+        const bool setup = pass && volume && command &&
+            md.Find(pass, "SetupVLParaffin", false, {0x01}, {{0x12, command}, {0x0c}, {0x12, volume}}) &&
+            CameraBridge::InstallHook("VLPostProcessPass.SetupVLParaffin", FindMethodPointer(pass, "SetupVLParaffin", 3),
+                reinterpret_cast<void*>(SetupParaffinWithOriginalAspect), reinterpret_cast<void**>(&setupParaffin));
+        const bool check = volume && md.Find(volume, "IsValidAspect", false, {0x02}, {{0x0c}}) &&
+            CameraBridge::InstallHook("VLParaffin.IsValidAspect", FindMethodPointer(volume, "IsValidAspect", 1),
+                reinterpret_cast<void*>(CheckOriginalParaffinAspect), reinterpret_cast<void**>(&validParaffinAspect));
+        const auto log = setup && check ? g_hostContext.logInfo : g_hostContext.logWarn;
+        if (log) log("[GakuMotion][LiveAspectPreview] paraffin hooks setup=%d aspect_check=%d", int(setup), int(check));
+    }
+
+    inline bool ReleaseProjection(void* renderedCamera = nullptr)
+    {
+        if (!projectedCamera) return true;
+        auto target = LiveActorProps::Target();
+        if (!target || !CameraBridge::OnUnityThread()) return false;
+        void* camera = target(projectedCamera);
+        if (renderedCamera && renderedCamera != camera) return true;
+        if (CameraBridge::IsAlive(camera)) {
+            Projection actual{};
+            if (!LiveLetterboxProbe::Read(getProjection, camera, actual)) return false;
+            // Another writer owns a different matrix. Leave its write intact.
+            if (actual == writtenProjection) {
+                if (!Invoke(resetProjection, camera, nullptr)) return false;
+                if (renderedCamera && LiveLetterboxProbe::Read(getProjection, camera, actual) &&
+                    actual != originalProjection && !Invoke(setProjection, camera, originalProjection.data()))
+                    return false;
+            }
+        }
+        StageLoader::freeHandle(projectedCamera);
+        projectedCamera = {};
+        return true;
+    }
+
+    inline void AfterCamera(void* context, void* camera, void* method)
+    {
+        if (managerEnd) managerEnd(context, camera, method);
+        ReleaseProjection(camera);
+    }
+
+    inline void BeforeCamera(void* camera)
+    {
+        if (!lease.owner || lease.owner != g_sceneOwner.presenterIdentity ||
+            lease.scene != g_sceneOwner.sceneHandle || projectedCamera || !CameraBridge::getMain ||
+            camera != CameraBridge::getMain(nullptr) || !CameraBridge::IsAlive(camera) ||
+            GakuMotion::camera_handoff::Requested() ||
+            GakuMotion::Core::Instance().injectionPolicy.Read().captureDepth != 0 ||
+            !GakuMotion::capture::LiveAutoPhotoIdle()) return;
+        bool stereo{};
+        float aspect{};
+        Projection native{};
+        if (!LiveLetterboxProbe::Read(getStereo, camera, stereo) || stereo ||
+            !LiveLetterboxProbe::Read(getAspect, camera, aspect) || !Matches(aspect, previewRatio) ||
+            !LiveLetterboxProbe::Read(getProjection, camera, native)) return;
+
+        auto widened = native;
+        if (!GakuMotion::live_aspect::PreserveHorizontalFraming(widened, lease.originalCameraAspect, aspect)) return;
+        projectedCamera = StageLoader::newHandle(camera, false);
+        if (!projectedCamera) return;
+        originalProjection = native;
+        writtenProjection = widened;
+        if (!Invoke(setProjection, camera, widened.data())) {
+            ReleaseProjection(camera);
+            return;
+        }
+        if (!projectionObserved) {
+            Projection actual{};
+            projectionObserved = LiveLetterboxProbe::Read(getProjection, camera, actual) && actual == widened;
+            if (projectionObserved && g_hostContext.logInfo)
+                g_hostContext.logInfo("[GakuMotion][LiveAspectPreview] horizontal framing scale_x=%.5f scale_y=%.5f",
+                    actual[0], actual[5]);
+        }
+    }
+
+    inline bool PrepareProjection(const GakuMotion::ExactMethodMetadata& md)
+    {
+        if (!CameraBridge::ready) return false;
+        if (managerEnd) return true;
+        void* cameraClass = FindClass("UnityEngine.CoreModule.dll", "UnityEngine", "Camera");
+        void* matrixClass = FindClass("UnityEngine.CoreModule.dll", "UnityEngine", "Matrix4x4");
+        void* manager = FindClass("UnityEngine.CoreModule.dll", "UnityEngine.Rendering", "RenderPipelineManager");
+        if (!cameraClass || !LiveLetterboxProbe::HasValueSize(matrixClass, sizeof(Projection))) return false;
+        getProjection = md.Find(cameraClass, "get_projectionMatrix", false, {0x11, matrixClass}, {});
+        setProjection = md.Find(cameraClass, "set_projectionMatrix", false, {0x01}, {{0x11, matrixClass}});
+        resetProjection = md.Find(cameraClass, "ResetProjectionMatrix", false, {0x01}, {});
+        getAspect = md.Find(cameraClass, "get_aspect", false, {0x0c}, {});
+        getStereo = md.Find(cameraClass, "get_stereoEnabled", false, {0x02}, {});
+        return getProjection && setProjection && resetProjection && getAspect && getStereo &&
+            CameraBridge::InstallHook("RenderPipelineManager.EndCameraRendering",
+                FindMethodPointer(manager, "EndCameraRendering", 2), reinterpret_cast<void*>(AfterCamera),
+                reinterpret_cast<void**>(&managerEnd));
+    }
+
     inline void DropLease()
     {
+        CameraBridge::projectionBegin = nullptr;
         if (lease.helper) StageLoader::freeHandle(lease.helper);
         if (lease.fitter) StageLoader::freeHandle(lease.fitter);
         lease = {};
@@ -41,6 +176,7 @@ namespace LiveAspectPreview
 
     inline bool Restore(bool sameOwner)
     {
+        if (!ReleaseProjection()) return false;
         if (!lease.owner) return true;
         const auto target = LiveActorProps::Target();
         if (!target) return false;
@@ -67,6 +203,13 @@ namespace LiveAspectPreview
             !g_faceRuntime.objectClass || !g_faceRuntime.readField) return false;
 
         const auto md = GroundShadowProbeBootstrap::Resolve(g_gameAssembly).method;
+        if (!PrepareProjection(md)) return false;
+        PrepareParaffin(md);
+        float originalCameraAspect{};
+        void* camera = CameraBridge::getMain ? CameraBridge::getMain(nullptr) : nullptr;
+        if (!CameraBridge::IsAlive(camera) ||
+            !LiveLetterboxProbe::Read(getAspect, camera, originalCameraAspect) ||
+            !Matches(originalCameraAspect, normalRatio)) return false;
         void* helperClass = FindClass("Assembly-CSharp.dll", "Campus.Live", "LiveSceneCameraHelper");
         void* presenterClass = FindClass("Assembly-CSharp.dll", "Campus.Live", "LiveScenePresenter");
         void* presenter = reinterpret_cast<void*>(owner);
@@ -81,7 +224,7 @@ namespace LiveAspectPreview
         if (!setCamera || !setRatio) return false;
 
         lease = {owner, scene, StageLoader::newHandle(helper, false), StageLoader::newHandle(ui.fitter, false),
-            setCamera, setRatio, ui.getRatio, ui.ratio};
+            setCamera, setRatio, ui.getRatio, ui.ratio, originalCameraAspect};
         if (!lease.helper || !lease.fitter) {
             DropLease();
             return false;
@@ -95,6 +238,9 @@ namespace LiveAspectPreview
             Restore(true);
             return false;
         }
+        projectionObserved = false;
+        flareAspectObserved = false;
+        CameraBridge::projectionBegin = BeforeCamera;
         return true;
     }
 
@@ -110,7 +256,8 @@ namespace LiveAspectPreview
             ? g_sceneOwner.presenterIdentity : 0;
         const int scene = owner ? g_sceneOwner.sceneHandle : 0;
         const bool requested = owner && owner == core.liveOwnerToken && scene == core.liveOwnerScene &&
-            core.liveTakeoverActive && !core.liveTakeoverFault && core.liveAspectPreviewRequested;
+            core.liveTakeoverActive && !core.liveTakeoverFault && core.liveAspectPreviewRequested &&
+            !GakuMotion::camera_handoff::Requested();
         const bool sameOwner = lease.owner && lease.owner == owner && lease.scene == scene;
         const bool protectedCamera = core.injectionPolicy.Read().captureDepth != 0 ||
             !GakuMotion::capture::LiveAutoPhotoIdle();
@@ -138,7 +285,12 @@ namespace LiveAspectPreview
         if (lease.owner) {
             if (inspectAt != Clock::time_point{} && now >= inspectAt) {
                 inspectAt = {};
-                LiveLetterboxProbe::Report(scene);
+                if (!projectionObserved) {
+                    Restore(sameOwner);
+                    core.liveControlNotice = "未确认 16:9 构图，已尝试恢复原画幅。";
+                    if (g_hostContext.logWarn)
+                        g_hostContext.logWarn("[GakuMotion][LiveAspectPreview] no verified render projection; scene=%d", scene);
+                }
             }
             return;
         }
@@ -146,11 +298,11 @@ namespace LiveAspectPreview
         attemptedOwner = owner;
         attemptedScene = scene;
         const auto ui = LiveLetterboxProbe::FindFitters(scene);
-        LiveLetterboxProbe::Report(scene);
         const bool applied = Apply(owner, scene, ui);
         if (g_hostContext.logInfo)
             g_hostContext.logInfo("[GakuMotion][LiveAspectPreview] scene=%d wrote_16x9=%d fitters=%u original=%.4f live_time=%.3f",
                 scene, int(applied), ui.count, ui.ratio, core.liveObservation.time);
-        inspectAt = now + std::chrono::milliseconds(300);
+        if (!applied) core.liveControlNotice = "当前镜头无法启用 16:9 画幅。";
+        inspectAt = now + std::chrono::seconds(1);
     }
 }

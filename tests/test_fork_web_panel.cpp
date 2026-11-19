@@ -96,6 +96,35 @@ int main()
 	check(ok(request("fork.command", R"({"action":"stage.prop","session":12,"epoch":)" + epoch +
 		R"(,"actorToken":)" + token + R"(,"key":)" + JString(ActorPropKey(prop)) + R"(,"value":true})")) &&
 		queued(Core::GuiAction::SetActorPropHidden), "Prop visibility uses the recognized prop identity");
+	core.guiCommands.clear();
+	GuiActorProp timeline{0, "Timeline", "Geo_baton_01", "舞台灯柱", 83, true, true, false, true};
+	core.actorProps.push_back(timeline);
+	const auto propsReply = request("fork.get");
+	const auto* result = propsReply.Find("result");
+	const auto* props = result ? result->Find("props") : nullptr;
+	check(props && props->arrayItems.size() == 2 && props->arrayItems[1].BoolPath("timeline", false),
+		"Live Timeline props are distinguishable from actor-mounted props");
+	const auto timelineToggle = R"(,"epoch":)" + epoch + R"(,"actorToken":0,"key":)" + JString(ActorPropKey(timeline));
+	check(!ok(request("fork.command", R"({"action":"stage.prop","session":12,"owner":18,"value":true)" + timelineToggle + "}")) &&
+		!queued(Core::GuiAction::SetActorPropHidden), "A previous Live owner cannot hide Timeline props");
+	check(ok(request("fork.command", R"({"action":"stage.prop","session":12,"owner":19,"value":true)" + timelineToggle + "}")),
+		"Timeline props can be hidden without an actor registry token");
+	core.ProcessPendingGuiCommands();
+	check(core.actorPropHidden.contains(ActorPropKey(timeline)) && core.actorPropScanRequested,
+		"Timeline visibility is applied on the main-thread queue and requests a refresh");
+	check(ok(request("fork.command", R"({"action":"stage.prop","session":12,"owner":19,"value":false)" + timelineToggle + "}")),
+		"Timeline props can be restored");
+	core.ProcessPendingGuiCommands();
+	check(!core.actorPropHidden.contains(ActorPropKey(timeline)), "Restoring Timeline visibility clears the hidden key");
+	core.liveTakeoverActive = false;
+	core.actorPropScanRequested = false;
+	check(!ok(request("fork.command", R"({"action":"stage.prop","session":12,"owner":19,"value":true)" + timelineToggle + "}")),
+		"Timeline props are read-only outside takeover");
+	check(!ok(request("fork.command", R"({"action":"stage.propsScan","session":12,"owner":18})")) && !core.actorPropScanRequested,
+		"A previous Live owner cannot trigger a prop scan");
+	check(ok(request("fork.command", R"({"action":"stage.propsScan","session":12,"owner":19})")) && core.actorPropScanRequested,
+		"The current Live can request a prop scan before takeover");
+	core.liveTakeoverActive = true;
 	check(ok(request("fork.command", R"({"action":"motion.arm","session":12,"epoch":)" + epoch +
 		R"(,"actorToken":)" + token + R"(,"operation":1,"value":43})")) &&
 		queued(Core::GuiAction::SceneArm), "Advanced motion uses the existing actor calibration queue");

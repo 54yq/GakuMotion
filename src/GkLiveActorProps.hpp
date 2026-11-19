@@ -1,5 +1,13 @@
 #pragma once
-// Discovery mirrors GakuActors within active actors in the verified scene.
+// Discover attached props within actors in the verified scene.
+namespace LiveTimelineProps
+{
+    bool RestoreAll();
+    void Abandon();
+    bool HasSaved();
+    void Scan(GakuMotion::Core& core, const std::vector<void*>& actorTransforms, bool canWrite);
+    void RestoreUnselected(const GakuMotion::Core& core);
+}
 namespace LiveActorProps
 {
     struct TargetState {
@@ -11,7 +19,7 @@ namespace LiveActorProps
         GakuMotion::injection::OwnerSnapshot owner;
         uint64_t token{}, epoch{};
         std::string root, prop;
-        StageLoader::Handle actor{};
+        StageLoader::Handle actor{}, attachment{};
         TargetState object, geometry;
     };
     inline std::unordered_map<std::string, Saved> saved;
@@ -19,7 +27,7 @@ namespace LiveActorProps
     inline TargetFn Target() { return reinterpret_cast<TargetFn>(GetProcAddress(g_gameAssembly,"il2cpp_gchandle_get_target")); }
 
     inline void Release(const Saved& state) {
-        for (auto handle : {state.actor, state.object.handle, state.geometry.handle})
+        for (auto handle : {state.actor, state.attachment, state.object.handle, state.geometry.handle})
             if (handle) StageLoader::freeHandle(handle);
     }
     inline void AbandonActor(uint64_t token) {
@@ -32,7 +40,9 @@ namespace LiveActorProps
     inline void Abandon() {
         for (auto& item : saved) Release(item.second);
         saved.clear();
+        LiveTimelineProps::Abandon();
     }
+    inline bool HasSaved() { return !saved.empty() || LiveTimelineProps::HasSaved(); }
 
     inline bool ReadActive(void* go, bool& active) {
         if(!go || !StageLoader::activeSelf || !g_faceRuntime.invoke || !g_safeBones.unbox) return false;
@@ -66,9 +76,9 @@ namespace LiveActorProps
         return go && CameraBridge::IsAlive(go) && StageLoader::SceneOfFreshGo(go) == scene ? go : nullptr;
     }
     inline void* ActorTransform(void* actor, int scene) {
-        if (void* go = SceneObject(actor, scene))
-            return StageLoader::Invoke(StageLoader::goTransform, go);
-        return nullptr;
+        if (!actor || !g_getComponentTransformNative) return nullptr;
+        void* transform = g_getComponentTransformNative(actor);
+        return SceneObject(transform, scene) ? transform : nullptr;
     }
     inline bool RestoreTarget(const TargetState& state, void* object, TargetFn target) {
         if (!state.handle) return true;
@@ -93,9 +103,10 @@ namespace LiveActorProps
         if (!g_getParentNative) return false;
         void* propTransform = StageLoader::Invoke(StageLoader::goTransform, prop);
         void* root = propTransform ? g_getParentNative(propTransform) : nullptr;
-        void* parent = root ? g_getParentNative(root) : nullptr;
+        void* parent = state.root.empty() ? root : root ? g_getParentNative(root) : nullptr;
         void* actorTransform = ActorTransform(actor, scene);
-        if (!actorTransform || !root || UniqueChild(parent, state.root) != root ||
+        if (!actorTransform || !root || target(state.attachment) != root ||
+            (!state.root.empty() && UniqueChild(parent, state.root) != root) ||
             UniqueChild(root, state.prop) != propTransform || StageLoader::SceneOfFreshGo(prop) != scene)
             return false;
         void* ancestor = parent;
@@ -116,7 +127,8 @@ namespace LiveActorProps
             Release(item.second);
             return true;
         });
-        return saved.empty();
+        const bool timelineRestored = LiveTimelineProps::RestoreAll();
+        return saved.empty() && timelineRestored;
     }
     inline bool SaveTarget(void* object, TargetState& state) {
         state.instanceId = StageLoader::ReadInt(StageLoader::instanceId, object);
@@ -130,13 +142,15 @@ namespace LiveActorProps
             StageLoader::ReadInt(StageLoader::instanceId, object) == state.instanceId &&
             ReadActive(object, active) && (!active || SetActive(object, false));
     }
-    inline void Hide(GakuMotion::Core& core, void* actor, const GakuMotion::GuiActorProp& prop,
+    inline void Hide(GakuMotion::Core& core, void* actor, void* attachment, const GakuMotion::GuiActorProp& prop,
         void* object, void* geometry, const std::string& key, TargetFn target) {
         auto found = saved.find(key);
         if (found == saved.end()) {
             Saved state{g_sceneOwner, prop.actorToken, core.sceneActorRegistry.Epoch(), prop.rootName, prop.propName};
             state.actor = StageLoader::newHandle(actor, false);
-            if (!state.actor || !SaveTarget(object, state.object) || (geometry && !SaveTarget(geometry, state.geometry))) {
+            state.attachment = StageLoader::newHandle(attachment, false);
+            if (!state.actor || !state.attachment || !SaveTarget(object, state.object) ||
+                (geometry && !SaveTarget(geometry, state.geometry))) {
                 Release(state);
                 core.actorPropHidden.erase(key);
                 return;
@@ -144,7 +158,7 @@ namespace LiveActorProps
             found = saved.emplace(key, std::move(state)).first;
         }
         const auto& state = found->second;
-        if (target(state.actor) == actor && state.owner.SameOwner(g_sceneOwner) &&
+        if (target(state.actor) == actor && target(state.attachment) == attachment && state.owner.SameOwner(g_sceneOwner) &&
             state.epoch == core.sceneActorRegistry.Epoch() &&
             HideTarget(object, state.object, target) &&
             (!state.geometry.handle || (geometry && HideTarget(geometry, state.geometry, target)))) return;
@@ -156,7 +170,7 @@ namespace LiveActorProps
 
     inline void Scan(GakuMotion::Core& core, const std::vector<GakuMotion::SceneActorObservation>& actors, bool canWrite) {
         core.actorProps.clear();
-        if (!g_getGameObjectNative || !StageLoader::goTransform || !StageLoader::instanceId ||
+        if (!g_getGameObjectNative || !g_getComponentTransformNative || !StageLoader::goTransform || !StageLoader::instanceId ||
             !g_getChildCountNative || !g_getChildNative || !g_getNameNative) return;
         const auto target = Target();
         canWrite = canWrite && target && StageLoader::newHandle && StageLoader::freeHandle &&
@@ -175,6 +189,8 @@ namespace LiveActorProps
             if (!transform) continue;
             const auto* entry = core.sceneActorRegistry.Find(actor.actor);
             const auto token = entry && entry->instanceId == actor.instanceId ? entry->token : 0;
+            if (std::find(actorTransforms.begin(), actorTransforms.begin() + index, transform) !=
+                actorTransforms.begin() + index) continue;
             const auto name = !actor.displayName.empty() ? actor.displayName : actor.character.empty() ?
                 "未识别角色" : GakuMotion::FormatIdolDisplayName(actor.character.c_str());
             const auto label = name + " · " + std::to_string(index + 1);
@@ -187,18 +203,19 @@ namespace LiveActorProps
                 bool active{};
                 if (!id || !ReadActive(object, active)) continue;
 
-                const bool isSuitcase = propName == "Prop_Hknesuitcase";
+                const bool isSuitcase = GakuMotion::live_actor_props::PropSuffix(propName) == "Hknesuitcase";
                 void* geometry = isSuitcase ? SceneObject(UniqueChild(root, "Geo_Hknesuitcase"), scene) : nullptr;
                 GakuMotion::GuiActorProp prop{token, rootName, propName, label, id, active,
                     token && canWrite && (!isSuitcase || geometry)};
                 if (prop.controllable) {
                     const auto key = GakuMotion::ActorPropKey(prop);
                     if (core.actorPropHidden.contains(key))
-                        Hide(core, actor.actor, prop, object, geometry, key, target);
+                        Hide(core, actor.actor, root, prop, object, geometry, key, target);
                 }
                 core.actorProps.push_back(std::move(prop));
             }
         }
+        LiveTimelineProps::Scan(core, actorTransforms, canWrite);
         if (!canWrite) return;
         std::erase_if(core.actorPropHidden, [&](const auto& key) {
             return std::none_of(core.actorProps.begin(), core.actorProps.end(), [&](const auto& prop) {
@@ -210,5 +227,6 @@ namespace LiveActorProps
             Release(item.second);
             return true;
         });
+        LiveTimelineProps::RestoreUnselected(core);
     }
 }

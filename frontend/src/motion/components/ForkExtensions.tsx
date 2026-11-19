@@ -66,30 +66,53 @@ export function ForkAdvancedMotion({ state, command }: { state: ForkState; comma
   )
 }
 
-export function ForkPropNodes({ state, command }: { state: ForkState; command: ForkCommand }) {
+export function ForkPropNodes({ state, command, timelineOnly = false }: {
+  state: ForkState; command: ForkCommand; timelineOnly?: boolean
+}) {
   const [filter, setFilter] = useState('')
   const query = filter.trim().toLowerCase()
-  const props = state.props.filter(prop => `${prop.actor} ${prop.name}`.toLowerCase().includes(query))
+  const groups = [
+    { title: '角色道具', items: state.props.filter(prop => !prop.timeline) },
+    { title: '时间轴道具', items: state.props.filter(prop => prop.timeline) },
+  ].filter((group, index) => timelineOnly ? index === 1 : index === 0 || state.viewing || group.items.length > 0)
+  const count = groups.reduce((total, group) => total + group.items.length, 0)
   return (
-    <CollapsiblePropertySection title="自定义道具节点" summary={`已识别 ${state.props.length} 项`} defaultOpen>
+    <CollapsiblePropertySection title={timelineOnly ? '时间轴道具' : '自定义道具节点'}
+      summary={`已识别 ${count} 项`} defaultOpen={!timelineOnly}>
       <div className="space-y-2">
-        <Input className="h-7 max-w-60 text-xs" placeholder="过滤道具或角色" aria-label="过滤道具节点"
-          value={filter} onChange={event => setFilter(event.currentTarget.value)} />
-        {!state.propsEditable && <p className="text-xs text-muted-foreground">当前场景可查看道具，显隐调整暂不可用。</p>}
-        <div className="max-h-72 divide-y overflow-auto rounded-md border bg-background/60">
-          {!props.length && <p className="p-3 text-xs text-muted-foreground">{query ? '没有匹配道具。' : '尚未识别到角色道具。'}</p>}
-          {props.map(prop => (
-            <label className="flex items-center justify-between gap-3 px-3 py-2 text-xs" key={prop.key}>
-              <span>{prop.actor} / {prop.name}</span>
-              <span className="flex items-center gap-2 text-muted-foreground">
-                <Checkbox aria-label={`隐藏 ${prop.actor} ${prop.name}`} checked={prop.hidden}
-                  disabled={!state.propsEditable || !prop.editable} onCheckedChange={value =>
-                    void command('stage.prop', { actorToken: prop.actorToken, key: prop.key, value: value === true })} />
-                隐藏
-              </span>
-            </label>
-          ))}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" variant="outline" disabled={!state.propsCanScan || state.propsScanning}
+            onClick={() => void command('stage.propsScan')}>{state.propsScanning ? '正在扫描道具…' : '重新扫描道具'}</Button>
+          <Input className="h-7 max-w-60 text-xs" placeholder="过滤道具或角色" aria-label="过滤道具节点"
+            value={filter} onChange={event => setFilter(event.currentTarget.value)} />
         </div>
+        {!state.propsEditable && <p className="text-xs text-muted-foreground">当前场景可查看道具，显隐调整暂不可用。</p>}
+        {state.propsNotice && <p role="status" className="text-xs text-warning">{state.propsNotice}</p>}
+        {groups.map(group => {
+          const items = group.items.filter(prop => `${prop.actor} ${prop.name}`.toLowerCase().includes(query))
+          return (
+            <section aria-label={group.title} key={group.title} className="space-y-1">
+              {!timelineOnly && <h3 className="text-xs font-medium">{group.title}</h3>}
+              <div className="max-h-56 divide-y overflow-auto rounded-md border bg-background/60">
+                {!items.length && <p className="p-3 text-xs text-muted-foreground">{query ? '没有匹配道具。' : '尚未识别到道具。'}</p>}
+                {items.map(prop => (
+                  <label className="flex items-center justify-between gap-3 px-3 py-2 text-xs" key={prop.key}>
+                    <span className="min-w-0">
+                      {prop.actor} <span className={prop.timeline ? 'break-all text-muted-foreground' : ''}>/ {prop.name}</span>
+                      {!prop.active && !prop.hidden && <span className="ml-2 text-muted-foreground">未启用</span>}
+                    </span>
+                    <span className="flex shrink-0 items-center gap-2 text-muted-foreground">
+                      <Checkbox aria-label={`隐藏 ${prop.actor} ${prop.name}`} checked={prop.hidden}
+                        disabled={!state.propsEditable || !prop.editable || (prop.timeline && !state.active)} onCheckedChange={value =>
+                          void command('stage.prop', { actorToken: prop.actorToken, key: prop.key, value: value === true })} />
+                      隐藏
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </section>
+          )
+        })}
       </div>
     </CollapsiblePropertySection>
   )

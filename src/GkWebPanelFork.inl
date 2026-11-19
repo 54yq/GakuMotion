@@ -29,7 +29,8 @@
 				props += "{\"key\":" + JString(ActorPropKey(prop)) + ",\"actorToken\":" + JNum(prop.actorToken) +
 					",\"actor\":" + JString(prop.actorLabel) +
 					",\"name\":" + JString(live_actor_props::DisplayName(prop.propName)) +
-					",\"hidden\":" + JBool(prop.hidden) + ",\"editable\":" + JBool(prop.controllable) + "}";
+					",\"hidden\":" + JBool(prop.hidden) + ",\"editable\":" + JBool(prop.controllable) +
+					",\"active\":" + JBool(prop.active) + ",\"timeline\":" + JBool(prop.timeline) + "}";
 			}
 			props += "]";
 			const auto strings = [](const auto& values) {
@@ -51,6 +52,9 @@
 				",\"wristStatus\":" + JNum(core_.player.controller.wristDiagnosticStatus) +
 				",\"armNotice\":" + JString(ctx.forearmAxisNotice) + ",\"arms\":" + arms +
 				",\"props\":" + props + ",\"propsEditable\":" + JBool(ctx.actorPropsEditable) +
+				",\"propsCanScan\":" + JBool(ctx.injectionAllowed || ctx.liveViewingConfirmed) +
+				",\"propsScanning\":" + JBool(core_.actorPropScanRequested) +
+				",\"propsNotice\":" + JString(ctx.ensembleNotice.starts_with("该时间轴道具") ? ctx.ensembleNotice : "") +
 				",\"followYaw\":" + JBool(core_.camera.settings.followPlacementYaw) +
 				",\"liveDof\":" + JBool(ctx.liveDofDisabled) +
 				",\"liveClock\":" + JBool(ctx.liveActorClockActive) + ",\"liveClockAvailable\":" + JBool(ctx.liveActorClockAvailable) +
@@ -123,6 +127,17 @@
 				else ctx.fnRemoveLibraryFolder(ctx.self, path.c_str());
 				return CmdResult::Ok();
 			}
+			if (action == "stage.propsScan")
+			{
+				if (!ctx.injectionAllowed && !ctx.liveViewingConfirmed)
+					return CmdResult::Err("not_ready", "当前场景不可扫描道具");
+				int64_t owner = 0;
+				if (ctx.liveViewingConfirmed && (!IntParam(params, "owner", owner) || owner <= 0 ||
+					static_cast<uint64_t>(owner) != core_.liveOwnerToken))
+					return CmdResult::Err("stale_token", "当前 Live 已变化，请重新扫描");
+				ctx.fnScanActorProps(ctx.self);
+				return CmdResult::Ok();
+			}
 			if (const auto guard = MutationGuardLocked(); !guard.ok) return guard;
 			int64_t epoch = -1;
 			if (!IntParam(params, "epoch", epoch) || epoch < 0 || static_cast<uint64_t>(epoch) != ctx.actorRosterEpoch)
@@ -173,11 +188,15 @@
 			{
 				std::string key;
 				int64_t token = -1;
+				int64_t owner = 0;
 				bool hidden = false;
-				if (!ctx.actorPropsEditable || !IntParam(params, "actorToken", token) || token <= 0 ||
+				const bool timelineCurrent = ctx.liveViewingConfirmed && ctx.liveTakeoverActive &&
+					IntParam(params, "owner", owner) && owner > 0 && static_cast<uint64_t>(owner) == core_.liveOwnerToken;
+				if (!ctx.actorPropsEditable || !IntParam(params, "actorToken", token) || token < 0 ||
 					!StringParam(params, "key", key) || !BoolParam(params, "value", hidden) ||
 					!std::any_of(ctx.actorProps.begin(), ctx.actorProps.end(), [&](const auto& prop) {
-						return prop.actorToken == static_cast<uint64_t>(token) && prop.controllable && ActorPropKey(prop) == key;
+						return prop.actorToken == static_cast<uint64_t>(token) && prop.controllable && ActorPropKey(prop) == key &&
+							(prop.timeline ? timelineCurrent : core_.sceneActorRegistry.Resolve(prop.actorToken, ctx.actorRosterEpoch) != nullptr);
 					}))
 					return CmdResult::Err("stale_token", "道具不可编辑或已变化");
 				ctx.fnSetActorPropHidden(ctx.self, static_cast<uint64_t>(token), ctx.actorRosterEpoch, key.c_str(), hidden);

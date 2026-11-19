@@ -48,6 +48,7 @@ namespace GakuMotion
 		std::string rootName, propName, actorLabel;
 		int instanceId{};
 		bool active{}, controllable{}, hidden{};
+		bool timeline{};
 	};
 	inline std::string ActorPropKey(const GuiActorProp& prop)
 	{

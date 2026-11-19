@@ -2693,7 +2693,8 @@ namespace GakuMotion::webpanel
 			float scrubTime = 0.0f;
 			uint64_t injectionSession = 0;
 			{
-				std::lock_guard<std::recursive_mutex> lock(core_.stateMutex);
+				std::unique_lock<std::recursive_mutex> lock(core_.stateMutex, std::try_to_lock);
+				if (!lock) return;
 				injectionAllowed = core_.InjectionAllowed();
 				injectionSession = core_.injectionSession;
 				scrubbing = core_.player.scrubbing;

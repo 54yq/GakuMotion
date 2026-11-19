@@ -29,6 +29,7 @@
 #include "GkFaceRuntime.hpp"
 #include "GakuMotion.hpp"
 #include "GkLiveActorPropPolicy.hpp"
+#include "GkLiveAspectProjection.hpp"
 #ifdef _WIN32
 #endif
 

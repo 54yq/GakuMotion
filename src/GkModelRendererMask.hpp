@@ -40,7 +40,7 @@ namespace ModelRendererMask {
         if (!m.getForce || !m.setForce) { m.getForce=nullptr; m.setForce=nullptr; }
         cached=m; return true;
     }
-    inline bool Capture(void* actor,std::vector<Entry>& entries) {
+    inline bool Capture(void* actor,std::vector<Entry>& entries, bool (*includeRenderer)(void*) = nullptr) {
         Methods m{};if(!Resolve(m))return false;
         using ClassType=void*(*)(void*);using TypeObject=void*(*)(void*);
         auto classType=reinterpret_cast<ClassType>(GetProcAddress(g_gameAssembly,"il2cpp_class_get_type"));
@@ -70,6 +70,7 @@ namespace ModelRendererMask {
             void* renderer=array ? (m.element ? g_faceRuntime.invoke(m.element,array,elementArgs,&ex) :
                 reinterpret_cast<void**>(static_cast<char*>(array)+32)[i]) : nullptr;
             if(ex||!renderer||!CameraBridge::IsAlive(renderer)){lastFailure="renderer_element";ok=false;break;}
+            if (includeRenderer && !includeRenderer(renderer)) continue;
             auto handle=StageLoader::newHandle(renderer,false);if(!handle){lastFailure="renderer_handle";ok=false;break;}
             renderer=target(handle);bool force{},enabled{};
             const int id=renderer?StageLoader::ReadInt(StageLoader::instanceId,renderer):0;
@@ -78,7 +79,26 @@ namespace ModelRendererMask {
             }
             entries.push_back({handle,id,force,enabled});
         }
-        StageLoader::freeHandle(arrayHandle);if(!ok)Release(entries);else lastFailure="none";return ok;
+        StageLoader::freeHandle(arrayHandle);if(!ok)Release(entries);else lastFailure="none";return ok && !entries.empty();
+    }
+    inline bool ApplyMeshMask(const std::vector<Entry>& entries, bool hide) {
+        Methods m{};
+        const auto target = LiveActorProps::Target();
+        if (!target || !Resolve(m)) return false;
+        const auto* get = m.getForce ? m.getForce : m.getEnabled;
+        const auto* set = m.getForce ? m.setForce : m.setEnabled;
+        bool ok = true, found = false;
+        for (const auto& entry : entries) {
+            void* renderer = target(entry.handle);
+            if (!CameraBridge::IsAlive(renderer)) continue;
+            found = true;
+            bool current{};
+            const bool wanted = m.getForce ? (hide || entry.forceOff) : (!hide && entry.enabled);
+            if (StageLoader::ReadInt(StageLoader::instanceId, renderer) != entry.id ||
+                !ReadBool(get, renderer, current) ||
+                (current != wanted && !WriteBool(set, get, renderer, wanted))) ok = false;
+        }
+        return ok && (!hide || found);
     }
     inline bool Apply(std::vector<Entry>& entries,bool hide) {
         Methods m{};if(!Resolve(m))return false;
