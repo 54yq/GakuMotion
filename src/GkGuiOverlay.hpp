@@ -471,9 +471,10 @@ namespace GakuMotion
 			if (!ctx.injectionAllowed || livePageOpen)
 			{
 				transportNavigation = {};
-				// Drop a drag crossing a scene/capture boundary. Committing its last
-				// value here would enqueue an injection command after permission loss.
-				scrub.active = false;
+				// Release the transport before switching panels. Across a scene or
+				// capture boundary the runtime owns cancellation.
+				if (ctx.injectionAllowed) CommitScrub(ctx);
+				else scrub.active = false;
 				const bool visible = hostedPanel || ImGui::Begin("GakuMotion 控制面板", &showWindow);
 				if (visible)
 				{
@@ -561,7 +562,6 @@ namespace GakuMotion
                                 livePageAwaitingTakeover=!ctx.liveTakeoverActive;ctx.fnSetLiveTakeover(ctx.self,!ctx.liveTakeoverActive);
                             }
                             ImGui::EndDisabled();
-                            if(!ctx.liveTakeoverActive){ ImGui::SameLine(); ImGui::BeginDisabled(); ImGui::Button("恢复 Live"); ImGui::EndDisabled(); }
                             if(ctx.liveTakeoverActive&&ImGui::Button("进入 MMD 页面")){livePageOpen=false;activePage=GuiPage::Library;}
                             ImGui::TextDisabled(ctx.liveTakeoverActive?"退出后恢复原先 Live 状态。":"启动后暂停舞台并进入 MMD 曲库。");
                             ImGui::TextWrapped("如果 MMD 播放出现物理运算异常，请退出 Live 接管并重新接入，重置物理状态。");
@@ -609,8 +609,6 @@ namespace GakuMotion
 				if (browsePendingKind >= 0) ImGui::TextDisabled("等待文件选择…");
 				if (!ctx.injectionNotice.empty()) ImGui::TextWrapped("%s", ctx.injectionNotice.c_str());
 				if (!browseNotice.empty()) ImGui::TextWrapped("%s", browseNotice.c_str());
-				if (ctx.liveTakeoverActive) DrawLiveAspectPreview(ctx);
-
 				DrawShell(*this, ctx);
 			}
 			if (!hostedPanel) ImGui::End();

@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 # SPDX-License-Identifier: MIT
 # Build local binaries and synthetic tests. There is no deployment path.
 [CmdletBinding()]
@@ -23,7 +23,8 @@ $importInputs = @('interop/GakuMotion.VmdImporter.Native/GakuMotion.VmdImporter.
     'candidate/csharp/src/GakuMotion.VmdImporter/Resources/gakumas_bone_profile.json',
     'candidate/csharp/src/GakuMotion.VmdImporter/Resources/mmd_source_skeleton.json',
     'tools/vmd2gkmotion/gakumas_morph_map.json', 'tools/vmd2gkmotion/vmd_eye_profile.json',
-    'tools/vmd2gkmotion/tooth_appearance_lut.json', 'tools/vmd2gkmotion/root_retarget_profiles.json')
+    'tools/vmd2gkmotion/tooth_appearance_lut.json', 'tools/vmd2gkmotion/root_retarget_profiles.json',
+    'tools/vmd2gkmotion/miku_raw_eye_keys.json')
 $inputs = if ($Target -eq 'Runtime') { $runtimeInputs } elseif ($Target -eq 'NativeAOT') { $importInputs } elseif ($Target -eq 'Contracts') { @('tests/test_stage_load_runtime.cpp') } else { $runtimeInputs + $importInputs }
 foreach ($inputPath in $inputs) {
     if (-not (Test-Path -LiteralPath (Join-Path $repo $inputPath) -PathType Leaf)) { throw ('Missing build input: ' + $inputPath) }
@@ -51,8 +52,14 @@ if ([string]::IsNullOrWhiteSpace($sdk)) {
         Where-Object { Test-Path -LiteralPath (Join-Path $_ 'Include') } | Select-Object -First 1
 }
 if ([string]::IsNullOrWhiteSpace($sdk)) { throw 'Windows SDK not found; pass -WindowsSdkRoot.' }
-$sdkVersion = Get-ChildItem -LiteralPath (Join-Path $sdk 'Include') -Directory | Sort-Object Name -Descending | Select-Object -First 1
-if (-not $sdkVersion) { throw 'Windows SDK Include directory not found.' }
+$sdkVersion = Get-ChildItem -LiteralPath (Join-Path $sdk 'Include') -Directory |
+    Where-Object {
+        $_.Name -match '^\d+\.\d+\.\d+\.\d+$' -and
+        (Test-Path -LiteralPath (Join-Path $_.FullName 'ucrt\stddef.h') -PathType Leaf) -and
+        (Test-Path -LiteralPath (Join-Path $sdk "Lib\$($_.Name)\um\x64\advapi32.lib") -PathType Leaf)
+    } |
+    Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
+if (-not $sdkVersion) { throw 'Complete Windows SDK (ucrt headers and um/x64 libs) not found.' }
 if ($Target -eq 'Preflight') { Write-Host 'Build inputs, MSVC and Windows SDK found.'; exit 0 }
 if ($Target -eq 'Runtime' -or $Target -eq 'All') {
     if ($PortableVisualStudio) {
@@ -115,13 +122,19 @@ if ($Target -eq 'NativeAOT' -or $Target -eq 'All') {
     New-Item -ItemType Directory -Path $aotOutput,$aotObjects -Force | Out-Null
     $linker = Join-Path $msvc.FullName 'bin\Hostx64\x64\link.exe'
     $libCreator = Join-Path $msvc.FullName 'bin\Hostx64\x64\lib.exe'
+    $prevLib = $env:LIB
+    $env:LIB = @((Join-Path $msvc.FullName 'lib\x64'), (Join-Path $sdk "Lib\$($sdkVersion.Name)\ucrt\x64"),
+        (Join-Path $sdk "Lib\$($sdkVersion.Name)\um\x64")) -join ';'
     Push-Location -LiteralPath $repo
     try {
         & $DotNet publish (Join-Path $repo 'interop\GakuMotion.VmdImporter.Native\GakuMotion.VmdImporter.Native.csproj') `
             -c Release -r win-x64 -o $aotOutput "-p:ArtifactsPath=$aotObjects" -p:IlcUseEnvironmentalTools=true `
             "-p:CppLinker=$linker" "-p:CppLibCreator=$libCreator"
         if ($LASTEXITCODE -ne 0) { throw ('NativeAOT build failed: ' + $LASTEXITCODE) }
-    } finally { Pop-Location }
+    } finally {
+        $env:LIB = $prevLib
+        Pop-Location
+    }
 }
 if ($Target -ne 'Contracts') { Write-Host 'Requested product build completed locally.'; exit 0 }
 # The CL/LIB/PATH defaults are only needed by the manual contracts compile below.

@@ -79,7 +79,7 @@ namespace GakuMotion
 		ImGui::TextColored(readyColor, "%s", readyText);
 		if (ctx.liveTakeoverActive)
 		{
-            if (ImGui::Button("Live 接管页面")) overlay.livePageOpen=true;
+            if (ImGui::Button("Live 接管页面")) { overlay.CommitScrub(ctx); overlay.livePageOpen = true; }
 			if (!ctx.liveControlNotice.empty()) ImGui::TextWrapped("%s", ctx.liveControlNotice.c_str());
 		}
 
@@ -90,70 +90,64 @@ namespace GakuMotion
 	inline void DrawShell(GuiOverlay& overlay, const GuiContext& ctx)
 	{
 		const auto& style = ImGui::GetStyle();
-		// EndChild and Separator each advance by ItemSpacing.y. Reserve their
-		// actual spacing so scaled host styles cannot push the transport outside.
-		const float transportHeight = TransportBarHeight(ImGui::GetContentRegionAvail().x, &overlay) +
-			2.0f * style.ItemSpacing.y + 1.0f;
-		const float availHeight = ImGui::GetContentRegionAvail().y;
-		const float contentAreaHeight = (std::max)(1.0f, std::floor(availHeight - transportHeight));
-
-		// ---- 上半部：左侧 Sidebar + 中间 Content ----
+		const float availableWidth = ImGui::GetContentRegionAvail().x;
 		const float sidebarWidth = (std::max)(115.0f, ImGui::GetFontSize() * 6.4f);
-		const float mainContentWidth = (std::max)(1.0f, ImGui::GetContentRegionAvail().x - sidebarWidth - style.ItemSpacing.x);
+		const bool compact = availableWidth < sidebarWidth + style.ItemSpacing.x + ImGui::GetFontSize() * 18.0f;
 
-		// 1. 左侧 Sidebar
-		ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 4.0f);
-		ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::GetStyleColorVec4(ImGuiCol_FrameBg));
-
-		if (ImGui::BeginChild("##gkmotion_sidebar", ImVec2(sidebarWidth, contentAreaHeight), false,
-		                      ImGuiWindowFlags_NoScrollbar))
+		auto drawNavigation = [&](bool horizontal)
 		{
-			ImGui::Spacing();
-			GuiBranding::DrawSidebarIcon(ImGui::GetContentRegionAvail().x - 30.0f);
-			ImGui::TextDisabled("    Tech Preview");
-			ImGui::Spacing();
-			ImGui::Separator();
-			ImGui::Spacing();
-
-			auto NavItem = [&](const char* label, GuiPage page, GuiIcons::Icon icon)
+			const float width = ImGui::GetContentRegionAvail().x;
+			const float itemWidth = horizontal
+				? (std::max)(1.0f, std::floor((width - 2.0f * style.ItemSpacing.x) / 3.0f))
+				: width;
+			const float height = (std::max)(30.0f, ImGui::GetFrameHeight());
+			int itemIndex = 0;
+			auto navItem = [&](const char* label, GuiPage page, GuiIcons::Icon icon)
 			{
-				const bool isSelected = (overlay.activePage == page);
-				if (isSelected)
-				{
-					ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
-				}
-				else
-				{
-					ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
-				}
-
-				if (GuiIcons::Button(label, icon, ImVec2(ImGui::GetContentRegionAvail().x, 30.0f)))
-				{
-					overlay.activePage = page;
-				}
+				if (horizontal && itemIndex % 3 != 0) ImGui::SameLine();
+				++itemIndex;
+				ImGui::PushStyleColor(ImGuiCol_Button, overlay.activePage == page
+					? ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive) : ImVec4(0, 0, 0, 0));
+				if (GuiIcons::Button(label, icon, ImVec2(itemWidth, height))) overlay.activePage = page;
 				ImGui::PopStyleColor();
 			};
-
-			NavItem("曲库", GuiPage::Library, GuiIcons::Icon::Library);
-			NavItem("动作", GuiPage::Motion, GuiIcons::Icon::Motion);
-			NavItem("镜头", GuiPage::Camera, GuiIcons::Icon::Camera);
-			NavItem("舞台", GuiPage::Stage, GuiIcons::Icon::Stage);
-			NavItem("设置", GuiPage::Settings, GuiIcons::Icon::Settings);
-
-			// 开发者模式下额外显示 [开发]
-			if (overlay.developerMode)
-			{
-				ImGui::Spacing();
-				ImGui::Separator();
-				ImGui::Spacing();
-				NavItem("  [开发]", GuiPage::Developer, GuiIcons::Icon::Developer);
-			}
+			navItem("曲库", GuiPage::Library, GuiIcons::Icon::Library);
+			navItem("动作", GuiPage::Motion, GuiIcons::Icon::Motion);
+			navItem("镜头", GuiPage::Camera, GuiIcons::Icon::Camera);
+			navItem("舞台", GuiPage::Stage, GuiIcons::Icon::Stage);
+			navItem("设置", GuiPage::Settings, GuiIcons::Icon::Settings);
+			if (overlay.developerMode) navItem("  [开发]", GuiPage::Developer, GuiIcons::Icon::Developer);
+		};
+		if (compact)
+		{
+			ImGui::PushID("##gkmotion_compact_navigation");
+			drawNavigation(true);
+			ImGui::PopID();
+			ImGui::Separator();
 		}
-		ImGui::EndChild();
-		ImGui::PopStyleColor();
-		ImGui::PopStyleVar();
 
-		ImGui::SameLine();
+		// Reserve the full transport and both vertical spacing gaps.
+		const float transportHeight = TransportBarHeight(availableWidth, &overlay) + 2.0f * style.ItemSpacing.y + 1.0f;
+		const float contentAreaHeight = (std::max)(1.0f, std::floor(ImGui::GetContentRegionAvail().y - transportHeight));
+		const float mainContentWidth = compact ? availableWidth :
+			(std::max)(1.0f, availableWidth - sidebarWidth - style.ItemSpacing.x);
+
+		if (!compact)
+		{
+			ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 4.0f);
+			ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::GetStyleColorVec4(ImGuiCol_FrameBg));
+			if (ImGui::BeginChild("##gkmotion_sidebar", ImVec2(sidebarWidth, contentAreaHeight), false))
+			{
+				GuiBranding::DrawSidebarIcon(ImGui::GetContentRegionAvail().x - 30.0f);
+				ImGui::Separator();
+				drawNavigation(false);
+			}
+			ImGui::EndChild();
+			ImGui::PopStyleColor();
+			ImGui::PopStyleVar();
+			ImGui::SameLine();
+		}
+
 
 		// 2. 中间 Content
 		if (ImGui::BeginChild("##gkmotion_main_content", ImVec2(mainContentWidth, contentAreaHeight), false))

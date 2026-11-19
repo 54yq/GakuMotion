@@ -13,7 +13,7 @@ GakuMotion 是运行在 GakuLoader 插件宿主之上的游戏原生演出扩展
 
 当前为野生的空白维护的分支 **v4.2.1 独立角色图实验版**，基于上游 **v0.1.1**。GakuLoader 显示 `v0.1.1+fork.4.2.1`。 [分支更新记录](docs/CHANGELOG.md)
 
-[安装指南](docs/INSTALLATION.md) · [使用指南](docs/USAGE.md) · [常见问题排查](docs/TROUBLESHOOTING.md) · [源码构建](BUILD_NOTES.md) · [全部文档索引](docs/README.md)
+[安装指南](docs/INSTALLATION.md) · [使用指南](docs/USAGE.md) · [常见问题排查](docs/TROUBLESHOOTING.md) · [源码构建](BUILD_NOTES.md) · [全部文档索引](docs/README.md) · [学马仕模组索引](https://github.com/Gaku-Mod-Tools/Mod-Directory)
 
 ## 支持范围
 
@@ -37,7 +37,7 @@ GakuMotion 目前处于 Developer Preview 阶段。
 
 ### 前置要求
 - 操作系统：Windows 10 / 11 64 位（x64）
-- 宿主程序：[GakuLoader](https://github.com/crested-ezios/GakuLoader)（游戏根目录下的 `version.dll`）
+- 宿主程序：[GakuLoader](https://github.com/Gaku-Mod-Tools/GakuLoader)（游戏根目录下的 `version.dll`）
 - 核心文件：配套版本的 `GakuMotion.dll` 与 `GakuMotion.VmdImporter.Native.dll`
 
 ### 文件放置路径
@@ -116,6 +116,10 @@ GakuMotion 当前仍在积极开发中。已知问题目录请参考 [已知问�
 - [KineTexture](https://github.com/crested-ezios/KineTexture)：提供底层正向运动学、数学计算与动作采样能力。
 - [GakuBurstBridge](https://github.com/crested-ezios/GakuBurstBridge)：可选的原生物理伴生库，用于让官方 Burst 物理读取动作输入。
 - 模组源码遵循 [MIT 许可证](LICENSE)，第三方组件遵循各自许可证，详见 [第三方通知](THIRD_PARTY_NOTICES.md)。
+
+### 社区生态
+- [GakuModTools Mod-Directory](https://github.com/Gaku-Mod-Tools/Mod-Directory)：面向学园偶像大师 PC（DMM）生态的开源 Mod、插件、加载器及开发工具索引，欢迎社区共同维护。
+
 ### 参考项目与致谢
 GakuMotion 的开发过程中参考了 MMD 动作生态、游戏 Mod 工具及相关研究成果。感谢以下为动作语义验证、兼容性研究和技术设计提供的帮助。
  - [Chinosk - Gakumas Localify](https://git.chinosk6.cn/chinosk/gkms-localify-dmm) — 原生插件兼容生态。

@@ -113,7 +113,7 @@ int wmain(int argc,wchar_t** argv)
     const auto count=reinterpret_cast<std::int32_t(*)()>(GetProcAddress(rejected,"GkFakeAbi_CallCount"));
     CHECK(count && count()==1);
     CHECK(!bridge::Initialize(Utf8(old/L".")) && count()==1);
-    CHECK(bridge::Detail().find("ABI v3")!=std::string::npos);
+    CHECK(bridge::Detail().find("ABI v4")!=std::string::npos);
 
     GakuMotion::RuntimeConfig config;
     CHECK(config.importBackend=="csharp");
@@ -133,6 +133,7 @@ int wmain(int argc,wchar_t** argv)
     // A nonmatching adjacent geometry file must not reject an unrelated VMD.
     Write(unicode/L"target_leg_geometry.json","{\"source_vmd_sha256\":\"not-this-source\"}");
     request.vmd=Utf8(body); request.motionsRoot=Utf8(library); request.title="桥接曲目";
+    request.sourceFps=60.0f; request.fps=30.0f;
     request.timing.motion={0.5f,2.0f}; request.timing.facial={1.5f,-1.0f};
     request.timing.camera={0.0f,0.25f}; request.timing.audio={2.0f,-0.5f};
     const auto transactions=unicode/L"managed transactions";
@@ -153,6 +154,10 @@ int wmain(int argc,wchar_t** argv)
     CHECK(!track.empty());
     GakuMotion::jsonlite::Value newMetadata; std::string newError;
     CHECK(GakuMotion::jsonlite::ParseText(Read(track/L"info.json"),newMetadata,newError));
+    const auto* sourceFps=newMetadata.Find("source_fps");
+    const auto* outputFps=newMetadata.Find("fps");
+    CHECK(sourceFps && sourceFps->IsNumber() && sourceFps->numberValue==60.0);
+    CHECK(outputFps && outputFps->IsNumber() && outputFps->numberValue==30.0);
     const auto newTiming=GakuMotion::ReadPerformanceTiming(newMetadata);
     CHECK(newTiming.motion.speed==0.5f && newTiming.motion.offsetSeconds==2.0f &&
         newTiming.facial.speed==1.5f && newTiming.facial.offsetSeconds==-1.0f &&

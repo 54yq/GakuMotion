@@ -1,10 +1,10 @@
-﻿#pragma once
+#pragma once
 
 // =============================================================================
 // GkCsharpImport.hpp — 测试用 VMD 导入后端（Candidate B，NativeAOT）
 // =============================================================================
 // 运行时仅使用 C# NativeAOT；Python 工具仅供离线研究。
-// Body ABI v3；独立镜头 ABI v1。未支持的目标几何请求明确失败，
+// Body ABI v4；独立镜头 ABI v1。未支持的目标几何请求明确失败，
 // 不启动解释器，也不覆盖已有动作。单一工作线程使用 @PROGRESS 协议。
 // =============================================================================
 
@@ -248,7 +248,7 @@ namespace GakuMotion::csharp_import
 				auto abi = reinterpret_cast<AbiFn>(GetProcAddress(module, "GkVmdImporter_AbiVersion"));
 				if (!run || !abi || abi() < 4)
 				{
-					Detail() = "GakuMotion.VmdImporter.Native.dll 缺少 ABI v3 导出（旧 DLL 会丢播放速度/初始偏移量请求）";
+					Detail() = "GakuMotion.VmdImporter.Native.dll 缺少 ABI v4 导出（旧 DLL 会丢源帧率或重新烘焙请求）";
 					RejectedModules().push_back({candidate, module, Detail()});
 					continue;
 				}

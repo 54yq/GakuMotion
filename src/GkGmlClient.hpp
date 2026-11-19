@@ -5,6 +5,7 @@
 #include "GakuMotionServices.h"
 #include "GkVisualHandoff.hpp"
 #include "GkCameraHandoff.hpp"
+#include "GkRinhaFacialFit.hpp"
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -87,6 +88,9 @@ inline GakuStatus Connect(const GakuHostApi* host) {
     if (!appearance.getAppearance) appearance = {};
     paths = {};
     GakuPaths::Query(host, paths); // Optional; legacy installations keep their layout.
+    // Published facial fit data is optional and never blocks activation: an
+    // absent provider keeps the compiled per-character tables authoritative.
+    facial_fit::Connect(api);
     active = true;
     return GAKU_OK;
 }

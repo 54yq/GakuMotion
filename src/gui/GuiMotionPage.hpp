@@ -381,19 +381,21 @@ namespace GakuMotion
             if (scrollRoles) ImGui::EndChild();
 			if (!ctx.ensembleNotice.empty()) ImGui::TextWrapped("%s", ctx.ensembleNotice.c_str());
 		}
-		ImGui::Spacing();
-		ImGui::Separator();
-		ImGui::TextUnformatted("表情幅度");
-		auto& face = controller.facialWeights;
-		ImGui::SliderFloat("整体##face", &face.overall, 0.0f, 2.0f, "%.2f 倍");
-		ImGui::SliderFloat("眉毛##face", &face.brow, 0.0f, 2.0f, "%.2f 倍");
-		ImGui::SliderFloat("眼部##face", &face.eye, 0.0f, 2.0f, "%.2f 倍");
-		ImGui::SliderFloat("嘴部##face", &face.mouth, 0.0f, 2.0f, "%.2f 倍");
-		ImGui::TextWrapped("分项与整体倍率相乘；通常限制在 0–100%%。眼骨视线不受影响。");
-		if (ImGui::Button("重置表情幅度")) face = FacialWeights{};
-		ImGui::SameLine();
-		if (ImGui::Button("保存表情幅度") && ctx.fnSaveFacialWeights) ctx.fnSaveFacialWeights(ctx.self);
-		if (!ctx.facialWeightsNotice.empty()) ImGui::TextWrapped("%s", ctx.facialWeightsNotice.c_str());
+		if (ImGui::CollapsingHeader("表情幅度"))
+		{
+			auto& weights = controller.facialWeights;
+			ImGui::SliderFloat("整体##face", &weights.overall, 0.0f, 2.0f, "%.2f 倍");
+			ImGui::SliderFloat("眉毛##face", &weights.brow, 0.0f, 2.0f, "%.2f 倍");
+			ImGui::SliderFloat("眼部##face", &weights.eye, 0.0f, 2.0f, "%.2f 倍");
+			ImGui::SliderFloat("嘴部##face", &weights.mouth, 0.0f, 2.0f, "%.2f 倍");
+			ImGui::TextWrapped("分项倍率乘以整体倍率，眼骨视线保持独立。");
+			if (ImGui::Button("重置表情幅度")) weights = FacialWeights{};
+			ImGui::SameLine();
+			ImGui::BeginDisabled(!ctx.fnSaveFacialWeights);
+			if (ImGui::Button("保存表情幅度")) ctx.fnSaveFacialWeights(ctx.self);
+			ImGui::EndDisabled();
+			if (!ctx.facialWeightsNotice.empty()) ImGui::TextWrapped("%s", ctx.facialWeightsNotice.c_str());
+		}
 
 		ImGui::Spacing();
 		ImGui::Separator();

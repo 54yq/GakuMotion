@@ -1,0 +1,63 @@
+{
+  "schema": "gakumotion_miku_raw_eye_keys/1",
+  "prefix": "miku.raweye.v1.",
+  "markers": [
+    "present",
+    "unsupported",
+    "native_authored"
+  ],
+  "bundle": "miku_krnh_v1",
+  "face": "mdl_chr_krnh-base-0000_face",
+  "character": "krnh",
+  "table_sha256": "0915fbd03191a1067de6d119a82d4aa47c5a8b6f58e3ea9933641b0c40628b5a",
+  "keys": [
+    "じと目",
+    "たれ目",
+    "なごみ",
+    "にこり",
+    "はぅ",
+    "はちゅ目",
+    "はちゅ目2",
+    "びっくり",
+    "まばたき",
+    "ウィンク",
+    "ウィンク2",
+    "ウィンク2右",
+    "ウィンク右",
+    "キリッ",
+    "キリッ2",
+    "上",
+    "下",
+    "右上",
+    "右下",
+    "困る",
+    "困る2",
+    "左上",
+    "左下",
+    "平行",
+    "怒り",
+    "眉頭",
+    "真面目",
+    "笑い",
+    "笑い2",
+    "笑い目"
+  ],
+  "accepted_keys": [
+    "たれ目",
+    "にこり",
+    "キリッ2",
+    "上",
+    "右上",
+    "困る",
+    "困る2",
+    "左上",
+    "平行",
+    "眉頭",
+    "真面目",
+    "笑い目"
+  ],
+  "notes": [
+    "Names only. Per-key grades live in the .krf, which stays authoritative.",
+    "Order matches the packed table exactly; the importer must not sort it."
+  ]
+}

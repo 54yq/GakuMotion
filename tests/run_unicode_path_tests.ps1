@@ -18,7 +18,14 @@ foreach ($candidate in @($WindowsSdkRoot, 'D:\Windows Kits\10', "${env:ProgramFi
     if ($candidate -and (Test-Path -LiteralPath (Join-Path $candidate 'Include'))) { $sdkRoot = $candidate; break }
 }
 if (-not $sdkRoot) { throw 'No Windows SDK found.' }
-$sdkVersion = Get-ChildItem -LiteralPath (Join-Path $sdkRoot 'Include') -Directory | Sort-Object Name | Select-Object -Last 1
+$sdkVersion = Get-ChildItem -LiteralPath (Join-Path $sdkRoot 'Include') -Directory |
+    Where-Object {
+        $_.Name -match '^\d+\.\d+\.\d+\.\d+$' -and
+        (Test-Path -LiteralPath (Join-Path $_.FullName 'ucrt\stddef.h') -PathType Leaf) -and
+        (Test-Path -LiteralPath (Join-Path $sdkRoot "Lib\$($_.Name)\um\x64\advapi32.lib") -PathType Leaf)
+    } |
+    Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
+if (-not $sdkVersion) { throw 'Complete Windows SDK not found.' }
 $env:INCLUDE = @("$($msvc.FullName)\include", "$sdkRoot\Include\$($sdkVersion.Name)\ucrt",
     "$sdkRoot\Include\$($sdkVersion.Name)\um", "$sdkRoot\Include\$($sdkVersion.Name)\shared") -join ';'
 $env:LIB = @("$($msvc.FullName)\lib\x64", "$sdkRoot\Lib\$($sdkVersion.Name)\ucrt\x64",

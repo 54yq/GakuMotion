@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 static void TestCameraCoreWorkflow(const std::string& repoRoot)
 {
