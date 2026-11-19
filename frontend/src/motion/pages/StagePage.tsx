@@ -15,10 +15,12 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
-import { ENSEMBLE_SLOT_NAMES } from '../protocol'
+import { ENSEMBLE_SLOT_NAMES, type ForkState } from '../protocol'
 import { motionStore, useMotionStore } from '../store'
 import { CollapsiblePropertySection, PropertyRow, PropertySection } from '../components/PropertyGroup'
 import { PendingBadge } from '../components/Unsupported'
+import { ForkPropNodes } from '../components/ForkExtensions'
+import type { ForkCommand } from '../components/ForkWorkspace'
 
 const COLOR_PRESETS: Array<{ label: string; rgb: [number, number, number] }> = [
   { label: '纯白', rgb: [1, 1, 1] },
@@ -37,7 +39,7 @@ function hexToRgb(hex: string): [number, number, number] {
   return [0, 2, 4].map((offset) => parseInt(value.slice(offset, offset + 2), 16) / 255) as [number, number, number]
 }
 
-export function StagePage() {
+export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; forkCommand?: ForkCommand } = {}) {
   const stage = useMotionStore((state) => state.stage)
   const actors = useMotionStore((state) => state.actors)
   const ensemble = useMotionStore((state) => state.ensemble)
@@ -287,87 +289,90 @@ export function StagePage() {
         summary={safeNodes.length > 0 ? `已扫描 ${safeNodes.length} 个节点` : '未扫描'}
       >
         <div className="space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="stage-custom-nodes"
-                checked={settings.customNodeControl}
-                disabled={disabled}
-                onCheckedChange={(checked) => {
-                  const enabled = checked === true
-                  motionStore.patchStage({ customNodeControl: enabled })
-                  if (enabled && safeNodes.length === 0 && scanSupported) void triggerScan()
-                }}
-              />
-              <Label htmlFor="stage-custom-nodes">自定义场景节点 [开关]</Label>
+          <CollapsiblePropertySection title="自定义场景节点" bodyClassName="space-y-3" defaultOpen>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="stage-custom-nodes"
+                  checked={settings.customNodeControl}
+                  disabled={disabled}
+                  onCheckedChange={(checked) => {
+                    const enabled = checked === true
+                    motionStore.patchStage({ customNodeControl: enabled })
+                    if (enabled && safeNodes.length === 0 && scanSupported) void triggerScan()
+                  }}
+                />
+                <Label htmlFor="stage-custom-nodes">自定义场景节点 [开关]</Label>
+              </div>
+
+              {settings.customNodeControl && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="relative">
+                    <RiSearchFill className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      className="h-7 w-44 pl-7 text-xs"
+                      placeholder="过滤场景节点..."
+                      aria-label="过滤场景节点"
+                      value={nodeFilter}
+                      onChange={(event) => setNodeFilter(event.target.value)}
+                    />
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs"
+                    disabled={!scanSupported || scanning}
+                    onClick={() => void triggerScan()}
+                  >
+                    <RiRefreshFill className={cn('size-3.5', scanning && 'animate-spin')} />
+                    {scanning ? '正在扫描…' : '扫描场景节点'}
+                  </Button>
+                  {!scanSupported && <PendingBadge />}
+                </div>
+              )}
             </div>
 
-            {settings.customNodeControl && (
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="relative">
-                  <RiSearchFill className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    className="h-7 w-44 pl-7 text-xs"
-                    placeholder="过滤场景节点..."
-                    aria-label="过滤场景节点"
-                    value={nodeFilter}
-                    onChange={(event) => setNodeFilter(event.target.value)}
-                  />
+            {settings.customNodeControl ? (
+              <>
+                <p className="text-xs text-warning">
+                  启用后将停止 GakuMotion 对场景节点的自动管理。仅建议在需要手工定制场景时使用。
+                </p>
+                <div className="max-h-72 divide-y divide-border/40 overflow-y-auto rounded-md border bg-background/60 p-1.5" data-testid="stage-node-tree">
+                  {filteredNodes.length === 0 ? (
+                    <p className="py-4 text-center text-xs text-muted-foreground">尚未扫描或没有候选节点。</p>
+                  ) : (
+                    filteredNodes.map((node) => {
+                      const parentInactive = safeNodes.some(
+                        (candidate) => candidate.index === node.parentIndex && !candidate.currentlyActive,
+                      )
+                      return (
+                        <div
+                          key={node.index}
+                          className="flex items-center gap-2 rounded px-2 py-1 hover:bg-accent/45"
+                          style={{ paddingLeft: `${8 + node.depth * 14}px` }}
+                        >
+                          <Checkbox
+                            checked={node.currentlyActive}
+                            disabled={node.isColliderLocked || parentInactive || !scanSupported}
+                            onCheckedChange={(checked) => void motionStore.toggleStageNode(node.index, checked === true)}
+                          />
+                          <span className="text-xs text-foreground">{node.displayName}</span>
+                          {node.isLightingRoot && <Badge variant="secondary" className="rounded-[4px]">光影</Badge>}
+                          {node.isIdentifiedBackground && <Badge variant="secondary" className="rounded-[4px]">背景</Badge>}
+                          {node.isColliderLocked && <Badge variant="outline" className="rounded-[4px]">碰撞锁定</Badge>}
+                        </div>
+                      )
+                    })
+                  )}
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 text-xs"
-                  disabled={!scanSupported || scanning}
-                  onClick={() => void triggerScan()}
-                >
-                  <RiRefreshFill className={cn('size-3.5', scanning && 'animate-spin')} />
-                  {scanning ? '正在扫描…' : '扫描场景节点'}
-                </Button>
-                {!scanSupported && <PendingBadge />}
-              </div>
-            )}
-          </div>
-
-          {settings.customNodeControl ? (
-            <>
-              <p className="text-xs text-warning">
-                启用后将停止 GakuMotion 对场景节点的自动管理。仅建议在需要手工定制场景时使用。
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                开启自定义场景节点后，可手工逐项勾选/隐藏场景里的特定 Mesh 或物件。
               </p>
-              <div className="max-h-72 divide-y divide-border/40 overflow-y-auto rounded-md border bg-background/60 p-1.5" data-testid="stage-node-tree">
-                {filteredNodes.length === 0 ? (
-                  <p className="py-4 text-center text-xs text-muted-foreground">尚未扫描或没有候选节点。</p>
-                ) : (
-                  filteredNodes.map((node) => {
-                    const parentInactive = safeNodes.some(
-                      (candidate) => candidate.index === node.parentIndex && !candidate.currentlyActive,
-                    )
-                    return (
-                      <div
-                        key={node.index}
-                        className="flex items-center gap-2 rounded px-2 py-1 hover:bg-accent/45"
-                        style={{ paddingLeft: `${8 + node.depth * 14}px` }}
-                      >
-                        <Checkbox
-                          checked={node.currentlyActive}
-                          disabled={node.isColliderLocked || parentInactive || !scanSupported}
-                          onCheckedChange={(checked) => void motionStore.toggleStageNode(node.index, checked === true)}
-                        />
-                        <span className="text-xs text-foreground">{node.displayName}</span>
-                        {node.isLightingRoot && <Badge variant="secondary" className="rounded-[4px]">光影</Badge>}
-                        {node.isIdentifiedBackground && <Badge variant="secondary" className="rounded-[4px]">背景</Badge>}
-                        {node.isColliderLocked && <Badge variant="outline" className="rounded-[4px]">碰撞锁定</Badge>}
-                      </div>
-                    )
-                  })
-                )}
-              </div>
-            </>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              开启自定义场景节点后，可手工逐项勾选/隐藏场景里的特定 Mesh 或物件。
-            </p>
-          )}
+            )}
+          </CollapsiblePropertySection>
+          {fork && forkCommand && <ForkPropNodes state={fork} command={forkCommand} />}
         </div>
       </CollapsiblePropertySection>
     </div>

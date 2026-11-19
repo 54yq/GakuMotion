@@ -1,6 +1,5 @@
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
@@ -15,7 +14,6 @@ export function EnsembleSection() {
   const draft = useMotionStore((state) => state.ensembleDraft)
   const actors = useMotionStore((state) => state.actors.actors)
   const libraryEntries = useMotionStore((state) => state.library.entries)
-  const presetName = useMotionStore((state) => state.ensemblePresetName)
   const playerState = useMotionStore((state) => state.player.state)
   const capabilities = useMotionStore((state) => state.capabilities)
   const supports = (method: string) => capabilities.includes(method)
@@ -239,30 +237,6 @@ export function EnsembleSection() {
           </Button>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <Input
-            className="h-8 w-44 text-xs"
-            placeholder="预设名称"
-            value={presetName}
-            onChange={(event) => motionStore.setEnsemblePresetName(event.target.value)}
-          />
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={!presetName.trim() || !supports('ensemble.presetSave')}
-            onClick={() => void motionStore.saveEnsemblePreset()}
-          >
-            保存预设
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={!presetName.trim() || !supports('ensemble.presetLoad')}
-            onClick={() => void motionStore.loadEnsemblePreset()}
-          >
-            载入预设
-          </Button>
-        </div>
       </div>
     </div>
   )

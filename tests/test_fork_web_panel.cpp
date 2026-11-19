@@ -68,6 +68,21 @@ int main()
 	check(ok(request("fork.command", R"({"action":"actor.hideModel","session":12,"epoch":)" + epoch +
 		R"(,"actorToken":)" + token + R"(,"value":true})")) && queued(Core::GuiAction::SetActorModelHidden),
 		"Model visibility uses the current recognized actor");
+	core.guiCommands.clear();
+	check(ok(request("fork.command", R"({"action":"formation.place","session":12,"epoch":)" + epoch +
+		R"(,"slot":-1,"actorToken":)" + token + R"(,"yaw":-24})")) &&
+		queued(Core::GuiAction::InitialYaw) && !queued(Core::GuiAction::InitialPosition),
+		"Editing heading independently leaves XYZ alone");
+	check(!ok(request("fork.command", R"({"action":"formation.save","session":12,"epoch":)" + epoch + R"(,"name":"old"})")),
+		"The obsolete ensemble preset command is unavailable");
+	GuiActorProp prop{core.sceneActorRegistry.Find(&primary)->token, "root", "mic", "primary", 82, true, true, false};
+	core.actorProps.push_back(prop);
+	check(ok(request("fork.command", R"({"action":"stage.prop","session":12,"epoch":)" + epoch +
+		R"(,"actorToken":)" + token + R"(,"key":)" + JString(ActorPropKey(prop)) + R"(,"value":true})")) &&
+		queued(Core::GuiAction::SetActorPropHidden), "Prop visibility uses the recognized prop identity");
+	check(ok(request("fork.command", R"({"action":"motion.arm","session":12,"epoch":)" + epoch +
+		R"(,"actorToken":)" + token + R"(,"operation":1,"value":43})")) &&
+		queued(Core::GuiAction::SceneArm), "Advanced motion uses the existing actor calibration queue");
 	check(ok(request("player.setSpeed", R"({"speed":1.25})")) && queued(Core::GuiAction::Speed),
 		"The upstream Web transport uses the existing Core speed control");
 	const auto libraryRevision = std::to_string(core.libraryRevision);

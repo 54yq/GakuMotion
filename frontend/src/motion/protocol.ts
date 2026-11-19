@@ -553,8 +553,23 @@ export interface ForkState {
   position: Vector3
   yaw: number
   formationNotice: string
-  presetNotice: string
-  presets: string[]
+  placementReset: boolean
+  initializeBones: boolean
+  auxMode: number
+  wristStatus: number
+  armNotice: string
+  arms: { token: number; share: number; degrees: number; locked: boolean; bound: boolean; primary: boolean }[]
+  props: { key: string; actorToken: number; actor: string; name: string; hidden: boolean; editable: boolean }[]
+  propsEditable: boolean
+  followYaw: boolean
+  liveDof: boolean
+  liveClock: boolean
+  liveClockAvailable: boolean
+  liveDiagnostics: boolean
+  liveFps: number
+  liveStalls: number
+  swingReportLoaded: boolean
+  liveClockNotice: string
   folders: string[]
   folderNotice: string
 }

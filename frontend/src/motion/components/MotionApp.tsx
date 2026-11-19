@@ -73,9 +73,9 @@ function ActivePage({ fork, command }: { fork: ReturnType<typeof useForkWorkspac
     case 'motion':
       return <MotionPage fork={fork} forkCommand={command} />
     case 'camera':
-      return <CameraPage />
+      return <CameraPage fork={fork} forkCommand={command} />
     case 'stage':
-      return <StagePage />
+      return <StagePage fork={fork} forkCommand={command} />
     case 'settings':
       return <SettingsPage />
     case 'developer':

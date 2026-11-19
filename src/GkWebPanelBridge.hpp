@@ -24,6 +24,7 @@
 
 #include "../include/GakuWebPanel.h"
 #include "GakuMotion.hpp"
+#include "GkLiveActorPropPolicy.hpp"
 #include "GkJsonLite.hpp"
 
 #include <algorithm>
@@ -1377,12 +1378,6 @@ namespace GakuMotion::webpanel
 			command.import = std::move(request);
 			core_.QueueGui(std::move(command));
 			return CmdResult::Ok("{\"started\":true}");
-		}
-
-		static bool ValidPresetName(const std::string& name)
-		{
-			return !name.empty() && name.size() <= 80 && name != "." && name != ".." &&
-				name.find_first_of("/\\:*?\"<>|") == std::string::npos;
 		}
 
 #include "GkWebPanelFork.inl"

@@ -41,7 +41,11 @@ function activeTransformKey(selection: number): keyof Pick<CameraSettings, 'tran
   return 'transformLookAt'
 }
 
-export function CameraPage() {
+import { ForkCameraOptions } from '../components/ForkExtensions'
+import type { ForkCommand } from '../components/ForkWorkspace'
+import type { ForkState } from '../protocol'
+
+export function CameraPage({ fork, forkCommand }: { fork?: ForkState | null; forkCommand?: ForkCommand } = {}) {
   const camera = useMotionStore((state) => state.camera)
   const draft = useMotionStore((state) => state.cameraDraft)
   const pending = useMotionStore((state) => state.cameraPending)
@@ -161,6 +165,7 @@ export function CameraPage() {
             <span className="text-warning">当前曲目没有可用运镜轨道，VMD 模式将保持固定机位。</span>
           )}
         </div>
+        {fork && forkCommand && <ForkCameraOptions state={fork} command={forkCommand} />}
       </PropertySection>
 
       {draft.enabled && (

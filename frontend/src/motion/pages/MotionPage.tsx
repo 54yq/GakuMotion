@@ -22,7 +22,8 @@ import { motionStore, useMotionStore } from '../store'
 import { formatMmSs } from '../time'
 import { BoneSection } from '../components/BoneSection'
 import { EnsembleSection } from '../components/EnsembleSection'
-import { ForkEnsembleControls, type ForkCommand } from '../components/ForkWorkspace'
+import { ForkEnsembleControls, ForkPlacementFields, type ForkCommand } from '../components/ForkWorkspace'
+import { ForkAdvancedMotion } from '../components/ForkExtensions'
 import type { ForkState } from '../protocol'
 import { Vector3Field } from '../components/NumberField'
 import { CollapsiblePropertySection, PropertyRow, PropertySection } from '../components/PropertyGroup'
@@ -214,7 +215,10 @@ export function MotionPage({ fork, forkCommand }: { fork?: ForkState | null; for
                 <span className="text-[11px] text-muted-foreground">世界坐标偏移 (米)</span>
               </div>
 
-              <Vector3Field
+              {fork && forkCommand ? (
+                <ForkPlacementFields key={selectedActor?.token} labelPrefix="初始位置" slot={-1} token={selectedActor?.token ?? 0}
+                  generation={0} initial={fork.position} yaw={fork.yaw} command={forkCommand} />
+              ) : <Vector3Field
                 labelPrefix="初始位置"
                 value={position.offset}
                 min={-10}
@@ -223,18 +227,23 @@ export function MotionPage({ fork, forkCommand }: { fork?: ForkState | null; for
                 disabled={!supports('position.set')}
                 onChange={(next) => void motionStore.setPosition(next)}
                 onCommit={(next) => void motionStore.setPosition(next)}
-              />
+              />}
 
               <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
                 <Button
                   variant="outline"
                   size="sm"
                   className="h-7 px-2.5 text-xs"
-                  disabled={!supports('position.set')}
-                  onClick={() => motionStore.resetPosition()}
+                  disabled={fork ? !selectedActor : !supports('position.set')}
+                  onClick={() => {
+                    if (fork && forkCommand && selectedActor) void forkCommand('formation.place', {
+                      slot: -1, actorToken: selectedActor.token, position: { x: 0, y: 0, z: 0 }, yaw: 0,
+                    })
+                    else motionStore.resetPosition()
+                  }}
                 >
                   <RiRestartFill className="size-3.5" />
-                  重置位置偏移
+                  {fork ? '重置站位与朝向' : '重置位置偏移'}
                 </Button>
                 <Button
                   variant="secondary"
@@ -338,7 +347,10 @@ export function MotionPage({ fork, forkCommand }: { fork?: ForkState | null; for
         badge={!supports('bone.set') ? <PendingBadge /> : undefined}
         summary={boneCount > 0 ? `${boneCount} 项活跃覆盖` : '暂无覆盖'}
       >
-        <BoneSection />
+        <div className="space-y-3">
+          {fork && forkCommand && <ForkAdvancedMotion state={fork} command={forkCommand} />}
+          <BoneSection />
+        </div>
       </CollapsiblePropertySection>
     </div>
   )

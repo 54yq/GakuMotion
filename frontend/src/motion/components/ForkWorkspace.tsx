@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Vector3Field } from './NumberField'
 import { getMotionBridge } from '../bridge'
 import { useMotionStore } from '../store'
 import type { ForkFollower, ForkState, Vector3 } from '../protocol'
@@ -10,7 +11,19 @@ const mockState: ForkState = {
   session: 1, owner: 1, epoch: 1, revision: 1, observed: true, viewing: true,
   paused: true, active: true, available: true, aspect: true, loop: false, loopLead: 1, liveTime: 42, duration: 155,
   liveNotice: 'Live 已暂停，可以为场景角色选择动作。',
-  position: zero, yaw: 0, formationNotice: '', presetNotice: '', presets: ['三人舞台'],
+  position: zero, yaw: 0, formationNotice: '',
+  placementReset: true, initializeBones: true, auxMode: 0, wristStatus: 0, armNotice: '',
+  arms: [
+    { token: 101, share: 0, degrees: 45, locked: false, bound: true, primary: true },
+    { token: 102, share: 0.2, degrees: 45, locked: false, bound: true, primary: false },
+  ],
+  props: [
+    { key: 'sample-mic', actorToken: 101, actor: '咲季', name: '麦克风', hidden: false, editable: true },
+    { key: 'sample-light', actorToken: 102, actor: '凛', name: '荧光棒', hidden: true, editable: true },
+  ],
+  propsEditable: true, followYaw: false, liveDof: false, liveClock: false, liveClockAvailable: true,
+  liveDiagnostics: false, liveClockNotice: '',
+  liveFps: 59.8, liveStalls: 0, swingReportLoaded: false,
   folders: [], folderNotice: '',
   followers: [
     { slot: 0, actorToken: 102, generation: 1, motionKey: '', position: { x: -1.2, y: 0, z: 0.4 }, yaw: 12, offsetSeconds: 0, physics: '原生物理' },
@@ -54,6 +67,36 @@ export function useForkWorkspace(preview = false) {
       if (action === 'live.loopLead') setState({ ...current, loopLead: Number(fields.value) })
       if (action === 'live.pause') setState({ ...current, paused: Boolean(fields.value) })
       if (action === 'live.seek') setState({ ...current, liveTime: Number(fields.value) })
+      if (action === 'motion.resetPhysics') setState({ ...current, placementReset: Boolean(fields.value) })
+      if (action === 'motion.initializeBones') setState({ ...current, initializeBones: Boolean(fields.value) })
+      if (action === 'motion.auxMode') setState({ ...current, auxMode: Number(fields.value) })
+      if (action === 'motion.wristReport') setState({ ...current, wristStatus: 2 })
+      if (action === 'camera.followYaw') setState({ ...current, followYaw: Boolean(fields.value) })
+      if (action === 'live.dof') setState({ ...current, liveDof: Boolean(fields.value) })
+      if (action === 'live.clock') setState({ ...current, liveClock: Boolean(fields.value) })
+      if (action === 'live.armDiagnostics') setState({ ...current, liveDiagnostics: Boolean(fields.value) })
+      if (action === 'live.swingReport') setState({ ...current, swingReportLoaded: true })
+      if (action === 'stage.prop') setState({ ...current, props: current.props.map(item =>
+        item.key === fields.key ? { ...item, hidden: Boolean(fields.value) } : item) })
+      if (action === 'motion.arm') setState({ ...current, arms: current.arms.map(item => {
+        if (item.token !== fields.actorToken) return item
+        switch (fields.operation) {
+          case 0: return { ...item, share: Number(fields.value) }
+          case 1: return { ...item, degrees: Number(fields.value) }
+          case 2: return { ...item, share: 0, degrees: 45 }
+          case 3: return { ...item, locked: Boolean(fields.value) }
+          default: return item
+        }
+      }) })
+      if (action === 'formation.place') {
+        const patch = {
+          ...(fields.position ? { position: fields.position as Vector3 } : {}),
+          ...(typeof fields.yaw === 'number' ? { yaw: fields.yaw } : {}),
+        }
+        setState(fields.slot === -1 ? { ...current, ...patch } : {
+          ...current, followers: current.followers.map(item => item.slot === fields.slot ? { ...item, ...patch } : item),
+        })
+      }
       return
     }
     try {
@@ -111,30 +154,38 @@ export function LiveControls({ state, command }: { state: ForkState; command: Fo
           </select>
         </label>}
       </div>
+      <details className="rounded-md border p-3">
+        <summary className="cursor-pointer text-xs font-medium">诊断与测试</summary>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Button size="sm" variant="outline" disabled={!state.viewing} onClick={() => void command('live.record')}>记录 Live 状态</Button>
+          <Button size="sm" variant="outline" onClick={() => void command('live.swingReport')}>读取上次 Swing 报告</Button>
+          <Button size="sm" variant="outline" disabled={!state.liveClock && (!state.liveClockAvailable || !state.paused || state.active)}
+            onClick={() => void command('live.clock', { value: !state.liveClock })}>
+            {state.liveClock ? '停止角色图实验并恢复' : '角色图运行 3 秒'}
+          </Button>
+          <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={state.liveDiagnostics}
+            onChange={event => void command('live.armDiagnostics', { value: event.currentTarget.checked })} />连续记录手臂与服装骨</label>
+        </div>
+        {state.liveClockNotice && <p className="mt-2 text-xs text-muted-foreground">{state.liveClockNotice}</p>}
+        <p className="mt-2 text-xs text-muted-foreground">
+          {state.liveFps > 0 ? `Unity 更新 ${state.liveFps.toFixed(1)} FPS · 本次记录卡顿 ${state.liveStalls} 次` : '等待 Live 帧采样'}
+          {state.swingReportLoaded && ' · 已读取 Swing 报告'}
+        </p>
+      </details>
     </section>
   )
 }
 
-function Placement({ slot, token, generation, initial, yaw, command }: {
-  slot: number; token: number; generation: number; initial: Vector3; yaw: number; command: ForkCommand
+export function ForkPlacementFields({ slot, token, generation, initial, yaw, command, labelPrefix }: {
+  slot: number; token: number; generation: number; initial: Vector3; yaw: number; command: ForkCommand; labelPrefix?: string
 }) {
-  const [draft, setDraft] = useState({ ...initial, yaw })
-  const [dirty, setDirty] = useState(false)
-  const values = dirty ? draft : { ...initial, yaw }
+  const apply = (patch: { position?: Vector3; yaw?: number }) =>
+    void command('formation.place', { slot, actorToken: token, generation, ...patch })
   return (
-    <div className="mt-3 flex flex-wrap items-end gap-2">
-      {(['x', 'y', 'z', 'yaw'] as const).map(key => (
-        <label className="w-20 text-xs text-muted-foreground" key={key}>
-          {key === 'yaw' ? '朝向 °' : `${key.toUpperCase()} 米`}
-          <Input className="mt-1 h-8 text-foreground" type="number" step={key === 'yaw' ? 1 : 0.05}
-            value={Number.isFinite(values[key]) ? values[key] : ''}
-            onChange={event => { setDraft({ ...values, [key]: event.currentTarget.valueAsNumber }); setDirty(true) }} />
-        </label>
-      ))}
-      <Button size="sm" variant="secondary" disabled={!token || !Object.values(values).every(Number.isFinite)}
-        onClick={async () => { await command('formation.place', { slot, actorToken: token, generation,
-          position: { x: values.x, y: values.y, z: values.z }, yaw: values.yaw }); setDirty(false) }}>应用站位</Button>
-    </div>
+    <Vector3Field labelPrefix={labelPrefix ?? (slot < 0 ? '主角色站位' : `副角色 ${slot + 1} 站位`)}
+      value={initial} min={-256} max={256} step={0.01} disabled={!token}
+      onCommit={position => apply({ position })}
+      heading={{ value: yaw, onCommit: value => apply({ yaw: value }) }} />
   )
 }
 
@@ -175,8 +226,11 @@ function Follower({ slot, follower, command }: { slot: number; follower?: ForkFo
         {Boolean(follower?.actorToken) && <Button size="sm" variant="ghost" disabled={bindingLocked}
           onClick={() => void command('formation.clear', { slot })}>解除</Button>}
       </div>
-      {follower?.generation ? <Placement slot={slot} token={follower.actorToken} generation={follower.generation}
+      {follower?.generation ? <ForkPlacementFields slot={slot} token={follower.actorToken} generation={follower.generation}
         initial={follower.position} yaw={follower.yaw} command={command} /> : null}
+      {follower?.generation ? <Button size="sm" variant="outline" onClick={() => void command('formation.place', {
+        slot, actorToken: follower.actorToken, generation: follower.generation, position: zero, yaw: 0,
+      })}>重置站位与朝向</Button> : null}
       {boundActor && <ModelVisibility actor={boundActor} command={command} />}
     </section>
   )
@@ -196,7 +250,6 @@ export function ForkEnsembleControls({ state, command }: { state: ForkState; com
   const playback = useMotionStore(model => model.player.state)
   const bindingLocked = playback === 'playing' || playback === 'paused'
   const [draftSlotCount, setDraftSlotCount] = useState(0)
-  const [preset, setPreset] = useState('')
   const slots = Math.max(state.followers.length, draftSlotCount)
   return (
     <div className="space-y-3">
@@ -215,7 +268,7 @@ export function ForkEnsembleControls({ state, command }: { state: ForkState; com
           <h3 className="text-sm font-medium">主角色{primary ? ` · ${primary.label}` : ''}</h3>
           <Button size="sm" variant="ghost" disabled={!primary} onClick={() => void command('formation.savePrimary')}>保存主角站位</Button>
         </div>
-        <Placement key={primary?.token} slot={-1} token={primary?.token ?? 0} generation={0}
+        <ForkPlacementFields key={primary?.token} slot={-1} token={primary?.token ?? 0} generation={0}
           initial={state.position} yaw={state.yaw} command={command} />
         {primary && <ModelVisibility actor={primary} command={command} />}
       </section>
@@ -224,15 +277,7 @@ export function ForkEnsembleControls({ state, command }: { state: ForkState; com
         return <Follower key={`${state.epoch}:${slot}:${follower?.generation ?? 0}`} slot={slot} follower={follower} command={command} />
       })}
       </div>
-      <div className="flex flex-wrap items-end gap-2 rounded-lg border bg-card p-4">
-        <label className="text-xs text-muted-foreground">队形预设
-          <Input className="mt-1 h-8 text-foreground" list="formation-presets" value={preset} onChange={event => setPreset(event.currentTarget.value)} />
-          <datalist id="formation-presets">{state.presets.map(name => <option key={name} value={name} />)}</datalist>
-        </label>
-        <Button size="sm" variant="secondary" disabled={!preset.trim()} onClick={() => void command('formation.save', { name: preset.trim() })}>保存</Button>
-        <Button size="sm" variant="secondary" disabled={!state.presets.includes(preset)} onClick={() => void command('formation.load', { name: preset })}>载入</Button>
-        {(state.presetNotice || state.formationNotice) && <p className="w-full text-xs text-muted-foreground">{state.presetNotice || state.formationNotice}</p>}
-      </div>
+      {state.formationNotice && <p className="text-xs text-muted-foreground">{state.formationNotice}</p>}
     </div>
   )
 }

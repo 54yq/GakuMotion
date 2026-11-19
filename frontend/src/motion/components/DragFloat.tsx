@@ -279,6 +279,7 @@ export function Vector3DragFloat({
   labelPrefix,
   onChange,
   onCommit,
+  heading,
 }: {
   value: { x: number; y: number; z: number }
   min: number
@@ -290,6 +291,7 @@ export function Vector3DragFloat({
   labelPrefix: string
   onChange?: (next: { x: number; y: number; z: number }) => void
   onCommit: (next: { x: number; y: number; z: number }) => void
+  heading?: { value: number; onCommit: (next: number) => void }
 }) {
   return (
     <div className="flex flex-wrap items-center gap-3">
@@ -305,10 +307,26 @@ export function Vector3DragFloat({
           dragSpeed={dragSpeed}
           decimals={decimals}
           disabled={disabled}
+          inputClassName={heading ? 'w-16' : undefined}
           onChange={onChange ? (next) => onChange({ ...value, [axis]: next }) : undefined}
           onCommit={(next) => onCommit({ ...value, [axis]: next })}
         />
       ))}
+      {heading && (
+        <DragFloat
+          label="朝向:"
+          ariaLabel={`${labelPrefix} 朝向`}
+          value={heading.value}
+          min={-180}
+          max={180}
+          step={1}
+          decimals={1}
+          unit="°"
+          disabled={disabled}
+          inputClassName="w-16"
+          onCommit={heading.onCommit}
+        />
+      )}
     </div>
   )
 }

@@ -13,6 +13,25 @@
 					",\"yaw\":" + JNum(follower.yawDegrees) + ",\"physics\":" + JString(follower.physicsStatus) + "}";
 			}
 			followers += "]";
+			std::string arms = "[";
+			for (const auto& arm : ctx.sceneArmCalibrations)
+			{
+				if (arms.size() > 1) arms += ",";
+				arms += "{\"token\":" + JNum(arm.token) + ",\"share\":" + JNum(arm.share) +
+					",\"degrees\":" + JNum(arm.degrees) + ",\"locked\":" + JBool(arm.locked) +
+					",\"bound\":" + JBool(arm.bound) + ",\"primary\":" + JBool(arm.primary) + "}";
+			}
+			arms += "]";
+			std::string props = "[";
+			for (const auto& prop : ctx.actorProps)
+			{
+				if (props.size() > 1) props += ",";
+				props += "{\"key\":" + JString(ActorPropKey(prop)) + ",\"actorToken\":" + JNum(prop.actorToken) +
+					",\"actor\":" + JString(prop.actorLabel) +
+					",\"name\":" + JString(live_actor_props::DisplayName(prop.propName)) +
+					",\"hidden\":" + JBool(prop.hidden) + ",\"editable\":" + JBool(prop.controllable) + "}";
+			}
+			props += "]";
 			const auto strings = [](const auto& values) {
 				std::string json = "[";
 				for (const auto& value : values) { if (json.size() > 1) json += ","; json += JString(value); }
@@ -26,10 +45,23 @@
 				",\"loop\":" + JBool(ctx.liveLoopEnabled) + ",\"loopLead\":" + JNum(ctx.liveLoopLead) +
 				",\"liveTime\":" + JNum(ctx.liveTime) + ",\"duration\":" + JNum(ctx.liveDuration) +
 				",\"liveNotice\":" + JString(ctx.liveControlNotice) + ",\"followers\":" + followers +
+				",\"placementReset\":" + JBool(ctx.placementResetExperiment) +
+				",\"initializeBones\":" + JBool(core_.player.initializeBeforeMotion) +
+				",\"auxMode\":" + JNum(core_.player.controller.auxDriveMode) +
+				",\"wristStatus\":" + JNum(core_.player.controller.wristDiagnosticStatus) +
+				",\"armNotice\":" + JString(ctx.forearmAxisNotice) + ",\"arms\":" + arms +
+				",\"props\":" + props + ",\"propsEditable\":" + JBool(ctx.actorPropsEditable) +
+				",\"followYaw\":" + JBool(core_.camera.settings.followPlacementYaw) +
+				",\"liveDof\":" + JBool(ctx.liveDofDisabled) +
+				",\"liveClock\":" + JBool(ctx.liveActorClockActive) + ",\"liveClockAvailable\":" + JBool(ctx.liveActorClockAvailable) +
+				",\"liveDiagnostics\":" + JBool(ctx.liveContinuousArmDiagnostics) +
+				",\"liveFps\":" + JNum(ctx.liveFrameMonitor.available ? ctx.liveFrameMonitor.fps : 0) +
+				",\"liveStalls\":" + JNum(static_cast<double>(ctx.liveFrameMonitor.stalls)) +
+				",\"swingReportLoaded\":" + JBool(ctx.physicsMonitor.checkpointReport.parsed) +
+				",\"liveClockNotice\":" + JString(ctx.liveActorClockNotice) +
 				",\"position\":" + JVec(core_.player.controller.initialPositionOffset) +
 				",\"yaw\":" + JNum(core_.player.controller.initialYawDegrees) +
-				",\"formationNotice\":" + JString(ctx.ensembleNotice) + ",\"presetNotice\":" + JString(ctx.ensemblePresetNotice) +
-				",\"presets\":" + strings(ctx.ensemblePresetNames) + ",\"folders\":" + strings(ctx.folderLibraryRoots) +
+				",\"formationNotice\":" + JString(ctx.ensembleNotice) + ",\"folders\":" + strings(ctx.folderLibraryRoots) +
 				",\"folderNotice\":" + JString(ctx.folderLibraryNotice) + "}";
 		}
 
@@ -68,6 +100,16 @@
 				else if (action == "live.seek" && ctx.liveViewingConfirmed && !ctx.liveTakeoverActive &&
 					NumberParam(params, "value", number) && number >= 0 && number < ctx.liveDuration)
 					ctx.fnSeekLive(ctx.self, static_cast<float>(number));
+				else if (action == "live.dof" && ctx.liveTakeoverActive && BoolParam(params, "value", enable))
+					ctx.fnSetLiveDofDisabled(ctx.self, enable);
+				else if (action == "live.record" && ctx.liveViewingConfirmed)
+					ctx.fnRecordLiveState(ctx.self);
+				else if (action == "live.swingReport") ctx.fnLoadSwingReport(ctx.self);
+				else if (action == "live.clock" && BoolParam(params, "value", enable) &&
+					(enable ? ctx.liveActorClockAvailable && ctx.livePaused && !ctx.liveTakeoverActive : ctx.liveActorClockActive))
+					ctx.fnActorClockTrial(ctx.self, enable);
+				else if (action == "live.armDiagnostics" && BoolParam(params, "value", enable))
+					ctx.fnSetContinuousArmDiagnostics(ctx.self, enable);
 				else return CmdResult::Err("not_ready", "当前 Live 状态不支持此操作");
 				return CmdResult::Ok();
 			}
@@ -86,6 +128,59 @@
 				return CmdResult::Err("stale_token", "角色名单已变化，请重新选择");
 			if (action == "formation.align") ctx.fnAlignEnsemble(ctx.self);
 			else if (action == "formation.auto") ctx.fnAutoAssignEnsemble(ctx.self);
+			else if (action == "motion.resetPhysics" || action == "motion.initializeBones" || action == "camera.followYaw")
+			{
+				bool enable = false;
+				if (!BoolParam(params, "value", enable)) return CmdResult::Err("invalid_params", "需要布尔值");
+				if (action == "motion.resetPhysics") ctx.fnSetPlacementResetExperiment(ctx.self, enable);
+				else if (action == "motion.initializeBones") ctx.fnSetInitializeBeforeMotion(ctx.self, enable);
+				else
+				{
+					auto settings = core_.camera.settings;
+					settings.followPlacementYaw = enable;
+					core_.QueueCameraSettings(settings);
+				}
+			}
+			else if (action == "motion.auxMode")
+			{
+				int64_t mode = -1;
+				if (!IntParam(params, "value", mode) || mode < 0 || mode >= kAuxModeCount)
+					return CmdResult::Err("invalid_params", "辅助骨模式无效");
+				ctx.fnSetAuxDriveMode(ctx.self, static_cast<int>(mode));
+			}
+			else if (action == "motion.wristReport")
+			{
+				if (core_.player.state == PlaybackState::Stopped)
+					return CmdResult::Err("not_ready", "请先载入动作");
+				ctx.fnCaptureWristDiagnostic(ctx.self);
+			}
+			else if (action == "motion.arm")
+			{
+				int64_t token = -1, op = -1;
+				double value = 0;
+				if (!IntParam(params, "actorToken", token) || token <= 0 ||
+					!core_.sceneActorRegistry.Resolve(static_cast<uint64_t>(token), ctx.actorRosterEpoch) ||
+					!IntParam(params, "operation", op) || op < 0 || op > 3 ||
+					!NumberParam(params, "value", value) ||
+					(op == 0 && std::abs(value) > 1) || (op == 1 && std::abs(value) > 90) ||
+					(op == 3 && value != 0 && value != 1))
+					return CmdResult::Err("invalid_params", "校正角色或数值无效");
+				ctx.fnSetSceneArm(ctx.self, static_cast<uint64_t>(token), ctx.actorRosterEpoch,
+					static_cast<int>(op), static_cast<float>(value));
+			}
+			else if (action == "stage.prop")
+			{
+				std::string key;
+				int64_t token = -1;
+				bool hidden = false;
+				if (!ctx.actorPropsEditable || !IntParam(params, "actorToken", token) || token <= 0 ||
+					!StringParam(params, "key", key) || !BoolParam(params, "value", hidden) ||
+					!std::any_of(ctx.actorProps.begin(), ctx.actorProps.end(), [&](const auto& prop) {
+						return prop.actorToken == static_cast<uint64_t>(token) && prop.controllable && ActorPropKey(prop) == key;
+					}))
+					return CmdResult::Err("stale_token", "道具不可编辑或已变化");
+				ctx.fnSetActorPropHidden(ctx.self, static_cast<uint64_t>(token), ctx.actorRosterEpoch, key.c_str(), hidden);
+			}
 			else if (action == "actor.hideModel")
 			{
 				int64_t token = -1;
@@ -97,31 +192,27 @@
 				ctx.fnSetActorModelHidden(ctx.self, static_cast<uint64_t>(token), ctx.actorRosterEpoch, hidden);
 			}
 			else if (action == "formation.savePrimary") ctx.fnSaveInitialPosition(ctx.self);
-			else if (action == "formation.save" || action == "formation.load")
-			{
-				std::string name;
-				if (!StringParam(params, "name", name) || !ValidPresetName(name) || name.find('\0') != std::string::npos)
-					return CmdResult::Err("invalid_params", "请输入有效队形名称");
-				if (action == "formation.save") ctx.fnSaveEnsemblePreset(ctx.self, name.c_str());
-				else ctx.fnApplyEnsemblePreset(ctx.self, name.c_str());
-			}
 			else if (action == "formation.place")
 			{
 				int64_t slot = -2;
 				Vector3 position;
 				double yaw = 0;
-				if (!IntParam(params, "slot", slot) || !VecParam(params, "position", position) ||
-					!NumberParam(params, "yaw", yaw) || std::abs(yaw) > 180 ||
-					std::abs(position.x) > 256 || std::abs(position.y) > 256 || std::abs(position.z) > 256)
+				const bool setPosition = params.Find("position") != nullptr;
+				const bool setYaw = params.Find("yaw") != nullptr;
+				if (!IntParam(params, "slot", slot) || (!setPosition && !setYaw) ||
+					(setYaw && (!NumberParam(params, "yaw", yaw) || std::abs(yaw) > 180)) ||
+					(setPosition && (!VecParam(params, "position", position) || std::abs(position.x) > 256 ||
+						std::abs(position.y) > 256 || std::abs(position.z) > 256)))
 					return CmdResult::Err("invalid_params", "站位或朝向超出范围");
 				if (slot == -1)
 				{
 					int64_t token = -1;
 					if (!IntParam(params, "actorToken", token) || token <= 0 ||
+					!core_.player.controller.targetActor ||
 						core_.sceneActorRegistry.Resolve(static_cast<uint64_t>(token), ctx.actorRosterEpoch) != core_.player.controller.targetActor)
 						return CmdResult::Err("stale_token", "主角色已变化");
-					core_.QueueInitialPosition(position);
-					core_.QueueInitialYaw(static_cast<float>(yaw));
+					if (setPosition) core_.QueueInitialPosition(position);
+					if (setYaw) core_.QueueInitialYaw(static_cast<float>(yaw));
 				}
 				else
 				{
@@ -133,8 +224,8 @@
 					const auto& follower = ctx.ensembleFollowers[static_cast<size_t>(slot)];
 					if (follower.actorToken != static_cast<uint64_t>(token) || follower.bindingGeneration != static_cast<uint64_t>(generation))
 						return CmdResult::Err("stale_token", "副角色绑定已变化");
-					ctx.fnSetEnsemblePosition(ctx.self, static_cast<int>(slot), follower.actorToken, ctx.actorRosterEpoch, follower.bindingGeneration, position);
-					ctx.fnSetEnsembleYaw(ctx.self, static_cast<int>(slot), follower.actorToken, ctx.actorRosterEpoch, follower.bindingGeneration, static_cast<float>(yaw));
+					if (setPosition) ctx.fnSetEnsemblePosition(ctx.self, static_cast<int>(slot), follower.actorToken, ctx.actorRosterEpoch, follower.bindingGeneration, position);
+					if (setYaw) ctx.fnSetEnsembleYaw(ctx.self, static_cast<int>(slot), follower.actorToken, ctx.actorRosterEpoch, follower.bindingGeneration, static_cast<float>(yaw));
 				}
 			}
 			else if (action == "formation.bind" || action == "formation.clear")
