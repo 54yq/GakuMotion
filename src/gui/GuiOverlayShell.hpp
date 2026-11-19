@@ -79,7 +79,11 @@ namespace GakuMotion
 		ImGui::TextColored(readyColor, "%s", readyText);
 		if (ctx.liveTakeoverActive)
 		{
-            if (ImGui::Button("Live 接管页面")) { overlay.CommitScrub(ctx); overlay.livePageOpen = true; }
+			if (ImGui::Button("Live 接管页面"))
+			{
+				overlay.CommitScrub(ctx);
+				overlay.livePageOpen = true;
+			}
 			if (!ctx.liveControlNotice.empty()) ImGui::TextWrapped("%s", ctx.liveControlNotice.c_str());
 		}
 
@@ -97,18 +101,22 @@ namespace GakuMotion
 		auto drawNavigation = [&](bool horizontal)
 		{
 			const float width = ImGui::GetContentRegionAvail().x;
+			const float minWidth = GuiIcons::ButtonSize("设置").x;
+			const int columns = width >= 3.0f * minWidth + 2.0f * style.ItemSpacing.x ? 3 : 2;
 			const float itemWidth = horizontal
-				? (std::max)(1.0f, std::floor((width - 2.0f * style.ItemSpacing.x) / 3.0f))
+				? (std::max)(1.0f, std::floor((width - (columns - 1) * style.ItemSpacing.x) / columns))
 				: width;
 			const float height = (std::max)(30.0f, ImGui::GetFrameHeight());
 			int itemIndex = 0;
 			auto navItem = [&](const char* label, GuiPage page, GuiIcons::Icon icon)
 			{
-				if (horizontal && itemIndex % 3 != 0) ImGui::SameLine();
+				if (horizontal && itemIndex % columns != 0) ImGui::SameLine();
 				++itemIndex;
 				ImGui::PushStyleColor(ImGuiCol_Button, overlay.activePage == page
 					? ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive) : ImVec4(0, 0, 0, 0));
-				if (GuiIcons::Button(label, icon, ImVec2(itemWidth, height))) overlay.activePage = page;
+				const ImVec2 size(itemWidth, height);
+				const bool pressed = horizontal ? ImGui::Button(label, size) : GuiIcons::Button(label, icon, size);
+				if (pressed) overlay.activePage = page;
 				ImGui::PopStyleColor();
 			};
 			navItem("曲库", GuiPage::Library, GuiIcons::Icon::Library);

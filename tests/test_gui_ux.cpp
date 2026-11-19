@@ -11,8 +11,6 @@
 #include <string>
 #include <vector>
 
-namespace GakuMotion::Log { void Write(Level, const char*, ...) {} }
-
 using namespace GakuMotion;
 
 // The headless harness does not load the host plugin's logging service.
@@ -955,6 +953,19 @@ int main(int argc, char** argv)
 	GImGui->TestEngineHookItems = true;
 	TestPlaybackAndTrackTimingGui(root);
 	TestResponsiveLibraryAndStageLayout(root);
+	{
+		Harness app(root);
+		app.windowWidth = 330.0f;
+		app.contextPatch = [](GuiContext& context) { context.injectionAllowed = true; };
+		app.Settle();
+		const auto* library = app.ItemWithLabel("曲库");
+		const auto* motion = app.ItemWithLabel("动作");
+		Check(library && motion && motion->rect.Min.x > library->rect.Min.x &&
+			motion->rect.Min.y == library->rect.Min.y, "compact navigation puts the main pages in a row");
+		app.Click("动作");
+		Check(app.core.gui.activePage == GuiPage::Motion && app.ItemWithLabel("表情幅度"),
+			"compact navigation opens the motion page with a dedicated facial section");
+	}
 	TestCameraPursuitControls(root);
 	TestCameraFollowTargetControls(root);
 	TestUnifiedCameraModeControls(root);

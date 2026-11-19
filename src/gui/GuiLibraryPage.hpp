@@ -837,7 +837,7 @@ namespace GakuMotion
 			}
 			ImGui::TextDisabled("速度与播放栏倍速相乘；偏移正数后移，负数前移。");
 			ImGui::SetNextItemWidth(160.0f);
-			ImGui::Combo("源动作帧率", &g_libraryModal.sourceFpsIndex, "自动检测\0 30 fps\0 60 fps\0");
+			ImGui::Combo("源动作帧率", &g_libraryModal.sourceFpsIndex, "自动检测\0 30 fps\0 60 fps\0 25 fps\0");
 			if (ImGui::IsItemHovered()) ImGui::SetTooltip("素材的时间基准；动作过快或过慢时可指定。修改已有曲目的源帧率会重新烘焙动作。");
 			ImGui::SetNextItemWidth(160.0f);
 			ImGui::Combo("输出采样帧率", &g_libraryModal.outputFpsIndex, "自动（保持原有）\0 30 fps\0 60 fps\0");
@@ -1013,7 +1013,8 @@ namespace GakuMotion
 				req.title = g_libraryModal.titleInput[0] ? g_libraryModal.titleInput : "未命名演出";
 				req.fps = g_libraryModal.outputFpsIndex == 1 ? 30.f : g_libraryModal.outputFpsIndex == 2 ? 60.f : 0.f;
 				req.rebakeOutput = g_libraryModal.isEditMode && req.fps > 0;
-				req.sourceFps = g_libraryModal.sourceFpsIndex == 1 ? 30.f : g_libraryModal.sourceFpsIndex == 2 ? 60.f : 0.f;
+				constexpr float sourceRates[] = {0.f, 30.f, 60.f, 25.f};
+				req.sourceFps = sourceRates[g_libraryModal.sourceFpsIndex];
 				req.timing = g_libraryModal.timing;
 
 				if (g_libraryModal.isEditMode)

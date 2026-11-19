@@ -562,6 +562,13 @@ namespace GakuMotion
                                 livePageAwaitingTakeover=!ctx.liveTakeoverActive;ctx.fnSetLiveTakeover(ctx.self,!ctx.liveTakeoverActive);
                             }
                             ImGui::EndDisabled();
+                            if (!ctx.liveTakeoverActive)
+                            {
+                                ImGui::SameLine();
+                                ImGui::BeginDisabled();
+                                ImGui::Button("恢复 Live");
+                                ImGui::EndDisabled();
+                            }
                             if(ctx.liveTakeoverActive&&ImGui::Button("进入 MMD 页面")){livePageOpen=false;activePage=GuiPage::Library;}
                             ImGui::TextDisabled(ctx.liveTakeoverActive?"退出后恢复原先 Live 状态。":"启动后暂停舞台并进入 MMD 曲库。");
                             ImGui::TextWrapped("如果 MMD 播放出现物理运算异常，请退出 Live 接管并重新接入，重置物理状态。");

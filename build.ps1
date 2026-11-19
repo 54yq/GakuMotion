@@ -81,7 +81,8 @@ if ($Target -eq 'Runtime' -or $Target -eq 'All') {
             "/I$(Join-Path $repo 'include')", "/I$(Join-Path $repo 'src')",
             "/I$(Join-Path $repo 'deps/KineTexture/src')", "/I$(Join-Path $repo 'deps/imgui')",
             "/Fo$nativeObjects\") + $sources + @('winmm.lib', 'user32.lib', 'comdlg32.lib',
-            '/link', "/OUT:$(Join-Path $nativeOutput 'GakuMotion.dll')", '/SUBSYSTEM:WINDOWS', '/OPT:REF', '/OPT:ICF')
+            '/link', "/OUT:$(Join-Path $nativeOutput 'GakuMotion.dll')",
+            "/IMPLIB:$(Join-Path $nativeObjects 'GakuMotion.lib')", '/SUBSYSTEM:WINDOWS', '/OPT:REF', '/OPT:ICF')
         & $compiler @args
         if ($LASTEXITCODE -ne 0) { throw ('Portable runtime build failed: ' + $LASTEXITCODE) }
     } else {
@@ -215,7 +216,9 @@ try {
         (Join-Path $repo 'tests\test_refresh_core.cpp'), "/Fe:$coreExe", "/Fo:$coreObj", 'winmm.lib', 'user32.lib')
     & $compiler @coreArgs
     if ($LASTEXITCODE -ne 0) { throw ('Synthetic core build failed: ' + $LASTEXITCODE) }
-    & $coreExe $repo
+    $fixture = 'synthetic-fixture'
+    New-Item -ItemType Directory -Path (Join-Path $OutputRoot $fixture) -Force | Out-Null
+    & $coreExe $fixture
     if ($LASTEXITCODE -ne 0) { throw ('Synthetic core tests failed: ' + $LASTEXITCODE) }
 } finally { Pop-Location }
 Write-Host 'Synthetic contracts passed.'

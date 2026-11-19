@@ -2425,6 +2425,8 @@ static void TestPlaylistLifecycle(const std::string& repoRoot)
 	deletion.libraryRevision = core.libraryRevision;
 	core.QueueGui(std::move(deletion));
 	core.ProcessPendingGuiCommands();
+	if (fs::exists(root / "motions" / "song"))
+		std::printf("Playlist fixture delete diagnostic: %s\n", core.playlistNotice.c_str());
 	Check(core.CurrentMotion() && core.CurrentMotion()->name == "song_c",
 	      "commands identify songs independently of row renumbering");
 	core.RefreshMotionLibrary();
