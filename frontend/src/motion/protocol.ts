@@ -567,6 +567,13 @@ export interface ForkState {
   propsCanScan: boolean
   propsScanning: boolean
   propsNotice: string
+  livePostEffects?: {
+    paraffinEnabled: boolean
+    paraffinAvailable: boolean
+    disableDepthOfField: boolean
+    manualDepthOfField: boolean
+    depthOfFieldUnavailable: boolean
+  }
   fixedActorLighting?: boolean
   actorLightingStrengths?: { key: number; fill: number; rim: number }
   actorLightingLimits?: { key: number; fill: number; rim: number }

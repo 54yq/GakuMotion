@@ -276,6 +276,28 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
           />
         </div>
 
+        {fork && forkCommand && fork.livePostEffects && (
+          <>
+            <PropertyRow label="镜头光晕（Paraffin）" htmlFor="stage-live-paraffin"
+              description={fork.active && !fork.livePostEffects.paraffinAvailable ? '当前光晕接口不可用' : undefined}>
+              <Checkbox id="stage-live-paraffin" checked={fork.livePostEffects.paraffinEnabled}
+                disabled={!fork.active || !fork.livePostEffects.paraffinAvailable}
+                onCheckedChange={(checked) => void forkCommand('live.paraffin', { value: checked === true })} />
+            </PropertyRow>
+            <PropertyRow label="关闭 Live 景深" htmlFor="stage-live-depth-of-field"
+              description={fork.livePostEffects.depthOfFieldUnavailable ? '当前景深接口不可用'
+                : fork.livePostEffects.manualDepthOfField ? '当前 Live 使用手动设置' : '自动：VMD 运镜时关闭'}>
+              {fork.livePostEffects.manualDepthOfField && (
+                <Button size="sm" variant="outline" disabled={!fork.active}
+                  onClick={() => void forkCommand('live.depthOfFieldAuto')}>恢复自动</Button>
+              )}
+              <Checkbox id="stage-live-depth-of-field" checked={fork.livePostEffects.disableDepthOfField}
+                disabled={!fork.active}
+                onCheckedChange={(checked) => void forkCommand('live.depthOfField', { value: checked === true })} />
+            </PropertyRow>
+          </>
+        )}
+
         {fork && forkCommand && fork.fixedActorLighting !== undefined && (
           <>
             <div className="flex items-center justify-between gap-3 px-3.5 py-2.5">

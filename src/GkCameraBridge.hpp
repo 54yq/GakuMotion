@@ -293,7 +293,8 @@ namespace CameraBridge
 	inline bool InstallIndependentDof();
 	inline bool DofRenderDetour(void* self, void* cmd, void* source, void* destination, void* cameraData, void* method)
 	{
-		const bool disabled = independentDofDisabled.load(std::memory_order_acquire);
+		const bool disabled = independentDofDisabled.load(std::memory_order_acquire) &&
+			GakuMotion::Core::Instance().injectionPolicy.Read().captureDepth == 0;
 		dofRenderCalls.fetch_add(1, std::memory_order_relaxed);
 		if (disabled) dofRenderSkipped.fetch_add(1, std::memory_order_relaxed);
 		return GakuMotion::InvokeDofRender(disabled,
@@ -898,26 +899,7 @@ namespace CameraBridge
 		}
 
 		auto& liveCore = GakuMotion::Core::Instance();
-		const bool disableLiveDof = liveCore.ShouldDisableLiveDof();
-		if (!disableLiveDof) independentDofDisabled.store(false, std::memory_order_release);
-		if (liveCore.liveTakeoverActive)
-		{
-			TraceCameraFocus(camera);
-			if (disableLiveDof)
-			{
-				const bool available = InstallIndependentDof();
-				independentDofDisabled.store(available, std::memory_order_release);
-				static auto lastDofTrace = std::chrono::steady_clock::time_point{};
-				const auto now = std::chrono::steady_clock::now();
-				if (g_hostContext.logInfo && now - lastDofTrace >= std::chrono::seconds(4))
-				{
-					g_hostContext.logInfo("[GakuMotion][LiveDoFRenderTrace] hook=%d calls=%llu skipped=%llu",
-					    int(available), static_cast<unsigned long long>(dofRenderCalls.load(std::memory_order_relaxed)),
-					    static_cast<unsigned long long>(dofRenderSkipped.load(std::memory_order_relaxed)));
-					lastDofTrace = now;
-				}
-			}
-		}
+		if (liveCore.liveTakeoverActive) TraceCameraFocus(camera);
 		else if (focalDistance >= 0.2f && focalDistance <= 50.0f)
 			WritePhotographyDoFFocalPoint(focalDistance);
 

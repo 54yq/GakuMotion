@@ -57,6 +57,11 @@
 				",\"propsCanScan\":" + JBool(ctx.injectionAllowed || ctx.liveViewingConfirmed) +
 				",\"propsScanning\":" + JBool(core_.actorPropScanRequested) +
 				",\"propsNotice\":" + JString(ctx.ensembleNotice.starts_with("该时间轴道具") ? ctx.ensembleNotice : "") +
+				",\"livePostEffects\":{\"paraffinEnabled\":" + JBool(core_.liveParaffinEnabled) +
+					",\"paraffinAvailable\":" + JBool(core_.liveParaffinAvailable) +
+					",\"disableDepthOfField\":" + JBool(core_.ShouldDisableLiveDof()) +
+					",\"manualDepthOfField\":" + JBool(core_.liveDepthOfFieldOverride >= 0) +
+					",\"depthOfFieldUnavailable\":" + JBool(core_.liveDepthOfFieldUnavailable) + "}" +
 				",\"fixedActorLighting\":" + JBool(core_.fixedActorLighting) +
 				",\"actorLightingStrengths\":{\"key\":" + JNum(core_.actorLightingStrengths.key) +
 					",\"fill\":" + JNum(core_.actorLightingStrengths.fill) +
@@ -139,6 +144,14 @@
 					core_.actorLightingSampleOwner = core_.liveOwnerToken;
 					core_.fixedActorLightingNotice = "正在读取主角色所在 Live 的打光…";
 				}
+				else if (action == "live.paraffin" && ctx.liveTakeoverActive && core_.liveParaffinAvailable &&
+					!camera_handoff::Requested() && BoolParam(params, "value", enable))
+					core_.liveParaffinEnabled = enable;
+				else if (action == "live.depthOfField" && ctx.liveTakeoverActive &&
+					!camera_handoff::Requested() && BoolParam(params, "value", enable))
+					core_.liveDepthOfFieldOverride = enable ? 1 : 0;
+				else if (action == "live.depthOfFieldAuto" && ctx.liveTakeoverActive && !camera_handoff::Requested())
+					core_.liveDepthOfFieldOverride = -1;
 				else if (action == "live.aspect" && BoolParam(params, "value", enable))
 					ctx.fnSetLiveAspectPreview(ctx.self, enable);
 				else if (action == "live.pause" && ctx.liveViewingConfirmed && !ctx.liveTakeoverActive &&

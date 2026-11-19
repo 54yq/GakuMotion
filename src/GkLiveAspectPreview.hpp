@@ -30,7 +30,8 @@ namespace LiveAspectPreview
     using ValidParaffinAspect = bool (*)(void*, float, const void*);
     inline SetupParaffin setupParaffin{};
     inline ValidParaffinAspect validParaffinAspect{};
-    inline bool flareHooksAttempted{}, flareAspectObserved{};
+    inline bool flareHooksAttempted{}, flareAspectHookReady{}, flareAspectObserved{};
+    inline std::atomic_bool suppressParaffin{false};
 
     inline bool Invoke(const void* method, void* object, void* argument)
     {
@@ -62,6 +63,8 @@ namespace LiveAspectPreview
 
     inline bool CheckOriginalParaffinAspect(void* self, float aspect, const void* method)
     {
+        if (suppressParaffin.load(std::memory_order_acquire) && CameraBridge::OnUnityThread() &&
+            GakuMotion::Core::Instance().injectionPolicy.Read().captureDepth == 0) return false;
         return validParaffinAspect(self, ParaffinAspect(aspect), method);
     }
 
@@ -77,9 +80,11 @@ namespace LiveAspectPreview
             md.Find(pass, "SetupVLParaffin", false, {0x01}, {{0x12, command}, {0x0c}, {0x12, volume}}) &&
             CameraBridge::InstallHook("VLPostProcessPass.SetupVLParaffin", FindMethodPointer(pass, "SetupVLParaffin", 3),
                 reinterpret_cast<void*>(SetupParaffinWithOriginalAspect), reinterpret_cast<void**>(&setupParaffin));
-        const bool check = volume && md.Find(volume, "IsValidAspect", false, {0x02}, {{0x0c}}) &&
-            CameraBridge::InstallHook("VLParaffin.IsValidAspect", FindMethodPointer(volume, "IsValidAspect", 1),
+        const void* aspectCheck = volume ? md.Find(volume, "IsValidAspect", false, {0x02}, {{0x0c}}) : nullptr;
+        const bool check = aspectCheck &&
+            CameraBridge::InstallHook("VLParaffin.IsValidAspect", GroundShadowProbeBootstrap::MethodPointer(aspectCheck),
                 reinterpret_cast<void*>(CheckOriginalParaffinAspect), reinterpret_cast<void**>(&validParaffinAspect));
+        flareAspectHookReady = check && validParaffinAspect;
         const auto log = setup && check ? g_hostContext.logInfo : g_hostContext.logWarn;
         if (log) log("[GakuMotion][LiveAspectPreview] paraffin hooks setup=%d aspect_check=%d", int(setup), int(check));
     }
@@ -255,12 +260,32 @@ namespace LiveAspectPreview
         const auto owner = g_sceneOwner.Valid() && g_sceneOwner.role == GakuMotion::injection::OwnerRole::Live
             ? g_sceneOwner.presenterIdentity : 0;
         const int scene = owner ? g_sceneOwner.sceneHandle : 0;
-        const bool requested = owner && owner == core.liveOwnerToken && scene == core.liveOwnerScene &&
-            core.liveTakeoverActive && !core.liveTakeoverFault && core.liveAspectPreviewRequested &&
-            !GakuMotion::camera_handoff::Requested();
+        const bool takeover = owner && owner == core.liveOwnerToken && scene == core.liveOwnerScene &&
+            core.liveTakeoverActive && !core.liveTakeoverFault && !GakuMotion::camera_handoff::Requested();
+        const bool requested = takeover && core.liveAspectPreviewRequested;
         const bool sameOwner = lease.owner && lease.owner == owner && lease.scene == scene;
         const bool protectedCamera = core.injectionPolicy.Read().captureDepth != 0 ||
             !GakuMotion::capture::LiveAutoPhotoIdle();
+        if (takeover && !protectedCamera && !flareHooksAttempted && g_gameAssembly)
+            PrepareParaffin(GroundShadowProbeBootstrap::Resolve(g_gameAssembly).method);
+        core.liveParaffinAvailable = flareAspectHookReady;
+        suppressParaffin.store(takeover && !protectedCamera && core.liveParaffinAvailable && !core.liveParaffinEnabled,
+            std::memory_order_release);
+        if (!core.liveTakeoverActive) {
+            core.liveParaffinEnabled = true;
+            core.liveDepthOfFieldOverride = -1;
+        }
+        const bool disableDepth = takeover && !protectedCamera && core.ShouldDisableLiveDof();
+        const bool depthInstalled = disableDepth && CameraBridge::InstallIndependentDof();
+        core.liveDepthOfFieldUnavailable = disableDepth && !depthInstalled;
+        CameraBridge::independentDofDisabled.store(depthInstalled, std::memory_order_release);
+        static auto lastDofTrace = Clock::time_point{};
+        if (disableDepth && g_hostContext.logInfo && now - lastDofTrace >= std::chrono::seconds(4)) {
+            lastDofTrace = now;
+            g_hostContext.logInfo("[GakuMotion][LiveDoFRenderTrace] hook=%d calls=%llu skipped=%llu",
+                int(depthInstalled), static_cast<unsigned long long>(CameraBridge::dofRenderCalls.load(std::memory_order_relaxed)),
+                static_cast<unsigned long long>(CameraBridge::dofRenderSkipped.load(std::memory_order_relaxed)));
+        }
 
         if (lease.owner && (!requested || !sameOwner)) {
             if (!sameOwner || (!protectedCamera && now >= restoreAt)) {

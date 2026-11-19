@@ -27,6 +27,8 @@ const mockState: ForkState = {
   propsCanScan: true, propsScanning: false, propsNotice: '',
   actorLightingStrengths: { key: 0.40, fill: 0.035, rim: 0.25 },
   actorLightingLimits: { key: 1, fill: 0.25, rim: 0.25 },
+  livePostEffects: { paraffinEnabled: true, paraffinAvailable: true, disableDepthOfField: false,
+    manualDepthOfField: false, depthOfFieldUnavailable: false },
   propsEditable: true, fixedActorLighting: false, followYaw: false, liveClock: false, liveClockAvailable: true,
   liveDiagnostics: false, liveClockNotice: '',
   liveFps: 59.8, liveStalls: 0, swingReportLoaded: false,
@@ -79,6 +81,13 @@ export function useForkWorkspace(preview = false) {
         setState({ ...current, fixedActorLighting: true, fixedActorLightingNotice: '预览模式使用示例打光' })
       if (action === 'live.actorLightingReset')
         setState({ ...current, actorLightingStrengths: mockState.actorLightingStrengths })
+      if (current.livePostEffects && (action === 'live.paraffin' || action === 'live.depthOfField' || action === 'live.depthOfFieldAuto')) {
+        const effects = current.livePostEffects
+        setState({ ...current, livePostEffects: action === 'live.paraffin'
+          ? { ...effects, paraffinEnabled: Boolean(fields.value) }
+          : { ...effects, disableDepthOfField: action === 'live.depthOfField' && Boolean(fields.value),
+            manualDepthOfField: action === 'live.depthOfField' } })
+      }
       if (action === 'live.aspect') setState({ ...current, aspect: Boolean(fields.value) })
       if (action === 'live.loop') setState({ ...current, loop: Boolean(fields.value) })
       if (action === 'live.loopLead') setState({ ...current, loopLead: Number(fields.value) })

@@ -124,6 +124,9 @@ namespace GakuMotion
 		bool liveViewingConfirmed{false};
 		bool liveTakeoverActive{false}, liveTakeoverAvailable{false};
 		bool liveAspectPreviewRequested{true};
+		bool liveParaffinEnabled{true}, liveParaffinAvailable{false};
+		int liveDepthOfFieldOverride{-1};
+		bool liveDepthOfFieldUnavailable{false};
 		PhysicsMonitor physicsMonitor;
 		std::chrono::steady_clock::time_point physicsMonitorAt{};
 		struct ActorLightingStrengths
@@ -176,7 +179,10 @@ namespace GakuMotion
 		bool (*fnBeforeInjection)(){nullptr};
 		bool ShouldDisableLiveDof() const
 		{
-			return liveTakeoverActive && camera.settings.enabled && camera.settings.mode == CameraMode::Track;
+			if (!liveTakeoverActive) return false;
+			return liveDepthOfFieldOverride < 0
+				? camera.settings.enabled && camera.settings.mode == CameraMode::Track
+				: liveDepthOfFieldOverride != 0;
 		}
 
 		bool InjectionAllowed() const { return !enforceInjectionPolicy || injectionPolicy.CanInject(); }

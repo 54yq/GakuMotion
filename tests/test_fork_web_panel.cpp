@@ -78,6 +78,20 @@ int main()
 	check(ok(request("fork.command", R"({"action":"live.fixedActorLighting","session":12,"owner":19,"value":true})")) &&
 		request("fork.get").BoolPath("result.fixedActorLighting", false),
 		"Web exposes the current Live actor lighting request");
+	core.liveParaffinAvailable = true;
+	check(!ok(request("fork.command", R"({"action":"live.paraffin","session":12,"owner":18,"value":false})")) &&
+		core.liveParaffinEnabled, "A stale Live owner cannot toggle Paraffin");
+	check(ok(request("fork.command", R"({"action":"live.paraffin","session":12,"owner":19,"value":false})")) &&
+		!request("fork.get").BoolPath("result.livePostEffects.paraffinEnabled", true),
+		"Paraffin can be disabled independently in the current Live");
+	check(ok(request("fork.command", R"({"action":"live.depthOfField","session":12,"owner":19,"value":true})")) &&
+		core.ShouldDisableLiveDof(), "Manual depth of field control works with native camera mode");
+	core.camera.settings.enabled = true;
+	core.camera.settings.mode = CameraMode::Track;
+	check(ok(request("fork.command", R"({"action":"live.depthOfField","session":12,"owner":19,"value":false})")) &&
+		!core.ShouldDisableLiveDof(), "Manual override can restore depth of field in VMD mode");
+	check(ok(request("fork.command", R"({"action":"live.depthOfFieldAuto","session":12,"owner":19})")) &&
+		core.ShouldDisableLiveDof() && core.liveDepthOfFieldOverride < 0, "Automatic VMD depth of field behavior can be restored");
 	const auto defaults = core.actorLightingStrengths;
 	check(defaults.key == .40f && defaults.fill == .035f && defaults.rim == .25f,
 		"The new lighting defaults match the selected strengths");
