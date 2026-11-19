@@ -29,24 +29,49 @@ namespace GakuMotion
 				ImGui::TextDisabled("未启用");
 			}
 		};
-		for (size_t i = 0; i < ctx.actorProps.size();) {
-			const auto& prop = ctx.actorProps[i];
-			if (!prop.modelId) {
-				draw(prop, numbered(live_actor_props::DisplayName(prop.propName) + " · " + prop.actorLabel));
-				++i;
+		struct Group {
+			std::string key, name;
+			std::vector<const GuiActorProp*> parts;
+		};
+		std::vector<Group> groups;
+		std::unordered_map<std::string, size_t> groupIndices;
+		for (const auto& prop : ctx.actorProps) {
+			const bool penlight = prop.propName.find("Penlight") != std::string::npos ||
+				prop.propName.find("penlight") != std::string::npos;
+			const auto key = penlight ? std::string("penlight") : prop.modelId
+				? "model/" + std::to_string(prop.modelId) : ActorPropKey(prop);
+			auto [entry, inserted] = groupIndices.try_emplace(key, groups.size());
+			if (!inserted) {
+				groups[entry->second].parts.push_back(&prop);
 				continue;
 			}
-			auto name = prop.modelName;
+			auto name = prop.modelId ? prop.modelName : live_actor_props::DisplayName(prop.propName);
 			if (name.find("_trolley") != std::string::npos) name = "移动箱";
 			else if (name.find("_crane") != std::string::npos) name = "摇臂";
 			else if (name.find("_dolly") != std::string::npos) name = "轨道摄影车";
-			const auto heading = numbered(name + " · " + prop.actorLabel);
-			ImGui::PushID(prop.modelId);
+			groups.push_back({key, penlight ? "荧光棒" : name + " · " + prop.actorLabel, {&prop}});
+		}
+		for (const auto& group : groups) {
+			const auto hiddenCount = std::count_if(group.parts.begin(), group.parts.end(),
+				[](const auto* part) { return part->hidden; });
+			bool hidden = static_cast<size_t>(hiddenCount) == group.parts.size();
+			const bool editable = ctx.actorPropsEditable && ctx.fnSetActorPropHidden &&
+				std::all_of(group.parts.begin(), group.parts.end(), [](const auto* part) { return part->controllable; });
+			ImGui::PushID(group.key.c_str());
+			ImGui::BeginDisabled(!editable);
+			if (ImGui::Checkbox("##hide_group", &hidden)) {
+				for (const auto* part : group.parts)
+					if (part->hidden != hidden)
+						ctx.fnSetActorPropHidden(ctx.self, part->actorToken, ctx.actorRosterEpoch,
+							ActorPropKey(*part).c_str(), hidden);
+			}
+			if (ImGui::IsItemHovered()) ImGui::SetTooltip("隐藏或恢复整组");
+			ImGui::EndDisabled();
+			ImGui::SameLine();
+			const auto heading = numbered(group.name) + (hiddenCount && !hidden ? "（部分隐藏）" : "");
 			const bool expanded = ImGui::TreeNodeEx("model", ImGuiTreeNodeFlags_OpenOnArrow, "%s", heading.c_str());
-			do {
-				const auto& part = ctx.actorProps[i++];
-				if (expanded) draw(part, part.propName);
-			} while (i < ctx.actorProps.size() && ctx.actorProps[i].modelId == prop.modelId);
+			if (expanded) for (const auto* part : group.parts)
+				draw(*part, part->modelId ? part->propName : live_actor_props::DisplayName(part->propName) + " · " + part->actorLabel);
 			if (expanded) ImGui::TreePop();
 			ImGui::PopID();
 		}
