@@ -96,7 +96,7 @@ namespace GakuMotion
 
 		// A missing or replaced actor is never touched during cleanup. If it was
 		// active, retain its snapshot and fail closed until the scene is discarded.
-		bool Clear(size_t index, const SceneActorRegistry& registry)
+		bool RestoreSlot(size_t index, const SceneActorRegistry& registry)
 		{
 			if (index >= followers_.size()) return false;
 			auto& follower = followers_[index];
@@ -114,9 +114,15 @@ namespace GakuMotion
 					{ restoreUnconfirmed_ = true; return false; }
 				}
 				follower.player->controller.DiscardBindings();
+				follower.active = false;
 			}
-			follower = {};
-			assignments_.Clear(index + 1);
+			return true;
+		}
+
+		bool Clear(size_t index, const SceneActorRegistry& registry)
+		{
+			if (!RestoreSlot(index, registry)) return false;
+			followers_[index] = {};
 			return true;
 		}
 
@@ -148,7 +154,6 @@ namespace GakuMotion
 					// The departed controller must not restore its cached Unity objects.
 					if (!releaseDetached || !releaseDetached(i)) return false;
 					follower = {};
-					assignments_.Clear(i + 1);
 				}
 			}
 			return true;
@@ -158,25 +163,15 @@ namespace GakuMotion
 		void Abandon()
 		{
 			for (auto& follower : followers_) follower = {};
-			assignments_.Reset();
 			placements_.clear();
 			armCalibrations_.clear();
 			restoreUnconfirmed_ = false;
 		}
 
-		bool Set(size_t index, uint64_t actorToken, uint64_t epoch, const MotionEntry& motion,
-		         float offset, const SceneActorRegistry& registry, const MotionPlayer& primary,
-		         const BoneOverrideSet& global, bool overridesEnabled)
+		bool PrepareFollower(Follower& follower, uint64_t actorToken, void* actor, const MotionEntry& motion,
+		                     float offset, const MotionPlayer& primary, const BoneOverrideSet& global, bool overridesEnabled)
 		{
-			if (!primary.controller.targetActor || !std::isfinite(offset) || motion.name.empty() ||
-			    primary.state == PlaybackState::Playing || primary.state == PlaybackState::Paused) return false;
-			void* actor = registry.Resolve(actorToken, epoch);
-			if (!actor || actor == primary.controller.targetActor) return false;
-			for (size_t i = 0; i < followers_.size(); ++i)
-				if (i != index && followers_[i].actorToken == actorToken) return false;
-			auto nextAssignments = assignments_;
-			if (!nextAssignments.Set(index + 1, actorToken, epoch, motion.name, offset)) return false;
-
+			if (!actor || actor == primary.controller.targetActor || !std::isfinite(offset) || motion.name.empty()) return false;
 			auto next = std::make_unique<MotionPlayer>();
 			next->initializeBeforeMotion = primary.initializeBeforeMotion;
 			// Copy service callbacks and settings, then discard copied ownership.
@@ -208,20 +203,50 @@ namespace GakuMotion
 			const bool hasOverrides = std::filesystem::exists(MotionPathFromUtf8(file), error);
 			if (error || (hasOverrides && !motionOverrides.LoadFromFile(file))) return false;
 			BoneOverrideSet::BuildEffective(global, motionOverrides, overridesEnabled, effective);
-			if (followers_.size() <= index) followers_.resize(index + 1);
-			if (!Clear(index, registry)) return false;
-			auto& follower = followers_[index];
 			follower.actorToken = actorToken;
 			follower.armLocked = calibration.locked;
-			follower.bindingGeneration = nextBindingGeneration_++;
-			if (!nextBindingGeneration_) ++nextBindingGeneration_;
 			follower.motionKey = motion.name;
 			follower.offsetSeconds = offset;
 			follower.motionOverrides = std::move(motionOverrides);
 			follower.overrides = std::move(effective);
 			follower.player = std::move(next);
-			follower.player->controller.SetBoneOverrides(&follower.overrides);
-			assignments_ = std::move(nextAssignments);
+			return true;
+		}
+
+		void InstallFollower(size_t index, Follower&& follower)
+		{
+			auto& installed = followers_[index];
+			installed = std::move(follower);
+			installed.bindingGeneration = nextBindingGeneration_++;
+			if (!nextBindingGeneration_) ++nextBindingGeneration_;
+			installed.player->controller.SetBoneOverrides(&installed.overrides);
+		}
+
+		bool Set(size_t index, uint64_t actorToken, uint64_t epoch, const MotionEntry& motion,
+		         float offset, const SceneActorRegistry& registry, const MotionPlayer& primary,
+		         const BoneOverrideSet& global, bool overridesEnabled, const MotionEntry* swapMotion = nullptr)
+		{
+			if (index >= 64 || restoreUnconfirmed_ || !primary.controller.targetActor ||
+			    primary.state == PlaybackState::Playing || primary.state == PlaybackState::Paused) return false;
+			size_t occupied = followers_.size();
+			for (size_t i = 0; i < followers_.size(); ++i)
+				if (i != index && followers_[i].actorToken == actorToken) { occupied = i; break; }
+			const bool swap = occupied < followers_.size();
+			if (swap && (!swapMotion || index >= followers_.size() || !followers_[index].player ||
+			    swapMotion->name != followers_[occupied].motionKey)) return false;
+
+			Follower next, displaced;
+			if (!PrepareFollower(next, actorToken, registry.Resolve(actorToken, epoch), motion,
+				offset, primary, global, overridesEnabled)) return false;
+			if (swap) {
+				const auto oldToken = followers_[index].actorToken;
+				if (!PrepareFollower(displaced, oldToken, registry.Resolve(oldToken, epoch), *swapMotion,
+					followers_[occupied].offsetSeconds, primary, global, overridesEnabled)) return false;
+			}
+			EnsureSlots(index + 1);
+			if (!RestoreSlot(index, registry) || (swap && !RestoreSlot(occupied, registry))) return false;
+			InstallFollower(index, std::move(next));
+			if (swap) InstallFollower(occupied, std::move(displaced));
 			return true;
 		}
 
@@ -320,7 +345,6 @@ namespace GakuMotion
 
 	private:
 		std::deque<Follower> followers_{2};
-		EnsembleAssignments assignments_;
 		std::unordered_map<uint64_t, Placement> placements_;
 		std::unordered_map<uint64_t, ArmCalibration> armCalibrations_;
 		bool restoreUnconfirmed_{false};

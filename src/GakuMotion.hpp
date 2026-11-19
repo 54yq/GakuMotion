@@ -1019,14 +1019,26 @@ namespace GakuMotion
 					if (ensemble.HasActiveFollowers() && !PrepareInjection())
 					{ ensembleNotice = "当前场景无法安全调整多角色绑定"; break; }
 					const int motionIndex = FindPlaylistIndex(motions, cmd.key);
-					if (cmd.libraryRevision != libraryRevision || motionIndex < 0 ||
+					if ((cmd.sceneSession && cmd.sceneSession != injectionSession) ||
+					    cmd.libraryRevision != libraryRevision || motionIndex < 0 ||
 					    cmd.candidateIndex < 0 || ensembleRestoreUnconfirmed ||
 					    player.state == PlaybackState::Playing || player.state == PlaybackState::Paused)
 					{ ensembleNotice = "绑定失败：请停止播放并确认角色和曲库未变化"; break; }
-					const bool ok = ensemble.Set(static_cast<size_t>(cmd.candidateIndex), cmd.actorToken,
-					                             cmd.actorEpoch, motions[motionIndex], cmd.value, sceneActorRegistry,
-					                             player, globalOverrides, masterOverridesEnabled);
-					if (ok) { ++injectionSession; ensembleNotice = "已绑定角色动作"; }
+					const MotionEntry* swapMotion = nullptr;
+					const auto slot = static_cast<size_t>(cmd.candidateIndex);
+					if (cmd.flag) {
+						const auto& followers = ensemble.Followers();
+						const auto occupied = std::find_if(followers.begin(), followers.end(), [&](const auto& follower) {
+							return follower.actorToken == cmd.actorToken;
+						});
+						const int otherMotion = occupied == followers.end() ? -1 : FindPlaylistIndex(motions, occupied->motionKey);
+						if (slot >= followers.size() || !followers[slot].player || followers[slot].actorToken == cmd.actorToken ||
+						    otherMotion < 0) { ensembleNotice = "交换失败：请确认两个副角色及对应动作仍可用"; break; }
+						swapMotion = &motions[otherMotion];
+					}
+					const bool ok = ensemble.Set(slot, cmd.actorToken, cmd.actorEpoch, motions[motionIndex], cmd.value,
+						sceneActorRegistry, player, globalOverrides, masterOverridesEnabled, swapMotion);
+					if (ok) { ++injectionSession; ensembleNotice = cmd.flag ? "已交换两位副角色" : "已绑定角色动作"; }
 					else if (ensemble.RestoreUnconfirmed())
 					{ ensembleRestoreUnconfirmed = true; ensembleNotice = "角色恢复未确认，已停止动作注入"; }
 					else ensembleNotice = "绑定失败：角色重复、名单已变化或动作无法读取";

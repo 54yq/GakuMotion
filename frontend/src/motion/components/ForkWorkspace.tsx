@@ -235,7 +235,9 @@ export function ForkPlacementFields({ slot, token, generation, initial, yaw, com
   )
 }
 
-function Follower({ slot, follower, command, remove }: { slot: number; follower?: ForkFollower; command: ForkCommand; remove: () => void }) {
+function Follower({ slot, follower, followers, command, remove }: {
+  slot: number; follower?: ForkFollower; followers: ForkFollower[]; command: ForkCommand; remove: () => void
+}) {
   const actors = useMotionStore(state => state.actors.actors)
   const entries = useMotionStore(state => state.library.entries)
   const playback = useMotionStore(state => state.player.state)
@@ -244,11 +246,16 @@ function Follower({ slot, follower, command, remove }: { slot: number; follower?
   const [key, setKey] = useState(follower?.motionKey ?? '')
   const [offset, setOffset] = useState(follower?.offsetSeconds ?? 0)
   const boundActor = actors.find(item => item.token === follower?.actorToken)
+  const occupied = followers.find(item => actor !== 0 && item.actorToken === actor && item.slot !== slot)
+  const hasDraft = actor !== (follower?.actorToken ?? 0) || key !== (follower?.motionKey ?? '') ||
+    offset !== (follower?.offsetSeconds ?? 0)
   return (
     <section className="min-w-0 space-y-2 rounded-lg border bg-background/70 p-3">
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-sm font-medium">副角色 {slot + 1}</h3>
-        <span className="text-xs text-muted-foreground">{follower?.physics || '尚未绑定'}</span>
+        <span className="text-xs text-muted-foreground">
+          {follower?.actorToken ? `已绑定 ${boundActor?.label ?? '角色'}` : '尚未绑定'}
+        </span>
         <Button size="sm" variant="ghost" disabled={!!follower?.actorToken && bindingLocked}
           aria-label={`删除副角色 ${slot + 1}`} onClick={remove}>删除</Button>
       </div>
@@ -269,11 +276,18 @@ function Follower({ slot, follower, command, remove }: { slot: number; follower?
           <Input className="mt-1 h-8 text-foreground" type="number" step={0.05} value={Number.isFinite(offset) ? offset : ''}
             onChange={event => setOffset(event.currentTarget.valueAsNumber)} />
         </label>
-        <Button size="sm" disabled={bindingLocked || !actor || !key || !Number.isFinite(offset)}
-          onClick={() => void command('formation.bind', { slot, actorToken: actor, motionKey: key, offsetSeconds: offset })}>绑定</Button>
+        <Button size="sm" disabled={bindingLocked || !actor || !key || !Number.isFinite(offset) || Boolean(occupied && !follower?.actorToken)}
+          onClick={() => void command(occupied ? 'formation.swap' : 'formation.bind', { slot, actorToken: actor, motionKey: key, offsetSeconds: offset })}>
+          {occupied && follower?.actorToken ? '交换角色' : '绑定'}
+        </Button>
         {Boolean(follower?.actorToken) && <Button size="sm" variant="ghost" disabled={bindingLocked}
           onClick={() => void command('formation.clear', { slot })}>解除</Button>}
       </div>
+      {occupied && <p className="text-xs text-muted-foreground">
+        {follower?.actorToken ? `将与副角色 ${occupied.slot + 1} 交换人物。动作和时间偏移按各自槽位应用。`
+          : `所选人物已绑定到副角色 ${occupied.slot + 1}，请先解除该绑定。`}
+      </p>}
+      {!occupied && hasDraft && follower?.actorToken && <p className="text-xs text-muted-foreground">选择尚未应用。</p>}
       {follower?.generation ? <ForkPlacementFields slot={slot} token={follower.actorToken} generation={follower.generation}
         initial={follower.position} yaw={follower.yaw} command={command} /> : null}
       {follower?.generation ? <Button size="sm" variant="outline" onClick={() => void command('formation.place', {
@@ -336,7 +350,7 @@ export function ForkEnsembleControls({ state, command }: { state: ForkState; com
       </section>
       {slots.map(slot => {
         const follower = bound.find(item => item.slot === slot)
-        return <Follower key={`${state.epoch}:${slot}:${follower?.generation ?? 0}`} slot={slot} follower={follower} command={command}
+        return <Follower key={`${state.epoch}:${slot}:${follower?.generation ?? 0}`} slot={slot} follower={follower} followers={bound} command={command}
           remove={() => {
             setDraftSlots(current => current.filter(item => item !== slot))
             if (follower) void command('formation.clear', { slot })

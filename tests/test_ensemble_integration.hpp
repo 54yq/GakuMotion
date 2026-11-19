@@ -108,6 +108,30 @@ static void TestEnsembleIntegration(const std::string& repoRoot)
 	view.fnSetEnsembleFollower(view.self, 1, tokenC, view.actorRosterEpoch, "missing", 0, view.libraryRevision);
 	core.ProcessPendingGuiCommands();
 	Check(core.ensemble.Followers()[1].actorToken == stable, "missing motion leaves the previous binding intact");
+	MotionEntry unavailable = trackC;
+	unavailable.dir += "/missing";
+	Check(!core.ensemble.Set(0, tokenC, view.actorRosterEpoch, trackB, .01f, core.sceneActorRegistry,
+		core.player, core.globalOverrides, true, &unavailable) &&
+		core.ensemble.Followers()[0].actorToken == tokenB && core.ensemble.Followers()[1].actorToken == tokenC,
+		"swap leaves both bindings intact if the second clip cannot load");
+	const auto queueSwap = [&](uint64_t token) {
+		Core::GuiCommand command{Core::GuiAction::SetEnsembleFollower};
+		command.flag = true; command.candidateIndex = 0; command.actorToken = token;
+		command.actorEpoch = core.sceneActorRegistry.Epoch(); command.sceneSession = core.injectionSession;
+		command.key = "B"; command.value = .01f; command.libraryRevision = core.libraryRevision;
+		core.QueueGui(std::move(command));
+		core.ProcessPendingGuiCommands();
+	};
+	const auto firstGeneration = core.ensemble.Followers()[0].bindingGeneration;
+	queueSwap(tokenC);
+	Check(core.ensemble.Followers()[0].actorToken == tokenC && core.ensemble.Followers()[1].actorToken == tokenB &&
+		core.ensemble.Followers()[0].player->controller.targetActor == c &&
+		core.ensemble.Followers()[1].player->controller.targetActor == b &&
+		core.ensemble.Followers()[0].motionKey == "B" && core.ensemble.Followers()[1].motionKey == "C" &&
+		core.ensemble.Followers()[1].offsetSeconds == -.01f &&
+		core.ensemble.Followers()[0].bindingGeneration != firstGeneration,
+		"one swap rebinds both actors and preserves each slot's motion and offset");
+	queueSwap(tokenB);
 	core.player.state = PlaybackState::Paused; core.player.currentTime = .04f;
 	EnsembleFixture::faces[b].weight = 12; EnsembleFixture::faces[c].weight = 17;
 	const auto noAnimatorWrites = EnsembleFixture::writes;
@@ -242,6 +266,9 @@ static void TestEnsembleIntegration(const std::string& repoRoot)
 		core.ensemble.Followers()[0].player.get() == boundB && core.ensemble.Followers()[1].player.get() == boundC &&
 		core.player.state == PlaybackState::Preview,
 		"adding a Live actor refreshes the roster while preserving playback and existing bindings");
+	Check(core.ensemble.Set(2, core.sceneActorRegistry.Find(&extraActor)->token, core.sceneActorRegistry.Epoch(),
+		trackB, 0.f, core.sceneActorRegistry, core.player, core.globalOverrides, true),
+		"a newly added Live actor can be bound without clearing the original slots");
 	const auto before = EnsembleFixture::writes;
 	core.PublishSceneActors({{a, 1, ""}, {b, 22, ""}}); // old B address reused; C removed
 	Check(core.ensemble.HasFollowers() && core.ensembleRestoreUnconfirmed && EnsembleFixture::writes == before,

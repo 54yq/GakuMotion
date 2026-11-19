@@ -310,7 +310,7 @@
 					if (setYaw) ctx.fnSetEnsembleYaw(ctx.self, static_cast<int>(slot), follower.actorToken, ctx.actorRosterEpoch, follower.bindingGeneration, static_cast<float>(yaw));
 				}
 			}
-			else if (action == "formation.bind" || action == "formation.clear")
+			else if (action == "formation.bind" || action == "formation.swap" || action == "formation.clear")
 			{
 				int64_t slot = -1, revision = -1;
 				if (!IntParam(params, "slot", slot) || slot < 0 || slot >= 64 ||
@@ -327,8 +327,16 @@
 						!StringParam(params, "motionKey", key) || FindPlaylistIndex(core_.motions, key) < 0 ||
 						!NumberParam(params, "offsetSeconds", offset) || std::abs(offset) > 120)
 						return CmdResult::Err("invalid_params", "请选择有效的副角色、动作和时间偏移");
-					ctx.fnSetEnsembleFollower(ctx.self, static_cast<int>(slot), static_cast<uint64_t>(token), ctx.actorRosterEpoch,
-						key.c_str(), static_cast<float>(offset), core_.libraryRevision);
+					GuiCommand cmd{GuiAction::SetEnsembleFollower};
+					cmd.candidateIndex = static_cast<int>(slot);
+					cmd.actorToken = static_cast<uint64_t>(token);
+					cmd.actorEpoch = ctx.actorRosterEpoch;
+					cmd.sceneSession = core_.injectionSession;
+					cmd.libraryRevision = core_.libraryRevision;
+					cmd.key = std::move(key);
+					cmd.value = static_cast<float>(offset);
+					cmd.flag = action == "formation.swap";
+					core_.QueueGui(std::move(cmd));
 				}
 			}
 			else return CmdResult::Err("unknown_method", "未知的本地看板操作");
