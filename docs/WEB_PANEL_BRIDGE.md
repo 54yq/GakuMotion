@@ -2,7 +2,7 @@
 
 曲库、底部播放控制、镜头和舞台页面来自 GakuMotion dev 的 `79fe245`。Web 资源安装位置是运行时 DLL 旁的 `GakuMotion.UI/`。运行时发布 `gakumotion.web-panel/v1`，由支持该接口的 GakuLoader 管理 WebView2。此次编译使用 Gaku-Mod-Tools/GakuLoader dev 的 `157cfb0`，其 `version.dll` 与 `WebView2Loader.dll` 为一组。原生 ImGui 回调仍在，调试时可在启动进程的环境中使用 `GAKUMOTION_NATIVE_PANEL=1` 进入原生面板。
 
-本构建合入本地 `fork-v4.3.6`（`310bbe3`）的运行时改动，插件描述符显示 `0.2.0+fork.4.3.6-web`。
+本构建合入本地 `fork-v4.3.6`（`310bbe3`）的运行时改动，插件描述符显示 `0.2.0+fork.4.3.7-web`。
 
 ## 功能如何映射到界面
 
