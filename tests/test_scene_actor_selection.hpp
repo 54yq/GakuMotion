@@ -1,6 +1,21 @@
 static void TestSceneActorSelection()
 {
 	BeginTest("scene actor roster and target selection lifetime");
+	{
+		live_aspect::Projection p{};
+		p[5] = 2.08607f;
+		p[0] = p[5] / (16.0f / 9.0f);
+		p[8] = 0.15f; p[9] = -0.1f; p[10] = -1.01f; p[11] = -1.0f; p[14] = -0.1f;
+		const auto original = p;
+		Check(live_aspect::PreserveHorizontalFraming(p, 3840.0f / 1634.0f, 16.0f / 9.0f) &&
+			std::abs(p[0] - original[5] * (1634.0f / 3840.0f)) < 0.0001f &&
+			std::abs(p[5] * 2160.0f - original[5] * 1634.0f) < 0.001f &&
+			p[8] == original[8] && std::abs(p[9] * 2160.0f - original[9] * 1634.0f) < 0.001f &&
+			p[10] == original[10] && p[11] == original[11] && p[14] == original[14],
+			"taller Live target preserves the old content scale, width, lens shift and depth");
+		Check(!live_aspect::PreserveHorizontalFraming(p, 16.0f / 9.0f, 16.0f / 9.0f),
+			"unchanged aspect is not expanded");
+	}
 	Check(live_actor_props::IsSupportedPair("Root_Microphone","Prop_Microphone") &&
 		live_actor_props::IsSupportedPair("Root_Penlightklljduo","Prop_Penlightklljduo") &&
 		!live_actor_props::IsSupportedPair("Root_Body","Prop_Body") &&
@@ -15,6 +30,8 @@ static void TestSceneActorSelection()
         Node waterGun{"Prop_Water_Gun"}, candy{"Prop_CharacterCandy"}, pinwheel{"Prop_Pinwheel"};
         Node body{"Prop_Body"}, duplicate{"Prop_Duplicate"}, duplicate2{"Prop_Duplicate"};
         Node unrelated{"Prop_StageOnly"}, foreignProp{"Prop_Penlight"};
+        Node attachedLight{"Prop_Lightstick(Clone)"}, cloneCandy{"Prop_Lollipop(Clone)"};
+        Node rightHand{"Root_Hand_R", {&attachedLight}}, cloneRoot{"Root_Lollipop(Clone)", {&cloneCandy}};
         Node rootMic{"Root_Microphone", {&microphone}};
         Node rootBag{"Root_Hknesuitcase", {&suitcase, &geometry}};
         Node rootLight{"Root_Penlightklljduo", {&penlight}};
@@ -23,14 +40,16 @@ static void TestSceneActorSelection()
         Node rootBody{"Root_Body", {&body}}, rootDuplicate{"Root_Duplicate", {&duplicate, &duplicate2}};
         Node rootForeign{"Root_Penlight", {&foreignProp}};
         Node foreignActor{"Actor", {&rootForeign}}, wrapper{"Model", {&rootBag, &rootLight, &rootGun, &rootCandy, &rootPinwheel, &rootBody, &rootDuplicate}};
-        Node actor{"Actor", {&wrapper, &rootMic, &unrelated, &foreignActor}};
+        Node actor{"Actor", {&wrapper, &rootMic, &unrelated, &foreignActor, &rightHand, &cloneRoot}};
         const auto props = live_actor_props::ScanActorProps(&actor,
             [](void* node) { return static_cast<Node*>(node)->children; },
             [](void* node) { return static_cast<Node*>(node)->name; },
             [&](void* node) { return node == &foreignActor; });
-        const bool complete = props.size() == 6 && std::all_of(props.begin(), props.end(), [&](const auto& prop) {
+        const bool complete = props.size() == 8 && std::all_of(props.begin(), props.end(), [&](const auto& prop) {
             return prop.object == &microphone || prop.object == &suitcase || prop.object == &penlight ||
-                prop.object == &waterGun || prop.object == &candy || prop.object == &pinwheel;
+                prop.object == &waterGun || prop.object == &candy || prop.object == &pinwheel ||
+                (prop.object == &attachedLight && prop.root == &rightHand && prop.rootName.empty()) ||
+                (prop.object == &cloneCandy && prop.root == &cloneRoot && prop.rootName == cloneRoot.name);
         });
         Check(complete, "find direct and nested character props, excluding protected, ambiguous and other-actor nodes");
         Check(live_actor_props::DisplayName("Prop_Water_Gun") == "水枪（Water_Gun）" &&

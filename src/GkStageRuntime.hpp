@@ -560,15 +560,17 @@ namespace StageLoader
 
 bool HelperGameObjectSetActive(void* go, bool value)
 {
-	if (!StageLoader::ObjectId(go) || !StageLoader::setActive) return false;
+	const int id = StageLoader::ObjectId(go);
+	if (!id || !StageLoader::setActive) return false;
+	if (StageLoader::ReadBool(StageLoader::activeSelf, go, !value) == value) return true;
 	void* args[1]{&value};
 	void* exception = nullptr;
 	g_faceRuntime.invoke(StageLoader::setActive, go, args, &exception);
 	if (exception) return false;
 	const bool readback = StageLoader::ReadBool(StageLoader::activeSelf, go, !value);
-	if (g_hostContext.logInfo) g_hostContext.logInfo(
+	if (g_developerDiagnostics && g_hostContext.logInfo) g_hostContext.logInfo(
 		"[GakuMotion][Stage] background id=%d generation=%llu requested=%d readback=%d",
-		StageLoader::ObjectId(go), static_cast<unsigned long long>(StageLoader::generation), value,
+		id, static_cast<unsigned long long>(StageLoader::generation), value,
 		readback);
 	return readback == value;
 }

@@ -20,6 +20,7 @@
 #include "GkLivePhysicsClockPolicy.hpp"
 #include "GkLiveWindLeasePolicy.hpp"
 #include "GkLiveActorPropPolicy.hpp"
+#include "GkLiveAspectProjection.hpp"
 #include "GkLiveArmSnapshotSchedule.hpp"
 #include <set>
 #include <fstream>
@@ -79,6 +80,7 @@ namespace
 		void (*setMotionPlaying)(bool playing);
 		bool (*isMotionPlaying)(void);
 	};
+	bool g_developerDiagnostics = false;
 
 	static void MotionLogInfo(const char* fmt, ...)
 	{
@@ -3212,13 +3214,21 @@ static bool RefreshSceneActors(GakuMotion::Core& core, bool force, bool refreshP
 
 	const bool propWritable = motionReady && core.CanControlActorProps() &&
 		(!liveViewing || GakuMotion::capture::LiveAutoPhotoIdle());
+	const auto propInterval = LiveActorProps::saved.empty()
+		? std::chrono::seconds(2) : std::chrono::milliseconds(500);
 	const bool propScanDue = refreshProps && propsScene && (force || !lastPropOwner.SameOwner(g_sceneOwner) ||
-		lastPropWritable != propWritable || now - lastPropScan >= std::chrono::milliseconds(500));
+		core.actorPropScanRequested || lastPropWritable != propWritable || now - lastPropScan >= propInterval);
 	if (!force && !propScanDue && (!motionReady ||
 		(!core.HasPendingTargetSelection() && now - lastScan < std::chrono::milliseconds(250)))) return motionReady;
 	lastScan = now;
 	auto scanProps = [&](const auto& actors) {
+		const auto start = std::chrono::steady_clock::now();
 		LiveActorProps::Scan(core, actors, propWritable);
+		const auto elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+		if (g_developerDiagnostics && g_hostContext.logInfo)
+			g_hostContext.logInfo("[GakuMotion][LiveProp] scene=%d actors=%zu found=%zu scan_ms=%.2f",
+				g_sceneOwner.sceneHandle, actors.size(), core.actorProps.size(), elapsed);
+		core.actorPropScanRequested = false;
 		lastPropOwner = g_sceneOwner;
 		lastPropScan = now;
 		lastPropWritable = propWritable;
@@ -3250,6 +3260,7 @@ static bool RefreshSceneActors(GakuMotion::Core& core, bool force, bool refreshP
 	if (!ReadSceneActors(observations, false)) {
 		if (propScanDue) {
 			core.actorProps.clear();
+			core.actorPropScanRequested = false;
 			lastPropOwner = g_sceneOwner;
 			lastPropScan = now;
 			lastPropWritable = propWritable;
@@ -3331,7 +3342,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	std::lock_guard<std::recursive_mutex> stateLock(core.stateMutex);
 	RefreshProtectedContext();
 	auto& player = core.player;
-	if (activeActor && !g_bodyShadowProbeAttempted)
+	if (g_developerDiagnostics && activeActor && !g_bodyShadowProbeAttempted)
 	{
 		// Metadata/native windows precede this module's shadow hook. They do
 		// not require an active motion or call any generated game method.
@@ -3388,7 +3399,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	}
 	if (core.liveObservation.confirmed && activeActor)
 	{
-		if (core.liveViewingConfirmed && g_sceneOwner.Valid() && sceneHandle == g_sceneOwner.sceneHandle &&
+		if (g_developerDiagnostics && core.liveViewingConfirmed && g_sceneOwner.Valid() && sceneHandle == g_sceneOwner.sceneHandle &&
 			core.sceneActorRegistry.Find(activeActor)) {
 			static std::array<void*, 3> sampledActors{};
 			static auto nextWindReport = std::chrono::steady_clock::time_point{};
@@ -3399,7 +3410,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 				if (free != sampledActors.end()) { *free = activeActor; LiveWindProbe::Sample(activeActor, sceneHandle, core); }
 			}
 		}
-		if (core.liveViewingConfirmed && g_sceneOwner.Valid() && sceneHandle == g_sceneOwner.sceneHandle)
+		if (g_developerDiagnostics && core.liveViewingConfirmed && g_sceneOwner.Valid() && sceneHandle == g_sceneOwner.sceneHandle)
 		{
 			static auto nextLetterboxReport = std::chrono::steady_clock::time_point{};
 			const auto now = std::chrono::steady_clock::now();
@@ -3428,18 +3439,20 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 			g_lastLiveActorScene = sceneHandle;
 			g_lastLiveActorTime = std::chrono::steady_clock::now();
 		}
-		static auto nextReport = std::chrono::steady_clock::time_point{};
-		static unsigned callbacks = 0, ownerMatches = 0;
-		++callbacks;
-		if (g_sceneOwner.Valid() && sceneHandle == g_sceneOwner.sceneHandle) ++ownerMatches;
-		const auto now = std::chrono::steady_clock::now();
-		if (now >= nextReport)
+		if (g_developerDiagnostics)
 		{
-			if (g_hostContext.logInfo) g_hostContext.logInfo(
-				"[GakuMotion][LiveProbe] actor_callbacks=%u owner_scene_matches=%u playback=%s",
-				callbacks, ownerMatches, core.liveObservation.paused ? "paused" : "playing");
-			callbacks = ownerMatches = 0;
-			nextReport = now + std::chrono::seconds(1);
+			static auto nextReport = std::chrono::steady_clock::time_point{};
+			static unsigned callbacks = 0, ownerMatches = 0;
+			++callbacks;
+			if (g_sceneOwner.Valid() && sceneHandle == g_sceneOwner.sceneHandle) ++ownerMatches;
+			const auto now = std::chrono::steady_clock::now();
+			if (now >= nextReport) {
+				if (g_hostContext.logInfo) g_hostContext.logInfo(
+					"[GakuMotion][LiveProbe] actor_callbacks=%u owner_scene_matches=%u playback=%s",
+					callbacks, ownerMatches, core.liveObservation.paused ? "paused" : "playing");
+				callbacks = ownerMatches = 0;
+				nextReport = now + std::chrono::seconds(1);
+			}
 		}
 	}
 #ifdef GKMOTION_CAPTURE_DIAGNOSTICS
@@ -3567,13 +3580,13 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 			const auto a=GakuMotion::live_audio::Observe(g_liveAudioApi,g_liveApi,access,scene);
 			core.liveAudioAvailable=a.available;core.liveAudioTime=a.time;core.liveAudioDuration=a.duration;core.liveAudioSources=a.sources;
 			static uintptr_t graphOwner{};static int graphScene{};static auto nextGraphProbe=std::chrono::steady_clock::time_point{};
-			if((graphOwner!=core.liveOwnerToken||graphScene!=sceneHandle)&&core.liveObservation.time>3.0f&&std::chrono::steady_clock::now()>=nextGraphProbe) {
+			if(g_developerDiagnostics && (graphOwner!=core.liveOwnerToken||graphScene!=sceneHandle)&&core.liveObservation.time>3.0f&&std::chrono::steady_clock::now()>=nextGraphProbe) {
 				nextGraphProbe=std::chrono::steady_clock::now()+std::chrono::seconds(5);
 				if(LiveAudioGraphProbe::Inspect(scene,access)){graphOwner=core.liveOwnerToken;graphScene=sceneHandle;}
 			}
 			static uintptr_t lastOwner{};static unsigned lastCount=~0u;static bool lastPaused{};
 			static auto nextAudioLog=std::chrono::steady_clock::time_point{};const auto audioNow=std::chrono::steady_clock::now();
-			if(g_hostContext.logInfo&&(lastOwner!=core.liveOwnerToken||lastCount!=a.sources||lastPaused!=core.liveObservation.paused||audioNow>=nextAudioLog)) {
+			if(g_developerDiagnostics && g_hostContext.logInfo&&(lastOwner!=core.liveOwnerToken||lastCount!=a.sources||lastPaused!=core.liveObservation.paused||audioNow>=nextAudioLog)) {
 				void* playerObj=GakuMotion::live_takeover::SceneField(g_liveApi,access,scene,"_livePlayer",g_liveApi.playerClass);
 				void* threeD=GakuMotion::live_audio::Field(access,playerObj,g_liveApi.playerClass,"_3dLive",g_liveAudioApi.threeD);
 				void* bgm=GakuMotion::live_audio::Field(access,threeD,g_liveAudioApi.threeD,"_bgmSource",g_liveAudioApi.source);
@@ -4272,6 +4285,9 @@ void MotionShutdown(void*)
 	if (GakuMotion::host::mainThread.isMainThread &&
 		GakuMotion::host::mainThread.isMainThread(GakuMotion::host::mainThread.context))
 	{
+		LiveAspectPreview::Restore(LiveAspectPreview::lease.owner && g_sceneOwner.Valid() &&
+			LiveAspectPreview::lease.owner == g_sceneOwner.presenterIdentity &&
+			LiveAspectPreview::lease.scene == g_sceneOwner.sceneHandle);
 		if(LiveActorClockMvp::active)RestoreActorClockMvp("shutdown");
 		RevokeProtectedInjection();
 	}
@@ -4334,6 +4350,10 @@ GakuStatus MotionActivate(const GakuHostApi* host, void** pluginState)
 	g_hostContext.gameRoot = GakuMotion::host::runtime.gameRoot;
 	g_hostContext.localRoot = GakuMotion::host::runtime.localRoot;
 	g_hostContext.pluginsRoot = GakuMotion::host::runtime.pluginsRoot;
+	std::error_code diagnosticsError;
+	g_developerDiagnostics = g_hostContext.gameRoot && std::filesystem::is_regular_file(
+		std::filesystem::path(g_hostContext.gameRoot) / L"GakuLoader" / L"Configs" / L"gaku-diagnostics.enabled",
+		diagnosticsError);
 	g_hostContext.gameAssemblyHandle = GakuMotion::host::runtime.getGameAssembly();
 	g_hostContext.logInfo = MotionLogInfo;
 	g_hostContext.logWarn = MotionLogWarn;
@@ -4385,6 +4405,8 @@ void MotionTick(void*, float)
 	}
 	if (g_runtimeReady.load(std::memory_order_acquire))
 	{
+		// Also restore at the next tick if the pipeline inlined its end event.
+		if (CameraBridge::OnUnityThread()) LiveAspectPreview::ReleaseProjection();
 		ResolveDeferredManagedTypes();
 		StageLoader::ResolveDeferredTypeObjects();
 		RefreshProtectedContext();
@@ -4493,7 +4515,7 @@ void MotionTick(void*, float)
 			static uint64_t lastLoggedEnds = 0;
 			const auto now = std::chrono::steady_clock::now();
 			const uint64_t endTotal = monitor.scheduleEnds[0] + monitor.scheduleEnds[1] + monitor.scheduleEnds[2];
-			if (now >= nextScheduleLog && (core.liveViewingConfirmed || endTotal != lastLoggedEnds)) {
+			if (g_developerDiagnostics && now >= nextScheduleLog && (core.liveViewingConfirmed || endTotal != lastLoggedEnds)) {
 				if (g_hostContext.logInfo) g_hostContext.logInfo("[GakuMotion][LiveScheduling] owner=%p player=%p eval_hooks=%d/%d end_hooks=%d/%d eval_float=%llu/%llu/%llu eval_plain=%llu/%llu/%llu end_check=%llu/%llu/%llu end_callback=%llu/%llu/%llu last_dt=%.6f last_end_time=%.3f callers=%p/%p/%p restart_attempts=%llu restart_status=%d; phases=playing/paused/takeover cumulative",
 					reinterpret_cast<void*>(core.liveOwnerToken), reinterpret_cast<void*>(LiveSchedulingProbe::actorPlayer.load()),
 					int(monitor.scheduleEvalDeltaHook), int(monitor.scheduleEvalPlainHook), int(monitor.scheduleEndCheckHook), int(monitor.scheduleEndHook),
@@ -4520,7 +4542,7 @@ void MotionTick(void*, float)
 		static auto nativeProbeStart = std::chrono::steady_clock::time_point{};
 		static auto nativeProbeLastRead = std::chrono::steady_clock::time_point{};
 		const auto probeNow = std::chrono::steady_clock::now();
-		const bool probeEligible = core.liveViewingConfirmed && core.liveObservation.confirmed &&
+		const bool probeEligible = g_developerDiagnostics && core.liveViewingConfirmed && core.liveObservation.confirmed &&
 		    !core.liveObservation.paused && !core.liveTakeoverActive && !core.liveTakeoverRequest && !core.liveSeekPending && !core.livePauseRequest &&
 		    core.liveOwnerToken && core.injectionPolicy.Read().captureDepth == 0;
 		const bool playbackAdvancing = playbackProbeGate.Observe(core.liveOwnerToken, core.liveOwnerScene,
@@ -4691,6 +4713,10 @@ void MotionTick(void*, float)
 						"[GakuMotion][LiveExit] blocked scene=%d step=wind reason=%s lease_scene=%d",
 						requestedScene, windFailure ? windFailure : "unknown", LiveWindOverride::lease.scene);
 					core.liveControlNotice = "风力恢复未确认，Live 保持暂停；请重试退出接管。";
+					return;
+				}
+				if (!LiveAspectPreview::Restore(true)) {
+					core.liveControlNotice = "原画幅恢复未确认，Live 保持暂停；请重试退出接管。";
 					return;
 				}
 				const bool independent = g_primaryUsesIndependentGraph;
@@ -4951,7 +4977,7 @@ extern "C" GAKU_PLUGIN_EXPORT GakuStatus GakuPlugin_Query(
 	if (!output) return GAKU_E_INVALID_ARGUMENT;
 	if (outputSize < sizeof(GakuPluginDescriptor)) return GAKU_E_SIZE;
 	const GakuPluginDescriptor descriptor{GAKU_ABI_VERSION, sizeof(GakuPluginDescriptor),
-		"gakumotion", "GakuMotion", "0.1.1+fork.4.3",
+		"gakumotion", "GakuMotion", "0.1.1+fork.4.3.1",
 		MotionActivate, MotionRuntimeReady, MotionTick, MotionActorTick,
 		RenderGmlMotion, MotionShutdown};
 	*output = descriptor;

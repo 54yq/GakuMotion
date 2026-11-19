@@ -376,6 +376,7 @@ namespace GakuMotion
 		std::unordered_map<uint64_t, bool> actorModelHidden;
 		bool (*fnApplyActorModelHidden)(uint64_t, uint64_t, bool){nullptr};
 		std::vector<GuiActorProp> actorProps;
+		bool actorPropScanRequested{};
 		bool (*fnBeforeTargetChange)(){nullptr};
 
 		BoneOverrideSet globalOverrides; // <localRoot>/GakuMotion/bone_overrides.json
@@ -955,6 +956,7 @@ namespace GakuMotion
 					{
 						if (cmd.flag) actorPropHidden.insert(cmd.key);
 						else actorPropHidden.erase(cmd.key);
+						actorPropScanRequested = true;
 					}
 					break;
 				case GuiAction::SetEnsembleFollower:
@@ -3723,9 +3725,15 @@ namespace GakuMotion
 #if defined(GKMOTION_ENABLE_IMGUI) || defined(HAS_IMGUI)
 		void OnRenderGui(bool hostedPanel = false)
 		{
-			std::lock_guard<std::recursive_mutex> lock(stateMutex);
+			std::unique_lock<std::recursive_mutex> lock(stateMutex, std::try_to_lock);
+			if (!lock) return; // The independent desktop panel can draw on its next frame.
+			const auto start = std::chrono::steady_clock::now();
 			gui.Draw(BuildGuiContext(), hostedPanel);
 			guiTextInputActive.store(ImGui::GetIO().WantTextInput && !ImGui::GetIO().AppFocusLost, std::memory_order_relaxed);
+			lock.unlock();
+			const auto elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+			if (elapsed >= 40.0)
+				LogWarn(detail::FormatMsg("[GakuMotion][DesktopUI] panel held shared state for %.1f ms", elapsed));
 		}
 #endif
 
@@ -3997,6 +4005,7 @@ namespace GakuMotion
             };
 			ctx.actorPropsEditable = CanControlActorProps();
 			ctx.actorProps = actorProps;
+			ctx.fnScanActorProps = [](void* self) { static_cast<Core*>(self)->actorPropScanRequested = true; };
 			for (auto& prop : ctx.actorProps)
 				prop.hidden = actorPropHidden.contains(ActorPropKey(prop));
 			ctx.fnSetActorPropHidden = [](void* self, uint64_t token, uint64_t epoch, const char* key, bool hidden)

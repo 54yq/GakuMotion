@@ -28,6 +28,7 @@
 #include <shlobj.h>
 #ifdef _MSC_VER
 #pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "ole32.lib")
 #endif
 #undef near
 #undef far
