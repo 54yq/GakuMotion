@@ -142,12 +142,8 @@ try {
   await page.screenshot({ path: join(outputDir, '03-live-takeover.png') })
   await page.getByRole('button', { name: '退出接管并恢复 Live', exact: true }).click()
   await page.getByRole('button', { name: '启动 Live 接管', exact: true }).waitFor()
-  await page.getByRole('button', { name: /移动资产/ }).click()
-  const restoredPenlight = page.getByRole('region', { name: '移动资产', exact: true })
-    .getByRole('checkbox', { name: '隐藏整组 荧光棒' })
-  if (!(await restoredPenlight.isDisabled()) || await restoredPenlight.isChecked()) {
-    throw new Error('Timeline props must be restored and read-only after takeover.')
-  }
+  await page.getByText('00:42 / 02:35', { exact: true }).waitFor()
+  if (await page.getByRole('button', { name: /移动资产/ }).count()) throw new Error('Live still exposes asset management.')
   if (errors.length) throw new Error(errors.join('\n'))
   console.log('Design smoke: library, transport, ensemble, motion, camera, prop rescan, Timeline visibility and Live takeover verified.')
 } finally {

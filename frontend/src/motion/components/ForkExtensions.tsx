@@ -67,14 +67,13 @@ export function ForkAdvancedMotion({ state, command }: { state: ForkState; comma
   )
 }
 
-export function ForkPropNodes({ state, command, timelineOnly = false }: {
-  state: ForkState; command: ForkCommand; timelineOnly?: boolean
+export function ForkPropNodes({ state, command }: {
+  state: ForkState; command: ForkCommand
 }) {
   const [filter, setFilter] = useState('')
   const query = filter.trim().toLowerCase()
   const models = new Map<string, { label: string; parts: ForkState['props'] }>()
   for (const prop of state.props) {
-    if (timelineOnly && !prop.timeline) continue
     const name = prop.modelName || prop.name
     const identity = [prop.actor, name, prop.name].join(' ')
     const penlight = /penlight|荧光棒/i.test(identity)
@@ -86,10 +85,10 @@ export function ForkPropNodes({ state, command, timelineOnly = false }: {
       : /crane/i.test(name) ? '摇臂' : /baton|灯柱/i.test(identity) ? '舞台灯柱' : name
     models.set(key, { label, parts: [prop] })
   }
-  const canEdit = (prop: ForkState['props'][number]) => !timelineOnly && state.propsEditable && prop.editable && (!prop.timeline || state.active)
+  const canEdit = (prop: ForkState['props'][number]) => state.propsEditable && prop.editable && (!prop.timeline || state.active)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   return (
-    <CollapsiblePropertySection title="移动资产" summary={`已识别 ${models.size} 项`} defaultOpen={!timelineOnly}>
+    <CollapsiblePropertySection title="移动资产" summary={`已识别 ${models.size} 项`} defaultOpen>
       <div className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" variant="outline" disabled={!state.propsCanScan || state.propsScanning}
@@ -98,7 +97,7 @@ export function ForkPropNodes({ state, command, timelineOnly = false }: {
             <Input className="h-8 w-60 max-w-full pl-7 text-xs" placeholder="搜索物品或部件" aria-label="搜索物品或部件"
               value={filter} onChange={event => setFilter(event.currentTarget.value)} /></div>
         </div>
-        {(timelineOnly || !state.propsEditable) && <p className="text-xs text-muted-foreground">当前可查看和扫描，接管后可调整显隐。</p>}
+        {!state.propsEditable && <p className="text-xs text-muted-foreground">当前可查看和扫描，接管后可调整显隐。</p>}
         {state.propsNotice && <p role="status" className="text-xs text-muted-foreground">{state.propsNotice}</p>}
         <section aria-label="移动资产" className="space-y-2">
           {(() => {

@@ -6,14 +6,16 @@ import { StageReplacementTab, StudioTab } from '../pages/DeveloperPage'
 import { MotionStatusBar } from './MotionStatusBar'
 import { CollapsiblePropertySection, PropertyRow, PropertySection } from './PropertyGroup'
 import { UnsupportedPanel } from './Unsupported'
+import type { ForkState } from '../protocol'
 
 const DEFAULT_NOTICE =
-  'GakuMotion 当前已禁用。仅在偶像摄影或更衣室且截图保护就绪时可用；已保存的设置保持不变。'
+  'GakuMotion 可在支持的 Live、拍摄现场和更衣室使用。'
 
 // injectionAllowed=false replaces the whole shell (no sidebar/transport), but
 // keeps the status bar and the developer options, exactly like GkGuiOverlay.
-export function PermissionGate() {
-  const permission = useMotionStore((state) => state.permission)
+export function PermissionGate({ live }: { live?: ForkState | null }) {
+  const liveReady = !!live?.viewing && live.available && !live.active
+  const notice = useMotionStore((state) => state.permission.notice)
   const developerMode = useMotionStore((state) => state.developerMode)
   const stage = useMotionStore((state) => state.stage)
   const capabilities = useMotionStore((state) => state.capabilities)
@@ -25,11 +27,15 @@ export function PermissionGate() {
       <MotionStatusBar />
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
         <div className="mx-auto max-w-3xl space-y-4">
-          <Alert variant="destructive" className="rounded-lg p-3.5">
+          <Alert variant={liveReady ? 'default' : 'destructive'}
+            className={liveReady ? 'rounded-lg border-emerald-500/50 bg-emerald-500/10 p-3.5 text-emerald-400' : 'rounded-lg p-3.5'}>
             <RiShieldKeyholeFill className="size-4" />
-            <AlertTitle className="text-sm font-semibold">控制已禁用</AlertTitle>
+            <AlertTitle className="text-sm font-semibold">{liveReady ? '已识别 Live' : '控制已禁用'}</AlertTitle>
             <AlertDescription className="mt-1 text-xs leading-relaxed">
-              {permission.notice || DEFAULT_NOTICE}
+              {liveReady ? '请启动 Live 接管后使用 GakuMotion。' : DEFAULT_NOTICE}
+              {!liveReady && notice && !/仅支持已验证的偶像摄影场景与更衣室/.test(notice) && (
+                <p className="mt-1">{notice}</p>
+              )}
             </AlertDescription>
           </Alert>
 

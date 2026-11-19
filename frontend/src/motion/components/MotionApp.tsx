@@ -455,7 +455,7 @@ export default function MotionApp() {
                   <LiveControls state={fork.state} command={fork.command} />
                   {fork.error && <p role="alert" className="text-xs text-destructive">{fork.error}</p>}
                 </div>}
-                <PermissionGate />
+                <PermissionGate live={fork.state} />
               </div>
             )}
             <DropOverlay />

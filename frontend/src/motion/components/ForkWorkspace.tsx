@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { ForkPropNodes } from './ForkExtensions'
+import { formatMmSs } from '../time'
 import { Vector3Field } from './NumberField'
 import { getMotionBridge } from '../bridge'
 import { useMotionStore } from '../store'
@@ -142,6 +142,9 @@ export function LiveControls({ state, command }: { state: ForkState; command: Fo
           onClick={() => void command('live.pause', { value: !state.paused })}>{state.paused ? '播放原 Live' : '暂停原 Live'}</Button>
         <label className="flex min-w-52 flex-1 items-center gap-2 text-xs text-muted-foreground">
           原 Live 进度
+          <span className="shrink-0 tabular-nums" aria-label="当前 Live 时间">
+            {state.viewing ? formatMmSs(seek ?? state.liveTime) : '--:--'} / {state.duration > 0 ? formatMmSs(state.duration) : '--:--'}
+          </span>
           <input type="range" className="min-w-0 flex-1 accent-primary" disabled={!canSeek}
             min={0} max={Math.max(0, state.duration - 0.1)} step={0.1} value={seek ?? state.liveTime}
             onChange={event => setSeek(event.currentTarget.valueAsNumber)}
@@ -185,7 +188,6 @@ export function LiveControls({ state, command }: { state: ForkState; command: Fo
           {state.swingReportLoaded && ' · 已读取 Swing 报告'}
         </p>
       </details>
-      {state.viewing && !state.active && <ForkPropNodes state={state} command={command} timelineOnly />}
     </section>
   )
 }
