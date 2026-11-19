@@ -40,7 +40,7 @@ namespace ModelRendererMask {
         if (!m.getForce || !m.setForce) { m.getForce=nullptr; m.setForce=nullptr; }
         cached=m; return true;
     }
-    inline bool Capture(void* actor,std::vector<Entry>& entries, bool (*includeRenderer)(void*) = nullptr) {
+    inline bool Capture(void* actor,std::vector<Entry>& entries, const std::function<bool(void*)>& includeRenderer = {}) {
         Methods m{};if(!Resolve(m))return false;
         using ClassType=void*(*)(void*);using TypeObject=void*(*)(void*);
         auto classType=reinterpret_cast<ClassType>(GetProcAddress(g_gameAssembly,"il2cpp_class_get_type"));

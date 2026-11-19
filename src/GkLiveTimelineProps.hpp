@@ -15,6 +15,7 @@ namespace LiveTimelineProps
     struct TrackModel {
         StageLoader::Handle object{};
         std::string director;
+        std::vector<StageLoader::Handle> parts;
     };
     inline GakuMotion::injection::OwnerSnapshot knownOwner;
     inline int knownActiveScene{};
@@ -24,7 +25,10 @@ namespace LiveTimelineProps
     inline void ClearKnownObjects()
     {
         for (auto handle : knownObjects) StageLoader::freeHandle(handle);
-        for (const auto& model : trackModels) StageLoader::freeHandle(model.object);
+        for (const auto& model : trackModels) {
+            for (auto part : model.parts) StageLoader::freeHandle(part);
+            StageLoader::freeHandle(model.object);
+        }
         knownObjects.clear();
         trackModels.clear();
     }
@@ -372,9 +376,23 @@ namespace LiveTimelineProps
             const auto remember = [&](void* value) {
                 void* model = GameObjectOf(value);
                 if (!model || !loaded(model)) return;
+                void* transform = StageLoader::Invoke(StageLoader::goTransform, model);
+                // Resolve a mesh binding to its prefab so sibling meshes share one mask.
+                if (transform && HelperGetTransformName(transform).starts_with("Geo_")) {
+                    void* parent = g_getParentNative(transform);
+                    for (int depth = 0; parent && depth < 16; ++depth, parent = g_getParentNative(parent)) {
+                        const auto name = HelperGetTransformName(parent);
+                        if (protectedBranch(name)) break;
+                        if (!name.starts_with("mdl_")) continue;
+                        if (void* root = LiveActorProps::SceneObject(parent, StageLoader::SceneOfFreshGo(model))) {
+                            transform = parent;
+                            model = root;
+                        }
+                        break;
+                    }
+                }
                 const int modelId = StageLoader::ReadInt(StageLoader::instanceId, model);
                 if (!modelId || seen.contains(modelId)) return;
-                void* transform = StageLoader::Invoke(StageLoader::goTransform, model);
                 if (!transform || std::any_of(actors.begin(), actors.end(), [&](void* actor) {
                     return actor && (IsBelow(actor, transform) || IsBelow(transform, actor));
                 })) return;
@@ -385,7 +403,23 @@ namespace LiveTimelineProps
                 if (node || !HasMesh(transform)) return;
                 if (auto handle = StageLoader::newHandle(model, false)) {
                     seen.insert(modelId);
-                    trackModels.push_back({handle, label});
+                    TrackModel entry{handle, label};
+                    std::vector<ModelRendererMask::Entry> meshes;
+                    const auto target = LiveActorProps::Target();
+                    std::unordered_set<void*> parts;
+                    if (ModelRendererMask::Capture(transform, meshes, IsMeshRenderer)) {
+                        for (const auto& mesh : meshes) {
+                            void* part = GameObjectOf(target(mesh.handle));
+                            if (part && parts.insert(part).second)
+                                if (auto partHandle = StageLoader::newHandle(part, false)) entry.parts.push_back(partHandle);
+                        }
+                    }
+                    ModelRendererMask::Release(meshes);
+                    if (entry.parts.size() != parts.size() || entry.parts.size() < 2) {
+                        for (auto part : entry.parts) StageLoader::freeHandle(part);
+                        entry.parts.clear();
+                    }
+                    trackModels.push_back(std::move(entry));
                     if (g_hostContext.logInfo)
                         g_hostContext.logInfo("[GakuMotion][LiveTimelineProp] track director=%s model=%s id=%d",
                             label.c_str(), name.c_str(), modelId);
@@ -418,7 +452,10 @@ namespace LiveTimelineProps
         const bool newMask = found == saved.end();
         if (newMask) {
             Saved state{StageLoader::newHandle(object, false), prop.instanceId, scene};
-            if (state.object && ModelRendererMask::Capture(transform, state.renderers, IsMeshRenderer))
+            const auto include = [&](void* renderer) {
+                return IsMeshRenderer(renderer) && (!prop.modelId || GameObjectOf(renderer) == object);
+            };
+            if (state.object && ModelRendererMask::Capture(transform, state.renderers, include))
                 found = saved.emplace(key, std::move(state)).first;
             else {
                 ModelRendererMask::Release(state.renderers);
@@ -483,13 +520,14 @@ namespace LiveTimelineProps
 
         std::vector<void*> modelRoots;
         unsigned readProps{}, readConstraints{};
-        auto add = [&](void* item, const std::string& label, bool meshVerified = false, bool handheld = false) {
+        auto add = [&](void* item, const std::string& label, bool meshVerified = false, bool handheld = false,
+            int modelId = 0, const std::string& modelName = {}) {
             void* object = GameObjectOf(item);
             void* transform = object ? StageLoader::Invoke(StageLoader::goTransform, object) : nullptr;
             if (!transform || std::any_of(actors.begin(), actors.end(), [&](void* actor) {
                 return actor && (IsBelow(actor, transform) || (!handheld && IsBelow(transform, actor)));
             }) || std::any_of(modelRoots.begin(), modelRoots.end(), [&](void* root) {
-                return IsBelow(transform, root) || IsBelow(root, transform);
+                return root == transform || (!modelId && (IsBelow(transform, root) || IsBelow(root, transform)));
             })) return;
             int scene = StageLoader::SceneOfFreshGo(object);
             void* sceneArgs[]{&scene};
@@ -501,6 +539,8 @@ namespace LiveTimelineProps
             bool active{};
             if (name.empty() || !LiveActorProps::ReadActive(object, active)) return;
             GakuMotion::GuiActorProp prop{0, "Timeline", name, label, id, active, canWrite, false, true};
+            prop.modelId = modelId;
+            prop.modelName = modelName;
             if (canWrite) Hide(core, prop, object, transform, scene);
             modelRoots.push_back(transform);
             core.actorProps.push_back(std::move(prop));
@@ -517,8 +557,19 @@ namespace LiveTimelineProps
             void* args[]{&slot};
             VisitList(StageLoader::Invoke(constraints, controller, args), [&](void* item) { ++readConstraints; add(item, label); });
         }
-        if (target) for (const auto& model : trackModels)
-            add(target(model.object), "轨道 · " + model.director, true);
+        if (target) for (const auto& model : trackModels) {
+            void* object = target(model.object);
+            if (!CameraBridge::IsAlive(object)) continue;
+            if (model.parts.empty()) {
+                add(object, model.director, true);
+                continue;
+            }
+            const int id = StageLoader::ReadInt(StageLoader::instanceId, object);
+            void* root = StageLoader::Invoke(StageLoader::goTransform, object);
+            if (!id || !root) continue;
+            const auto name = HelperGetTransformName(root);
+            for (auto part : model.parts) add(target(part), model.director, true, false, id, name);
+        }
         if (core.actorPropScanRequested && g_hostContext.logInfo) {
             g_hostContext.logInfo("[GakuMotion][LiveTimelineProp] slots=%d props=%u constraints=%u handheld=%zu tracks=%zu found=%zu",
                 count, readProps, readConstraints, knownObjects.size(), trackModels.size(), core.actorProps.size());

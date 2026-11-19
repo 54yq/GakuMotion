@@ -16,7 +16,7 @@ namespace GakuMotion
 		if (idx < 0 || idx >= static_cast<int>(list.size())) return;
 		const auto& cand = list[idx];
 		if (std::any_of(ctx.actorProps.begin(), ctx.actorProps.end(), [&](const auto& prop) {
-			return cand.instanceId && cand.instanceId == prop.instanceId;
+			return cand.instanceId && (cand.instanceId == prop.instanceId || cand.instanceId == prop.modelId);
 		})) return;
 
 		const char* badgeText = "[节点]";
