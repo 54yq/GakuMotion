@@ -377,6 +377,7 @@ namespace GakuMotion
 		bool (*fnApplyActorModelHidden)(uint64_t, uint64_t, bool){nullptr};
 		std::vector<GuiActorProp> actorProps;
 		bool actorPropScanRequested{};
+		bool timelinePropDiscoveryRequested{};
 		bool (*fnBeforeTargetChange)(){nullptr};
 
 		BoneOverrideSet globalOverrides; // <localRoot>/GakuMotion/bone_overrides.json
@@ -4006,7 +4007,11 @@ namespace GakuMotion
             };
 			ctx.actorPropsEditable = CanControlActorProps();
 			ctx.actorProps = actorProps;
-			ctx.fnScanActorProps = [](void* self) { static_cast<Core*>(self)->actorPropScanRequested = true; };
+			ctx.fnScanActorProps = [](void* self) {
+				auto& core = *static_cast<Core*>(self);
+				core.actorPropScanRequested = true;
+				core.timelinePropDiscoveryRequested = true;
+			};
 			for (auto& prop : ctx.actorProps)
 				prop.hidden = actorPropHidden.contains(ActorPropKey(prop));
 			ctx.fnSetActorPropHidden = [](void* self, uint64_t token, uint64_t epoch, const char* key, bool hidden)

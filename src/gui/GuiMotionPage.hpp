@@ -9,7 +9,6 @@
 #include "../GkGuiOverlay.hpp"
 #include "../GkBoneOverride.hpp"
 #include "../GkIdolController.hpp"
-#include "../GkLiveActorPropPolicy.hpp"
 
 #ifdef GKMOTION_GUI_ACTIVE
 namespace GakuMotion
@@ -61,8 +60,6 @@ namespace GakuMotion
         if (ctx.ensembleNotice.rfind("模型显隐未完成", 0) == 0)
             ImGui::TextWrapped("%s", ctx.ensembleNotice.c_str());
 		ImGui::TextWrapped("表情随驱动角色自动适配。");
-
-		DrawSceneProps(ctx);
 
 		// =========================================================================
 		// 3. 初始角色位置偏移

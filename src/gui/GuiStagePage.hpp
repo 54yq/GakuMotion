@@ -15,6 +15,9 @@ namespace GakuMotion
 	{
 		if (idx < 0 || idx >= static_cast<int>(list.size())) return;
 		const auto& cand = list[idx];
+		if (std::any_of(ctx.actorProps.begin(), ctx.actorProps.end(), [&](const auto& prop) {
+			return cand.instanceId && cand.instanceId == prop.instanceId;
+		})) return;
 
 		const char* badgeText = "[节点]";
 		ImVec4 badgeColor = ImVec4(0.7f, 0.7f, 0.7f, 1.0f);
@@ -213,7 +216,7 @@ namespace GakuMotion
 
 		ImGui::EndDisabled(); // !customNodeActive
 
-		if (ctx.liveViewingConfirmed) DrawSceneProps(ctx, true);
+		if (ctx.liveViewingConfirmed || ctx.actorPropsEditable || !ctx.actorProps.empty()) DrawTimelineProps(ctx);
 
 		ImGui::Spacing();
 		ImGui::Separator();
