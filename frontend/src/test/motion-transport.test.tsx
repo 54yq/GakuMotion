@@ -1,7 +1,8 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { LiveControls, useForkWorkspace } from '@/motion/components/ForkWorkspace'
 import { TransportBar } from '@/motion/components/TransportBar'
 import { setMotionBridge } from '@/motion/bridge'
 import { MotionMockBridgeClient } from '@/motion/mock'
@@ -90,6 +91,40 @@ describe('TransportBar', () => {
     expect(methods).toContain('player.scrubBegin')
     expect(methods).toContain('player.scrubEnd')
     expect(methods.indexOf('player.scrubBegin')).toBeLessThan(methods.indexOf('player.scrubEnd'))
+  })
+
+  it('holds the committed slider target while native reports an in-flight scrub', async () => {
+    await motionStore.selectMotion('hikari-no-saki', false)
+    renderBar()
+    const slider = screen.getByRole('slider', { name: '播放进度' })
+    await act(async () => motionStore.scrubStart(8))
+    vi.spyOn(bridge, 'request').mockImplementationOnce(() => new Promise(() => {}))
+    act(() => motionStore.scrubCommit(12))
+    expect(slider).toHaveAttribute('aria-valuenow', '12')
+    await act(async () => { await bridge.request('player.scrubUpdate', { seconds: 9 }) })
+    expect(slider).toHaveAttribute('aria-valuenow', '12')
+    act(() => bridge.push('player.stateChanged', { ...motionStore.getState().player, time: 12, scrubbing: true }))
+    expect(motionStore.getState().scrub.pending).toBe(true)
+    await act(async () => { await bridge.request('player.scrubEnd', { seconds: 12 }) })
+    expect(motionStore.getState().scrub.pending).toBeUndefined()
+  })
+
+  it('keeps the original Live slider at the target until the new time arrives', () => {
+    const request = vi.fn(async () => {})
+    function Fixture({ time }: { time: number }) {
+      const { state } = useForkWorkspace(true)
+      return state && <LiveControls state={{ ...state, active: false, liveTime: time }} command={request} />
+    }
+    const { rerender } = render(<Fixture time={8} />)
+    const slider = screen.getByRole('slider', { name: /原 Live 进度/ })
+    fireEvent.change(slider, { target: { value: '26' } })
+    fireEvent.pointerUp(slider)
+    rerender(<Fixture time={9} />)
+    expect(slider).toHaveValue('26')
+    expect(request).toHaveBeenCalledWith('live.seek', { value: 26 }, true)
+    rerender(<Fixture time={26} />)
+    rerender(<Fixture time={27} />)
+    expect(slider).toHaveValue('27')
   })
 
   it('opens precision control panel for frame stepping, time/frame seek, and fine speed', async () => {

@@ -3438,14 +3438,15 @@ namespace GakuMotion
 			ensembleNotice = "已按主角色恢复分轨初始站位并统一朝向与走位；可继续微调站位";
 		}
 
-		bool PublishSceneActors(const std::vector<SceneActorObservation>& observations)
+		bool PublishSceneActors(const std::vector<SceneActorObservation>& observations, bool preserveExisting = false)
 		{
 			const uint64_t previousEpoch = sceneActorRegistry.Epoch();
 			const auto* old = sceneActorRegistry.Find(player.controller.targetActor);
 			const uint64_t oldToken = old ? old->token : 0;
 			sceneActorRegistry.Publish(observations);
-			if (previousEpoch != sceneActorRegistry.Epoch()) { actorPropHidden.clear(); actorProps.clear(); actorModelHidden.clear(); }
-			if (previousEpoch != sceneActorRegistry.Epoch() && ensemble.HasFollowers() && !ensembleRestoreUnconfirmed)
+			const bool resetBindings = previousEpoch != sceneActorRegistry.Epoch() && !preserveExisting;
+			if (resetBindings) { actorPropHidden.clear(); actorProps.clear(); actorModelHidden.clear(); }
+			if (resetBindings && ensemble.HasFollowers() && !ensembleRestoreUnconfirmed)
 			{
 				if (!ensemble.ClearAll(sceneActorRegistry))
 				{

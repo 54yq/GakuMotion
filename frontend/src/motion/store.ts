@@ -533,7 +533,7 @@ export interface MotionAppState {
   importDialogOpen: boolean
   navigationError: string | null
   actionError: string | null
-  scrub: { active: boolean; value: number }
+  scrub: { active: boolean; value: number; pending?: boolean }
   cameraDraft: CameraSettings
   cameraExpected: CameraSettings | null
   cameraPending: boolean
@@ -1017,12 +1017,20 @@ export class MotionStore {
 
   scrubCommit = (seconds: number): void => {
     if (!this.state.scrub.active) return
+    const scrub = { active: false, value: seconds, pending: true }
+    const finish = () => {
+      if (this.state.scrub === scrub) this.set({ scrub: { active: false, value: 0 } })
+    }
     this.set({
-      scrub: { active: false, value: seconds },
+      scrub,
       probeScrubEnd: this.state.probeScrubEnd + 1,
       probeLastScrubValue: seconds,
     })
-    void this.client().request('player.scrubEnd', { seconds }).catch((error) => this.reportActionError(error))
+    window.setTimeout(finish, 2000)
+    void this.client().request('player.scrubEnd', { seconds }).catch((error) => {
+      finish()
+      this.reportActionError(error)
+    })
   }
 
   seekTime = async (input: string): Promise<void> => {
@@ -1793,7 +1801,9 @@ export class MotionStore {
   }
 
   private onPlayerStateChanged(player: PlayerState): void {
-    this.set({ player })
+    const { scrub } = this.state
+    const reached = !player.scrubbing && Math.abs(player.time - scrub.value) <= 0.35
+    this.set({ player, scrub: scrub.pending && reached ? { active: false, value: 0 } : scrub })
     this.maybeAutoSubmitAfterStop()
   }
 

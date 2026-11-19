@@ -124,7 +124,27 @@ export function useForkWorkspace(preview = false) {
 
 export function LiveControls({ state, command }: { state: ForkState; command: ForkCommand }) {
   const [seek, setSeek] = useState<number | null>(null)
+  const [pendingSeek, setPendingSeek] = useState<number | null>(null)
   const canSeek = state.viewing && !state.active && state.duration > 0
+  useEffect(() => {
+    setSeek(null)
+    setPendingSeek(null)
+  }, [canSeek, state.owner, state.session])
+  useEffect(() => {
+    if (pendingSeek === null) return
+    const timer = window.setTimeout(() => setPendingSeek(null), 2000)
+    return () => window.clearTimeout(timer)
+  }, [pendingSeek])
+  useEffect(() => {
+    const tolerance = state.paused ? 0.15 : 0.75
+    if (pendingSeek !== null && Math.abs(state.liveTime - pendingSeek) <= tolerance) setPendingSeek(null)
+  }, [pendingSeek, state.liveTime, state.paused])
+  const commitSeek = (value: number) => {
+    setPendingSeek(value)
+    setSeek(null)
+    void command('live.seek', { value }, true)
+  }
+  const displayTime = seek ?? pendingSeek ?? state.liveTime
   return (
     <section className="space-y-3 rounded-lg border bg-card p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -143,14 +163,15 @@ export function LiveControls({ state, command }: { state: ForkState; command: Fo
         <label className="flex min-w-52 flex-1 items-center gap-2 text-xs text-muted-foreground">
           原 Live 进度
           <span className="shrink-0 tabular-nums" aria-label="当前 Live 时间">
-            {state.viewing ? formatMmSs(seek ?? state.liveTime) : '--:--'} / {state.duration > 0 ? formatMmSs(state.duration) : '--:--'}
+            {state.viewing ? formatMmSs(displayTime) : '--:--'} / {state.duration > 0 ? formatMmSs(state.duration) : '--:--'}
           </span>
           <input type="range" className="min-w-0 flex-1 accent-primary" disabled={!canSeek}
-            min={0} max={Math.max(0, state.duration - 0.1)} step={0.1} value={seek ?? state.liveTime}
+            min={0} max={Math.max(0, state.duration - 0.1)} step={0.1} value={displayTime}
             onChange={event => setSeek(event.currentTarget.valueAsNumber)}
             onBlur={() => setSeek(null)}
-            onPointerUp={event => { void command('live.seek', { value: event.currentTarget.valueAsNumber }); setSeek(null) }}
-            onKeyUp={event => { if (seek !== null && (event.key.startsWith('Arrow') || event.key === 'Home' || event.key === 'End')) { void command('live.seek', { value: seek }); setSeek(null) } }} />
+            onPointerCancel={() => setSeek(null)}
+            onPointerUp={event => commitSeek(event.currentTarget.valueAsNumber)}
+            onKeyUp={event => { if (seek !== null && (event.key.startsWith('Arrow') || event.key === 'Home' || event.key === 'End')) commitSeek(seek) }} />
         </label>
         <label className="flex items-center gap-2 text-xs">
           <input type="checkbox" checked={state.aspect} onChange={event => void command('live.aspect', { value: event.currentTarget.checked })} />

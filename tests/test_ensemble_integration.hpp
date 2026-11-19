@@ -231,6 +231,17 @@ static void TestEnsembleIntegration(const std::string& repoRoot)
 	core.player.state = PlaybackState::Preview;
 	core.OnLateUpdate(b, animB, nullptr, .016f, false);
 	core.OnLateUpdate(c, animC, nullptr, .016f, false);
+	int extraActor{};
+	const auto rosterEpoch = core.sceneActorRegistry.Epoch();
+	const auto session = core.injectionSession;
+	const auto* boundB = fb.player.get();
+	const auto* boundC = fc.player.get();
+	Check(!core.PublishSceneActors({{a, 1, ""}, {b, 2, ""}, {c, 3, ""}, {&extraActor, 4, ""}}, true) &&
+		core.sceneActorRegistry.Epoch() != rosterEpoch && core.injectionSession == session &&
+		core.sceneActorRegistry.Find(b)->token == tokenB && core.sceneActorRegistry.Find(&extraActor) &&
+		core.ensemble.Followers()[0].player.get() == boundB && core.ensemble.Followers()[1].player.get() == boundC &&
+		core.player.state == PlaybackState::Preview,
+		"adding a Live actor refreshes the roster while preserving playback and existing bindings");
 	const auto before = EnsembleFixture::writes;
 	core.PublishSceneActors({{a, 1, ""}, {b, 22, ""}}); // old B address reused; C removed
 	Check(core.ensemble.HasFollowers() && core.ensembleRestoreUnconfirmed && EnsembleFixture::writes == before,

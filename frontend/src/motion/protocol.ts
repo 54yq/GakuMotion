@@ -17,6 +17,7 @@ export type PlaybackStatus = 'stopped' | 'playing' | 'paused' | 'preview'
 
 export interface PlayerState {
   state: PlaybackStatus
+  scrubbing?: boolean
   title: string
   time: number
   duration: number

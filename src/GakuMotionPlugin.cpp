@@ -1044,7 +1044,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.10-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.11-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -3277,15 +3277,16 @@ static bool RefreshSceneActors(GakuMotion::Core& core, bool force, bool refreshP
 	const auto oldEpoch = core.sceneActorRegistry.Epoch();
 	const auto& oldEntries = core.sceneActorRegistry.Entries();
 	const size_t oldCount = oldEntries.size();
-	const bool actorSetChanged = oldCount != observations.size() ||
-		std::any_of(oldEntries.begin(), oldEntries.end(), [&](const auto& old) {
-			return !GakuMotion::ObservedSceneActor(observations, old);
-		});
+	const bool previousActorMissing = std::any_of(oldEntries.begin(), oldEntries.end(), [&](const auto& old) {
+		return !GakuMotion::ObservedSceneActor(observations, old);
+	});
+	const bool actorSetChanged = oldCount != observations.size() || previousActorMissing;
 	const bool liveRosterChanged = oldCount && actorSetChanged && core.liveTakeoverActive &&
 		core.liveViewingConfirmed && core.liveObservation.confirmed && core.liveObservation.paused &&
 		core.liveOwnerToken == g_liveTakeoverOwner && core.liveOwnerScene == g_liveTakeoverScene &&
 		core.injectionPolicy.Read().captureDepth == 0 && GakuMotion::capture::LiveAutoPhotoIdle();
-	if (liveRosterChanged)
+	const bool addedLiveActors = liveRosterChanged && !previousActorMissing && observations.size() > oldCount;
+	if (liveRosterChanged && !addedLiveActors)
 	{
 		if (const char* reason = RestoreForLiveRosterChange(core, observations)) {
 			core.actorProps.clear();
@@ -3298,20 +3299,20 @@ static bool RefreshSceneActors(GakuMotion::Core& core, bool force, bool refreshP
 			return false;
 		}
 	}
-	else if (actorSetChanged && (!LiveActorProps::RestoreAll(core) || !ActorModelVisibility::RestoreAll(core))) {
+	else if (actorSetChanged && !addedLiveActors && (!LiveActorProps::RestoreAll(core) || !ActorModelVisibility::RestoreAll(core))) {
 		core.actorProps.clear();
 		core.ensembleRestoreUnconfirmed=true;
 		core.ensembleNotice="角色道具恢复未确认，已暂停注入；请重新进入场景";
 		core.player.Pause(); g_motionSceneAllowed=false; return false;
 	}
-	if (core.PublishSceneActors(observations))
+	if (core.PublishSceneActors(observations, addedLiveActors))
 	{
 		ClearSecondaryPhysics(true);
 		HelperClearActorAnimatorCache();
 		NativeAudio::Release(GakuMotion::bgm::ReleaseReason::SceneLost);
 		core.PickBoundActorAsTarget(); // Old physics has been abandoned; bind only a fresh actor.
 	}
-	if (oldCount && oldEpoch != core.sceneActorRegistry.Epoch())
+	if (!addedLiveActors && oldCount && oldEpoch != core.sceneActorRegistry.Epoch())
 	{
 		void* current = observations.empty() ? nullptr : observations.front().actor;
 		if (current) StageLoader::BindContext(g_sceneOwner.sceneHandle, current);
@@ -3321,7 +3322,10 @@ static bool RefreshSceneActors(GakuMotion::Core& core, bool force, bool refreshP
 		}
 	}
 	if (propScanDue || (refreshProps && propsScene && actorSetChanged)) scanProps(observations);
-	if (liveRosterChanged && g_liveDriver.MayInject() && !core.liveTakeoverRequest)
+	if (addedLiveActors && g_hostContext.logInfo)
+		g_hostContext.logInfo("[GakuMotion][LiveRoster] added scene=%d previous=%zu current=%zu",
+			core.liveOwnerScene, oldCount, observations.size());
+	if (liveRosterChanged && !addedLiveActors && g_liveDriver.MayInject() && !core.liveTakeoverRequest)
 	{
 		core.liveTakeoverRequest = LiveRosterExitRequest;
 		core.liveTakeoverRequestOwner = core.liveOwnerToken;

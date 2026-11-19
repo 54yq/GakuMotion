@@ -84,7 +84,7 @@ export function TransportBar() {
   const isPaused = player.state === 'paused'
   const isPreview = player.state === 'preview'
 
-  const displayTime = scrub.active ? scrub.value : player.time
+  const displayTime = scrub.active || scrub.pending ? scrub.value : player.time
   const volumePercent = Math.round(player.volume * 100)
   React.useEffect(() => {
     if (volumePercent > 0) lastVolumeRef.current = volumePercent
@@ -159,7 +159,7 @@ export function TransportBar() {
             aria-label="播放进度"
             className={cn(
               'block size-3 rounded-full border-2 border-primary bg-background shadow-sm transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none',
-              scrub.active
+              scrub.active || scrub.pending
                 ? 'scale-100 opacity-100'
                 : 'scale-75 opacity-0 group-hover:scale-100 group-hover:opacity-100 focus-visible:scale-100 focus-visible:opacity-100',
             )}
@@ -331,7 +331,7 @@ export function TransportBar() {
               size="icon"
               className="size-8 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
               aria-label="预览第一帧"
-              disabled={!hasClip || !supports('player.seekFrame') || scrub.active}
+              disabled={!hasClip || !supports('player.seekFrame') || scrub.active || scrub.pending}
               onClick={() => void motionStore.seekFrame('0')}
             >
               <RiEyeFill className="size-4" />

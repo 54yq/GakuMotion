@@ -2077,6 +2077,7 @@ namespace GakuMotion::webpanel
 			const int playMode = static_cast<int>(core_.playlist.mode);
 			return "{\"state\":" + JString(state) + ",\"title\":" + JString(title) +
 				",\"time\":" + JNum(player.currentTime) +
+				",\"scrubbing\":" + JBool(player.scrubbing) +
 				",\"duration\":" + JNum(player.TimelineDuration()) +
 				",\"totalFrames\":" + JNum(player.clip.total_frames) +
 				",\"fps\":" + JNum(player.clip.fps) +
