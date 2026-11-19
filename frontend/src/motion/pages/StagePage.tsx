@@ -15,7 +15,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
-import { ENSEMBLE_SLOT_NAMES, type ForkState } from '../protocol'
+import { ENSEMBLE_SLOT_NAMES, type ForkState, type StageNode } from '../protocol'
 import { motionStore, useMotionStore } from '../store'
 import { CollapsiblePropertySection, PropertyRow, PropertySection } from '../components/PropertyGroup'
 import { PendingBadge } from '../components/Unsupported'
@@ -29,6 +29,34 @@ const COLOR_PRESETS: Array<{ label: string; rgb: [number, number, number] }> = [
   { label: '绿幕', rgb: [0, 1, 0] },
   { label: '蓝幕', rgb: [0, 0.35, 0.85] },
 ]
+
+const functionTags: ReadonlyArray<readonly [RegExp, string]> = [
+  [/floodlight|泛光灯/, '泛光灯'],
+  [/bloom|glow|泛光/, '泛光'],
+  [/colorgrading|colorcorrection|colorgra|lutfilter|\blut\b|调色/, '色彩分级'],
+  [/filter|滤镜/, '滤镜'],
+  [/depthoffield|(?:^|[^a-z])dof|vldof|景深/, '景深'],
+  [/vignette|暗角/, '暗角'],
+  [/tonemapping|tonemap/, '色调映射'],
+  [/motionblur|动态模糊/, '动态模糊'],
+  [/lensflare|paraffin|光晕/, '镜头光晕'],
+  [/truss|lightrig|lightframe|灯架|桁架/, '灯架'],
+  [/spotlight|spotlamp|聚光灯/, '聚光灯'],
+  [/directionallight|sunlight|方向光/, '方向光'],
+  [/pointlight|点光源/, '点光源'],
+  [/decolight|装饰灯/, '装饰灯'],
+  [/reallight|lightfixture|灯具/, '舞台灯具'],
+  [/ledscreen|ledwall|backscreen|屏幕/, '舞台屏幕'],
+  [/backdrop|幕布/, '背景幕布'],
+  [/decal|贴花/, '贴花'],
+  [/stagefloor|floorpanel|地板/, '舞台地板'],
+  [/scaffold|supportframe|支架/, '支架'],
+]
+
+function stageFunctionTag(node: StageNode) {
+  const name = `${node.name} ${node.displayName}`.toLowerCase().replace(/[_-]/g, '')
+  return functionTags.find(([pattern]) => pattern.test(name))?.[1]
+}
 
 function rgbToHex(rgb: [number, number, number]): string {
   return `#${rgb.map((channel) => Math.round(Math.min(Math.max(channel, 0), 1) * 255).toString(16).padStart(2, '0')).join('')}`
@@ -72,7 +100,7 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
     const needle = nodeFilter.trim().toLowerCase()
     if (!needle) return safeNodes
     return safeNodes.filter(
-      (node) => node.displayName.toLowerCase().includes(needle) || node.name.toLowerCase().includes(needle),
+      (node) => [node.displayName, node.name, stageFunctionTag(node)].some(value => value?.toLowerCase().includes(needle)),
     )
   }, [safeNodes, nodeFilter])
   const nodesByIndex = new Map(safeNodes.map(node => [node.index, node]))
@@ -403,10 +431,11 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
                             </Button>
                           ) : <span className="pl-4 text-xs text-foreground">{node.displayName}</span>}
                           {<Badge variant="secondary" className="rounded-[4px]">
-                            {/dof/i.test(node.name) ? '景深' : /posteffect/i.test(node.name) && !node.isLightingRoot ? '后处理'
+                            {/dof|depth.?of.?field/i.test(node.name) ? '后处理' : /posteffect/i.test(node.name) && !node.isLightingRoot ? '后处理'
                               : node.isLightingRoot || node.isLightingNode || /light/i.test(node.name) ? '光影'
                               : node.isIdentifiedBackground || /decal|background/i.test(node.name) ? '背景与装饰' : '场景结构'}
                           </Badge>}
+                          {stageFunctionTag(node) && <Badge variant="outline">{stageFunctionTag(node)}</Badge>}
                           {node.containsMovingAsset && <Badge variant="outline">包含移动资产</Badge>}
                           {node.isColliderLocked && <Badge variant="outline" className="rounded-[4px]">碰撞锁定</Badge>}
                           <label className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
