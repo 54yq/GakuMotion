@@ -187,7 +187,7 @@ namespace GakuMotion::webpanel
 		"facial.setWeights", "facial.save",
 		"position.set", "position.save",
 		"camera.set", "camera.save",
-		"stage.set", "stage.scan", "stage.toggleNode", "stage.refreshRendering", "stage.setLoadReplacement",
+		"stage.set", "stage.scan", "stage.toggleNode", "stage.setLoadReplacement",
 		"settings.setPhysics",
 		"shell.setTextInputActive",
 		"appearance.get",
@@ -724,15 +724,6 @@ namespace GakuMotion::webpanel
 				std::lock_guard<std::recursive_mutex> lock(core_.stateMutex);
 				core_.QueueScanStageCandidates();
 				return CmdResult::Ok("{\"nodes\":" + StageNodesJsonLocked() + "}");
-			}
-			if (method == "stage.refreshRendering")
-			{
-				std::lock_guard<std::recursive_mutex> lock(core_.stateMutex);
-				if (const auto guard = MutationGuardLocked(); !guard.ok) return guard;
-				if (visual_handoff::Requested())
-					return CmdResult::Err("protected", "Resource control is held by GakuActors");
-				core_.QueueGui({GuiAction::RefreshStageRendering});
-				return CmdResult::Ok();
 			}
 			if (method == "stage.toggleNode") return StageToggleNode(params);
 			if (method == "stage.setLoadReplacement") return StageSetLoadReplacement(params);

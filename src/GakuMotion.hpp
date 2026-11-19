@@ -495,7 +495,7 @@ namespace GakuMotion
 			CameraSettings, SaveCameraSettings, CameraImport, ReloadCamera,
 			SoleSettings, SaveSoleSettings, LoadSoleSettings, ExperimentalSolePitch, ExperimentalWaistSupport,
 			BeforeQuartzExperiment, CostumePhysicsCapture, AuxDriveMode, WristDiagnostic, WristTwistShare, ForearmAxisAdjustment, ForearmAxisLock,
-			StageSettings, StagePreset, ToggleStageCandidate, ScanStageCandidates, RefreshStageRendering,
+			StageSettings, StagePreset, ToggleStageCandidate, ScanStageCandidates,
 			MountCustomStage, UnloadCustomStage, RestoreCameraSkybox,
 			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, StageLoadReplacement, SelectTarget, SetActorPropHidden, SetActorModelHidden, InitializeBeforeMotion,
 			AddLibraryFolder, RemoveLibraryFolder, SetEnsembleFollower, ClearEnsembleFollower, EnsemblePosition, EnsembleYaw, FollowerArm, SceneArm, AlignEnsemble, AutoAssignEnsemble, SaveEnsemblePreset, ApplyEnsemblePreset
@@ -812,8 +812,7 @@ namespace GakuMotion
                 if(visual_handoff::Requested() && (cmd.action==GuiAction::SetActorModelHidden ||
                     cmd.action==GuiAction::SetActorPropHidden ||
                     cmd.action==GuiAction::StageSettings || cmd.action==GuiAction::StagePreset ||
-                    cmd.action==GuiAction::ToggleStageCandidate || cmd.action==GuiAction::RefreshStageRendering ||
-                    cmd.action==GuiAction::MountCustomStage ||
+                    cmd.action==GuiAction::ToggleStageCandidate || cmd.action==GuiAction::MountCustomStage ||
                     cmd.action==GuiAction::UnloadCustomStage || cmd.action==GuiAction::RestoreCameraSkybox)) {
                     ensembleNotice="资源控制已交给 GakuActors；请先在 GakuActors 中释放";continue;
                 }
@@ -1134,14 +1133,6 @@ namespace GakuMotion
 						allowed = index < nodes.size() && !StagePropOwnership(nodes)[index];
 					}
 					if (allowed) stageManager.ToggleCandidate(cmd.candidateIndex, cmd.flag);
-					break;
-				}
-				case GuiAction::RefreshStageRendering:
-				{
-					std::lock_guard<std::mutex> lock(stageManager.stageMutex);
-					if (stageManager.candidates.empty())
-						stageManager.DiscoverCandidates(currentActor, stageManager.currentSceneName);
-					stageManager.RefreshStageRenderingLocked(StagePropOwnership(stageManager.candidates));
 					break;
 				}
 				case GuiAction::ScanStageCandidates:

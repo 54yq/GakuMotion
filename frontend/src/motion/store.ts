@@ -2224,15 +2224,6 @@ export class MotionStore {
 
   // ---- Stage nodes / replacement (phase 2) ----
 
-  refreshStageRendering = async (): Promise<void> => {
-    try {
-      await this.client().request('stage.refreshRendering')
-      this.set({ actionError: null })
-    } catch (error) {
-      this.reportActionError(error)
-    }
-  }
-
   scanStageNodes = async (): Promise<void> => {
     if (!this.supports('stage.scan')) return
     try {
