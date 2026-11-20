@@ -799,11 +799,11 @@ export function LibraryPage({ fork, forkCommand }: { fork?: ForkState | null; fo
           if (!open) motionStore.cancelDelete()
         }}
       >
-        <AlertDialogContent data-testid="delete-dialog">
+        <AlertDialogContent data-testid="delete-dialog" className="max-h-[calc(100dvh_-_2rem)] w-[calc(100%_-_2rem)] grid-cols-1 overflow-y-auto">
           <AlertDialogHeader>
             <AlertDialogTitle>删除选中确认</AlertDialogTitle>
             <AlertDialogDescription asChild>
-              <div className="space-y-2">
+              <div className="min-w-0 space-y-2 [overflow-wrap:anywhere]">
                 <p>删除曲目：{pendingDelete?.key}</p>
                 <p>将永久删除整个曲目目录及其中全部文件：{pendingDelete?.directory}</p>
                 <p>此操作无法撤销，文件不会进入回收站。确定删除选中曲目？</p>
@@ -811,7 +811,7 @@ export function LibraryPage({ fork, forkCommand }: { fork?: ForkState | null; fo
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
+          <AlertDialogFooter className="min-w-0 flex-wrap">
             <AlertDialogCancel onClick={() => motionStore.cancelDelete()}>取消删除</AlertDialogCancel>
             <AlertDialogAction
               disabled={deleteChanged || busy}

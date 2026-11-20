@@ -58,6 +58,7 @@ import { deepEqual } from './utils'
 import {
   classifyImportFiles,
   ensembleUiError,
+  fileStem,
   isSupportedLibraryFile,
   validateImportForm,
   validateSole,
@@ -89,6 +90,8 @@ export interface ImportFormState {
   editRevision: number
   editInfo: EditEntryInfo | null
   title: string
+  titleEdited: boolean
+  relatedMedia: { camera: string[]; audio: string[] }
   subtitle: string
   sourceFps: number
   fps: number
@@ -131,6 +134,8 @@ function emptyImportForm(): ImportFormState {
     editRevision: 0,
     editInfo: null,
     title: '',
+    titleEdited: false,
+    relatedMedia: { camera: [], audio: [] },
     subtitle: '',
     sourceFps: 0,
     fps: 0,
@@ -686,8 +691,11 @@ export class MotionStore {
   private facialTimer: ReturnType<typeof setTimeout> | null = null
   private pendingFacial: FacialWeights | null = null
   private dialogTimer: ReturnType<typeof setInterval> | null = null
+  private importSession = 0
+  private siblingScan = 0
   private dialogId = 0
   private dialogTarget: DialogTarget | null = null
+  private dialogImportSession = 0
   private dropTimer: ReturnType<typeof setInterval> | null = null
   private dropTargetActive = false
   private importUiTimer: ReturnType<typeof setInterval> | null = null
@@ -1480,73 +1488,70 @@ export class MotionStore {
   // ---- Import form (phase 2) ----
 
   private probePaths = async (paths: string[]): Promise<VmdProbe[]> => {
+    const session = this.importSession
     const targets = paths.filter((path) => /\.(vmd|gkcamera)$/i.test(path) && !this.state.importForm.probes[path])
     if (targets.length === 0 || !this.supports('library.probeFiles')) return []
     try {
-      const { probes } = await this.client().request('library.probeFiles', { paths: targets })
+      const { probes } = await this.client().request('library.probeFiles', { paths: targets.slice(0, 256) })
+      if (session !== this.importSession || !this.state.importForm.open) return []
       const merged = { ...this.state.importForm.probes }
       for (const probe of probes) merged[probe.path] = probe
       this.set({ importForm: { ...this.state.importForm, probes: merged } })
       return probes
     } catch (error) {
-      this.reportActionError(error)
+      if (session === this.importSession) this.reportActionError(error)
       return []
     }
   }
 
   openImportNew = async (files: string[]): Promise<void> => {
+    ++this.importSession
     const form = emptyImportForm()
     form.open = true
-    form.mode = 'new'
     form.slots.motion.candidates = [IMPORT_SLOT.empty]
-    form.slots.facial.candidates = [IMPORT_SLOT.autoFacial]
+    form.slots.facial.candidates = [IMPORT_SLOT.autoFacial, IMPORT_SLOT.skip]
     form.slots.camera.candidates = [IMPORT_SLOT.empty]
-    form.slots.audio.candidates = [IMPORT_SLOT.autoAudio]
+    form.slots.audio.candidates = [IMPORT_SLOT.autoAudio, IMPORT_SLOT.skip]
     this.set({ importForm: form })
-    await this.probePaths(files)
-    const probes = Object.values(this.state.importForm.probes)
-    const classification = classifyImportFiles(files, probes)
-    const next = this.state.importForm
-    const appendUnique = (list: string[], item: string) => {
-      if (!list.includes(item)) list.push(item)
+    if (files.length) await this.importAppendFiles(files, true)
+  }
+
+  private scanSiblingMedia = async (motionPath: string): Promise<void> => {
+    const session = this.importSession
+    const scan = ++this.siblingScan
+    const stillCurrent = () => session === this.importSession && scan === this.siblingScan &&
+      this.state.importForm.open && this.importFormPicks().motion === motionPath
+    const previous = this.state.importForm
+    const slots = { ...previous.slots }
+    for (const slot of ['camera', 'audio'] as const) {
+      const selected = slots[slot].candidates[slots[slot].selection]
+      const candidates = slots[slot].candidates.filter(path => !previous.relatedMedia[slot].includes(path))
+      slots[slot] = { candidates, selection: Math.max(0, candidates.indexOf(selected)) }
     }
-    const slots = {
-      motion: { ...next.slots.motion, candidates: [...next.slots.motion.candidates] },
-      facial: { ...next.slots.facial, candidates: [...next.slots.facial.candidates] },
-      camera: { ...next.slots.camera, candidates: [...next.slots.camera.candidates] },
-      audio: { ...next.slots.audio, candidates: [...next.slots.audio.candidates] },
-    }
-    for (const file of files) {
-      const ext = file.slice(file.lastIndexOf('.')).toLowerCase()
-      if (ext === '.vmd') {
-        appendUnique(slots.motion.candidates, file)
-        appendUnique(slots.facial.candidates, file)
-        appendUnique(slots.camera.candidates, file)
-      } else if (ext === '.gkcamera') {
-        appendUnique(slots.camera.candidates, file)
-      } else if (ext === '.wav') {
-        appendUnique(slots.audio.candidates, file)
+    this.set({ importForm: { ...previous, slots, relatedMedia: { camera: [], audio: [] } } })
+    if (isSlotPlaceholder(motionPath) || !this.supports('library.findSiblingMedia')) return
+    try {
+      const media = await this.client().request('library.findSiblingMedia', { motionPath })
+      if (!stillCurrent()) return
+      await this.probePaths(media.camera)
+      if (!stillCurrent()) return
+      const form = this.state.importForm
+      const next = { ...form.slots }
+      const relatedMedia = { camera: [] as string[], audio: [] as string[] }
+      for (const slot of ['camera', 'audio'] as const) {
+        const current = next[slot]
+        const extra = media[slot].filter(path => !current.candidates.includes(path))
+        relatedMedia[slot] = extra
+        const candidates = [...current.candidates, ...extra]
+        const sameName = media[slot].filter(path => fileStem(path).toLowerCase() === fileStem(motionPath).toLowerCase())
+        const preferred = sameName.length === 1 ? sameName[0] : media[slot].length === 1 ? media[slot][0] : undefined
+        const selection = current.selection === 0 && preferred ? candidates.indexOf(preferred) : current.selection
+        next[slot] = { candidates, selection }
       }
+      this.set({ importForm: { ...form, slots: next, relatedMedia } })
+    } catch (error) {
+      if (stillCurrent()) this.reportActionError(error)
     }
-    slots.facial.candidates.push(IMPORT_SLOT.skip)
-    slots.audio.candidates.push(IMPORT_SLOT.skip)
-    const findIndex = (list: string[], path: string): number => {
-      if (path === '') return 0
-      const index = list.indexOf(path)
-      return index > 0 ? index : 0
-    }
-    slots.motion.selection = findIndex(slots.motion.candidates, classification.motionCandidate)
-    slots.facial.selection = findIndex(slots.facial.candidates, classification.facialCandidate)
-    slots.camera.selection = findIndex(slots.camera.candidates, classification.cameraCandidate)
-    slots.audio.selection = findIndex(slots.audio.candidates, classification.audioCandidate)
-    this.set({
-      importForm: {
-        ...this.state.importForm,
-        title: classification.suggestedTitle,
-        slots,
-        unsupportedAudio: classification.unsupportedAudioCount,
-      },
-    })
   }
 
   openImportEdit = async (key: string): Promise<void> => {
@@ -1580,6 +1585,7 @@ export class MotionStore {
         form.slots.audio.candidates.push(IMPORT_SLOT.keepTrack)
         form.slots.audio.selection = 1
       }
+      ++this.importSession
       this.set({ importForm: form, actionError: null })
     } catch (error) {
       if (error instanceof BridgeError && error.code === 'stale_revision') {
@@ -1591,12 +1597,16 @@ export class MotionStore {
   }
 
   closeImportForm = (): void => {
+    ++this.importSession
     this.set({ importForm: emptyImportForm() })
   }
 
-  importAppendFiles = async (files: string[]): Promise<void> => {
+  importAppendFiles = async (files: string[], initial = false): Promise<void> => {
+    const session = this.importSession
     await this.probePaths(files)
+    if (session !== this.importSession || !this.state.importForm.open) return
     const next = { ...this.state.importForm }
+    const classification = classifyImportFiles(files, Object.values(next.probes))
     const slots = {
       motion: { ...next.slots.motion, candidates: [...next.slots.motion.candidates] },
       facial: { ...next.slots.facial, candidates: [...next.slots.facial.candidates] },
@@ -1618,11 +1628,26 @@ export class MotionStore {
         appendUnique(slots.audio.candidates, file)
       }
     }
-    this.set({ importForm: { ...next, slots } })
+    let selectedMotion = false
+    if (next.mode === 'new') {
+      const suggested = { motion: classification.motionCandidate, facial: classification.facialCandidate,
+        camera: classification.cameraCandidate, audio: classification.audioCandidate }
+      for (const slot of ['motion', 'facial', 'camera', 'audio'] as const) {
+        const index = slots[slot].candidates.indexOf(suggested[slot])
+        if (slots[slot].selection === 0 && index > 0 && (initial || slot === 'motion')) {
+          slots[slot].selection = index
+          if (slot === 'motion') selectedMotion = true
+        }
+      }
+    }
+    this.set({ importForm: { ...next, slots, unsupportedAudio: next.unsupportedAudio + classification.unsupportedAudioCount } })
+    if (selectedMotion) this.setImportSelection('motion', slots.motion.selection)
   }
 
   importPickSlotFile = async (slot: ImportSlotKey, file: string): Promise<void> => {
+    const session = this.importSession
     await this.probePaths([file])
+    if (session !== this.importSession || !this.state.importForm.open) return
     const slotState = this.state.importForm.slots[slot]
     const candidates = [...slotState.candidates]
     let selection = candidates.indexOf(file)
@@ -1636,19 +1661,28 @@ export class MotionStore {
         slots: { ...this.state.importForm.slots, [slot]: { candidates, selection } },
       },
     })
+    this.setImportSelection(slot, selection)
   }
 
   setImportSelection = (slot: ImportSlotKey, selection: number): void => {
+    const form = this.state.importForm
+    const path = form.slots[slot].candidates[selection] ?? ''
+    const newMotion = slot === 'motion' && form.mode === 'new'
     this.set({
       importForm: {
-        ...this.state.importForm,
-        slots: { ...this.state.importForm.slots, [slot]: { ...this.state.importForm.slots[slot], selection } },
+        ...form,
+        title: newMotion && !form.titleEdited ? (isSlotPlaceholder(path) ? '' : fileStem(path)) : form.title,
+        relatedMedia: slot === 'camera' || slot === 'audio'
+          ? { ...form.relatedMedia, [slot]: form.relatedMedia[slot].filter(item => item !== path) }
+          : form.relatedMedia,
+        slots: { ...form.slots, [slot]: { ...form.slots[slot], selection } },
       },
     })
+    if (newMotion) void this.scanSiblingMedia(path)
   }
 
   setImportTitle = (title: string): void => {
-    this.set({ importForm: { ...this.state.importForm, title } })
+    this.set({ importForm: { ...this.state.importForm, title, titleEdited: true } })
   }
 
   setImportSubtitle = (subtitle: string): void => {
@@ -2005,10 +2039,12 @@ export class MotionStore {
                 ? 4
                 : 5
     const multiple = target === 'library-add' || target === 'append'
+    const session = this.importSession
     try {
       const { dialogId } = await this.client().request('dialog.pickFile', { kind, multiple })
       this.dialogId = dialogId
       this.dialogTarget = target
+      this.dialogImportSession = session
       this.set({ dialogBusy: true })
       this.dialogTimer = setInterval(() => void this.pollDialog(), 200)
     } catch (error) {
@@ -2026,9 +2062,11 @@ export class MotionStore {
         const target = this.dialogTarget
         this.dialogTarget = null
         if (target === 'library-add') await this.openImportNew(result.paths)
-        else if (target === 'append') await this.importAppendFiles(result.paths)
         else if (target === 'video') this.set({ studioVideoPath: result.paths[0] })
-        else if (target) await this.importPickSlotFile(target, result.paths[0])
+        else if (target && this.dialogImportSession === this.importSession && this.state.importForm.open) {
+          if (target === 'append') await this.importAppendFiles(result.paths)
+          else await this.importPickSlotFile(target, result.paths[0])
+        }
       } else if (result.state === 'failed' && result.notice !== '') {
         this.set({ actionError: result.notice })
       }

@@ -93,6 +93,7 @@ const PHASE1_METHODS: MotionMethodName[] = [
 const PHASE2_METHODS: MotionMethodName[] = [
   'library.import',
   'library.probeFiles',
+  'library.findSiblingMedia',
   'library.startEdit',
   'dialog.pickFile',
   'dialog.poll',
@@ -911,6 +912,14 @@ export class MotionMockBridgeClient implements MotionBridgeClient {
         this.dialogResults.delete(dialogId)
         if (!picked) return { state: 'cancelled', paths: [], notice: '' } as MotionMethods[M]['result']
         return { state: 'accepted', paths: picked.paths, notice: '' } as MotionMethods[M]['result']
+      }
+      case 'library.findSiblingMedia': {
+        this.requireCapability('library.findSiblingMedia')
+        const sample = String(p.motionPath).endsWith('NewDance_motion.vmd')
+        return {
+          camera: sample ? ['C:\\Sample\\NewDance_camera.vmd', 'C:\\Sample\\NewDance_wide.gkcamera'] : [],
+          audio: sample ? ['C:\\Sample\\NewDance_song.wav'] : [],
+        } as MotionMethods[M]['result']
       }
       case 'library.probeFiles': {
         this.requireCapability('library.probeFiles')

@@ -639,6 +639,7 @@ export interface MotionMethods {
     result: { state: 'pending' | 'accepted' | 'cancelled' | 'failed'; paths: string[]; notice: string }
   }
   'library.import': { params: { request: ImportRequest }; result: { started: boolean } }
+  'library.findSiblingMedia': { params: { motionPath: string }; result: { audio: string[]; camera: string[] } }
   'library.probeFiles': {
     params: { paths: string[] }
     result: { classification: ImportClassification; probes: VmdProbe[] }

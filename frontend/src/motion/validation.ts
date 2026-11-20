@@ -227,7 +227,7 @@ export function validateImportForm(
   return null
 }
 
-function fileStem(path: string): string {
+export function fileStem(path: string): string {
   const name = path.split(/[\\/]/).pop() ?? ''
   const dotIndex = name.lastIndexOf('.')
   return dotIndex > 0 ? name.slice(0, dotIndex) : name

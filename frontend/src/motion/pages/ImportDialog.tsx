@@ -106,10 +106,15 @@ export function ImportDialog() {
           </div>
 
           <div className="space-y-2.5">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm font-medium">演出轨道与同步参数</p>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {!editing && <Button variant="outline" size="sm" disabled={busy || !dialogSupported}
+                  onClick={() => void motionStore.browseFiles('motion')}>
+                  导入文件…
+                </Button>}
                 <Button
+                  title="将更多文件加入轨道下拉候选"
                   variant="outline"
                   size="sm"
                   disabled={busy || !dialogSupported}
