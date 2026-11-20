@@ -52,6 +52,30 @@ struct BridgeTestAccess {
         s.poses[0].handle.index=0; s.poses[0].hid=0; s.poses[0].rotation={0,0,0,1}; s.poses[0].position={1,2,3};
         s.poses[1].handle.index=1; s.poses[1].hid=10; s.poses[1].rotation={0,1,0,0};
         TestStream stream; Diagnostic d;
+        {
+            // A serialized DynamicBone list must bind by handle, then follow
+            // only a reciprocal child link. No stream transform is written.
+            const Bridge::BoneStateLayout layout{128,0,12,16,20,32,0,12,24,60,0,4,16,88,92};
+            alignas(16) unsigned char records[2][128]{}, swing[208]{};
+            auto field = [&](int row, int offset, const auto& value) {
+                std::memcpy(records[row]+offset,&value,sizeof(value));
+            };
+            field(0,0,Handle{2,0,0}); field(1,0,Handle{2,1,1});
+            field(0,12,int32_t{-1}); field(0,16,int32_t{1});
+            field(1,12,int32_t{0}); field(1,16,int32_t{-1});
+            field(1,20,GbbVector3{1,2,3}); field(1,56,int32_t{2});
+            field(1,60,uint8_t{1}); field(1,88,0.5f); field(1,92,uint8_t{1});
+            ListHeader header{reinterpret_cast<uintptr_t>(records),2,2,0,0};
+            const auto pointer=reinterpret_cast<uintptr_t>(&header);
+            std::memcpy(swing+Bridge::ListOffsets[0],&pointer,sizeof(pointer));
+            GbbSwingBoneState sample[4]{};
+            CHECK(Bridge::ReadBoneStates(&b,layout,Handle{2,0,-1},swing,&stream,sample)==2);
+            CHECK(sample[1].index==1 && sample[1].child_speed.z==3 && sample[1].hit_checks==2);
+            CHECK(sample[1].use_limit==1 && sample[1].use_global_wind==1 && sample[1].wind==0.5f);
+            field(1,0,Handle{2,0,0});
+            CHECK(Bridge::ReadBoneStates(&b,layout,Handle{2,0,-1},swing,&stream,sample)==0);
+            CHECK(stream.rotations==0 && stream.positions==0);
+        }
         CHECK(b.NativePass(s,&stream,d) && d.writes==2 && d.injected && stream.rotations==2 && stream.positions==1);
         CHECK(d.before.w==1 && d.after.y==1 && stream.p[0].x==1);
         stream={}; stream.failResolve=true; d={};

@@ -176,6 +176,106 @@ class Bridge {
             std::memcpy(&header, reinterpret_cast<void*>(container), sizeof(header)); return true;
         } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
     }
+    struct BoneStateLayout {
+        size_t stride{};
+        int driven{}, parent{}, child{}, speed{}, collision{}, normal{}, point{}, hits{};
+        int limit{}, useLimit{}, positive{}, negative{}, wind{}, globalWind{};
+    };
+    BoneStateLayout stateLayout_{};
+    bool stateLayoutChecked_{};
+
+    BoneStateLayout PrepareBoneStateLayout() {
+        if (!meta_.classFromType) return {};
+        auto find = [&](const char* name) { return meta_.Class("ActorAnimation.Runtime.dll","ActorAnimation",name); };
+        const auto dynamic = find("ActorSwingJobDynamicBone");
+        const auto collision = find("CollisionInfo");
+        const auto limit = find("ActorSwingJobLimitInfo");
+        if (!dynamic || !collision || !limit) return {};
+        auto typeOf = [&](void* klass,const char* name) -> void* {
+            const auto field = meta_.Field(klass,name,0x11);
+            return field ? meta_.classFromType(meta_.fieldType(field)) : nullptr;
+        };
+        const auto driven = typeOf(dynamic,"driven");
+        const auto handle = driven ? typeOf(driven,"m_Handle") : nullptr;
+        uint32_t alignment{};
+        if (!handle || meta_.valueSize(handle,&alignment) != sizeof(Handle) ||
+            !meta_.Layout(handle,profile::HandleFields) || !meta_.Offset(driven,"m_Handle",0,0x11) ||
+            typeOf(dynamic,"collision") != collision || typeOf(dynamic,"limit") != limit) return {};
+        auto offset = [&](void* cls,const char* name,int type,size_t bytes) {
+            const auto field = meta_.Field(cls,name,type);
+            if (!field) return -1;
+            const int value = meta_.fieldOffset(field) - profile::BoxHeader;
+            const int size = meta_.valueSize(cls,&alignment);
+            return value >= 0 && size >= value && bytes <= static_cast<size_t>(size-value) ? value : -1;
+        };
+        const int bodySize = meta_.valueSize(dynamic,&alignment);
+        if (bodySize != 956) return {};
+        BoneStateLayout l{
+            static_cast<size_t>(bodySize),offset(dynamic,"driven",0x11,sizeof(Handle)),
+            offset(dynamic,"parentIndex",0x08,4),offset(dynamic,"childIndex",0x08,4),
+            offset(dynamic,"childSpeed",0x11,12),offset(dynamic,"collision",0x11,meta_.valueSize(collision,&alignment)),
+            offset(collision,"normal",0x11,12),offset(collision,"position",0x11,12),offset(collision,"hitCheckCount",0x08,4),
+            offset(dynamic,"limit",0x11,meta_.valueSize(limit,&alignment)),
+            offset(limit,"useLimit",0x02,1),offset(limit,"positive",0x11,12),offset(limit,"negative",0x11,12),
+            offset(dynamic,"wind",0x0c,4),offset(dynamic,"useWindGlobalForce",0x02,1)};
+        if (l.driven<0 || l.parent<0 || l.child<0 || l.speed<0 || l.collision<0 || l.normal<0 ||
+            l.point<0 || l.hits<0 || l.limit<0 || l.useLimit<0 || l.positive<0 || l.negative<0 ||
+            l.wind<0 || l.globalWind<0) return {};
+        return l;
+    }
+
+    template<class T> static T ReadStateField(const unsigned char* row,int offset) {
+        T value{};
+        std::memcpy(&value,row+offset,sizeof(value));
+        return value;
+    }
+
+    // Match the transform handle in the same stream before following child
+    // indices. A missing or ambiguous match is reported as an empty sample.
+    static unsigned ReadBoneStates(Bridge* bridge,const BoneStateLayout& l,Handle handle,
+                                   void* swing,void* stream,GbbSwingBoneState* rows) {
+        if (!l.stride) return 0;
+        __try {
+            uintptr_t container{};
+            ListHeader header{};
+            if (!ReadListHeader(swing,ListOffsets[0],container,header) ||
+                !ValidListHeader(header,l.stride) || !header.payload || header.length > 2048) return 0;
+            bridge->resolve_(&handle,stream);
+            if (handle.skeleton < 0 || handle.index < 0) return 0;
+            const auto* base = reinterpret_cast<const unsigned char*>(header.payload);
+            int index = -1;
+            for (int i=0;i<header.length;++i) {
+                const Handle bone = ReadStateField<Handle>(base + i*l.stride,l.driven);
+                if (bone.version != handle.version || bone.index != handle.index ||
+                    (bone.skeleton >= 0 && bone.skeleton != handle.skeleton)) continue;
+                if (index >= 0) return 0;
+                index = i;
+            }
+            unsigned count = 0;
+            while (count < 4 && index >= 0 && index < header.length) {
+                const auto* row = base + index*l.stride;
+                auto& out = rows[count++];
+                out.index = index;
+                out.parent_index = ReadStateField<int32_t>(row,l.parent);
+                out.child_index = ReadStateField<int32_t>(row,l.child);
+                out.child_speed = ReadStateField<GbbVector3>(row,l.speed);
+                out.hit_checks = ReadStateField<int32_t>(row,l.collision+l.hits);
+                out.contact_point = ReadStateField<GbbVector3>(row,l.collision+l.point);
+                out.contact_normal = ReadStateField<GbbVector3>(row,l.collision+l.normal);
+                out.use_limit = ReadStateField<uint8_t>(row,l.limit+l.useLimit);
+                out.limit_positive = ReadStateField<GbbVector3>(row,l.limit+l.positive);
+                out.limit_negative = ReadStateField<GbbVector3>(row,l.limit+l.negative);
+                out.wind = ReadStateField<float>(row,l.wind);
+                out.use_global_wind = ReadStateField<uint8_t>(row,l.globalWind);
+                index = out.child_index;
+                for (unsigned j=0;j<count;++j) if (rows[j].index==index) return count;
+                if (index >= 0 && index < header.length &&
+                    ReadStateField<int32_t>(base+index*l.stride,l.parent)!=out.index) break;
+            }
+            return count;
+        } __except(EXCEPTION_EXECUTE_HANDLER) { return 0; }
+    }
+
     struct OutputProbe {
         Handle handle{};
         void* transform{};
@@ -185,6 +285,30 @@ class Bridge {
     };
     OutputProbe requestedOutput_{};
     GbbSwingOutputSample completedOutput_{};
+    std::array<OutputProbe,2> stateRequests_{};
+    std::array<GbbSwingStateSample,2> stateResults_{};
+    struct StateWork {
+        std::array<OutputProbe,2> requests{};
+        std::array<GbbSwingStateSample,2> samples{};
+        BoneStateLayout layout{};
+    };
+
+    void FinishBoneStates(StateWork& work,void* swing,void* stream) {
+        for (size_t i=0;i<work.requests.size();++i) {
+            const auto& request=work.requests[i];
+            if (!request.transform) continue;
+            auto& sample=work.samples[i];
+            sample.after_count=ReadBoneStates(this,work.layout,request.handle,swing,stream,sample.after);
+            if (!ReadSwingOutput(this,request.handle,stream,&sample.local_rotation)) continue;
+            sample.size=sizeof(sample);
+            sample.source_frame=request.frame;
+            sample.delta_time=request.dt;
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (stateRequests_[i].transform==request.transform && stateRequests_[i].frame==request.frame &&
+                generation_.load(std::memory_order_relaxed)==request.generation)
+                stateResults_[i]=sample;
+        }
+    }
 
     static bool ReadSwingOutput(Bridge* bridge, Handle handle, void* stream, GbbQuaternion* rotation) {
         __try {
@@ -786,7 +910,7 @@ class Bridge {
         if (matched && !target->PairState().Finish(reinterpret_cast<uintptr_t>(target),target->generation_.load(std::memory_order_acquire)))
             target->PairRejected(experiment::Reject::Generation,false,generation);
     }
-    bool BeforeSwing(void* swing, void* stream, uintptr_t caller,uint64_t admittedGeneration,OutputProbe& outputProbe) {
+    bool BeforeSwing(void* swing, void* stream, uintptr_t caller,uint64_t admittedGeneration,OutputProbe& outputProbe, StateWork& stateWork) {
         const auto start = Ticks();
         swingCalls_.fetch_add(1, std::memory_order_relaxed);
         if (!Observing()) return false;
@@ -834,6 +958,15 @@ class Bridge {
                             outputProbe = requestedOutput_;
                             outputProbe.dt = d.dt;
                         }
+                        if (stateLayout_.stride) {
+                            stateWork.layout = stateLayout_;
+                            for (size_t i=0;i<stateRequests_.size();++i) {
+                                const auto& request=stateRequests_[i];
+                                if (request.generation!=s.generation || request.frame!=s.frame || !request.transform) continue;
+                                stateWork.requests[i]=request;
+                                stateWork.requests[i].dt=d.dt;
+                            }
+                        }
                     }
                     if (s.beforeQuartz) {
                         pairedPasses_.fetch_add(1,std::memory_order_relaxed);
@@ -852,16 +985,16 @@ class Bridge {
     }
 #ifdef GBB_TESTING
     bool BeforeSwing(void* swing, void* stream, uintptr_t caller = 0, uint64_t generation = 0) {
-        OutputProbe output{};
-        return BeforeSwing(swing,stream,caller,generation,output);
+        OutputProbe output{}; StateWork state{};
+        return BeforeSwing(swing,stream,caller,generation,output,state);
     }
 #endif
-    static bool BeforeSwingCpp(Bridge* target,void* swing, void* stream, uintptr_t caller,uint64_t admittedGeneration, OutputProbe& outputProbe) noexcept {
-        try { return target && target->BeforeSwing(swing, stream, caller,admittedGeneration,outputProbe); }
+    static bool BeforeSwingCpp(Bridge* target,void* swing, void* stream, uintptr_t caller,uint64_t admittedGeneration, OutputProbe& outputProbe, StateWork& stateWork) noexcept {
+        try { return target && target->BeforeSwing(swing, stream, caller,admittedGeneration,outputProbe,stateWork); }
         catch (...) { if (target) target->CallbackFault(admittedGeneration); return false; }
     }
-    static bool BeforeSwingGuarded(Bridge* target,void* swing, void* stream, uintptr_t caller,uint64_t admittedGeneration, OutputProbe& outputProbe) {
-        __try { return BeforeSwingCpp(target,swing, stream, caller,admittedGeneration,outputProbe); }
+    static bool BeforeSwingGuarded(Bridge* target,void* swing, void* stream, uintptr_t caller,uint64_t admittedGeneration, OutputProbe& outputProbe, StateWork& stateWork) {
+        __try { return BeforeSwingCpp(target,swing, stream, caller,admittedGeneration,outputProbe,stateWork); }
         __except(EXCEPTION_EXECUTE_HANDLER) { if (target) target->CallbackFault(admittedGeneration); return false; }
     }
     static void SwingDetour(void* swing, void* stream) {
@@ -874,7 +1007,13 @@ class Bridge {
         uint64_t admittedGeneration{};
         auto* target=self->RouteJob(job,&admittedGeneration);
         OutputProbe outputProbe{};
-        const bool matched = BeforeSwingGuarded(target,swing, stream, reinterpret_cast<uintptr_t>(_ReturnAddress()),admittedGeneration,outputProbe);
+        StateWork stateWork{};
+        const bool matched = BeforeSwingGuarded(target,swing, stream, reinterpret_cast<uintptr_t>(_ReturnAddress()),admittedGeneration,outputProbe,stateWork);
+        for (size_t i=0;i<stateWork.requests.size();++i) {
+            const auto& request=stateWork.requests[i];
+            if (request.transform) stateWork.samples[i].before_count =
+                ReadBoneStates(target,stateWork.layout,request.handle,swing,stream,stateWork.samples[i].before);
+        }
         const uint64_t start = matched ? Ticks() : 0;
         // Never manually execute or skip the engine solver. Its own behavior
         // (including an engine fault) is outside the bridge exception boundary.
@@ -883,6 +1022,7 @@ class Bridge {
         if (matched) {
             target->solverTimer_.Add(Ticks() - start);
             target->FinishSwingOutput(outputProbe,stream);
+            target->FinishBoneStates(stateWork,swing,stream);
         }
     }
     int Reject(int result, const char* why) {
@@ -910,6 +1050,39 @@ public:
             requestedOutput_ = {h,transform,frame,generation,0.f};
             completedOutput_ = {};
         } else requestedOutput_.frame = frame;
+        return ready ? GBB_OK : GBB_PENDING;
+    }
+
+    int SampleSwingState(void* actor,void* transform,uint32_t slot,int frame,GbbSwingStateSample* out) {
+        if (!out || out->size!=sizeof(*out) || !transform || slot>=stateRequests_.size() ||
+            !MainThread(false) || frame<=0) return GBB_E_ARGUMENT;
+        std::unique_lock<std::mutex> lock(mutex_);
+        const auto generation=generation_.load(std::memory_order_relaxed);
+        void* const animator=current_.animator;
+        if (current_.actor!=actor || current_.frame!=frame || !animator || !bind_) return GBB_PENDING;
+        if (!stateLayoutChecked_) {
+            lock.unlock();
+            const auto layout=PrepareBoneStateLayout();
+            lock.lock();
+            stateLayout_=layout;
+            stateLayoutChecked_=true;
+        }
+        if (!stateLayout_.stride) return GBB_E_UNAVAILABLE;
+        auto& request=stateRequests_[slot];
+        auto& result=stateResults_[slot];
+        const bool same=request.generation==generation && request.transform==transform;
+        const bool ready=same && result.size==sizeof(*out) && result.source_frame==frame-1;
+        if (ready) *out=result;
+        if (!same) {
+            Handle h{};
+            lock.unlock();
+            if (!BindGuarded(bind_,animator,transform,&h,bindInfo_)) return GBB_E_BINDING;
+            lock.lock();
+            if (generation_.load(std::memory_order_relaxed)!=generation || current_.actor!=actor ||
+                current_.animator!=animator || current_.frame!=frame) return GBB_PENDING;
+            request={h,transform,frame,generation,0.f};
+            result={};
+        } else request.frame=frame;
         return ready ? GBB_OK : GBB_PENDING;
     }
 
@@ -1577,5 +1750,10 @@ extern "C" GBB_EXPORT int32_t GBB_CALL GakuBurstBridge_ReadActorObservation(void
 
 extern "C" GBB_EXPORT int32_t GBB_CALL GakuBurstBridge_SampleSwingOutput(void* actor, void* transform, int32_t frame, GbbSwingOutputSample* out) {
     __try { return gbb::CppBoundary([&] { return gbb::instance.SampleSwingOutput(actor,transform,frame,out); }); }
+    __except(EXCEPTION_EXECUTE_HANDLER) { return GBB_E_FAULT; }
+}
+
+extern "C" GBB_EXPORT int32_t GBB_CALL GakuBurstBridge_SampleSwingState(void* actor, void* transform, uint32_t slot, int32_t frame, GbbSwingStateSample* out) {
+    __try { return gbb::CppBoundary([&] { return gbb::instance.SampleSwingState(actor,transform,slot,frame,out); }); }
     __except(EXCEPTION_EXECUTE_HANDLER) { return GBB_E_FAULT; }
 }

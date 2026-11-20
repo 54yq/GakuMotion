@@ -322,6 +322,17 @@ namespace GakuMotion
             __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
         }
 
+        bool SampleSwingState(void* actor,void* transform,uint32_t slot,int frame,GbbSwingStateSample& result) const
+        {
+            const auto fn=module_ ? reinterpret_cast<GbbSampleSwingStateFn>(
+                GetProcAddress(module_,"GakuBurstBridge_SampleSwingState")) : nullptr;
+            if (!fn || !transform) return false;
+            result={};
+            result.size=sizeof(result);
+            __try { return fn(actor,transform,slot,frame,&result)==GBB_OK && result.source_frame==frame-1; }
+            __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+        }
+
 		int DumpTraces(const wchar_t* path) const
 		{
 			return api_.dump_traces ? DumpGuarded(api_, path) : GBB_E_UNAVAILABLE;

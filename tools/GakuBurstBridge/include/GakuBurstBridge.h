@@ -93,6 +93,22 @@ typedef struct GbbSwingOutputSample {
     GbbQuaternion local_rotation;
     float delta_time;
 } GbbSwingOutputSample;
+
+typedef struct GbbSwingBoneState {
+    int32_t index, parent_index, child_index, hit_checks, use_limit, use_global_wind;
+    GbbVector3 child_speed, contact_point, contact_normal, limit_positive, limit_negative;
+    float wind;
+} GbbSwingBoneState;
+typedef struct GbbSwingStateSample {
+    uint32_t size;
+    int32_t source_frame;
+    GbbQuaternion local_rotation;
+    float delta_time;
+    GbbSwingBoneState before[4], after[4];
+    uint32_t before_count, after_count;
+} GbbSwingStateSample;
+typedef int32_t (GBB_CALL *GbbSampleSwingStateFn)(void* actor, void* transform, uint32_t slot, int32_t request_frame, GbbSwingStateSample* output);
+
 typedef int32_t (GBB_CALL *GbbSampleSwingOutputFn)(void* actor, void* transform, int32_t request_frame, GbbSwingOutputSample* output);
 typedef struct GbbPerf {
     uint32_t size, version;

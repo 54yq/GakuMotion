@@ -1050,7 +1050,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.31-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.32-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -3963,6 +3963,16 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
         GbbSwingOutputSample swingOutput{};
         const bool sampledSwing = currentNative && g_burstBridge.SampleSwingOutput(activeActor,
             g_costumeCapture.SwingOutputTarget(binding->second,controller), unityFrame,swingOutput);
+        if (currentNative) {
+            static constexpr const char* bones[]{"LeftFrontHair1_S","RigntBackCloth1_S"};
+            for (uint32_t slot=0; slot<std::size(bones); ++slot) {
+                GbbSwingStateSample state{};
+                if (g_burstBridge.SampleSwingState(activeActor,
+                        g_costumeCapture.SwingOutputTarget(binding->second,controller,bones[slot]),slot,
+                        unityFrame,state))
+                    g_costumeCapture.RecordSwingState(bones[slot],binding->second,unityFrame,player.currentTime,state);
+            }
+        }
         g_costumeCapture.RecordActorPose(stage, binding->second, controller, unityFrame, player.currentTime,
             core.config.secondaryPhysicsBackend, actual, currentNative ? native.source_frame : -1, native.delta_time, realDeltaTime, sampledSwing ? &swingOutput : nullptr);
     };

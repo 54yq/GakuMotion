@@ -114,9 +114,46 @@ namespace GakuMotion
 			}
 		}
 
-        void* SwingOutputTarget(const IdolBoneBinding& binding, const IdolController& controller)
+        void* SwingOutputTarget(const IdolBoneBinding& binding, const IdolController& controller, const char* name = "LeftFrontHair1_S")
         {
-            return poseSampler_.FindSampledSecondary(binding,controller,"LeftFrontHair1_S");
+            return poseSampler_.FindSampledSecondary(binding,controller,name);
+        }
+
+        void RecordSwingState(const char* bone, const IdolBoneBinding& binding, int frame, float time,
+                              const GbbSwingStateSample& sample)
+        {
+            if (!Active()) return;
+            out_ << "{\"event\":\"swing_state\",\"bone\":";
+            Name(bone);
+            Identity(1,reinterpret_cast<uintptr_t>(binding.actor),frame,time);
+            out_ << ",\"source_frame\":" << sample.source_frame << ",\"native_dt_s\":";
+            Number(sample.delta_time);
+            out_ << ",\"output_local\":";
+            const auto& q=sample.local_rotation;
+            Rotation(Quaternion(q.x,q.y,q.z,q.w));
+            const auto vector = [&](const GbbVector3& v) { Vector(Vector3(v.x,v.y,v.z)); };
+            const auto phase = [&](const GbbSwingBoneState* rows,uint32_t count) {
+                out_ << '[';
+                for (uint32_t i=0;i<(std::min)(count,4u);++i) {
+                    if (i) out_ << ',';
+                    const auto& row=rows[i];
+                    out_ << "{\"index\":" << row.index << ",\"parent_index\":" << row.parent_index
+                         << ",\"child_index\":" << row.child_index << ",\"hit_checks\":" << row.hit_checks
+                         << ",\"use_limit\":" << row.use_limit << ",\"use_global_wind\":" << row.use_global_wind
+                         << ",\"wind_coefficient\":";
+                    Number(row.wind);
+                    out_ << ",\"child_speed\":"; vector(row.child_speed);
+                    out_ << ",\"contact_point\":"; vector(row.contact_point);
+                    out_ << ",\"contact_normal\":"; vector(row.contact_normal);
+                    out_ << ",\"limit_positive\":"; vector(row.limit_positive);
+                    out_ << ",\"limit_negative\":"; vector(row.limit_negative);
+                    out_ << '}';
+                }
+                out_ << ']';
+            };
+            out_ << ",\"before\":"; phase(sample.before,sample.before_count);
+            out_ << ",\"after\":"; phase(sample.after,sample.after_count);
+            out_ << "}\n";
         }
 
         void RecordActorPose(const char* stage, const IdolBoneBinding& binding, const IdolController& controller,
