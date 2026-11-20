@@ -1,6 +1,5 @@
 import * as React from 'react'
 import {
-  RiGroup2Fill,
   RiPaletteFill,
   RiRefreshFill,
   RiSearchFill,
@@ -13,9 +12,8 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
-import { ENSEMBLE_SLOT_NAMES, type ForkState, type StageNode } from '../protocol'
+import { type ForkState, type StageNode } from '../protocol'
 import { motionStore, useMotionStore } from '../store'
 import { CollapsiblePropertySection, PropertyRow, PropertySection } from '../components/PropertyGroup'
 import { NumberField } from '../components/NumberField'
@@ -70,13 +68,10 @@ function hexToRgb(hex: string): [number, number, number] {
 
 export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; forkCommand?: ForkCommand } = {}) {
   const stage = useMotionStore((state) => state.stage)
-  const actors = useMotionStore((state) => state.actors)
-  const ensemble = useMotionStore((state) => state.ensemble)
   const rawNodes = useMotionStore((state) => state.stageNodes)
   const safeNodes = Array.isArray(rawNodes) ? rawNodes : []
   const supported = useMotionStore((state) => state.capabilities.includes('stage.set'))
   const scanSupported = useMotionStore((state) => state.capabilities.includes('stage.scan'))
-  const actorSelectSupported = useMotionStore((state) => state.capabilities.includes('actors.selectTarget'))
   const [scanning, setScanning] = React.useState(false)
   const [nodeFilter, setNodeFilter] = React.useState('')
   const [expandedNodes, setExpandedNodes] = React.useState<Set<number>>(() => new Set())
@@ -87,7 +82,6 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
   const sceneBgEnabled = !settings.hideBackground
   const customNodeActive = settings.customNodeControl
   const disabled = !supported
-  const selectedActor = actors.actors.find((actor) => actor.selected)
 
   const triggerScan = React.useCallback(async () => {
     if (!scanSupported || scanning) return
@@ -144,7 +138,7 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
   return (
     <div className="mx-auto max-w-5xl space-y-4" data-testid="stage-page">
       {/* Stage Context & Roster Overview */}
-      <div className="grid items-start gap-4 lg:grid-cols-2">
+      <div className="grid items-start gap-4">
         <PropertySection
           title={
             <span className="inline-flex items-center gap-1.5">
@@ -180,64 +174,6 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
                 </p>
               )}
             </div>
-          )}
-        </PropertySection>
-
-        <PropertySection
-          title={
-            <span className="inline-flex items-center gap-1.5">
-              <RiGroup2Fill className="size-3.5 text-primary" />
-              <span>舞台角色阵容</span>
-            </span>
-          }
-          description={ensemble.active ? '当前处于多人舞台编排模式' : '切换当前单人舞台驱动角色；支持扩展多人同台演出'}
-          actions={
-            <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={() => motionStore.setPage('motion')}>
-              前往编排
-            </Button>
-          }
-        >
-          {ensemble.active ? (
-            <div className="grid grid-cols-3 divide-x divide-border/60">
-              {ensemble.settings.slots.map((slot, index) => (
-                <div
-                  key={index}
-                  className={cn(
-                    'px-3 py-2.5 text-xs',
-                    slot.enabled ? 'bg-card' : 'bg-muted/25 opacity-60',
-                  )}
-                >
-                  <div className="font-semibold text-foreground">{ENSEMBLE_SLOT_NAMES[index]}</div>
-                  <div className="truncate text-muted-foreground">{slot.actorHint || '未绑定'}</div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <>
-              <PropertyRow label="驱动角色" description={`当前场景共识别 ${actors.actors.length} 名角色`}>
-                <Select
-                  value={selectedActor ? String(selectedActor.token) : undefined}
-                  disabled={actors.actors.length === 0 || !actorSelectSupported}
-                  onValueChange={(value) => void motionStore.selectActor(Number(value))}
-                >
-                  <SelectTrigger className="h-8 w-[180px] text-xs" aria-label="舞台驱动角色">
-                    <SelectValue placeholder={actors.targetLabel || '尚未识别角色'} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {actors.actors.map((actor) => (
-                      <SelectItem key={actor.token} value={String(actor.token)}>
-                        {actor.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </PropertyRow>
-              <PropertyRow label="当前绑定状态">
-                <span className="rounded-[4px] border border-border bg-muted/60 px-2 py-0.5 text-xs text-muted-foreground">
-                  已绑定：{actors.boundLabel || '尚未绑定'}
-                </span>
-              </PropertyRow>
-            </>
           )}
         </PropertySection>
       </div>
