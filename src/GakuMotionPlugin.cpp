@@ -1050,7 +1050,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.29-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.30-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -3960,8 +3960,11 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
         const int actual = after && g_physicsActor == activeActor && g_physicsFrame == unityFrame ? g_physicsActual : -1;
         const auto& native = g_burstBridge.status;
         const bool currentNative = actual == 2 && native.actor == activeActor && native.injected;
+        GbbSwingOutputSample swingOutput{};
+        const bool sampledSwing = currentNative && g_burstBridge.SampleSwingOutput(activeActor,
+            g_costumeCapture.SwingOutputTarget(binding->second,controller), unityFrame,swingOutput);
         g_costumeCapture.RecordActorPose(stage, binding->second, controller, unityFrame, player.currentTime,
-            core.config.secondaryPhysicsBackend, actual, currentNative ? native.source_frame : -1, native.delta_time, realDeltaTime);
+            core.config.secondaryPhysicsBackend, actual, currentNative ? native.source_frame : -1, native.delta_time, realDeltaTime, sampledSwing ? &swingOutput : nullptr);
     };
     recordMainActorPose("before_plugin_pose", false);
 	EyeGazeProbe::Before(activeActor);

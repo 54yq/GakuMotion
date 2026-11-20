@@ -176,6 +176,35 @@ class Bridge {
             std::memcpy(&header, reinterpret_cast<void*>(container), sizeof(header)); return true;
         } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
     }
+    struct OutputProbe {
+        Handle handle{};
+        void* transform{};
+        int frame{-1};
+        uint64_t generation{};
+        float dt{};
+    };
+    OutputProbe requestedOutput_{};
+    GbbSwingOutputSample completedOutput_{};
+
+    static bool ReadSwingOutput(Bridge* bridge, Handle handle, void* stream, GbbQuaternion* rotation) {
+        __try {
+            bridge->resolve_(&handle,stream);
+            if (handle.skeleton < 0) return false;
+            bridge->readRotation_(&handle,stream,rotation);
+            return ValidQuat(*rotation);
+        } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+    }
+
+    void FinishSwingOutput(const OutputProbe& request, void* stream) {
+        if (!request.transform) return;
+        GbbQuaternion result{};
+        if (!ReadSwingOutput(this,request.handle,stream,&result)) return;
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (requestedOutput_.transform == request.transform && requestedOutput_.generation == request.generation &&
+            requestedOutput_.frame == request.frame && generation_.load(std::memory_order_relaxed) == request.generation)
+            completedOutput_ = {sizeof(GbbSwingOutputSample),request.frame,result,request.dt};
+    }
+
     struct SwingVisit {
         int frame{-1};
         uintptr_t job{}, caller{}, stream{};
@@ -757,7 +786,7 @@ class Bridge {
         if (matched && !target->PairState().Finish(reinterpret_cast<uintptr_t>(target),target->generation_.load(std::memory_order_acquire)))
             target->PairRejected(experiment::Reject::Generation,false,generation);
     }
-    bool BeforeSwing(void* swing, void* stream, uintptr_t caller = 0,uint64_t admittedGeneration=0) {
+    bool BeforeSwing(void* swing, void* stream, uintptr_t caller,uint64_t admittedGeneration,OutputProbe& outputProbe) {
         const auto start = Ticks();
         swingCalls_.fetch_add(1, std::memory_order_relaxed);
         if (!Observing()) return false;
@@ -799,7 +828,13 @@ class Bridge {
             if (!stopped_.load(std::memory_order_acquire) &&
                 generation_.load(std::memory_order_relaxed) == s.generation) {
                 if (ok) { d.sequence = matches_.fetch_add(1, std::memory_order_relaxed) + 1; diagnostic_ = d;
-                    if (d.injected) NoteSwingVisit(s,job,swing,stream,caller,d.dt);
+                    if (d.injected) {
+                        NoteSwingVisit(s,job,swing,stream,caller,d.dt);
+                        if (requestedOutput_.generation == s.generation && requestedOutput_.frame == s.frame) {
+                            outputProbe = requestedOutput_;
+                            outputProbe.dt = d.dt;
+                        }
+                    }
                     if (s.beforeQuartz) {
                         pairedPasses_.fetch_add(1,std::memory_order_relaxed);
                         pairedGeneration_.store(s.generation,std::memory_order_release);
@@ -815,12 +850,18 @@ class Bridge {
         nativeTimer_.Add(Ticks() - start);
         return true; // Time original solver only for the two-key Actor match.
     }
-    static bool BeforeSwingCpp(Bridge* target,void* swing, void* stream, uintptr_t caller,uint64_t admittedGeneration) noexcept {
-        try { return target && target->BeforeSwing(swing, stream, caller,admittedGeneration); }
+#ifdef GBB_TESTING
+    bool BeforeSwing(void* swing, void* stream, uintptr_t caller = 0, uint64_t generation = 0) {
+        OutputProbe output{};
+        return BeforeSwing(swing,stream,caller,generation,output);
+    }
+#endif
+    static bool BeforeSwingCpp(Bridge* target,void* swing, void* stream, uintptr_t caller,uint64_t admittedGeneration, OutputProbe& outputProbe) noexcept {
+        try { return target && target->BeforeSwing(swing, stream, caller,admittedGeneration,outputProbe); }
         catch (...) { if (target) target->CallbackFault(admittedGeneration); return false; }
     }
-    static bool BeforeSwingGuarded(Bridge* target,void* swing, void* stream, uintptr_t caller,uint64_t admittedGeneration) {
-        __try { return BeforeSwingCpp(target,swing, stream, caller,admittedGeneration); }
+    static bool BeforeSwingGuarded(Bridge* target,void* swing, void* stream, uintptr_t caller,uint64_t admittedGeneration, OutputProbe& outputProbe) {
+        __try { return BeforeSwingCpp(target,swing, stream, caller,admittedGeneration,outputProbe); }
         __except(EXCEPTION_EXECUTE_HANDLER) { if (target) target->CallbackFault(admittedGeneration); return false; }
     }
     static void SwingDetour(void* swing, void* stream) {
@@ -832,13 +873,17 @@ class Bridge {
         void* job=reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(swing)-profile::Swing);
         uint64_t admittedGeneration{};
         auto* target=self->RouteJob(job,&admittedGeneration);
-        const bool matched = BeforeSwingGuarded(target,swing, stream, reinterpret_cast<uintptr_t>(_ReturnAddress()),admittedGeneration);
+        OutputProbe outputProbe{};
+        const bool matched = BeforeSwingGuarded(target,swing, stream, reinterpret_cast<uintptr_t>(_ReturnAddress()),admittedGeneration,outputProbe);
         const uint64_t start = matched ? Ticks() : 0;
         // Never manually execute or skip the engine solver. Its own behavior
         // (including an engine fault) is outside the bridge exception boundary.
         self->originalSwing_(swing, stream);
         FinishActorTimingGuarded(self, actorTiming);
-        if (matched) target->solverTimer_.Add(Ticks() - start);
+        if (matched) {
+            target->solverTimer_.Add(Ticks() - start);
+            target->FinishSwingOutput(outputProbe,stream);
+        }
     }
     int Reject(int result, const char* why) {
         Cancel(false);
@@ -846,6 +891,28 @@ class Bridge {
         return result;
     }
 public:
+    int SampleSwingOutput(void* actor, void* transform, int frame, GbbSwingOutputSample* out) {
+        if (!out || out->size != sizeof(*out) || !transform || !MainThread(false)) return GBB_E_ARGUMENT;
+        std::unique_lock<std::mutex> lock(mutex_);
+        const auto generation = generation_.load(std::memory_order_relaxed);
+        void* const animator = current_.animator;
+        if (current_.actor != actor || current_.frame != frame || !animator || !bind_) return GBB_PENDING;
+        const bool same = requestedOutput_.generation == generation && requestedOutput_.transform == transform;
+        const bool ready = same && completedOutput_.size == sizeof(*out) && completedOutput_.source_frame == frame - 1;
+        if (ready) *out = completedOutput_;
+        if (!same) {
+            Handle h{};
+            lock.unlock();
+            if (!BindGuarded(bind_,animator,transform,&h,bindInfo_)) return GBB_E_BINDING;
+            lock.lock();
+            if (generation_.load(std::memory_order_relaxed) != generation || current_.actor != actor ||
+                current_.animator != animator || current_.frame != frame) return GBB_PENDING;
+            requestedOutput_ = {h,transform,frame,generation,0.f};
+            completedOutput_ = {};
+        } else requestedOutput_.frame = frame;
+        return ready ? GBB_OK : GBB_PENDING;
+    }
+
     explicit Bridge(bool detourOwner=true) { if (detourOwner) self_ = this; }
     int CreateContext(GbbContext* out) {
         if (!out) return GBB_E_ARGUMENT;
@@ -1505,5 +1572,10 @@ extern "C" GBB_EXPORT int32_t GBB_CALL GakuBurstBridge_ObserveActor(void* actor,
 }
 extern "C" GBB_EXPORT int32_t GBB_CALL GakuBurstBridge_ReadActorObservation(void** actor, uint64_t* matched, uint64_t* other, uint64_t* bad) {
     __try { return gbb::CppBoundary([&] { return gbb::instance.ReadActorObservation(actor, matched, other, bad); }); }
+    __except(EXCEPTION_EXECUTE_HANDLER) { return GBB_E_FAULT; }
+}
+
+extern "C" GBB_EXPORT int32_t GBB_CALL GakuBurstBridge_SampleSwingOutput(void* actor, void* transform, int32_t frame, GbbSwingOutputSample* out) {
+    __try { return gbb::CppBoundary([&] { return gbb::instance.SampleSwingOutput(actor,transform,frame,out); }); }
     __except(EXCEPTION_EXECUTE_HANDLER) { return GBB_E_FAULT; }
 }

@@ -1,5 +1,6 @@
 #pragma once
 #include "GkFallbackPhysics.hpp"
+#include "GakuBurstBridge.h"
 #include "GkJsonLite.hpp"
 #include <filesystem>
 #include <fstream>
@@ -113,9 +114,14 @@ namespace GakuMotion
 			}
 		}
 
+        void* SwingOutputTarget(const IdolBoneBinding& binding, const IdolController& controller)
+        {
+            return poseSampler_.FindSampledSecondary(binding,controller,"LeftFrontHair1_S");
+        }
+
         void RecordActorPose(const char* stage, const IdolBoneBinding& binding, const IdolController& controller,
                              int frame, float time, int requested, int actual, int sourceFrame, float nativeDt,
-                             float frameDt = 0.f)
+                             float frameDt = 0.f, const GbbSwingOutputSample* swingOutput = nullptr)
         {
             if (!Active()) return;
             out_ << "{\"event\":\"actor_pose\",\"stage\":";
@@ -129,6 +135,13 @@ namespace GakuMotion
             out_ << ",\"head_world\":";
             Quaternion head{};
             if (FallbackPhysics::SampleHeadWorld(binding, controller, head)) Rotation(head); else out_ << "null";
+            out_ << ",\"swing_output\":";
+            if (swingOutput) {
+                out_ << "{\"bone\":\"LeftFrontHair1_S\",\"source_frame\":" << swingOutput->source_frame << ",\"local\":";
+                const auto& q = swingOutput->local_rotation;
+                Rotation(Quaternion(q.x,q.y,q.z,q.w));
+                out_ << '}';
+            } else out_ << "null";
             out_ << ",\"bones\":[";
             bool first = true;
             poseSampler_.SampleSecondaryLocal(binding, controller, [&](const std::string& name, Quaternion rotation, const Quaternion* parentWorld) {

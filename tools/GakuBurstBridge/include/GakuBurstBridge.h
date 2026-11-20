@@ -86,6 +86,14 @@ typedef struct GbbStatus {
     char profile[64];
     char detail[192];
 } GbbStatus;
+
+typedef struct GbbSwingOutputSample {
+    uint32_t size;
+    int32_t source_frame;
+    GbbQuaternion local_rotation;
+    float delta_time;
+} GbbSwingOutputSample;
+typedef int32_t (GBB_CALL *GbbSampleSwingOutputFn)(void* actor, void* transform, int32_t request_frame, GbbSwingOutputSample* output);
 typedef struct GbbPerf {
     uint32_t size, version;
     uint64_t qpc_frequency, publish_calls, publish_total_ns, publish_last_ns, publish_max_ns;
