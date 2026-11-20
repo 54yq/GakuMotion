@@ -27,7 +27,7 @@ const mockState: ForkState = {
   propsCanScan: true, propsScanning: false, propsNotice: '',
   actorLightingStyle: { key: { x: 1, y: 1, z: 1 }, fill: { x: 1, y: 1, z: 1 }, rim: { x: 1, y: 1, z: 1 }, weight: 1, keyAngle: { x: -15, y: 25, z: 0 }, rimAngle: { x: 35, y: 15, z: 0 } },
   actorLightingStrengths: { key: 0.40, fill: 0.035, rim: 0.25 },
-  actorLightingLimits: { key: 3.4028234663852886e38, fill: 3.4028234663852886e38, rim: 3.4028234663852886e38 },
+  actorLightingLimits: { key: 10, fill: 10, rim: 10 },
   livePostEffects: { paraffinEnabled: true, paraffinAvailable: true, disableDepthOfField: false,
     manualDepthOfField: false, depthOfFieldUnavailable: false },
   propsEditable: true, fixedActorLighting: false, followYaw: false, liveClock: false, liveClockAvailable: true,

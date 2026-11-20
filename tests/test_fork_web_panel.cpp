@@ -111,10 +111,10 @@ int main()
 	for (const auto* channel : {"key", "fill", "rim"}) {
 		const auto prefix = std::string(R"({"action":"live.actorLightingStrength","session":12,"owner":19,"channel":")") +
 			channel + R"(","value":)";
-		check(ok(request("fork.command", prefix + "2.5}")), "HDR intensity is accepted above the old limits");
-		check(!ok(request("fork.command", prefix + "3.5e38}")), "Float overflow is rejected");
+		check(ok(request("fork.command", prefix + "10}")), "HDR intensity is accepted above the old limits");
+		check(!ok(request("fork.command", prefix + "10.01}")), "The 1000 percent limit is enforced");
 	}
-	check(core.actorLightingStrengths == GakuMotion::Core::ActorLightingStrengths{2.5f, 2.5f, 2.5f},
+	check(core.actorLightingStrengths == GakuMotion::Core::ActorLightingStrengths{10.f, 10.f, 10.f},
 		"HDR intensities are stored for all three channels");
 	check(ok(request("fork.command", R"({"action":"live.actorLightingDirection","session":12,"owner":19,"channel":"rim","axis":"x","value":-58})")) &&
 		core.actorLightingStyle.rimAngle.x == -58 && core.actorLightingStyle.rimAngle.y == 15,

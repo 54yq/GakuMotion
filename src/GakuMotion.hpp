@@ -144,7 +144,7 @@ namespace GakuMotion
 		ActorLightingStyle actorLightingStyle;
 		uint64_t actorLightingStyleRevision{};
 		ActorLightingStrengths actorLightingStrengths;
-		static constexpr float actorLightingMax = (std::numeric_limits<float>::max)();
+		static constexpr float actorLightingMax = 10.f;
 		uint64_t actorLightingSampleActor{};
 		uintptr_t actorLightingSampleOwner{};
 		bool actorLightingSampled{};
