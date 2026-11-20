@@ -114,7 +114,8 @@ namespace GakuMotion
 		}
 
         void RecordActorPose(const char* stage, const IdolBoneBinding& binding, const IdolController& controller,
-                             int frame, float time, int requested, int actual, int sourceFrame, float nativeDt)
+                             int frame, float time, int requested, int actual, int sourceFrame, float nativeDt,
+                             float frameDt = 0.f)
         {
             if (!Active()) return;
             out_ << "{\"event\":\"actor_pose\",\"stage\":";
@@ -123,15 +124,22 @@ namespace GakuMotion
             out_ << ",\"requested_backend\":" << requested << ",\"actual_backend\":" << actual
                  << ",\"source_frame\":" << sourceFrame << ",\"native_dt_s\":";
             if (sourceFrame >= 0) Number(nativeDt); else out_ << "null";
+            out_ << ",\"frame_dt_s\":";
+            Number(frameDt);
+            out_ << ",\"head_world\":";
+            Quaternion head{};
+            if (FallbackPhysics::SampleHeadWorld(binding, controller, head)) Rotation(head); else out_ << "null";
             out_ << ",\"bones\":[";
             bool first = true;
-            poseSampler_.SampleSecondaryLocal(binding, controller, [&](const std::string& name, Quaternion rotation) {
+            poseSampler_.SampleSecondaryLocal(binding, controller, [&](const std::string& name, Quaternion rotation, const Quaternion* parentWorld) {
                 if (!first) out_ << ',';
                 first = false;
                 out_ << "{\"bone\":";
                 Name(name);
                 out_ << ",\"local\":";
                 Rotation(rotation);
+                out_ << ",\"parent_world\":";
+                if (parentWorld) Rotation(*parentWorld); else out_ << "null";
                 out_ << '}';
             });
             out_ << "]}\n";

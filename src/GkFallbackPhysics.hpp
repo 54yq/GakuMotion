@@ -74,6 +74,16 @@ namespace GakuMotion
 				if (bone.garment) visit(bone.name, bone.length, bone.axis, bone.rest);
 		}
 
+        static bool SampleHeadWorld(const IdolBoneBinding& binding, const IdolController& controller, Quaternion& rotation)
+        {
+            if (!controller.fnGetWorldRotation) return false;
+            for (size_t i=0; i<binding.boneTransforms.size() && i<binding.boneHids.size(); ++i) {
+                if (binding.boneHids[i] == 10 && binding.boneTransforms[i])
+                    return CaptureRotation(controller.fnGetWorldRotation, binding.boneTransforms[i], rotation);
+            }
+            return false;
+        }
+
         // Read-only sampling uses a dedicated instance, never the active solver.
         template<class Visit>
         void SampleSecondaryLocal(const IdolBoneBinding& binding, const IdolController& controller, Visit&& visit)
@@ -86,7 +96,10 @@ namespace GakuMotion
                 if (count >= 4) continue;
                 Quaternion rotation{};
                 if (!CaptureRotation(controller.fnGetLocalRotation, bone.transform, rotation)) continue;
-                visit(bone.name, rotation);
+                Quaternion parentWorld{};
+                const bool parentValid = bone.parent &&
+                    CaptureRotation(controller.fnGetWorldRotation, bone.parent, parentWorld);
+                visit(bone.name, rotation, parentValid ? &parentWorld : nullptr);
                 ++count;
             }
         }

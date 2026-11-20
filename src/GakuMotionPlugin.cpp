@@ -1050,7 +1050,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.28-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.29-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -3961,7 +3961,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
         const auto& native = g_burstBridge.status;
         const bool currentNative = actual == 2 && native.actor == activeActor && native.injected;
         g_costumeCapture.RecordActorPose(stage, binding->second, controller, unityFrame, player.currentTime,
-            core.config.secondaryPhysicsBackend, actual, currentNative ? native.source_frame : -1, native.delta_time);
+            core.config.secondaryPhysicsBackend, actual, currentNative ? native.source_frame : -1, native.delta_time, realDeltaTime);
     };
     recordMainActorPose("before_plugin_pose", false);
 	EyeGazeProbe::Before(activeActor);
