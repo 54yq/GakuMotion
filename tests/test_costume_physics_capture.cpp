@@ -83,7 +83,19 @@ int main()
 	assert(sampled.solver.Publish(sampled.binding, sampled.controller, .02f, 3, &jumped));
 	assert(jumped.poseResets == 1 && !jumped.timeReset && jumped.maxima[Frame::Acceleration] < 0.f);
 	capture.Record(2, sampled.binding.actor, 3, 103.126f, .02f, 2, 0, false, sampled.solver, jumped);
-	assert(capture.Close("synthetic") && capture.Frames() == 2);
+	sampled.skirt.position = {};
+	const auto beforeSample = sampled.skirt.rotation;
+	capture.RecordActorPose("after_plugin_pose", sampled.binding, sampled.controller, 3, 103.126f, 2, 2, 2, .02f);
+	assert(sampled.skirt.rotation.x == beforeSample.x && sampled.skirt.rotation.w == beforeSample.w);
+	assert(capture.Close("synthetic") && capture.Frames() == 3);
+	{
+		std::ifstream recorded(path);
+		const std::string contents((std::istreambuf_iterator<char>(recorded)), {});
+		assert(contents.find("\"event\":\"actor_pose\"") != std::string::npos);
+		assert(contents.find("\"source_frame\":2,\"native_dt_s\":0.02") != std::string::npos);
+		const auto actorPose = contents.substr(contents.find("\"event\":\"actor_pose\""));
+		assert(actorPose.find("Skirt1_S") != std::string::npos && actorPose.find("Hair1_S") != std::string::npos);
+	}
 	assert(!capture.Open(path, "must not overwrite", 43));
 
 	Rig handoff;

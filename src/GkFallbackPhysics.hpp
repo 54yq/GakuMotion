@@ -74,6 +74,23 @@ namespace GakuMotion
 				if (bone.garment) visit(bone.name, bone.length, bone.axis, bone.rest);
 		}
 
+        // Read-only sampling uses a dedicated instance, never the active solver.
+        template<class Visit>
+        void SampleSecondaryLocal(const IdolBoneBinding& binding, const IdolController& controller, Visit&& visit)
+        {
+            if (!HasApi(controller) || !binding.actorTransform) return;
+            if (!SameBinding(binding)) Bind(binding, controller);
+            unsigned hair = 0, garment = 0;
+            for (const auto& bone : bones_) {
+                auto& count = bone.garment ? garment : hair;
+                if (count >= 4) continue;
+                Quaternion rotation{};
+                if (!CaptureRotation(controller.fnGetLocalRotation, bone.transform, rotation)) continue;
+                visit(bone.name, rotation);
+                ++count;
+            }
+        }
+
 		FallbackPhysics() = default;
 
 		explicit FallbackPhysics(Settings settings) : settings_(settings)

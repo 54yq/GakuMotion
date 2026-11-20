@@ -157,6 +157,7 @@ namespace
 	GakuMotion::FallbackPhysics g_fallbackPhysics;
 	GakuMotion::CostumePhysicsCapture g_costumeCapture;
 	int g_costumeCaptureMotion{-1};
+    int g_costumeCaptureBackend{-1};
 
 	void FinishCostumeCapture(GakuMotion::Core& core, const char* reason, bool complete)
 	{
@@ -172,14 +173,15 @@ namespace
 	bool CostumeCaptureEligible(const GakuMotion::Core& core)
 	{
 		return core.liveTakeoverActive && core.InjectionAllowed() && !core.captureSuspended &&
-			!core.ensembleRestoreUnconfirmed && core.config.secondaryPhysicsBackend == 1 &&
+			!core.ensembleRestoreUnconfirmed && core.config.secondaryPhysicsBackend != 0 &&
 			core.player.state != GakuMotion::PlaybackState::Stopped;
 	}
 
 	bool CostumeCaptureMatches(const GakuMotion::Core& core)
 	{
 		return CostumeCaptureEligible(core) && core.injectionSession == g_costumeCapture.Session() &&
-			core.currentMotionIndex == g_costumeCaptureMotion;
+			core.currentMotionIndex == g_costumeCaptureMotion &&
+            core.config.secondaryPhysicsBackend == g_costumeCaptureBackend;
 	}
 
 	void PollCostumeCapture(GakuMotion::Core& core)
@@ -211,6 +213,7 @@ namespace
 			return;
 		}
 		g_costumeCaptureMotion = core.currentMotionIndex;
+        g_costumeCaptureBackend = core.config.secondaryPhysicsBackend;
 		core.costumeCaptureStatus = Status::Recording;
 		if (g_hostContext.logInfo) g_hostContext.logInfo("[GakuMotion][CostumePhysics] file=%s", label.c_str());
 	}
@@ -1047,7 +1050,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.24-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.25-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -3921,6 +3924,20 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	const auto bodyBegin = std::chrono::steady_clock::now();
 	const auto* posePlayer = ActorGroundShadow::PlayerForActor(activeActor);
 	const uint64_t poseSerialBefore = posePlayer ? posePlayer->controller.footPoseWriteStamp.serial : 0;
+    const auto recordMainActorPose = [&](const char* stage, bool after) {
+        if (!g_costumeCapture.Active() || !CostumeCaptureMatches(core) || !core.IsTargetActor(activeActor) ||
+            player.state != GakuMotion::PlaybackState::Playing || unityFrame < 0) return;
+        const auto& controller = player.controller;
+        const auto binding = controller.bindings.find(activeActor);
+        if (binding == controller.bindings.end() || !binding->second.bindPoseCaptured ||
+            controller.targetActor != activeActor || !controller.CanDriveActor(activeActor)) return;
+        const int actual = after && g_physicsActor == activeActor && g_physicsFrame == unityFrame ? g_physicsActual : -1;
+        const auto& native = g_burstBridge.status;
+        const bool currentNative = actual == 2 && native.actor == activeActor && native.injected;
+        g_costumeCapture.RecordActorPose(stage, binding->second, controller, unityFrame, player.currentTime,
+            core.config.secondaryPhysicsBackend, actual, currentNative ? native.source_frame : -1, native.delta_time);
+    };
+    recordMainActorPose("before_plugin_pose", false);
 	EyeGazeProbe::Before(activeActor);
 	if (player.controller.targetActor)
 		GakuMotion::OnLateUpdate(activeActor, anim, nullptr, dtToPass, isNewPhysicalFrame,
@@ -4160,6 +4177,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	// Consume the completed body + secondary pose in the same tick.
 	ActorGroundShadow::RefreshAfterPose(activeActor, poseSerialBefore);
 	GroundShadowProbe::AfterPose(activeActor, poseSerialBefore);
+    recordMainActorPose("after_plugin_pose", true);
 	const auto* snapshotPlayer=ActorGroundShadow::PlayerForActor(activeActor);
 	if (core.liveTakeoverActive && snapshotPlayer && snapshotPlayer->controller.footPoseWriteStamp.actor==activeActor &&
 		snapshotPlayer->controller.footPoseWriteStamp.serial!=poseSerialBefore) {

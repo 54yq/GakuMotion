@@ -7,7 +7,7 @@
 
 namespace GakuMotion
 {
-	// Main-thread, bounded recorder. Only records the built-in solver's state.
+	// Main-thread, bounded recorder for solver and actor pose diagnostics.
 	class CostumePhysicsCapture
 	{
 	public:
@@ -24,6 +24,7 @@ namespace GakuMotion
 			out_.open(path, std::ios::binary);
 			if (!out_) return false;
 			state_ = {};
+            poseSampler_.Clear();
 			frames_ = 0;
 			session_ = session;
 			started_ = Clock::now();
@@ -44,6 +45,7 @@ namespace GakuMotion
 		{
 			out_ << "{\"event\":\"end\",\"reason\":\"" << reason << "\",\"frames\":" << frames_ << "}\n";
 			out_.close();
+            poseSampler_.Clear();
 			return out_.good();
 		}
 
@@ -111,7 +113,38 @@ namespace GakuMotion
 			}
 		}
 
+        void RecordActorPose(const char* stage, const IdolBoneBinding& binding, const IdolController& controller,
+                             int frame, float time, int requested, int actual, int sourceFrame, float nativeDt)
+        {
+            if (!Active()) return;
+            out_ << "{\"event\":\"actor_pose\",\"stage\":";
+            Name(stage);
+            Identity(1, reinterpret_cast<uintptr_t>(binding.actor), frame, time);
+            out_ << ",\"requested_backend\":" << requested << ",\"actual_backend\":" << actual
+                 << ",\"source_frame\":" << sourceFrame << ",\"native_dt_s\":";
+            if (sourceFrame >= 0) Number(nativeDt); else out_ << "null";
+            out_ << ",\"bones\":[";
+            bool first = true;
+            poseSampler_.SampleSecondaryLocal(binding, controller, [&](const std::string& name, Quaternion rotation) {
+                if (!first) out_ << ',';
+                first = false;
+                out_ << "{\"bone\":";
+                Name(name);
+                out_ << ",\"local\":";
+                Rotation(rotation);
+                out_ << '}';
+            });
+            out_ << "]}\n";
+            ++frames_;
+            const auto now = Clock::now();
+            if (now >= nextFlush_) {
+                out_.flush();
+                nextFlush_ = now + std::chrono::seconds(1);
+            }
+        }
+
 	private:
+        FallbackPhysics poseSampler_;
 		struct Role
 		{
 			uintptr_t actor{};
