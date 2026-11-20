@@ -35,7 +35,7 @@ namespace LiveAnimatorProbe
 	// The actor's physics job is inserted into VL.Animation's separately owned
 	// graph. Animator.playableGraph alone does not describe this graph. Resolve
 	// the component and player afresh, without retaining scene objects or writes.
-	inline void SampleActorGraph(void* actor, int phase, int clockSlot = 0, LiveDynamicFollowerClock* followerClock = nullptr)
+	inline void SampleActorGraph(void* actor, int phase, int clockSlot = 0, LiveDynamicFollowerClock* followerClock = nullptr, uint64_t spectatorToken = 0)
 	{
 		if (!actor || !g_getComponentInChildrenNative || !il2cpp_class_get_type ||
 			!il2cpp_type_get_object || !il2cpp_class_get_parent || !g_faceRuntime.objectClass ||
@@ -79,15 +79,17 @@ namespace LiveAnimatorProbe
 			if (name && ns && std::strcmp(name, "MotionDefinePlayer") == 0 &&
 				std::strcmp(ns, "VL.Animation") == 0) { motionClass = c; break; }
 		}
-		LiveCodeCapture::Class(motionClass);
-		LiveCodeCapture::Capture(componentClass, actualClass, playerBase,
-            reinterpret_cast<void*>(GakuMotion::Core::Instance().liveOwnerToken));
-		LiveSchedulingProbe::InstallActor(motionClass, metadata);
+		if (!spectatorToken) {
+			LiveCodeCapture::Class(motionClass);
+			LiveCodeCapture::Capture(componentClass, actualClass, playerBase,
+				reinterpret_cast<void*>(GakuMotion::Core::Instance().liveOwnerToken));
+			LiveSchedulingProbe::InstallActor(motionClass, metadata);
+		}
 		// Identify exact candidate methods without invoking or detouring them.
 		// The scene end check has to be verified before any suppression can be
 		// considered; an async end sequence cannot be cancelled by guesswork.
 		static bool reportedCandidates = false;
-		if (!reportedCandidates && actualClass && playerBase && g_liveApi.presenterClass && className && classNamespace)
+		if (!spectatorToken && !reportedCandidates && actualClass && playerBase && g_liveApi.presenterClass && className && classNamespace)
 		{
 			const bool endBool = metadata.Find(g_liveApi.presenterClass, "CheckLiveEnd", false, {0x02}, {{0x0c}}) != nullptr;
 			const bool endVoid = metadata.Find(g_liveApi.presenterClass, "CheckLiveEnd", false, {0x01}, {{0x0c}}) != nullptr;
@@ -135,7 +137,7 @@ namespace LiveAnimatorProbe
 								if (!e && target) targetMatches = target == HelperGetActorAnimator(actor) ? 1 : 0; }
 						}
 					}
-					if (phase>=0) {
+					if (phase>=0 && !spectatorToken) {
 						alignas(16) std::array<unsigned char, 16> actorGraph{};
 						std::memcpy(actorGraph.data(), graph, actorGraph.size());
 						if (targetMatches == 1)
@@ -149,6 +151,12 @@ namespace LiveAnimatorProbe
 			}
 		}
 		auto& currentCore = GakuMotion::Core::Instance();
+		if (spectatorToken) {
+			g_hostContext.logInfo("[GakuMotion][LiveUnboundGraph] actor=%p actor_token=%llu target_actor=%p valid=%d playing=%d update_mode=%d actor_target=%d motion_time=%.3f",
+				actor, static_cast<unsigned long long>(spectatorToken), currentCore.player.controller.targetActor,
+				valid, playing, mode, targetMatches, currentCore.player.currentTime);
+			return;
+		}
 		if (phase >= 0 && targetMatches == 1 && currentCore.liveViewingConfirmed && currentCore.liveOwnerToken &&
 			(!currentCore.player.controller.targetActor || currentCore.player.controller.targetActor == actor))
 		{

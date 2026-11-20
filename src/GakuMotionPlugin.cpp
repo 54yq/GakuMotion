@@ -1050,7 +1050,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.26-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.27-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -3672,8 +3672,34 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 		LiveAnimatorProbe::SampleActorGraph(activeActor, (o.paused ? 1 : 0) | (core.liveTakeoverActive ? 2 : 0));
 		core.liveControlNotice = GakuMotion::detail::FormatMsg("已记录第 %llu 次 Live 状态（只读）。", static_cast<unsigned long long>(seq));
 	}
-	if (core.liveViewingConfirmed && core.liveObservation.confirmed)
+	if (core.liveViewingConfirmed && core.liveObservation.confirmed) {
 		LiveAnimatorProbe::Sample(activeActor, core.liveObservation.paused, core.liveTakeoverActive, static_cast<int>(player.state));
+		// Confirm the game's own graph pause for each unbound role during
+		// single-target playback, without borrowing or reconfiguring its graph.
+		if (core.liveTakeoverActive && core.liveObservation.paused && core.InjectionAllowed() &&
+			player.state == GakuMotion::PlaybackState::Playing && player.controller.targetActor &&
+			activeActor != player.controller.targetActor && g_hostContext.logInfo &&
+			std::none_of(core.ensemble.Followers().begin(), core.ensemble.Followers().end(),
+				[](const auto& follower) { return follower.active && follower.player && follower.actorToken; })) {
+			if (const auto* entry = core.sceneActorRegistry.Find(activeActor)) {
+				using Clock = std::chrono::steady_clock;
+				static uint64_t epoch{}, session{};
+				static std::unordered_map<uint64_t, Clock::time_point> nextSample;
+				if (epoch != core.sceneActorRegistry.Epoch() || session != core.injectionSession) {
+					epoch = core.sceneActorRegistry.Epoch();
+					session = core.injectionSession;
+					nextSample.clear();
+				}
+				const auto now = Clock::now();
+				auto& next = nextSample[entry->token];
+				if (now >= next) {
+					next = now + std::chrono::seconds(5);
+					LiveAnimatorProbe::Resolve();
+					LiveAnimatorProbe::SampleActorGraph(activeActor, 3, 0, nullptr, entry->token);
+				}
+			}
+		}
+	}
 	else if (g_motionSceneAllowed && g_sceneOwner.role == GakuMotion::injection::OwnerRole::Photography &&
 		core.IsTargetActor(activeActor) && player.state == GakuMotion::PlaybackState::Playing)
 		LiveAnimatorProbe::SamplePhotography(activeActor);
