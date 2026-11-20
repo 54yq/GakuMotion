@@ -1050,7 +1050,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.27-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.28-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -1910,7 +1910,7 @@ static void ResetPlacementDynamicBone(void* actor)
 				Clock::active = true;
 				return false;
 			}
-			if (mustCheckOriginal && !graph.OriginalPaused()) return false;
+			if (mustCheckOriginal && !graph.OriginalRestored()) return false;
 			return Clock::Start(now, true);
 		}
 		g_primaryUsesIndependentGraph = Clock::active = Clock::mmdSession = true;
@@ -1945,7 +1945,7 @@ static void ResetPlacementDynamicBone(void* actor)
 			if (now - LiveActorClockMvp::started < 2.0) return true;
 		}
 		graph.fallbackSession = core.injectionSession;
-		if (!graph.Release() || !graph.OriginalPaused()) return false;
+		if (!graph.Release() || !graph.OriginalRestored()) return false;
 		g_primaryUsesIndependentGraph = LiveActorClockMvp::active = false;
 		const bool started = LiveActorClockMvp::Start(now, true);
 		if (g_hostContext.logInfo) g_hostContext.logInfo(
@@ -1973,7 +1973,7 @@ static void ResetPlacementDynamicBone(void* actor)
 			}
 			if (!detached && same && (g_independentActorGraph.originalRigChanged ||
 			    !CameraBridge::IsAlive(reinterpret_cast<void*>(LiveActorClockMvp::actor)) ||
-			    !g_independentActorGraph.OriginalPaused())) {
+			    !g_independentActorGraph.OriginalRestored())) {
 				core.liveActorClockFault = true;
 				core.liveActorClockNotice = "原角色图或骨架恢复未确认，Live 保持暂停。";
 				return false;

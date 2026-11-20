@@ -11,6 +11,8 @@ struct IndependentLiveActorGraph
     StageLoader::Handle builderPin{};
     const void *getOriginalGraph{}, *destroy{}, *rootAt{}, *nodeTime{};
     bool owned{}, confirmedSwing{}, originalRigChanged{};
+    alignas(16) Handle suspendedOriginal{};
+    bool originalSuspended{}, restoredRunningOriginal{};
     double nextCheck{};
     uint64_t fallbackSession = UINT64_MAX;
     const char* reason{};
@@ -39,6 +41,41 @@ struct IndependentLiveActorGraph
             LiveIndependentGraphProbe::SameHandle(current, Clock::graph);
     }
 
+    bool OriginalRestored() const
+    {
+        if (!restoredRunningOriginal) return OriginalPaused();
+        alignas(16) Handle current{};
+        return Clock::SameOwner() && Clock::Read(Clock::valid, true) == 1 &&
+            Clock::Read(Clock::mode) == 1 && Clock::Read(Clock::playing, true) == 1 &&
+            LiveIndependentGraphProbe::Read(getOriginalGraph, reinterpret_cast<void*>(Clock::player), current) &&
+            LiveIndependentGraphProbe::SameHandle(current, Clock::graph);
+    }
+
+    bool SuspendRunningOriginal(const GakuMotion::ExactMethodMetadata& metadata)
+    {
+        using namespace LiveIndependentGraphProbe;
+        auto& core = GakuMotion::Core::Instance();
+        alignas(16) Handle current{};
+        if (!Clock::SameOwner() || !core.liveTakeoverActive || !core.liveObservation.confirmed ||
+            !core.liveObservation.paused || !Clock::verifiedOutputs ||
+            Clock::Read(Clock::valid, true) != 1 || Clock::Read(Clock::mode) != 1 ||
+            Clock::Read(Clock::playing, true) != 1 ||
+            !Read(getOriginalGraph, reinterpret_cast<void*>(Clock::player), current) ||
+            !SameHandle(current, Clock::graph)) return false;
+        const auto scanned = Inspect(Clock::graphClass, current, metadata);
+        if (!scanned.complete || scanned.campusJobs != 2 || scanned.motionClips != 0) return false;
+
+        suspendedOriginal = current;
+        originalSuspended = true;
+        int manualMode = 3;
+        void* args[]{&manualMode};
+        const bool ok = Invoke(Clock::stop, current.data()) && Invoke(Clock::setMode, current.data(), args) && OriginalPaused();
+        if (g_hostContext.logInfo)
+            g_hostContext.logInfo("[GakuMotion][IndependentActorGraph] suspended_running_original=%d campus_jobs=%d",
+                int(ok), static_cast<int>(scanned.campusJobs));
+        return ok;
+    }
+
     bool Fail(const char* message)
     {
         reason = message;
@@ -63,6 +100,24 @@ struct IndependentLiveActorGraph
         builderPin = nullptr;
         owned = confirmedSwing = false;
         graph = {};
+        if (originalSuspended) {
+            unsigned char valid{};
+            if (!LiveIndependentGraphProbe::Read(Clock::valid, suspendedOriginal.data(), valid)) return false;
+            if (valid) {
+                int gameTime = 1;
+                void* args[]{&gameTime};
+                unsigned char playing{};
+                int mode{};
+                if (!Invoke(Clock::setMode, suspendedOriginal.data(), args) ||
+                    !Invoke(Clock::play, suspendedOriginal.data()) ||
+                    !LiveIndependentGraphProbe::Read(Clock::playing, suspendedOriginal.data(), playing) || !playing ||
+                    !LiveIndependentGraphProbe::Read(Clock::mode, suspendedOriginal.data(), mode) || mode != gameTime)
+                    return false;
+            }
+            restoredRunningOriginal = valid != 0;
+            suspendedOriginal = {};
+            originalSuspended = false;
+        }
         return true;
     }
 
@@ -138,6 +193,7 @@ struct IndependentLiveActorGraph
         using namespace LiveIndependentGraphProbe;
         reason = nullptr;
         originalRigChanged = false;
+        restoredRunningOriginal = false;
         auto metadata = GroundShadowProbeBootstrap::Resolve(g_gameAssembly).method;
         const auto objectNew = reinterpret_cast<void*(*)(void*)>(GetProcAddress(g_gameAssembly, "il2cpp_object_new"));
         void* playerBase = FindClass("vl-unity.Runtime.dll", "VL.Animation", "AnimationPlayerBase");
@@ -147,14 +203,13 @@ struct IndependentLiveActorGraph
         void* initClass = FindClass("campus-submodule.Runtime.dll", "ActorAnimation", "CampusActorAnimationInitializeData");
         void* scriptClass = FindClass("UnityEngine.AnimationModule.dll", "UnityEngine.Animations", "AnimationScriptPlayable");
         void* handleClass = PlayableClass("PlayableHandle");
-        if (owned || builderPin || !objectNew || !componentClass || !rigClass || !builderClass || !initClass ||
+        if (owned || originalSuspended || builderPin || !objectNew || !componentClass || !rigClass || !builderClass || !initClass ||
             !scriptClass || !handleClass || !StageLoader::newHandle || !StageLoader::freeHandle ||
             !StageLoader::valueSize || !g_getComponentInChildrenNative || !Clock::graphClass) return Fail("native_types");
         uint32_t align{};
         if (StageLoader::valueSize(scriptClass, &align) != 16 || StageLoader::valueSize(handleClass, &align) != 16)
             return Fail("handle_size");
         getOriginalGraph = metadata.Find(playerBase, "GetPlayableGraph", false, {0x11, Clock::graphClass}, {});
-        if (!OriginalPaused()) return Fail("original_graph_not_paused");
         void* classType = il2cpp_class_get_type(componentClass);
         void* type = classType ? il2cpp_type_get_object(classType) : nullptr;
         void* component = type ? g_getComponentInChildrenNative(actor, type) : nullptr;
@@ -169,6 +224,8 @@ struct IndependentLiveActorGraph
             g_faceRuntime.objectClass(stockBuilder) != builderClass || g_faceRuntime.objectClass(job) != campusJob ||
             ReferenceField(component, "_animationPlayer") != reinterpret_cast<void*>(Clock::player) ||
             ReferenceField(rig, "_animator") != animator || !RigInitialized(rig)) return Fail("actor_rig_ownership");
+
+        if (!OriginalPaused() && !SuspendRunningOriginal(metadata)) return Fail("original_graph_not_paused");
 
         const auto create = metadata.Find(Clock::graphClass, "Create", true, {0x11, Clock::graphClass}, {});
         destroy = metadata.Find(Clock::graphClass, "Destroy", false, {0x01}, {});
