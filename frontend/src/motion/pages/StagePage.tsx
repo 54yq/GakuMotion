@@ -196,7 +196,7 @@ export function StagePage() {
           title="控制场景光影节点与角色阴影渲染；关闭场景背景时不会关闭此项"
         >
           <div className="space-y-0.5">
-            <Label htmlFor="stage-lighting" className="cursor-pointer text-[13px] font-medium">
+            <Label htmlFor="stage-lighting" className="cursor-pointer text-sm font-medium">
               光影效果
             </Label>
             <span className="block text-xs text-muted-foreground">控制场景灯光节点及角色锚定阴影联动</span>
@@ -214,7 +214,7 @@ export function StagePage() {
           title="关闭时自动隐藏场景网格并应用纯色背景"
         >
           <div className="space-y-0.5">
-            <Label htmlFor="stage-background" className="cursor-pointer text-[13px] font-medium">
+            <Label htmlFor="stage-background" className="cursor-pointer text-sm font-medium">
               场景背景
             </Label>
             <span className="block text-xs text-muted-foreground">关闭后隐藏三维背景并启用纯色抠像幕布</span>
@@ -237,7 +237,7 @@ export function StagePage() {
         <div className="flex flex-wrap items-center justify-between gap-3 px-3.5 py-2.5">
           <div className="flex items-center gap-2">
             <RiPaletteFill className="size-3.5 text-primary" />
-            <span className="text-[13px] font-medium">背景颜色</span>
+            <span className="text-sm font-medium">背景颜色</span>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <input

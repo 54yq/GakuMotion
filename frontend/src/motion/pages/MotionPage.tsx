@@ -40,10 +40,10 @@ function FacialSliderRow({ facet, label, hint }: { facet: keyof FacialWeights; l
   const value = draft ?? weights[facet]
   return (
     <div className="space-y-1.5 px-3.5 py-2.5">
-      <div className="flex items-center justify-between text-xs">
+      <div className="flex items-center justify-between text-sm">
         <div className="flex items-baseline gap-2">
           <span className="font-medium text-foreground">{label}</span>
-          <span className="text-[11px] text-muted-foreground">{hint}</span>
+          <span className="text-xs text-muted-foreground">{hint}</span>
         </div>
         <span className="font-medium tabular-nums text-primary">{value.toFixed(2)} 倍</span>
       </div>
@@ -105,11 +105,11 @@ export function MotionPage() {
             </div>
             <div className="min-w-0 space-y-0.5">
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="truncate text-sm font-semibold text-foreground">
+                <h1 className="truncate text-lg font-semibold text-foreground">
                   {loadedEntry?.title ?? (loaded.motionKey ? player.title : '尚未加载动作素材')}
                 </h1>
                 {loadedEntry && (
-                  <span className="rounded-[4px] border border-border bg-muted/60 px-1.5 py-0 text-[11px] tabular-nums text-muted-foreground">
+                  <span className="rounded-[4px] border border-border bg-muted/60 px-2 py-0.5 text-xs tabular-nums text-muted-foreground">
                     {formatMmSs(loadedEntry.durationSeconds)} · {loadedEntry.totalFrames} 帧 · {Number(player.fps.toPrecision(4))} fps
                   </span>
                 )}
@@ -122,10 +122,10 @@ export function MotionPage() {
               {loadedEntry ? (
                 <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                   <span className="truncate">目录：{loadedEntry.directory}</span>
-                  {loadedEntry.hasMotion && <span className="rounded-[4px] border border-border bg-muted/50 px-1.5 py-0 text-[10px]">动作</span>}
-                  {loadedEntry.hasFacial && <span className="rounded-[4px] border border-border bg-muted/50 px-1.5 py-0 text-[10px]">表情</span>}
-                  {loadedEntry.hasCamera && <span className="rounded-[4px] border border-border bg-muted/50 px-1.5 py-0 text-[10px]">镜头</span>}
-                  {loadedEntry.hasAudio && <span className="rounded-[4px] border border-border bg-muted/50 px-1.5 py-0 text-[10px]">音乐</span>}
+                  {loadedEntry.hasMotion && <span className="rounded-[4px] border border-border bg-muted/50 px-1.5 py-0 text-micro">动作</span>}
+                  {loadedEntry.hasFacial && <span className="rounded-[4px] border border-border bg-muted/50 px-1.5 py-0 text-micro">表情</span>}
+                  {loadedEntry.hasCamera && <span className="rounded-[4px] border border-border bg-muted/50 px-1.5 py-0 text-micro">镜头</span>}
+                  {loadedEntry.hasAudio && <span className="rounded-[4px] border border-border bg-muted/50 px-1.5 py-0 text-micro">音乐</span>}
                 </div>
               ) : (
                 <p className="text-xs text-muted-foreground">
@@ -197,18 +197,18 @@ export function MotionPage() {
                   ))}
                 </SelectContent>
               </Select>
-              <span className="rounded-[4px] border border-border bg-muted/60 px-2 py-0.5 text-[11px] text-muted-foreground">
+              <span className="rounded-[4px] border border-border bg-muted/60 px-2 py-0.5 text-xs text-muted-foreground">
                 当前绑定：{actors.boundLabel || '尚未绑定'}
               </span>
             </PropertyRow>
 
             <div className="space-y-2.5 px-3.5 py-3">
               <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 text-[13px] font-medium text-foreground">
+                <div className="flex items-center gap-1.5 text-sm font-medium text-foreground">
                   <RiMapPin2Fill className="size-3.5 text-primary" />
                   <span>初始角色位置偏移</span>
                 </div>
-                <span className="text-[11px] text-muted-foreground">世界坐标偏移 (米)</span>
+                <span className="text-xs text-muted-foreground">世界坐标偏移 (米)</span>
               </div>
 
               <Vector3Field
@@ -249,7 +249,7 @@ export function MotionPage() {
                   {position.notice}
                 </p>
               )}
-              <p className="text-[11px] leading-relaxed text-muted-foreground">
+              <p className="text-xs leading-relaxed text-muted-foreground">
                 修改立即作用于当前驱动对象，切歌保留，停止后恢复场景原位；保存后作为下次启动的默认偏移。
               </p>
             </div>

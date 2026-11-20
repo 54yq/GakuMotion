@@ -37,8 +37,17 @@ export default {
         sm: 'calc(var(--radius) - 4px)',
       },
       fontFamily: {
-        sans: ['"Segoe UI"', 'Arial', '"Microsoft YaHei UI"', '"Microsoft YaHei"', 'system-ui', 'sans-serif'],
-        mono: ['"Segoe UI"', 'Arial', 'Cascadia Code', 'Consolas', 'monospace'],
+        sans: ['var(--gaku-font-sans, "Microsoft YaHei UI", "PingFang SC", "Segoe UI", system-ui, sans-serif)'],
+        mono: ['var(--gaku-font-mono, "Cascadia Mono", "Consolas", monospace)'],
+      },
+      fontSize: {
+        micro: ['var(--gaku-text-micro, 11px)', { lineHeight: '1.35' }],
+        xs: ['var(--gaku-text-xs, 12px)', { lineHeight: '1.4' }],
+        sm: ['var(--gaku-text-sm, 13px)', { lineHeight: '1.4' }],
+        base: ['var(--gaku-text-base, 14px)', { lineHeight: '1.45' }],
+        md: ['var(--gaku-text-md, 15px)', { lineHeight: '1.45' }],
+        lg: ['var(--gaku-text-lg, 18px)', { lineHeight: '1.35' }],
+        title: ['var(--gaku-text-title, 22px)', { lineHeight: '1.3' }],
       },
       keyframes: {
         'accordion-down': { from: { height: '0' }, to: { height: 'var(--radix-accordion-content-height)' } },

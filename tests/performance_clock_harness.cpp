@@ -315,6 +315,165 @@ static void TestMotionPlayerAdapter()
     MotionPlayer empty;
     auto emptyClock = MakeMotionPlayerAudioDrivenClock(empty);
     Check(!emptyClock.Seek(PerformanceTime{2}), "unloaded adapter seek reports failure");
+
+    // Combined audio observe + position callback queries once per tick on absolute backend.
+    {
+        MotionPlayer combined;
+        Script::Prepare(combined);
+        combined.audioPositionIsAbsolute = true;
+        static int combinedCalls = 0;
+        static bool combinedPlaying = true;
+        static float combinedTime = 0.25f;
+        combinedCalls = 0;
+        combinedPlaying = true;
+        combinedTime = 0.25f;
+        combined.fnObserveAudioWithTime = [](audio::Observation* outObs, float* outTimeSeconds) -> bool {
+            ++combinedCalls;
+            if (outObs)
+            {
+                outObs->sourceOpen = true;
+                outObs->confirmed = true;
+                outObs->sourceEpoch = 1;
+                outObs->state = combinedPlaying ? audio::PlaybackState::Playing : audio::PlaybackState::Paused;
+            }
+            if (outTimeSeconds) *outTimeSeconds = combinedPlaying ? combinedTime : -1.0f;
+            return true;
+        };
+        combined.Play();
+        Script::reads = 0;
+        combined.Tick(0.016f, actor);
+        Check(combinedCalls == 1 && Script::reads == 0 && Near(combined.currentTime, 0.25, 1e-6) &&
+            std::string_view(combined.lastClockSource) == "audio",
+            "combined audio observe+time uses a single query per tick");
+        combinedTime = 0.50f;
+        combined.Tick(0.016f, actor);
+        Check(combinedCalls == 2 && Script::reads == 0 && Near(combined.currentTime, 0.50, 1e-6),
+            "combined callback tracks monotonic absolute audio progress");
+        combinedPlaying = false;
+        combined.Tick(0.020f, actor);
+        Check(combinedCalls == 3 && Script::reads == 0 && Near(combined.currentTime, 0.52, 1e-6) &&
+            std::string_view(combined.lastClockSource) == "local(no-audio)",
+            "combined callback falls back to local clock when audio stops playing");
+    }
+
+    // Smooth PLL audio clock under 20ms quantized mixer steps at 60fps and 120fps.
+    {
+        static double trueAudioSeconds = 0.0;
+        static double quantStepSeconds = 0.020;
+        auto wireQuantizedAudio = [](MotionPlayer& p) {
+            Script::Prepare(p);
+            p.audioPositionIsAbsolute = true;
+            p.fnSupportsAudioPlaybackRate = [] { return true; };
+            p.fnSetAudioPlaybackRate = [](float) {};
+            p.fnObserveAudioWithTime = [](audio::Observation* outObs, float* outTimeSeconds) -> bool {
+                if (outObs)
+                {
+                    outObs->sourceOpen = true;
+                    outObs->confirmed = true;
+                    outObs->sourceEpoch = 1;
+                    outObs->state = audio::PlaybackState::Playing;
+                }
+                if (outTimeSeconds)
+                {
+                    const double q = std::floor(trueAudioSeconds / quantStepSeconds) * quantStepSeconds;
+                    *outTimeSeconds = static_cast<float>(q);
+                }
+                return true;
+            };
+        };
+
+        // A. 60fps (16.67ms) with 20ms quantized audio cursor updates.
+        {
+            MotionPlayer smooth60;
+            wireQuantizedAudio(smooth60);
+            trueAudioSeconds = 0.0;
+            quantStepSeconds = 0.020;
+            smooth60.Play();
+            constexpr float dt60 = 1.0f / 60.0f;
+            bool allPositive = true;
+            bool allBounded = true;
+            bool steadyLowVariance = true;
+            double minDelta = 1e9, maxDelta = 0.0;
+            for (int f = 0; f < 180; ++f)
+            {
+                trueAudioSeconds += static_cast<double>(dt60);
+                smooth60.Tick(dt60, actor);
+                const double d = smooth60.lastStepDeltaSeconds;
+                if (d <= 0.0) allPositive = false;
+                if (d < dt60 * 0.90 || d > dt60 * 1.10) allBounded = false;
+                if (f >= 90)
+                {
+                    if (d < dt60 * 0.96 || d > dt60 * 1.04) steadyLowVariance = false;
+                    minDelta = (std::min)(minDelta, d);
+                    maxDelta = (std::max)(maxDelta, d);
+                }
+            }
+            const double expectedMeanAudio = trueAudioSeconds - 0.5 * quantStepSeconds;
+            Check(allPositive && allBounded && steadyLowVariance && (maxDelta - minDelta) < 0.001,
+                "60fps with 20ms quantized audio advances smoothly every frame with low variance");
+            Check(std::fabs(smooth60.preciseTimeSeconds - expectedMeanAudio) < 0.012,
+                "60fps smooth audio clock stays phase-locked to quantized audio time");
+        }
+
+        // B. 120fps (8.33ms) with 20ms quantized audio cursor updates (>50% unchanged cursor frames).
+        {
+            MotionPlayer smooth120;
+            wireQuantizedAudio(smooth120);
+            trueAudioSeconds = 0.0;
+            quantStepSeconds = 0.020;
+            smooth120.Play();
+            constexpr float dt120 = 1.0f / 120.0f;
+            bool allPositive = true;
+            bool allBounded = true;
+            for (int f = 0; f < 240; ++f)
+            {
+                trueAudioSeconds += static_cast<double>(dt120);
+                smooth120.Tick(dt120, actor);
+                const double d = smooth120.lastStepDeltaSeconds;
+                if (d <= 0.0) allPositive = false;
+                if (d < dt120 * 0.90 || d > dt120 * 1.10) allBounded = false;
+            }
+            const double expectedMeanAudio = trueAudioSeconds - 0.5 * quantStepSeconds;
+            Check(allPositive && allBounded,
+                "120fps with 20ms quantized audio has zero frozen frames and bounded steps");
+            Check(std::fabs(smooth120.preciseTimeSeconds - expectedMeanAudio) < 0.012,
+                "120fps smooth audio clock remains phase-locked to quantized audio");
+        }
+
+        // C. 1.5x playback speed + 0.5% audio clock drift + Seek/Pause/Resume re-anchor.
+        {
+            MotionPlayer drifted;
+            wireQuantizedAudio(drifted);
+            drifted.SetPlaybackSpeed(1.5f);
+            trueAudioSeconds = 0.0;
+            quantStepSeconds = 0.020;
+            drifted.Play();
+            constexpr float dt60 = 1.0f / 60.0f;
+            bool allSmooth = true;
+            for (int f = 0; f < 240; ++f)
+            {
+                trueAudioSeconds += static_cast<double>(dt60) * 1.5 * 1.005;
+                drifted.Tick(dt60, actor);
+                const double d = drifted.lastStepDeltaSeconds;
+                if (d < dt60 * 1.5 * 0.90 || d > dt60 * 1.5 * 1.10) allSmooth = false;
+            }
+            const double expectedMeanAudio = trueAudioSeconds - 0.5 * quantStepSeconds;
+            Check(allSmooth && std::fabs(drifted.preciseTimeSeconds - expectedMeanAudio) < 0.015,
+                "1.5x rate with 20ms quantization and 0.5% drift tracks smoothly without lag accumulation");
+
+            drifted.Seek(8.0f);
+            trueAudioSeconds = 8.0;
+            drifted.Pause();
+            drifted.Tick(dt60, actor);
+            Check(Near(drifted.currentTime, 8.0, 1e-6), "paused seek holds exact position");
+            drifted.Resume();
+            trueAudioSeconds += static_cast<double>(dt60) * 1.5;
+            drifted.Tick(dt60, actor);
+            Check(drifted.lastStepDeltaSeconds > dt60 * 1.5 * 0.90 &&
+                drifted.lastStepDeltaSeconds < dt60 * 1.5 * 1.10,
+                "resume after seek continues smoothly without PLL spike");
+        }
+    }
 }
 #endif
 

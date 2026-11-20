@@ -35,6 +35,8 @@
 #include <cstring>
 #include <cstdio>
 #include <atomic>
+#include <condition_variable>
+#include <memory>
 #include <mutex>
 #include <limits>
 #include <sstream>
@@ -1428,6 +1430,26 @@ namespace
 		return -1.0f;
 	}
 
+	bool HelperAudioObserveWithTime(GakuMotion::audio::Observation* outObs, float* outTimeSeconds)
+	{
+		if (!g_audioPlugin.Available()) return false;
+		GakuMotion::audio::Observation obs{};
+		double posSec = -1.0;
+		if (g_audioPlugin.Observe(obs, &posSec))
+		{
+			g_audioObservation = obs;
+			if (outObs) *outObs = obs;
+			if (outTimeSeconds)
+			{
+				*outTimeSeconds = (obs.EffectivePlaying() && std::isfinite(posSec) && posSec >= 0.0)
+					? static_cast<float>(posSec)
+					: -1.0f;
+			}
+			return true;
+		}
+		return false;
+	}
+
 	void* FindClass(const char* assemblyName, const char* namespaze, const char* className)
 	{
 		if (!il2cpp_domain_get || !il2cpp_domain_assembly_open || !il2cpp_assembly_get_image || !il2cpp_class_from_name)
@@ -1791,8 +1813,40 @@ namespace
 			g_faceRuntime.invoke(g_activeSceneMethod, nullptr, args, &exception);
 			g_activeSceneVerified = exception == nullptr && activeHandle != 0;
 		}
-		const std::string name = g_activeSceneVerified
-			? Il2CppStringToUtf8(g_getSceneNameNative(activeHandle, nullptr)) : "";
+		static int s_lastSceneNameHandle = 0;
+		static int s_lastSceneNameFrame = INT_MIN;
+		static bool s_lastSceneNameValid = false;
+		static std::string s_lastSceneName;
+		std::string name;
+		const int unityFrame = g_faceUnityFrame ? g_faceUnityFrame() : -1;
+		if (g_activeSceneVerified)
+		{
+			const bool reuseSceneName = !forceOwnerRead && s_lastSceneNameValid &&
+				activeHandle == s_lastSceneNameHandle && unityFrame >= 0 &&
+				s_lastSceneNameFrame >= 0 &&
+				(unityFrame == s_lastSceneNameFrame ||
+					(g_sceneOwner.Valid() && unityFrame >= s_lastSceneNameFrame &&
+						unityFrame - s_lastSceneNameFrame < 30));
+			if (reuseSceneName)
+			{
+				name = s_lastSceneName;
+			}
+			else
+			{
+				name = Il2CppStringToUtf8(g_getSceneNameNative(activeHandle, nullptr));
+				s_lastSceneName = name;
+				s_lastSceneNameHandle = activeHandle;
+				s_lastSceneNameFrame = unityFrame;
+				s_lastSceneNameValid = true;
+			}
+		}
+		else
+		{
+			s_lastSceneNameValid = false;
+			s_lastSceneNameHandle = 0;
+			s_lastSceneNameFrame = INT_MIN;
+			s_lastSceneName.clear();
+		}
 		g_verifiedActiveSceneHandle = g_activeSceneVerified ? activeHandle : 0;
 		if (GakuMotion::stage_load::receipt.owner.Valid() &&
 			SceneOwnerRuntime::ConfirmedUnloaded(GakuMotion::stage_load::receipt.owner.sceneHandle))
@@ -2043,6 +2097,13 @@ bool InitializeMotion()
 	core.fnStartImport = StartMotionImport;
 	core.fnPollImport = PollMotionImport;
 	core.fnPollImportProgress = PollMotionImportWithProgress;
+	core.fnSaveTrackCoverPng = [](const std::vector<uint8_t>& rawBytes, std::string_view mimeHint,
+		const std::filesystem::path& targetDir, std::string& outFileName, std::string& outError) {
+		return GakuMotion::cover::SaveTrackCoverPng(rawBytes, mimeHint, targetDir, outFileName, outError, 512);
+	};
+	core.fnLoadTrackCoverDataUri = [](const std::filesystem::path& coverPath) {
+		return GakuMotion::cover::LoadCoverAsDataUri(coverPath, 512);
+	};
 	core.fnStartCameraImport = StartCameraImport;
 	core.fnPollCameraImport = PollCameraImport;
 	core.fnPickFile = GakuMotion::host::active ? nullptr : PickMotionFile;
@@ -2062,6 +2123,7 @@ bool InitializeMotion()
 	player.fnSeekAudio = HelperAudioSeek;
 	player.fnSeekPausedAudio = HelperAudioSeekPaused;
 	player.fnObserveAudio = HelperAudioObserve;
+	player.fnObserveAudioWithTime = HelperAudioObserveWithTime;
 	player.fnSetAudioVolume = HelperAudioSetVolume;
 	player.fnAudioVolumeSupport = HelperAudioVolumeSupport;
 	player.fnSupportsAudioPlaybackRate = HelperAudioSupportsRate;
@@ -2638,14 +2700,36 @@ static bool EnsureRuntimeReadyForActor(void* activeActor, void (*initialize)(voi
 // Search only an admitted owner scene, at most four times per second unless a
 // scene boundary or a target-selection command requires a fresh admission check.
 // No callbacks, managed pointers or speculative metadata are exposed to ImGui.
-static bool RefreshSceneActors(GakuMotion::Core& core, bool force = false)
+static int g_lastActorCallbackFrame = INT_MIN;
+
+static bool RefreshSceneActors(GakuMotion::Core& core, bool force = false, void* callbackActor = nullptr)
 {
 	static auto lastScan = std::chrono::steady_clock::time_point{};
+	static int lastScanFrame = INT_MIN;
 	const auto now = std::chrono::steady_clock::now();
+	const int unityFrame = g_faceUnityFrame ? g_faceUnityFrame() : -1;
 	if (!core.InjectionAllowed() || !g_sceneOwner.Valid() || g_currentSceneHandle != g_sceneOwner.sceneHandle)
 		return false;
-	if (!force && !core.HasPendingTargetSelection() && now - lastScan < std::chrono::milliseconds(250)) return true;
+	if (callbackActor && !core.sceneActorRegistry.Find(callbackActor))
+		force = true;
+	if (!force && unityFrame >= 0 && unityFrame == lastScanFrame)
+		return true;
+	if (!force && !core.HasPendingTargetSelection() && !core.sceneActorRegistry.Entries().empty())
+	{
+		// Avoid periodic 250 ms FindObjectsOfType full-scene scans and managed
+		// heap allocations while playback is active and actor ticks arrive cleanly.
+		if (core.player.state == GakuMotion::PlaybackState::Playing &&
+			unityFrame >= 0 && g_lastActorCallbackFrame >= 0 &&
+			unityFrame >= g_lastActorCallbackFrame &&
+			(unityFrame - g_lastActorCallbackFrame) <= 2)
+		{
+			return true;
+		}
+		if (now - lastScan < std::chrono::milliseconds(250))
+			return true;
+	}
 	lastScan = now;
+	lastScanFrame = unityFrame;
 	auto unavailable = [&]
 	{
 		// A failed fresh check must not admit a command through yesterday's token.
@@ -2874,7 +2958,8 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	if (renderedFrame >= 0 && renderedFrame != s_lastRenderedFrame)
 	{
 		s_lastRenderedFrame = renderedFrame;
-		core.OnMainCameraRendered(false);
+		if (!core.IsInOffscreenCapture())
+			core.OnMainCameraRendered(false);
 	}
 	const int unityFrame = g_faceUnityFrame ? g_faceUnityFrame() : -1;
 	const bool isNewPhysicalFrame = unityFrame >= 0 ? unityFrame != s_lastUnityFrame : true;
@@ -2895,7 +2980,8 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	if (s_cameraPhysicalFrame == 0) s_cameraPhysicalFrame = 1;
 	// Fresh typed snapshots remove disabled/destroyed actors even when no actor
 	// callback remains. Never retain an accumulating list of seen scene actors.
-	RefreshSceneActors(core, sceneChanged);
+	g_lastActorCallbackFrame = unityFrame;
+	RefreshSceneActors(core, sceneChanged, activeActor);
 	StageLoader::BindContext(sceneHandle, activeActor);
 	// Refresh native identities before admitting a queued ensemble transaction.
 	TickPhotographyEnsemble(core, unityFrame);
@@ -3647,6 +3733,10 @@ GakuStatus PublishActorApi()
 			title = L"选择本地视频";
 			filter = GakuFileFilter{L"本地视频", L"*.mp4;*.m4v;*.mov;*.webm;*.avi;*.wmv"};
 			break;
+		case 6:
+			title = L"选择封面图片";
+			filter = GakuFileFilter{L"图片文件 (*.png;*.jpg;*.jpeg;*.webp;*.bmp)", L"*.png;*.jpg;*.jpeg;*.webp;*.bmp"};
+			break;
 		default:
 			notice = "不支持的文件选择类型";
 			return false;
@@ -3807,6 +3897,295 @@ GakuStatus PublishActorApi()
 		return {};
 	}
 
+	std::string WebPanelReadImagePreviewDataUri(const std::string& pathUtf8)
+	{
+		if (pathUtf8.empty()) return {};
+		return GakuMotion::cover::LoadCoverAsDataUri(GakuMotion::MotionPathFromUtf8(pathUtf8), 1024);
+	}
+
+	namespace
+	{
+		struct GkScreenshotCapabilitiesV1
+		{
+			uint32_t abiVersion;
+			uint32_t structSize;
+			uint32_t runtimeReady;
+			uint32_t cameraAvailable;
+			uint32_t greenScreenDetected;
+			uint32_t maxDimension;
+			uint32_t windowWidth;
+			uint32_t windowHeight;
+		};
+		struct GkScreenshotFrameRequestV1
+		{
+			uint32_t abiVersion;
+			uint32_t structSize;
+			uint32_t width;
+			uint32_t height;
+			uint32_t pixelFormat;
+			uint32_t alphaMode;
+		};
+		struct GkScreenshotFrameInfoV1
+		{
+			uint32_t abiVersion;
+			uint32_t structSize;
+			uint32_t width;
+			uint32_t height;
+			uint32_t rowPitch;
+			uint32_t hasAlpha;
+			uint64_t unityFrame;
+		};
+		struct GkScreenshotServiceV1
+		{
+			uint32_t abiVersion;
+			uint32_t structSize;
+			void* context;
+			GakuStatus (*getCapabilities)(void* context, GkScreenshotCapabilitiesV1* output);
+			GakuStatus (*requestFileCapture)(void* context, const void* request, uint64_t* outTicket);
+			GakuStatus (*pollCapture)(void* context, uint64_t ticket, void* output);
+			GakuStatus (*releaseTicket)(void* context, uint64_t ticket);
+			GakuStatus (*captureFrameImmediate)(void* context, const GkScreenshotFrameRequestV1* request,
+				void* outPixels, size_t capacity, GkScreenshotFrameInfoV1* outInfo,
+				char* errorBuffer, uint32_t errorCapacity);
+			GakuStatus (*armPresentCapture)(void* context, uint64_t token, uint32_t width, uint32_t height,
+				uint32_t pixelFormat);
+			GakuStatus (*consumePresentCapture)(void* context, uint64_t* outToken, void* outPixels, size_t capacity,
+				GkScreenshotFrameInfoV1* outInfo, char* errorBuffer, uint32_t errorCapacity);
+			GakuStatus (*cancelPresentCapture)(void* context);
+		};
+
+		std::mutex g_screenshotSvcMutex;
+		GkScreenshotServiceV1 g_screenshotSvc{};
+		bool g_screenshotSvcResolved{false};
+
+		bool ResolveScreenshotService(GkScreenshotServiceV1& out)
+		{
+			std::lock_guard<std::mutex> lock(g_screenshotSvcMutex);
+			if (!g_screenshotSvcResolved)
+			{
+				if (!GakuMotion::host::active || !GakuMotion::host::api.queryService) return false;
+				GkScreenshotServiceV1 candidate{};
+				if (GakuMotion::host::Query("screenshotmanager.capture/v1", candidate) != GAKU_OK) return false;
+				if (!candidate.getCapabilities || !candidate.captureFrameImmediate) return false;
+				g_screenshotSvc = candidate;
+				g_screenshotSvcResolved = true;
+			}
+			out = g_screenshotSvc;
+			return true;
+		}
+	} // namespace
+
+	GakuMotion::webpanel::ScreenshotCapabilitiesView WebPanelGetScreenshotCapabilities()
+	{
+		GakuMotion::webpanel::ScreenshotCapabilitiesView view;
+		GkScreenshotServiceV1 svc{};
+		if (!ResolveScreenshotService(svc))
+		{
+			view.available = false;
+			view.notice = "未检测到 ScreenshotManager 联动服务";
+			return view;
+		}
+		GkScreenshotCapabilitiesV1 caps{};
+		caps.abiVersion = 1u;
+		caps.structSize = sizeof(caps);
+		if (svc.getCapabilities(svc.context, &caps) != GAKU_OK)
+		{
+			view.available = false;
+			view.notice = "无法读取 ScreenshotManager 状态";
+			return view;
+		}
+		view.available = true;
+		view.runtimeReady = caps.runtimeReady != 0;
+		view.cameraAvailable = caps.cameraAvailable != 0;
+		view.windowWidth = caps.windowWidth;
+		view.windowHeight = caps.windowHeight;
+		if (!view.runtimeReady) view.notice = "ScreenshotManager 运行时尚未就绪";
+		else if (!view.cameraAvailable) view.notice = "当前场景暂无可用摄影机";
+		return view;
+	}
+
+	GakuMotion::webpanel::ScreenshotCaptureView WebPanelCaptureScreenshot()
+	{
+		GakuMotion::webpanel::ScreenshotCaptureView out;
+		if (!GakuMotion::host::active || !GakuMotion::host::mainThread.enqueue)
+		{
+			out.error = "宿主主线程调度服务不可用";
+			return out;
+		}
+
+		struct CaptureJob
+		{
+			std::mutex mtx;
+			std::condition_variable cv;
+			bool done{false};
+			bool ok{false};
+			uint32_t width{0};
+			uint32_t height{0};
+			uint32_t rowPitch{0};
+			std::vector<uint8_t> pixels;
+			std::string error;
+		};
+
+		auto executeOnMainThread = [](CaptureJob& job) {
+			GkScreenshotServiceV1 svc{};
+			if (!ResolveScreenshotService(svc))
+			{
+				std::lock_guard<std::mutex> lock(job.mtx);
+				job.error = "未检测到 ScreenshotManager 联动服务";
+				job.done = true;
+				job.cv.notify_one();
+				return;
+			}
+			GkScreenshotCapabilitiesV1 caps{};
+			caps.abiVersion = 1u;
+			caps.structSize = sizeof(caps);
+			if (svc.getCapabilities(svc.context, &caps) != GAKU_OK)
+			{
+				std::lock_guard<std::mutex> lock(job.mtx);
+				job.error = "无法查询 ScreenshotManager 能力";
+				job.done = true;
+				job.cv.notify_one();
+				return;
+			}
+			if (!caps.runtimeReady)
+			{
+				std::lock_guard<std::mutex> lock(job.mtx);
+				job.error = "ScreenshotManager 运行时尚未就绪";
+				job.done = true;
+				job.cv.notify_one();
+				return;
+			}
+			if (!caps.cameraAvailable)
+			{
+				std::lock_guard<std::mutex> lock(job.mtx);
+				job.error = "当前场景暂无可用摄影机，无法拍照";
+				job.done = true;
+				job.cv.notify_one();
+				return;
+			}
+
+			uint32_t reqW = caps.windowWidth;
+			uint32_t reqH = caps.windowHeight;
+			constexpr uint32_t kMaxCaptureDim = 1024u;
+			if (reqW > 0 && reqH > 0 && (reqW > kMaxCaptureDim || reqH > kMaxCaptureDim))
+			{
+				if (reqW >= reqH)
+				{
+					reqH = (std::max)(1u, static_cast<uint32_t>(static_cast<uint64_t>(reqH) * kMaxCaptureDim / reqW));
+					reqW = kMaxCaptureDim;
+				}
+				else
+				{
+					reqW = (std::max)(1u, static_cast<uint32_t>(static_cast<uint64_t>(reqW) * kMaxCaptureDim / reqH));
+					reqH = kMaxCaptureDim;
+				}
+			}
+
+			GkScreenshotFrameRequestV1 req{};
+			req.abiVersion = 1u;
+			req.structSize = sizeof(req);
+			req.width = reqW;
+			req.height = reqH;
+			req.pixelFormat = 1u; // GAKU_PIXEL_BGRA8_SRGB_TOPDOWN
+			req.alphaMode = 2u;   // GAKU_SCREENSHOT_ALPHA_OPAQUE
+
+			const size_t initialBytes = (reqW > 0 && reqH > 0)
+				? static_cast<size_t>(reqW) * reqH * 4u
+				: static_cast<size_t>(1920u) * 1080u * 4u;
+			std::vector<uint8_t> pixels(initialBytes);
+			GkScreenshotFrameInfoV1 info{};
+			info.abiVersion = 1u;
+			info.structSize = sizeof(info);
+			char errBuf[256]{};
+			GakuStatus st = svc.captureFrameImmediate(
+				svc.context, &req, pixels.data(), pixels.size(), &info, errBuf, static_cast<uint32_t>(sizeof(errBuf)));
+			if (st == GAKU_E_SIZE && info.width > 0 && info.height > 0 && info.rowPitch >= info.width * 4u)
+			{
+				const size_t needed = static_cast<size_t>(info.rowPitch) * info.height;
+				if (needed <= 128ULL * 1024ULL * 1024ULL)
+				{
+					pixels.resize(needed);
+					std::memset(errBuf, 0, sizeof(errBuf));
+					st = svc.captureFrameImmediate(
+						svc.context, &req, pixels.data(), pixels.size(), &info, errBuf, static_cast<uint32_t>(sizeof(errBuf)));
+				}
+			}
+
+			std::lock_guard<std::mutex> lock(job.mtx);
+			if (st == GAKU_OK && info.width > 0 && info.height > 0)
+			{
+				job.ok = true;
+				job.width = info.width;
+				job.height = info.height;
+				job.rowPitch = info.rowPitch;
+				job.pixels = std::move(pixels);
+			}
+			else
+			{
+				job.ok = false;
+				job.error = errBuf[0] != '\0' ? std::string(errBuf) : "ScreenshotManager 即时抓帧失败";
+			}
+			job.done = true;
+			job.cv.notify_one();
+		};
+
+		auto job = std::make_shared<CaptureJob>();
+		if (GakuMotion::host::mainThread.isMainThread &&
+			GakuMotion::host::mainThread.isMainThread(GakuMotion::host::mainThread.context))
+		{
+			executeOnMainThread(*job);
+		}
+		else
+		{
+			struct EnqueuePayload
+			{
+				std::shared_ptr<CaptureJob> job;
+				void (*fn)(CaptureJob&);
+			};
+			auto* payload = new EnqueuePayload{job, executeOnMainThread};
+			const GakuStatus enq = GakuMotion::host::mainThread.enqueue(
+				GakuMotion::host::mainThread.context,
+				[](void* ud) {
+					auto* p = static_cast<EnqueuePayload*>(ud);
+					if (p)
+					{
+						p->fn(*p->job);
+						delete p;
+					}
+				},
+				payload);
+			if (enq != GAKU_OK)
+			{
+				delete payload;
+				out.error = "无法向 Unity 主线程提交拍照任务";
+				return out;
+			}
+			std::unique_lock<std::mutex> lock(job->mtx);
+			if (!job->cv.wait_for(lock, std::chrono::milliseconds(3000), [&]() { return job->done; }))
+			{
+				out.error = "等待 Unity 主线程拍照超时";
+				return out;
+			}
+		}
+
+		if (!job->ok)
+		{
+			out.error = job->error.empty() ? "拍照失败" : job->error;
+			return out;
+		}
+		out.dataUri = GakuMotion::cover::EncodeBgraTopDownToDataUri(
+			job->pixels.data(), job->width, job->height, job->rowPitch, 1024);
+		if (out.dataUri.empty())
+		{
+			out.error = "拍照图像编码失败";
+			return out;
+		}
+		out.ok = true;
+		out.width = job->width;
+		out.height = job->height;
+		return out;
+	}
+
 	GakuMotion::webpanel::AudioEffectState WebPanelGetAudioEffectsState()
 	{
 		GakuMotion::webpanel::AudioEffectState st;
@@ -3837,6 +4216,9 @@ GakuStatus PublishActorApi()
 		hooks.appearance = WebPanelAppearance;
 		hooks.probeAudio = WebPanelProbeAudio;
 		hooks.getTrackCoverDataUri = WebPanelGetTrackCoverDataUri;
+		hooks.readImagePreviewDataUri = WebPanelReadImagePreviewDataUri;
+		hooks.getScreenshotCapabilities = WebPanelGetScreenshotCapabilities;
+		hooks.captureScreenshot = WebPanelCaptureScreenshot;
 		hooks.getAudioEffectsState = WebPanelGetAudioEffectsState;
 		hooks.setAudioEffectPreset = WebPanelSetAudioEffectPreset;
 		hooks.pluginVersion = "0.1.1";
@@ -3955,6 +4337,14 @@ GakuStatus PublishClockApi()
 	service.notifyFrameRendered = [](void* ctx, uint64_t leaseId, uint64_t evaluatedFrameSerial, uint32_t advanceFrames) -> GakuStatus
 	{
 		return ctx ? static_cast<GakuMotion::Core*>(ctx)->NotifyFrameRendered(leaseId, evaluatedFrameSerial, advanceFrames) : GAKU_E_INVALID_ARGUMENT;
+	};
+	service.beginOffscreenCapture = [](void* ctx) -> GakuStatus
+	{
+		return ctx ? static_cast<GakuMotion::Core*>(ctx)->BeginOffscreenCapture() : GAKU_E_INVALID_ARGUMENT;
+	};
+	service.endOffscreenCapture = [](void* ctx) -> GakuStatus
+	{
+		return ctx ? static_cast<GakuMotion::Core*>(ctx)->EndOffscreenCapture() : GAKU_E_INVALID_ARGUMENT;
 	};
 	return GakuMotion::host::api.registerService(GakuMotion::host::api.hostContext,
 		GAKU_SERVICE_MOTION_CLOCK, sizeof(service), &service);

@@ -32,6 +32,7 @@
 #include <deque>
 #include <future>
 #include <chrono>
+#include <unordered_set>
 
 namespace GakuMotion
 {
@@ -307,13 +308,27 @@ namespace GakuMotion
 		std::string soleNotice;
 		void* soleObservedActor{nullptr};
 		uint64_t soleCalibrationGeneration{0};
+		struct PendingImportCover
+		{
+			bool set{false};
+			bool clear{false};
+			std::string dataUri;
+		};
+
 		bool importBusy{false};
 		ImportProgressState importProgress;
 		ImportProgressState guiImportProgressSnapshot;
 		std::string activeImportEditDir;
+		std::string pendingImportEditKey;
+		std::unordered_set<std::string> pendingImportExistingKeys;
+		PendingImportCover pendingImportCover;
+		std::string lastImportedKey;
 		bool (*fnStartImport)(const MotionImportRequest&, std::string&){nullptr};
 		int (*fnPollImport)(std::string&){nullptr};
 		int (*fnPollImportProgress)(std::string&, ImportProgressState*){nullptr};
+		bool (*fnSaveTrackCoverPng)(const std::vector<uint8_t>& rawBytes, std::string_view mimeHint,
+			const std::filesystem::path& targetDir, std::string& outFileName, std::string& outError){nullptr};
+		std::string (*fnLoadTrackCoverDataUri)(const std::filesystem::path& coverPath){nullptr};
 		bool (*fnPickFile)(int, std::string&){nullptr};
 		bool (*fnBeginPickFile)(int, std::string&){nullptr};
 		int (*fnPollPickFile)(std::string&, std::string&){nullptr};
@@ -339,6 +354,7 @@ namespace GakuMotion
 		NotifyMotionPlayingFn fnNotifyMotionPlaying{nullptr};
 		std::string (*fnActiveAudioEffectId)(){nullptr};
 		bool renderCompletionHookObserved{false};
+		std::atomic<uint32_t> offscreenCaptureDepth{0};
 		uint64_t nextRecordingLeaseId{1};
 		performance::ClockConfiguration savedClockBeforeLease{};
 		bool savedLoopBeforeLease{true};
@@ -427,6 +443,9 @@ namespace GakuMotion
 			bool flag{false};
 			std::string key;
 			MotionImportRequest import;
+			bool importCoverSet{false};
+			bool importCoverClear{false};
+			std::string importCoverDataUri;
 			Vector3 position;
 			GakuMotion::CameraSettings cameraSettings;
 			CameraImportRequest cameraImport;
@@ -692,7 +711,11 @@ namespace GakuMotion
 			}
 			for (const auto& command : commands)
 			{
-				if (command.action == GuiAction::Import) StartImport(command.import);
+				if (command.action == GuiAction::Import)
+				{
+					pendingImportCover = {command.importCoverSet, command.importCoverClear, command.importCoverDataUri};
+					StartImport(command.import);
+				}
 				else if (command.action == GuiAction::CameraImport) StartCameraImport(command.cameraImport);
 				else BeginLibraryRefresh();
 			}
@@ -822,7 +845,9 @@ namespace GakuMotion
 					break;
 				case GuiAction::SaveMusicVolume: SaveMusicVolume();
 					break;
-				case GuiAction::Import: StartImport(cmd.import);
+				case GuiAction::Import:
+					pendingImportCover = {cmd.importCoverSet, cmd.importCoverClear, cmd.importCoverDataUri};
+					StartImport(cmd.import);
 					break;
 				case GuiAction::CameraSettings:
 					ApplyCameraSettings(cmd.cameraSettings);
@@ -922,6 +947,128 @@ namespace GakuMotion
 			NotifyMotionPlaying(player.state == PlaybackState::Playing);
 		}
 
+		bool ApplyTrackCoverToDirectory(
+			const std::filesystem::path& trackDir,
+			bool clear,
+			const std::string& coverDataUri,
+			std::string& outCoverFile,
+			std::string& outError) const
+		{
+			outCoverFile.clear();
+			outError.clear();
+			if (trackDir.empty())
+			{
+				outError = "Track directory is empty";
+				return false;
+			}
+			if (clear)
+			{
+				RemoveTrackCoverFiles(trackDir);
+				return UpdateTrackInfoJsonCover(trackDir, false, "", outError);
+			}
+			std::string mime;
+			std::vector<uint8_t> rawBytes;
+			if (!DecodeCoverDataUri(coverDataUri, mime, rawBytes))
+			{
+				outError = "封面图片数据无效（需要 PNG/JPEG/WEBP/BMP Data URI）";
+				return false;
+			}
+			if (fnSaveTrackCoverPng)
+			{
+				if (!fnSaveTrackCoverPng(rawBytes, mime, trackDir, outCoverFile, outError))
+					return false;
+			}
+			else
+			{
+				const bool isPngMagic = rawBytes.size() >= 8 &&
+					rawBytes[0] == 0x89 && rawBytes[1] == 0x50 && rawBytes[2] == 0x4E && rawBytes[3] == 0x47;
+				if (!isPngMagic && mime != "image/png")
+				{
+					outError = "Cover PNG encoder is unavailable";
+					return false;
+				}
+				if (!WriteRawPngCoverAtomic(rawBytes, trackDir, outCoverFile, outError))
+					return false;
+			}
+			return UpdateTrackInfoJsonCover(trackDir, true, outCoverFile, outError);
+		}
+
+		bool SetTrackCover(
+			const std::string& key,
+			bool clear,
+			const std::string& coverDataUri,
+			std::string& outThumbnailDataUri,
+			std::string& outError)
+		{
+			outThumbnailDataUri.clear();
+			outError.clear();
+			if (key.empty())
+			{
+				outError = "Track key is required";
+				return false;
+			}
+			std::lock_guard<std::recursive_mutex> lock(stateMutex);
+			if (importBusy || cameraImportBusy || libraryScan.valid())
+			{
+				outError = "正在导入或刷新曲库，请稍后再试";
+				return false;
+			}
+			const int index = FindPlaylistIndex(motions, key);
+			if (index < 0)
+			{
+				outError = "Motion key not found: " + key;
+				return false;
+			}
+			const std::filesystem::path trackDir = MotionPathFromUtf8(motions[index].dir);
+			std::string savedFile;
+			if (!ApplyTrackCoverToDirectory(trackDir, clear, coverDataUri, savedFile, outError))
+			{
+				return false;
+			}
+			motions[index].hasCover = !clear;
+			motions[index].coverFile = savedFile;
+			if (loadedMotionKey == key)
+			{
+				loadedMotionEntry.hasCover = motions[index].hasCover;
+				loadedMotionEntry.coverFile = motions[index].coverFile;
+			}
+			libraryVersions[key] = ReadMotionFileVersion(motions[index].dir);
+			++libraryRevision;
+			++libraryMutationGeneration;
+			if (!clear && !savedFile.empty())
+			{
+				if (fnLoadTrackCoverDataUri)
+					outThumbnailDataUri = fnLoadTrackCoverDataUri(trackDir / MotionPathFromUtf8(savedFile));
+				if (outThumbnailDataUri.empty())
+					outThumbnailDataUri = coverDataUri;
+			}
+			return true;
+		}
+
+		std::string FindNewlyAddedMotionDirLocked() const
+		{
+			const auto root = MotionPathFromUtf8(motionsRoot);
+			std::error_code ec;
+			if (!std::filesystem::is_directory(root, ec)) return {};
+			for (std::filesystem::directory_iterator it(root, ec), end; it != end && !ec; it.increment(ec))
+			{
+				const auto& entry = *it;
+				if (entry.path().filename() == ".gakumotion-trash") continue;
+				if (!entry.is_directory(ec)) continue;
+				const auto utf8Name = entry.path().filename().u8string();
+				std::string name(utf8Name.begin(), utf8Name.end());
+				if (pendingImportExistingKeys.count(name)) continue;
+				for (const char* candidate : {"motion.gkclip", "motion.gk_world_dump", "motion.gkmotion"})
+				{
+					if (std::filesystem::exists(entry.path() / candidate, ec))
+					{
+						return MotionPathToUtf8(entry.path());
+					}
+				}
+			}
+			return {};
+		}
+
 		void PollImport()
 		{
 			if (!importBusy) return;
@@ -941,18 +1088,79 @@ namespace GakuMotion
 					{
 						importProgress.progress = 1.0f;
 						if (importProgress.statusText.empty()) importProgress.statusText = "导入完成";
+
+						const bool isNewImport = pendingImportEditKey.empty() && activeImportEditDir.empty();
+						std::string targetDir = activeImportEditDir;
+						if (targetDir.empty())
+							targetDir = FindNewlyAddedMotionDirLocked();
+
+						if (!targetDir.empty() && (pendingImportCover.clear || (pendingImportCover.set && !pendingImportCover.dataUri.empty())))
+						{
+							std::string coverFile, coverErr;
+							if (!ApplyTrackCoverToDirectory(
+									MotionPathFromUtf8(targetDir),
+									pendingImportCover.clear,
+									pendingImportCover.dataUri,
+									coverFile,
+									coverErr))
+							{
+								LogWarn("[GakuMotion][Cover] Failed to save import cover: " + coverErr);
+							}
+						}
+
 						RefreshMotionLibrary();
 						SavePlaylist();
+
+						std::string importedKey;
+						if (!pendingImportEditKey.empty())
+						{
+							if (FindPlaylistIndex(motions, pendingImportEditKey) >= 0)
+								importedKey = pendingImportEditKey;
+						}
+						else
+						{
+							for (const auto& entry : motions)
+							{
+								if (!pendingImportExistingKeys.count(entry.name))
+								{
+									importedKey = entry.name;
+									break;
+								}
+							}
+							if (importedKey.empty() && !targetDir.empty())
+							{
+								for (const auto& entry : motions)
+								{
+									if (MotionPathEqualsUtf8(entry.dir, targetDir))
+									{
+										importedKey = entry.name;
+										break;
+									}
+								}
+							}
+						}
+						lastImportedKey = importedKey;
+
+						if (isNewImport && !importedKey.empty() && !EnsembleActive() && player.state != PlaybackState::Playing)
+						{
+							const int idx = FindPlaylistIndex(motions, importedKey);
+							if (idx >= 0) SelectMotionByIndex(idx, false, /*forcePreview=*/true);
+						}
+
 						// Keep every loaded channel on one version until explicit reload.
 						if (!activeImportEditDir.empty() && player.currentMotionDir == activeImportEditDir)
 							loadedSourceChanged = true;
 					}
 					else
 					{
+						lastImportedKey.clear();
 						if (importProgress.errorDetail.empty()) importProgress.errorDetail = result;
 						if (importProgress.statusText.empty()) importProgress.statusText = "导入失败";
 					}
 					activeImportEditDir.clear();
+					pendingImportEditKey.clear();
+					pendingImportExistingKeys.clear();
+					pendingImportCover = {};
 					playlistNotice = result;
 				}
 			}
@@ -1384,6 +1592,7 @@ namespace GakuMotion
 			++loadedMotionGeneration;
 			loadedMotionVersion = version;
 			loadedSourceMissing = loadedSourceChanged = false;
+			InvalidateClockAudioProbeCache();
 			LoadOverrides(false);
 			TryLoadAuxGroundTruth(directory);
 			NotifyMotionPlaying(false);
@@ -1403,6 +1612,7 @@ namespace GakuMotion
 			loadedMotionEntry = {};
 			loadedSourceMissing = loadedSourceChanged = false;
 			++loadedMotionGeneration;
+			InvalidateClockAudioProbeCache();
 			motionOverrides = BoneOverrideSet{};
 			LoadOverrides(false);
 			NotifyMotionPlaying(false);
@@ -1492,6 +1702,11 @@ namespace GakuMotion
 				return;
 			}
 			++libraryMutationGeneration; // Any in-flight scan predates this import.
+			lastImportedKey.clear();
+			pendingImportEditKey = request.editKey;
+			pendingImportExistingKeys.clear();
+			for (const auto& entry : motions)
+				pendingImportExistingKeys.insert(entry.name);
 			importProgress = {};
 			importProgress.active = true;
 			importProgress.progress = 0.02f;
@@ -1506,6 +1721,9 @@ namespace GakuMotion
 				importProgress.statusText = "导入服务未就绪";
 				importProgress.errorDetail = "导入服务未就绪";
 				playlistNotice = "导入服务未就绪";
+				pendingImportEditKey.clear();
+				pendingImportExistingKeys.clear();
+				pendingImportCover = {};
 				return;
 			}
 
@@ -1520,6 +1738,9 @@ namespace GakuMotion
 					importProgress.statusText = "目标曲目不存在";
 					importProgress.errorDetail = "未找到待编辑曲目: " + request.editKey;
 					playlistNotice = importProgress.errorDetail;
+					pendingImportEditKey.clear();
+					pendingImportExistingKeys.clear();
+					pendingImportCover = {};
 					return;
 				}
 				request.editDir = motions[idx].dir;
@@ -1547,6 +1768,9 @@ namespace GakuMotion
 				importProgress.succeeded = false;
 				importProgress.statusText = "启动导入失败";
 				importProgress.errorDetail = playlistNotice;
+				pendingImportEditKey.clear();
+				pendingImportExistingKeys.clear();
+				pendingImportCover = {};
 			}
 			else
 			{
@@ -1868,8 +2092,30 @@ namespace GakuMotion
 			return GAKU_OK;
 		}
 
+		bool IsInOffscreenCapture() const noexcept
+		{
+			return offscreenCaptureDepth.load(std::memory_order_acquire) > 0;
+		}
+
+		GakuStatus BeginOffscreenCapture() noexcept
+		{
+			offscreenCaptureDepth.fetch_add(1, std::memory_order_acq_rel);
+			return GAKU_OK;
+		}
+
+		GakuStatus EndOffscreenCapture() noexcept
+		{
+			uint32_t cur = offscreenCaptureDepth.load(std::memory_order_acquire);
+			while (cur > 0 &&
+			       !offscreenCaptureDepth.compare_exchange_weak(cur, cur - 1, std::memory_order_acq_rel))
+			{
+			}
+			return GAKU_OK;
+		}
+
 		void OnMainCameraRendered(bool fromEndFrameHook = false)
 		{
+			if (IsInOffscreenCapture()) return;
 			std::lock_guard<std::recursive_mutex> lock(stateMutex);
 			if (fromEndFrameHook)
 			{
@@ -1893,7 +2139,18 @@ namespace GakuMotion
 			return engineDeltaSeconds;
 		}
 
-		GakuStatus ReadClockSnapshot(GakuMotionClockSnapshotV1* output)
+		mutable std::string cachedClockAudioPath_;
+		mutable bool cachedClockAudioExists_{false};
+		mutable std::chrono::steady_clock::time_point cachedClockAudioProbeTime_{};
+
+		void InvalidateClockAudioProbeCache() const noexcept
+		{
+			cachedClockAudioPath_.clear();
+			cachedClockAudioExists_ = false;
+			cachedClockAudioProbeTime_ = {};
+		}
+
+		GakuStatus ReadClockSnapshot(GakuMotionClockSnapshotV1* output, bool probeAudioFile = true)
 		{
 			if (!output) return GAKU_E_INVALID_ARGUMENT;
 			std::lock_guard<std::recursive_mutex> lock(stateMutex);
@@ -1921,8 +2178,28 @@ namespace GakuMotion
 			snap.fpsDenominator = player.clockConfig.fixedFrameRate.denominator;
 			snap.waitingForRenderComplete = player.waitingForRenderComplete ? 1u : 0u;
 			const std::string audioPath = (!player.currentMotionDir.empty()) ? player.AudioPath() : std::string();
-			std::error_code ec;
-			const bool audioExists = !audioPath.empty() && std::filesystem::is_regular_file(MotionPathFromUtf8(audioPath), ec);
+			bool audioExists = false;
+			if (!audioPath.empty())
+			{
+				if (probeAudioFile)
+				{
+					const auto now = std::chrono::steady_clock::now();
+					if (audioPath != cachedClockAudioPath_ ||
+						cachedClockAudioProbeTime_ == std::chrono::steady_clock::time_point{} ||
+						now - cachedClockAudioProbeTime_ >= std::chrono::seconds(1))
+					{
+						std::error_code ec;
+						cachedClockAudioExists_ = std::filesystem::is_regular_file(MotionPathFromUtf8(audioPath), ec);
+						cachedClockAudioPath_ = audioPath;
+						cachedClockAudioProbeTime_ = now;
+					}
+					audioExists = cachedClockAudioExists_;
+				}
+				else if (audioPath == cachedClockAudioPath_)
+				{
+					audioExists = cachedClockAudioExists_;
+				}
+			}
 			snap.hasAudio = audioExists ? 1u : 0u;
 			snap.currentTimeSeconds = player.preciseTimeSeconds;
 			snap.timelineDurationSeconds = static_cast<double>(player.TimelineDuration());

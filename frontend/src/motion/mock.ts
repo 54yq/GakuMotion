@@ -103,6 +103,10 @@ const PHASE2_METHODS: MotionMethodName[] = [
   'library.startEdit',
   'library.probeAudio',
   'library.getCover',
+  'library.setCover',
+  'library.readImagePreview',
+  'screenshot.capabilities',
+  'screenshot.capture',
   'clock.setRunMode',
   'clock.configure',
   'audioEffect.set',
@@ -931,8 +935,9 @@ export class MotionMockBridgeClient implements MotionBridgeClient {
           1: ['C:\\Sample\\NewDance_motion.vmd'],
           2: ['C:\\Sample\\NewDance_facial.vmd'],
           3: ['C:\\Sample\\NewDance_camera.vmd'],
-          4: ['C:\\Sample\\NewDance_song.wav'],
+          4: ['C:\\Sample\\NewDance_song.mp3'],
           5: ['C:\\Sample\\StageBackdrop.mp4'],
+          6: ['C:\\Sample\\CoverArt.png'],
         }
         this.dialogResults.set(dialogId, { paths: sampleByKind[kind] ?? sampleByKind[0] })
         return { dialogId } as MotionMethods[M]['result']
@@ -1000,6 +1005,54 @@ export class MotionMockBridgeClient implements MotionBridgeClient {
         const cover = entry ? (this.coverByKey.get(entry.id) ?? (entry.hasCover ? MOCK_COVER_PNG : '')) : ''
         return { hasCover: cover !== '', coverDataUri: cover } as MotionMethods[M]['result']
       }
+      case 'library.setCover': {
+        this.requireCapability('library.setCover')
+        const key = String(p.key ?? '')
+        const clear = Boolean(p.clear)
+        const coverDataUri = String(p.coverDataUri ?? '')
+        const index = this.entries.findIndex((item) => item.id === key)
+        if (index < 0) throw new BridgeError('not_found', '曲目不存在')
+        if (clear) {
+          this.coverByKey.delete(key)
+          this.entries[index] = { ...this.entries[index], hasCover: false }
+        } else {
+          if (!coverDataUri.startsWith('data:image/')) throw new BridgeError('invalid_params', '无效封面数据')
+          this.coverByKey.set(key, coverDataUri)
+          this.entries[index] = { ...this.entries[index], hasCover: true }
+        }
+        this.libraryRevision += 1
+        this.emitLibrary()
+        return {
+          hasCover: !clear,
+          coverDataUri: clear ? '' : coverDataUri,
+          revision: this.libraryRevision,
+        } as MotionMethods[M]['result']
+      }
+      case 'library.readImagePreview': {
+        this.requireCapability('library.readImagePreview')
+        const path = String(p.path ?? '')
+        if (!path) throw new BridgeError('invalid_params', '路径不能为空')
+        return { dataUri: MOCK_COVER_PNG } as MotionMethods[M]['result']
+      }
+      case 'screenshot.capabilities': {
+        this.requireCapability('screenshot.capabilities')
+        return {
+          available: true,
+          runtimeReady: true,
+          cameraAvailable: true,
+          windowWidth: 1280,
+          windowHeight: 720,
+          notice: '',
+        } as MotionMethods[M]['result']
+      }
+      case 'screenshot.capture': {
+        this.requireCapability('screenshot.capture')
+        return {
+          dataUri: MOCK_COVER_PNG,
+          width: 1280,
+          height: 720,
+        } as MotionMethods[M]['result']
+      }
       case 'clock.setRunMode': {
         this.requireCapability('clock.setRunMode')
         const runMode: ClockRunMode = p.runMode === 'recording' ? 'recording' : 'realtime'
@@ -1051,8 +1104,25 @@ export class MotionMockBridgeClient implements MotionBridgeClient {
             ? req.editKey
             : `${req.title.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'custom'}-${Date.now().toString(36)}`
           const existingIndex = this.entries.findIndex((item) => item.id === id)
+          const hasAudioTrack = !req.clearAudio && req.audioFile !== ''
+          const customCover = req.coverDataUri && !req.clearCover ? req.coverDataUri : ''
+          const audioEmbeddedCover = hasAudioTrack && !req.audioFile.toLowerCase().endsWith('.wav')
           if (isEdit && existingIndex >= 0) {
             const current = this.entries[existingIndex]
+            let nextHasCover = current.hasCover ?? false
+            if (req.clearCover) {
+              this.coverByKey.delete(id)
+              nextHasCover = false
+            } else if (customCover) {
+              this.coverByKey.set(id, customCover)
+              nextHasCover = true
+            } else if (req.clearAudio) {
+              this.coverByKey.delete(id)
+              nextHasCover = false
+            } else if (audioEmbeddedCover) {
+              this.coverByKey.set(id, MOCK_COVER_PNG)
+              nextHasCover = true
+            }
             this.entries[existingIndex] = {
               ...current,
               title: req.title.trim(),
@@ -1060,9 +1130,15 @@ export class MotionMockBridgeClient implements MotionBridgeClient {
               hasFacial: req.disableMorph ? false : req.facialFile !== '' || current.hasFacial,
               hasCamera: req.clearCamera ? false : req.cameraFile !== '' || current.hasCamera,
               hasAudio: req.clearAudio ? false : req.audioFile !== '' || current.hasAudio,
+              hasCover: nextHasCover,
             }
           } else {
-            this.entries.unshift({
+            let nextHasCover = false
+            if (!req.clearCover && (customCover || audioEmbeddedCover)) {
+              this.coverByKey.set(id, customCover || MOCK_COVER_PNG)
+              nextHasCover = true
+            }
+            const created: LibraryEntry = {
               id,
               title: req.title.trim(),
               subtitle: req.subtitle?.trim() || undefined,
@@ -1072,12 +1148,18 @@ export class MotionMockBridgeClient implements MotionBridgeClient {
               hasMotion: true,
               hasFacial: !req.disableMorph,
               hasCamera: req.cameraFile !== '',
-              hasAudio: !req.clearAudio && req.audioFile !== '',
-            })
+              hasAudio: hasAudioTrack,
+              hasCover: nextHasCover,
+            }
+            this.entries.unshift(created)
           }
           this.timings.set(id, req.timing)
           this.libraryRevision += 1
           this.libraryNotice = isEdit ? `已更新曲目：${req.title}` : `已导入曲目：${req.title}`
+          if (!isEdit && !this.ensemble.active && this.player.state !== 'playing') {
+            const targetEntry = this.entries.find((item) => item.id === id)
+            if (targetEntry) this.loadEntry(targetEntry, false)
+          }
           this.emit('import.progress', {
             active: false,
             finished: true,
@@ -1086,6 +1168,7 @@ export class MotionMockBridgeClient implements MotionBridgeClient {
             stage: 'DONE',
             statusText: '导入完成',
             errorDetail: '',
+            importedKey: id,
           })
           this.emitLibrary()
         }

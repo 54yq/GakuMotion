@@ -31,12 +31,12 @@ export function MotionStatusBar() {
 
   return (
     <header
-      className="flex min-h-[38px] shrink-0 flex-wrap items-center justify-end gap-2.5 bg-background px-4 py-1.5 text-xs"
+      className="flex min-h-[42px] shrink-0 flex-wrap items-center justify-end gap-2.5 bg-background px-5 py-2 text-xs"
       data-testid="motion-status-bar"
     >
       {(loaded.sourceMissing || loaded.sourceChanged) && (
         <Badge variant="warning" className="gap-1 rounded-[4px]">
-          <RiAlertFill className="size-3" />
+          <RiAlertFill className="size-3.5" />
           <span>{loaded.sourceMissing ? '源文件缺失' : '源文件已变更'}</span>
         </Badge>
       )}
@@ -48,13 +48,13 @@ export function MotionStatusBar() {
 
       {stageSceneName && (
         <span className="hidden items-center gap-1 text-muted-foreground sm:inline-flex">
-          <RiMapPin2Fill className="size-3" />
+          <RiMapPin2Fill className="size-3.5" />
           <span className="max-w-[140px] truncate">{stageSceneName}</span>
         </span>
       )}
 
       {ensembleActive && (
-        <Badge variant="outline" className="rounded-[4px] border-border bg-muted/60 px-1.5 py-0 text-[10px] text-foreground">
+        <Badge variant="outline" className="rounded-[4px] border-border bg-muted/60 px-2 py-0.5 text-micro text-foreground">
           多人舞台激活
         </Badge>
       )}
@@ -63,7 +63,7 @@ export function MotionStatusBar() {
         <button
           type="button"
           onClick={() => motionStore.setPage('motion')}
-          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background/60 px-2 py-0.5 text-foreground transition-colors hover:border-foreground/30 hover:bg-accent/55"
+          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background/60 px-2.5 py-1 text-xs text-foreground transition-colors hover:border-foreground/30 hover:bg-accent/55"
           title="点击前往动作页切换驱动角色"
         >
           {ensembleActive ? (
@@ -75,7 +75,7 @@ export function MotionStatusBar() {
           <span className="text-muted-foreground">· 绑定: {boundName}</span>
         </button>
       ) : (
-        <div className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background/60 px-2 py-0.5 text-foreground">
+        <div className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background/60 px-2.5 py-1 text-xs text-foreground">
           <RiUserFollowFill className="size-3.5 text-muted-foreground" />
           <span>驱动: {targetName}</span>
           <span className="text-muted-foreground">· 绑定: {boundName}</span>

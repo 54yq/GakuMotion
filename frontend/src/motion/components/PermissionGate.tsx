@@ -21,14 +21,14 @@ export function PermissionGate() {
   const studioSupported = capabilities.includes('studio.set')
 
   return (
-    <div className="flex h-full flex-col overflow-hidden" data-testid="permission-gate">
+    <div className="flex h-full w-full flex-col overflow-hidden bg-background" data-testid="permission-gate">
       <MotionStatusBar />
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
         <div className="mx-auto max-w-3xl space-y-4">
-          <Alert variant="destructive" className="rounded-lg p-3.5">
+          <Alert variant="destructive" className="rounded-lg p-4">
             <RiShieldKeyholeFill className="size-4" />
-            <AlertTitle className="text-sm font-semibold">控制已禁用</AlertTitle>
-            <AlertDescription className="mt-1 text-xs leading-relaxed">
+            <AlertTitle className="text-md font-semibold">控制已禁用</AlertTitle>
+            <AlertDescription className="mt-1 text-sm leading-relaxed">
               {permission.notice || DEFAULT_NOTICE}
             </AlertDescription>
           </Alert>

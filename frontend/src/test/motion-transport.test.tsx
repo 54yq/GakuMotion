@@ -189,9 +189,21 @@ describe('TransportBar', () => {
     await waitFor(() => expect(motionStore.getState().clock.configuredSource).toBe('engine_delta'))
   })
 
-  it('renders embedded track cover image in TransportBar when available', async () => {
+  it('renders embedded track cover image in TransportBar when available and keeps cover across track switch and refresh', async () => {
     await motionStore.selectMotion('hikari-no-saki', false)
     renderBar()
+    await waitFor(() => expect(screen.getByTestId('transport-cover-img')).toBeInTheDocument())
+
+    // Refreshing library re-fetches cover in TransportBar instead of staying blank
+    await motionStore.refreshLibrary()
+    await waitFor(() => expect(screen.getByTestId('transport-cover-img')).toBeInTheDocument())
+
+    // Switching to a track without cover displays the default album cover
+    await motionStore.selectMotion('encore-demo', false)
+    await waitFor(() => expect(screen.getByTestId('transport-default-cover')).toBeInTheDocument())
+
+    // Switching back restores cover image
+    await motionStore.selectMotion('hikari-no-saki', false)
     await waitFor(() => expect(screen.getByTestId('transport-cover-img')).toBeInTheDocument())
   })
 })

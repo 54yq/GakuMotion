@@ -75,13 +75,13 @@ export function PrecisionControlPanel({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="w-[430px] max-w-[calc(100vw-24px)] space-y-3.5 text-xs" data-testid="precision-control-panel">
+    <div className="w-[440px] max-w-[calc(100vw-24px)] space-y-3.5 text-xs" data-testid="precision-control-panel">
       {/* Header */}
       <div className="flex items-center justify-between gap-2 border-b border-border/70 pb-2.5">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-foreground">精细播放控制</span>
+          <span className="text-md font-semibold text-foreground">精细播放控制</span>
           {hasClip && (
-            <Badge variant="outline" className="rounded-[4px] bg-muted/60 text-[10px] tabular-nums text-muted-foreground">
+            <Badge variant="outline" className="rounded-[4px] bg-muted/60 text-micro tabular-nums text-muted-foreground">
               {Number(player.fps.toPrecision(6))} fps
             </Badge>
           )}
@@ -195,7 +195,7 @@ export function PrecisionControlPanel({ onClose }: { onClose: () => void }) {
                 aria-pressed={seekStepSeconds === step}
                 onClick={() => motionStore.setSeekStepSeconds(step)}
                 className={cn(
-                  'rounded-md border px-2 py-0.5 text-[11px] tabular-nums transition-colors',
+                  'rounded-md border px-2 py-0.5 text-xs tabular-nums transition-colors',
                   seekStepSeconds === step
                     ? 'border-primary bg-primary/15 font-medium text-primary'
                     : 'border-border bg-background/60 text-muted-foreground hover:text-foreground',
@@ -213,7 +213,7 @@ export function PrecisionControlPanel({ onClose }: { onClose: () => void }) {
         <span className="block font-medium text-foreground">精确时间与动作帧定位</span>
         <div className="grid grid-cols-2 gap-2">
           <div className="space-y-1">
-            <label className="text-[11px] text-muted-foreground" htmlFor="precision-time-input">
+            <label className="text-xs text-muted-foreground" htmlFor="precision-time-input">
               时间 (秒或 mm:ss.mmm)
             </label>
             <div className="flex gap-1">
@@ -247,7 +247,7 @@ export function PrecisionControlPanel({ onClose }: { onClose: () => void }) {
           </div>
 
           <div className="space-y-1">
-            <label className="text-[11px] text-muted-foreground" htmlFor="precision-frame-input">
+            <label className="text-xs text-muted-foreground" htmlFor="precision-frame-input">
               动作帧 (0 – {maxFrame})
             </label>
             <div className="flex gap-1">
@@ -309,7 +309,7 @@ export function PrecisionControlPanel({ onClose }: { onClose: () => void }) {
             type="button"
             variant="outline"
             size="sm"
-            className="h-7 px-2 text-[11px] tabular-nums"
+            className="h-7 px-2 text-micro tabular-nums"
             disabled={!supports('player.setSpeed') || player.speed <= 0.1}
             onClick={() => stepSpeed(-0.05)}
           >
@@ -329,7 +329,7 @@ export function PrecisionControlPanel({ onClose }: { onClose: () => void }) {
             type="button"
             variant="outline"
             size="sm"
-            className="h-7 px-2 text-[11px] tabular-nums"
+            className="h-7 px-2 text-micro tabular-nums"
             disabled={!supports('player.setSpeed') || player.speed >= 3}
             onClick={() => stepSpeed(0.05)}
           >
@@ -359,7 +359,7 @@ export function PrecisionControlPanel({ onClose }: { onClose: () => void }) {
                 disabled={!supports('player.setSpeed')}
                 onClick={() => void motionStore.setSpeed(speed)}
                 className={cn(
-                  'rounded-md border px-2 py-0.5 text-[11px] tabular-nums transition-colors disabled:opacity-50',
+                  'rounded-md border px-2 py-0.5 text-micro tabular-nums transition-colors disabled:opacity-50',
                   active
                     ? 'border-primary bg-primary text-primary-foreground'
                     : 'border-border/80 bg-background/60 text-muted-foreground hover:text-foreground',
@@ -378,11 +378,11 @@ export function PrecisionControlPanel({ onClose }: { onClose: () => void }) {
           <span className="font-medium text-foreground">播放与时钟模式</span>
           <div className="flex items-center gap-1">
             {clock.leaseId > 0 && (
-              <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 px-1.5 py-0 text-[10px] text-amber-600 dark:text-amber-400">
+              <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 px-1.5 py-0 text-micro text-amber-600 dark:text-amber-400">
                 {clock.leaseOwner || '录制插件'} 接管中
               </Badge>
             )}
-            <Badge variant="secondary" className="px-1.5 py-0 text-[10px] tabular-nums">
+            <Badge variant="secondary" className="px-1.5 py-0 text-micro tabular-nums">
               {clock.runMode === 'recording' ? '供录制' : '实时'}
             </Badge>
           </div>
@@ -394,7 +394,7 @@ export function PrecisionControlPanel({ onClose }: { onClose: () => void }) {
             disabled={!supports('clock.setRunMode') || clock.leaseId > 0}
             onClick={() => void motionStore.setClockRunMode('realtime')}
             className={cn(
-              'rounded-md border px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-50',
+              'rounded-md border px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50',
               clock.runMode === 'realtime'
                 ? 'border-primary bg-primary text-primary-foreground'
                 : 'border-border/80 bg-background/60 text-muted-foreground hover:text-foreground',
@@ -408,7 +408,7 @@ export function PrecisionControlPanel({ onClose }: { onClose: () => void }) {
             disabled={!supports('clock.setRunMode') || clock.leaseId > 0}
             onClick={() => void motionStore.setClockRunMode('recording')}
             className={cn(
-              'rounded-md border px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-50',
+              'rounded-md border px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50',
               clock.runMode === 'recording'
                 ? 'border-primary bg-primary text-primary-foreground'
                 : 'border-border/80 bg-background/60 text-muted-foreground hover:text-foreground',
@@ -435,7 +435,7 @@ export function PrecisionControlPanel({ onClose }: { onClose: () => void }) {
                 disabled={!supports('clock.configure') || clock.leaseId > 0}
                 onClick={() => void motionStore.configureClock({ source: sourceId })}
                 className={cn(
-                  'rounded-md border px-2 py-0.5 text-[11px] transition-colors disabled:opacity-50',
+                  'rounded-md border px-2 py-0.5 text-micro transition-colors disabled:opacity-50',
                   active
                     ? 'border-primary/60 bg-primary/15 font-medium text-primary'
                     : 'border-border/80 bg-background/60 text-muted-foreground hover:text-foreground',
@@ -447,7 +447,7 @@ export function PrecisionControlPanel({ onClose }: { onClose: () => void }) {
           })}
         </div>
         {(clock.runMode === 'recording' || clock.configuredSource === 'fixed_step') && (
-          <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+          <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
             <span>步进帧率</span>
             <div className="flex items-center gap-1">
               {[30, 60, 120].map((fpsVal) => {
@@ -459,7 +459,7 @@ export function PrecisionControlPanel({ onClose }: { onClose: () => void }) {
                     disabled={!supports('clock.configure') || clock.leaseId > 0}
                     onClick={() => void motionStore.configureClock({ fpsNumerator: fpsVal, fpsDenominator: 1 })}
                     className={cn(
-                      'rounded border px-1.5 py-0.5 text-[11px] tabular-nums transition-colors disabled:opacity-50',
+                      'rounded border px-1.5 py-0.5 text-micro tabular-nums transition-colors disabled:opacity-50',
                       active
                         ? 'border-primary bg-primary text-primary-foreground'
                         : 'border-border/80 bg-background/60 text-muted-foreground hover:text-foreground',
@@ -472,7 +472,7 @@ export function PrecisionControlPanel({ onClose }: { onClose: () => void }) {
             </div>
           </div>
         )}
-        <div className="text-[10px] text-muted-foreground">
+        <div className="text-micro text-muted-foreground">
           {clock.runMode === 'recording'
             ? '供录制模式将等待每帧渲染完成后推进步进时钟（禁用实时配乐），可由 VideoExporter 锁步接管。'
             : '当前已与 Windows 挂钟解耦，按引擎/音频时钟推进。'}
@@ -484,7 +484,7 @@ export function PrecisionControlPanel({ onClose }: { onClose: () => void }) {
         <div className="flex items-center justify-between gap-2">
           <span className="font-medium text-foreground">曲目切换与重载</span>
           {ensembleActive && (
-            <span className="text-[11px] text-warning">多人舞台激活时禁用上下曲</span>
+            <span className="text-micro text-warning">多人舞台激活时禁用上下曲</span>
           )}
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
@@ -527,7 +527,7 @@ export function PrecisionControlPanel({ onClose }: { onClose: () => void }) {
       </div>
 
       {/* Shortcuts summary */}
-      <div className="border-t border-border/60 pt-2 text-[11px] text-muted-foreground">
+      <div className="border-t border-border/60 pt-2 text-micro text-muted-foreground">
         快捷键：Space 播放/暂停 · ←/→ 快退快进 · Shift+←/→ 逐帧 · F9/F10 全局热键
       </div>
     </div>

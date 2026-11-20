@@ -9,6 +9,8 @@ namespace EyeGazeProbe
     using Quaternion = GakuMotion::Quaternion;
     inline RenderLoop originalRenderLoop = nullptr;
     inline void* hookTarget = nullptr;
+    inline GakuRenderFrameService sharedRenderFrame{};
+    inline bool sharedRenderFrameRegistered = false;
     inline thread_local unsigned renderDepth = 0;
     inline DWORD ownerThread = 0;
     inline uint64_t lastSequence = 0, sequence = 0, sampleIndex = 0;
@@ -83,8 +85,8 @@ namespace EyeGazeProbe
         auto out = Json();
         out << "{\"schema\":1,\"pid\":" << GetCurrentProcessId() << ",\"seq\":" << sequence
             << ",\"state\":" << Quote(state) << ",\"sample_count\":" << sampleIndex
-            << ",\"remaining\":" << remaining << ",\"render_hook_ready\":" << (hookTarget ? "true" : "false")
-            << ",\"render_loop_hook_ready\":" << (hookTarget ? "true" : "false")
+            << ",\"remaining\":" << remaining << ",\"render_hook_ready\":" << ((hookTarget || sharedRenderFrameRegistered) ? "true" : "false")
+            << ",\"render_loop_hook_ready\":" << ((hookTarget || sharedRenderFrameRegistered) ? "true" : "false")
             << ",\"render_boundary\":" << Quote(lastBoundary)
             << ",\"before_calls\":" << counters.beforeCalls << ",\"prepared\":" << counters.prepared
             << ",\"after_written\":" << counters.afterWritten << ",\"end_calls\":" << counters.endCalls
@@ -159,9 +161,36 @@ namespace EyeGazeProbe
             try { ObserveEnd(HelperCameraGetMain(), "RenderPipelineManager.DoRenderLoop_Internal.exit"); }
             catch (...) { ++ioFailures; }
     }
+    inline void SharedAfterRender(void*, int isNormalOuter)
+    {
+        if (isNormalOuter && OnThread() && remaining > 0)
+            try { ObserveEnd(HelperCameraGetMain(), "RenderPipelineManager.DoRenderLoop_Internal.exit"); }
+            catch (...) { ++ioFailures; }
+    }
     inline bool Install()
     {
-        if (hookTarget) return true;
+        if (hookTarget || sharedRenderFrameRegistered) return true;
+        if (OnThread() && GakuMotion::host::active && GakuMotion::host::api.queryService)
+        {
+            GakuRenderFrameService svc{};
+            if (GakuMotion::host::api.queryService(GakuMotion::host::api.hostContext,
+                    GAKU_SERVICE_RENDER_FRAME, GAKU_SERVICE_VERSION, sizeof(svc), &svc) == GAKU_OK &&
+                svc.abiVersion == GAKU_SERVICE_VERSION && svc.structSize >= sizeof(svc) &&
+                svc.registerObserver && svc.unregisterObserver)
+            {
+                GakuRenderFrameBinding binding{
+                    GAKU_SERVICE_VERSION, sizeof(GakuRenderFrameBinding),
+                    "gakumotion.eye-gaze-probe", nullptr, &SharedAfterRender, nullptr
+                };
+                if (svc.registerObserver(svc.context, &binding) == GAKU_OK)
+                {
+                    sharedRenderFrame = svc;
+                    sharedRenderFrameRegistered = true;
+                    hookFailure.clear();
+                    return true;
+                }
+            }
+        }
         if (!OnThread() || !GakuMotion::host::active || !GakuMotion::host::hooks.acquire ||
             !GakuMotion::host::hooks.release) { hookFailure = "host_hook_api_unavailable"; return false; }
         void* manager = FindClass("UnityEngine.CoreModule.dll", "UnityEngine.Rendering", "RenderPipelineManager");
@@ -269,6 +298,12 @@ namespace EyeGazeProbe
     inline void Shutdown()
     {
         remaining = 0; sample = {}; ownerThread = 0;
+        if (sharedRenderFrameRegistered && sharedRenderFrame.unregisterObserver)
+        {
+            sharedRenderFrame.unregisterObserver(sharedRenderFrame.context);
+            sharedRenderFrameRegistered = false;
+            sharedRenderFrame = {};
+        }
         if (hookTarget && GakuMotion::host::hooks.release)
         {
             const auto result = GakuMotion::host::hooks.release(GakuMotion::host::hooks.context, hookTarget);

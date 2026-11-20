@@ -169,6 +169,7 @@ namespace GakuMotion
 		{
 			if (std::fabs(static_cast<double>(currentTime) - preciseTimeSeconds) > 1e-5)
 			{
+				audioPllErrorFiltered_ = 0.0;
 				SyncClockState(static_cast<double>(currentTime));
 			}
 		}
@@ -176,6 +177,7 @@ namespace GakuMotion
 		{
 			audioSeekOffset = 0.0f;
 			audioSyncSettleFrames = fnGetAudioTime ? kAudioSettleFrames : 0;
+			audioPllErrorFiltered_ = 0.0;
 		}
 		bool StartAudioAtCurrentTime()
 		{
@@ -215,6 +217,7 @@ namespace GakuMotion
 			playbackSpeedMultiplier = speed;
 			engineClock_.SetPlaybackRate(speed);
 			fixedClock_.SetPlaybackRate(speed);
+			audioPllErrorFiltered_ = 0.0;
 			if (fnSupportsAudioPlaybackRate && fnSupportsAudioPlaybackRate() && audioStarted && AudioRateSupported())
 			{
 				SyncAudioPlaybackRate();
@@ -253,6 +256,9 @@ namespace GakuMotion
 		// Optional confirmed backend state. Legacy callbacks remain source-compatible,
 		// but callback presence alone is never evidence for native-BGM suppression.
 		audio::Observation (*fnObserveAudio)(){nullptr};
+		// Optional combined observation + position callback so audio-clock frames do
+		// not acquire the audio engine lock and query cursor position twice per tick.
+		bool (*fnObserveAudioWithTime)(audio::Observation* outObs, float* outTimeSeconds){nullptr};
 		audio::Observation ObserveAudio() const
 		{
 			return fnObserveAudio ? fnObserveAudio() : audio::Observation{};
@@ -284,8 +290,18 @@ namespace GakuMotion
 		// 音频时钟回退容差（方案 B）：MCI position 偶发回退（毫秒量化抖动）时，
 		// 低于当前时间减去本容差的采样被视为抖动而不采信，避免动作瞬间倒退。
 		static constexpr float kAudioBackwardToleranceSeconds = 0.01f;
+		// Phase-locked audio clock parameters for absolute audio backends.
+		// Audio mixer cursors advance in discrete ~10-25ms WASAPI buffer chunks;
+		// tracking smoothed phase error with bounded rate nudging eliminates
+		// per-frame quantization stutter while staying locked to audio time.
+		static constexpr double kAudioPllHardSnapSeconds = 0.080;
+		static constexpr double kAudioPllBackwardHoldSeconds = 0.080;
+		static constexpr double kAudioPllFilterTauSeconds = 0.15;
+		static constexpr double kAudioPllGainPerSecond = 4.0;
+		static constexpr double kAudioPllMaxRateAdjust = 0.08;
 		float audioSeekOffset{0.0f};
 		int audioSyncSettleFrames{0};
+		double audioPllErrorFiltered_{0.0};
 		float lastSyncCorrectionSeconds{0.0f}; // 最近一次跳转的校正量（诊断用）
 		int seekCount{0}; // 累计跳转次数（诊断用）
 
@@ -361,6 +377,7 @@ namespace GakuMotion
 			state = (!fnCanPlay || fnCanPlay()) ? PlaybackState::Preview : PlaybackState::Stopped;
 			audioSeekOffset = 0.0f;
 			audioSyncSettleFrames = 0;
+			audioPllErrorFiltered_ = 0.0;
 			lastSyncCorrectionSeconds = 0.0f;
 			seekCount = 0;
 
@@ -398,6 +415,7 @@ namespace GakuMotion
 				state = PlaybackState::Paused;
 				waitingForRenderComplete = false;
 				lastStepDeltaSeconds = 0.0;
+				audioPllErrorFiltered_ = 0.0;
 				engineClock_.Pause();
 				fixedClock_.Pause();
 				if (fnPauseAudio) fnPauseAudio();
@@ -435,6 +453,7 @@ namespace GakuMotion
 			SyncAudioPlaybackRate();
 			RefreshAudioStarted();
 			audioSyncSettleFrames = (fnGetAudioTime != nullptr) ? kAudioSettleFrames : 0;
+			audioPllErrorFiltered_ = 0.0;
 		}
 
 		void Stop()
@@ -452,6 +471,7 @@ namespace GakuMotion
 			SyncClockState(0.0);
 			audioSeekOffset = 0.0f;
 			audioSyncSettleFrames = 0;
+			audioPllErrorFiltered_ = 0.0;
 			if (fnStopAudio) fnStopAudio();
 			// 保留 clip 剪辑缓存，杜绝下次播放必须重新读盘
 			controller.RestoreMute();
@@ -477,6 +497,7 @@ namespace GakuMotion
 			lastStepDeltaSeconds = 0.0;
 			audioSeekOffset = 0.0f;
 			audioSyncSettleFrames = 0;
+			audioPllErrorFiltered_ = 0.0;
 			if (fnStopAudio) fnStopAudio();
 			controller.DiscardBindings();
 			controller.SetTargetActor(nullptr);
@@ -533,6 +554,7 @@ namespace GakuMotion
 			SyncClockState(clamped);
 			audioSeekOffset = 0.0f;
 			audioSyncSettleFrames = (fnGetAudioTime != nullptr) ? kAudioSettleFrames : 0;
+			audioPllErrorFiltered_ = 0.0;
 			++seekCount;
 
 			// Playing scrub temporarily pauses the backend, so seek mode follows
@@ -612,6 +634,7 @@ namespace GakuMotion
 			lastStepDeltaSeconds = 0.0;
 			audioSeekOffset = 0.0f;
 			audioSyncSettleFrames = 0;
+			audioPllErrorFiltered_ = 0.0;
 			Probe("[GakuMotion][ProbeS1][PLY] BEGIN req=%.3f -> set=%.3f dur=%.3f state=%d scrubbing=1",
 			      timeSeconds, clamped, clip.duration_seconds, static_cast<int>(state));
 		}
@@ -648,6 +671,7 @@ namespace GakuMotion
 			muted = value;
 			audioSeekOffset = 0;
 			audioSyncSettleFrames = kAudioSettleFrames;
+			audioPllErrorFiltered_ = 0.0;
 			if (value)
 			{
 				audioStarted = false;
@@ -662,6 +686,7 @@ namespace GakuMotion
 			if (!clockConfig.fixedFrameRate.Valid())
 				clockConfig.fixedFrameRate = {60, 1};
 			fixedClock_.SetFrameRate(clockConfig.fixedFrameRate);
+			audioPllErrorFiltered_ = 0.0;
 			if (clockConfig.runMode == performance::PlaybackRunMode::ForRecording)
 			{
 				if (audioStarted && fnStopAudio) fnStopAudio();
@@ -784,6 +809,7 @@ namespace GakuMotion
 						SyncClockState(0.0);
 						audioSeekOffset = 0.0f;
 						audioSyncSettleFrames = (fnGetAudioTime != nullptr) ? kAudioSettleFrames : 0;
+						audioPllErrorFiltered_ = 0.0;
 						if (fnStopAudio) fnStopAudio();
 						audioStarted = false;
 						if (!StartAudioAtCurrentTime()) { Pause(); return; }
@@ -816,6 +842,56 @@ namespace GakuMotion
 		//
 		// PROBE S1：每次改写 currentTime 都记录「是谁改的」。若拖动提交后
 		// currentTime 被拉回，日志里紧跟 END 的那一行会直接指出凶手分支。
+		void AdvanceAbsoluteAudioClock(double deltaTime, double rawAudioTime, double prevTime) noexcept
+		{
+			const double speed = static_cast<double>(playbackSpeedMultiplier);
+			const double audioSpeed = static_cast<double>(timing.audio.speed);
+			const double audioTime = rawAudioTime / audioSpeed + static_cast<double>(timing.audio.offsetSeconds);
+			const double nominalStep = (std::max)(0.0, engineClock_.Time().seconds - prevTime);
+			const double predictedTime = prevTime + nominalStep;
+			const double rawError = audioTime - predictedTime;
+
+			// Scale snap/hold thresholds with timeline speed so high playback rates
+			// absorb ~10-40ms wall-clock mixer steps smoothly without false snaps.
+			const double rateScale = (std::max)(0.25, speed);
+			const double snapThreshold = kAudioPllHardSnapSeconds * rateScale;
+			const double holdThreshold = kAudioPllBackwardHoldSeconds * rateScale;
+
+			if (rawError > snapThreshold)
+			{
+				audioPllErrorFiltered_ = 0.0;
+				SyncClockState(audioTime);
+				lastClockSource = "audio";
+			}
+			else if (rawError < -holdThreshold)
+			{
+				audioPllErrorFiltered_ = 0.0;
+				lastClockSource = "audio(backward-held)";
+			}
+			else
+			{
+				if (deltaTime > 0.0 && nominalStep > 0.0)
+				{
+					const double alpha = 1.0 - std::exp(-deltaTime / kAudioPllFilterTauSeconds);
+					audioPllErrorFiltered_ += alpha * (rawError - audioPllErrorFiltered_);
+					const double maxAdjust = kAudioPllMaxRateAdjust * nominalStep;
+					const double gain = (std::min)(0.5, deltaTime * kAudioPllGainPerSecond);
+					const double correction = std::clamp(audioPllErrorFiltered_ * gain, -maxAdjust, maxAdjust);
+					const double nextTime = (std::max)(prevTime, predictedTime + correction);
+					SyncClockState(nextTime);
+				}
+				else
+				{
+					SyncClockState(prevTime);
+				}
+				lastClockSource = "audio";
+			}
+
+			audioSeekOffset = 0.0f;
+			audioSyncSettleFrames = 0;
+			lastSyncCorrectionSeconds = 0.0f;
+		}
+
 		void AdvanceClock(float deltaTime)
 		{
 			if (!std::isfinite(deltaTime) || deltaTime < 0.0f) return;
@@ -862,7 +938,6 @@ namespace GakuMotion
 
 			if (clockConfig.source == performance::ClockSource::FixedStep)
 			{
-				UpdateAudioTiming();
 				if (deltaTime > 0.0f)
 				{
 					fixedClock_.Resume();
@@ -879,7 +954,6 @@ namespace GakuMotion
 			engineClock_.Resume();
 			engineClock_.Advance(static_cast<double>(deltaTime));
 			const float advanced = static_cast<float>(engineClock_.Time().seconds);
-			UpdateAudioTiming();
 
 			if (clockConfig.source == performance::ClockSource::EngineDelta)
 			{
@@ -890,36 +964,63 @@ namespace GakuMotion
 				return;
 			}
 
-			if (!fnGetAudioTime || !AudioEligible() || (fnObserveAudio && !ObserveAudio().EffectivePlaying()))
-			{
+			UpdateAudioTiming();
+
+			const auto fallbackLocalNoAudio = [&]() {
+				audioPllErrorFiltered_ = 0.0;
 				SyncClockState(advanced);
 				UpdateAudioTiming();
 				lastStepDeltaSeconds = (std::max)(0.0, preciseTimeSeconds - prevTime);
 				lastClockSource = "local(no-audio)";
+			};
+
+			float combinedAudioTime = -1.0f;
+			bool hasCombinedAudioTime = false;
+			if (!fnGetAudioTime || !AudioEligible())
+			{
+				fallbackLocalNoAudio();
+				return;
+			}
+			if (fnObserveAudioWithTime)
+			{
+				audio::Observation obs{};
+				float obsTime = -1.0f;
+				if (fnObserveAudioWithTime(&obs, &obsTime))
+				{
+					if (!obs.EffectivePlaying())
+					{
+						fallbackLocalNoAudio();
+						return;
+					}
+					combinedAudioTime = obsTime;
+					hasCombinedAudioTime = true;
+				}
+				else if (fnObserveAudio && !ObserveAudio().EffectivePlaying())
+				{
+					fallbackLocalNoAudio();
+					return;
+				}
+			}
+			else if (fnObserveAudio && !ObserveAudio().EffectivePlaying())
+			{
+				fallbackLocalNoAudio();
 				return;
 			}
 
-			// MCI position is the absolute file time. Calibrating against the local
-			// frame clock after startup folds any first-frame stall into a permanent
-			// offset. Follow the actual source position instead, including on seeks.
+			// Absolute backends (GakuAudio / MCI) report file position in discrete
+			// mixer/device chunks. Phase-locking a continuous local integrator to the
+			// smoothed audio error removes frame-to-frame stair-step judder while
+			// catching up immediately on startup/seek stalls and holding on backsteps.
 			if (audioPositionIsAbsolute)
 			{
-				const float rawAudioTime = fnGetAudioTime();
+				const float rawAudioTime = hasCombinedAudioTime ? combinedAudioTime : fnGetAudioTime();
 				if (std::isfinite(rawAudioTime) && rawAudioTime >= 0.0f)
 				{
-					const float audioTime = rawAudioTime / timing.audio.speed + timing.audio.offsetSeconds;
-					if (audioTime >= currentTime - kAudioBackwardToleranceSeconds)
-					{
-						SyncClockState(audioTime);
-						lastClockSource = "audio";
-					}
-					else lastClockSource = "audio(backward-held)";
-					audioSeekOffset = 0.0f;
-					audioSyncSettleFrames = 0;
-					lastSyncCorrectionSeconds = 0.0f;
+					AdvanceAbsoluteAudioClock(static_cast<double>(deltaTime), static_cast<double>(rawAudioTime), prevTime);
 				}
 				else
 				{
+					audioPllErrorFiltered_ = 0.0;
 					SyncClockState(advanced);
 					lastClockSource = "local(audio-query-fail)";
 				}

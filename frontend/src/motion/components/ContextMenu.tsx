@@ -95,7 +95,7 @@ export function ContextMenu({ open, x, y, items, onClose, testId = 'context-menu
               item.onSelect()
             }}
             className={cn(
-              'flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs transition-colors focus-visible:outline-none focus-visible:bg-accent disabled:pointer-events-none disabled:opacity-45',
+              'flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-sm transition-colors focus-visible:outline-none focus-visible:bg-accent disabled:pointer-events-none disabled:opacity-45',
               item.destructive
                 ? 'text-destructive hover:bg-destructive/12'
                 : 'text-popover-foreground hover:bg-accent hover:text-accent-foreground',
@@ -103,7 +103,7 @@ export function ContextMenu({ open, x, y, items, onClose, testId = 'context-menu
           >
             {item.icon && <span className="shrink-0 opacity-80">{item.icon}</span>}
             <span className="flex-1 truncate">{item.label}</span>
-            {item.shortcut && <span className="ml-2 text-[10px] text-muted-foreground">{item.shortcut}</span>}
+            {item.shortcut && <span className="ml-2 text-micro text-muted-foreground">{item.shortcut}</span>}
           </button>
         )
       })}

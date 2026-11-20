@@ -4,7 +4,6 @@ import {
   RiAlertFill,
   RiCameraFill,
   RiCheckFill,
-  RiDiscFill,
   RiEqualizerFill,
   RiMusic2Fill,
   RiOrderPlayFill,
@@ -30,6 +29,8 @@ import { CAMERA_MODES, ENSEMBLE_PLAY_MODES, PLAYBACK_SPEEDS, PLAY_MODES } from '
 import { motionStore, useMotionStore } from '../store'
 import { durationMismatch, formatTransportTime, framePosition, validTimeline } from '../time'
 import { PrecisionControlPanel } from './PrecisionControlPanel'
+import { AlbumCover } from './AlbumCover'
+import { CoverEditorModal } from './CoverEditorModal'
 import { PendingBadge } from './Unsupported'
 
 function IconTooltip({ label, children }: { label: string; children: React.ReactNode }) {
@@ -56,6 +57,7 @@ export function TransportBar() {
   const scrub = useMotionStore((state) => state.scrub)
   const loaded = useMotionStore((state) => state.loaded)
   const libraryEntries = useMotionStore((state) => state.library.entries)
+  const libraryRevision = useMotionStore((state) => state.library.revision)
   const actors = useMotionStore((state) => state.actors)
   const ensembleActive = useMotionStore((state) => state.ensemble.active)
   const musicVolumeSupport = useMotionStore((state) => state.musicVolumeSupport)
@@ -98,11 +100,15 @@ export function TransportBar() {
     () => libraryEntries.find((entry) => entry.id === loaded.motionKey) ?? null,
     [libraryEntries, loaded.motionKey],
   )
+  const currentEntryId = currentEntry?.id ?? ''
+  const hasCachedCover = useMotionStore((state) =>
+    currentEntryId ? Object.prototype.hasOwnProperty.call(state.coverCache, currentEntryId) : true,
+  )
   React.useEffect(() => {
-    if (currentEntry?.hasCover) {
+    if (currentEntry && (currentEntry.hasCover || currentEntry.hasAudio) && !hasCachedCover) {
       void motionStore.ensureTrackCover(currentEntry.id)
     }
-  }, [currentEntry?.id, currentEntry?.hasCover])
+  }, [currentEntry?.id, currentEntry?.hasCover, currentEntry?.hasAudio, hasCachedCover, libraryRevision])
   const currentCoverUri = currentEntry?.id ? (coverCache[currentEntry.id] ?? '') : ''
   const activeEffectPreset = React.useMemo(
     () => audioEffect.presets.find((p) => p.id === audioEffect.activeId) ?? audioEffect.presets[0] ?? { id: 'flat', name: '原声', category: 'flat', description: '' },
@@ -184,7 +190,7 @@ export function TransportBar() {
         {hoverInfo && hasClip && (
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute -top-7 z-40 -translate-x-1/2 whitespace-nowrap rounded-md border bg-popover px-2 py-0.5 text-[11px] font-medium tabular-nums text-popover-foreground shadow-md"
+            className="pointer-events-none absolute -top-8 z-40 -translate-x-1/2 whitespace-nowrap rounded-md border bg-popover px-2.5 py-0.5 text-xs font-medium tabular-nums text-popover-foreground shadow-md"
             style={{ left: `${Math.min(Math.max(hoverInfo.ratio * 100, 5), 95)}%` }}
           >
             {formatTransportTime(hoverInfo.seconds)} / {formatTransportTime(duration)} · 帧{' '}
@@ -195,7 +201,7 @@ export function TransportBar() {
 
       {/* Inline diagnostic strip when critical notices/errors are present */}
       {(actionError || showSourceNotice || (navigationError && !precisionOpen) || (hasDurationMismatch && !precisionOpen)) && (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border/60 bg-muted/40 px-4 py-1 text-xs">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border/60 bg-muted/40 px-5 py-1.5 text-xs">
           {showSourceNotice && (
             <span className="flex items-center gap-1 text-warning">
               <RiAlertFill className="size-3.5 shrink-0" />
@@ -225,7 +231,7 @@ export function TransportBar() {
               <button
                 type="button"
                 onClick={() => motionStore.clearActionError()}
-                className="text-[11px] underline underline-offset-2"
+                className="text-xs underline underline-offset-2"
               >
                 忽略
               </button>
@@ -235,33 +241,41 @@ export function TransportBar() {
       )}
 
       {/* Main 3-Zone Player Bar */}
-      <div className="flex items-center justify-between gap-3 px-4 py-2">
-        {/* Left: Calm neutral icon + Title + Status + Time + Actor */}
-        <div className="flex min-w-0 flex-1 items-center gap-2.5">
-          <div
-            aria-hidden="true"
-            className={cn(
-              'flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md border',
-              hasClip
-                ? 'border-primary/25 bg-primary/10 text-primary'
-                : 'border-border bg-muted/60 text-muted-foreground',
-            )}
-          >
-            {currentCoverUri ? (
-              <img
+      <div className="flex min-h-[72px] items-center justify-between gap-4 px-5 py-2.5">
+        {/* Left: Album cover + Title + Status + Time + Actor */}
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          {currentEntry ? (
+            <button
+              type="button"
+              title="点击编辑曲目封面"
+              aria-label={`编辑 ${currentEntry.title} 封面`}
+              data-testid="transport-cover-button"
+              onClick={() => motionStore.openCoverEditorForTrack(currentEntry.id, 'transport')}
+              className={cn(
+                'flex size-[var(--gaku-cover-player,48px)] shrink-0 items-center justify-center overflow-hidden rounded-md border transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                hasClip
+                  ? 'border-primary/25 bg-primary/10 text-primary'
+                  : 'border-border bg-muted/60 text-muted-foreground',
+              )}
+            >
+              <AlbumCover
                 src={currentCoverUri}
-                alt=""
-                data-testid="transport-cover-img"
-                className="size-full object-cover"
+                imgTestId="transport-cover-img"
+                defaultTestId="transport-default-cover"
               />
-            ) : (
-              <RiDiscFill className="size-4" />
-            )}
-          </div>
+            </button>
+          ) : (
+            <div
+              aria-hidden="true"
+              className="flex size-[var(--gaku-cover-player,48px)] shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-muted/60 text-muted-foreground"
+            >
+              <AlbumCover defaultTestId="transport-default-cover" />
+            </div>
+          )}
           <div className="min-w-0 flex-1 space-y-0.5">
             <div className="flex items-center gap-2">
               <div
-                className="min-w-0 truncate text-[13px] font-semibold leading-tight text-foreground"
+                className="min-w-0 truncate text-base font-semibold leading-snug text-foreground"
                 data-testid="transport-title"
               >
                 {player.title}
@@ -269,14 +283,14 @@ export function TransportBar() {
               {clock.runMode === 'recording' && (
                 <span
                   data-testid="transport-recording-badge"
-                  className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400"
+                  className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-micro font-medium text-amber-600 dark:text-amber-400"
                 >
                   供录制
                 </span>
               )}
               {!supports('player.scrubBegin') && <PendingBadge />}
             </div>
-            <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <span className="truncate">
                 {currentSubtitle || (ensembleActive ? '多人舞台' : actors.targetLabel || '未绑定角色')}
               </span>
@@ -285,19 +299,19 @@ export function TransportBar() {
         </div>
 
         {/* Center: PlayMode hot-toggle + Rewind + Play/Pause + Fast-Forward + Stop */}
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="flex shrink-0 items-center gap-1.5">
           <IconTooltip label={`播放模式：${currentPlayModeLabel}（点击切换）`}>
             <Button
               type="button"
               variant="ghost"
               size="icon"
-              className="size-8 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+              className="size-9 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
               aria-label="切换播放模式"
               data-testid="transport-playmode-toggle"
               disabled={!supports('playlist.setMode')}
               onClick={() => void motionStore.cyclePlayMode()}
             >
-              <PlayModeIcon className="size-4" />
+              <PlayModeIcon className="size-[18px]" />
             </Button>
           </IconTooltip>
 
@@ -306,12 +320,12 @@ export function TransportBar() {
               type="button"
               variant="ghost"
               size="icon"
-              className="size-8 rounded-md text-foreground/85 hover:bg-accent"
+              className="size-9 rounded-md text-foreground/85 hover:bg-accent"
               aria-label="快退"
               disabled={!hasClip || !supports('player.seek')}
               onClick={() => void motionStore.seekRelative(-seekStepSeconds)}
             >
-              <RiRewindFill className="size-4" />
+              <RiRewindFill className="size-[18px]" />
             </Button>
           </IconTooltip>
 
@@ -320,12 +334,12 @@ export function TransportBar() {
               type="button"
               variant="default"
               size="icon"
-              className="size-9 rounded-full shadow-sm transition-transform active:scale-95"
+              className="size-10 rounded-full shadow-sm transition-transform active:scale-95"
               aria-label={isPlaying ? '暂停' : '播放'}
               disabled={!hasClip || !transportSupported}
               onClick={() => void (isPlaying ? motionStore.pause() : motionStore.play())}
             >
-              {isPlaying ? <RiPauseFill className="size-4" /> : <RiPlayFill className="size-4 translate-x-[0.5px]" />}
+              {isPlaying ? <RiPauseFill className="size-5" /> : <RiPlayFill className="size-5 translate-x-[0.5px]" />}
             </Button>
           </IconTooltip>
 
@@ -334,12 +348,12 @@ export function TransportBar() {
               type="button"
               variant="ghost"
               size="icon"
-              className="size-8 rounded-md text-foreground/85 hover:bg-accent"
+              className="size-9 rounded-md text-foreground/85 hover:bg-accent"
               aria-label="快进"
               disabled={!hasClip || !supports('player.seek')}
               onClick={() => void motionStore.seekRelative(seekStepSeconds)}
             >
-              <RiSpeedFill className="size-4" />
+              <RiSpeedFill className="size-[18px]" />
             </Button>
           </IconTooltip>
 
@@ -348,19 +362,19 @@ export function TransportBar() {
               type="button"
               variant="ghost"
               size="icon"
-              className="size-8 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+              className="size-9 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
               aria-label="停止"
               disabled={!hasClip || !supports('player.stop')}
               onClick={() => void motionStore.stop()}
             >
-              <RiStopFill className="size-4" />
+              <RiStopFill className="size-[18px]" />
             </Button>
           </IconTooltip>
           {!transportSupported && <PendingBadge />}
         </div>
 
         {/* Right: Audio Effect Badge, Camera Badge Popover, Speed Icon, Volume Icon, Precision Drawer Trigger */}
-        <div className="flex flex-1 items-center justify-end gap-1.5">
+        <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
           {/* Audio Effect Preset Badge */}
           <div className="flex items-center gap-1">
             <Popover open={audioFxOpen} onOpenChange={setAudioFxOpen}>
@@ -372,18 +386,18 @@ export function TransportBar() {
                   disabled={!supports('audioEffect.set')}
                   title={audioEffect.available ? `音效：${activeEffectPreset.name}` : '未加载 GakuAudio 音效插件'}
                   className={cn(
-                    'inline-flex h-6 items-center gap-1 rounded-[4px] border px-2 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50',
+                    'inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-[4px] border px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50',
                     effectModified && audioEffect.available
                       ? 'border-primary/40 bg-primary/10 text-primary hover:border-primary/60'
                       : 'border-border bg-background/70 text-muted-foreground hover:border-foreground/30 hover:text-foreground',
                   )}
                 >
-                  <RiMusic2Fill className="size-3 shrink-0" />
+                  <RiMusic2Fill className="size-3.5 shrink-0" />
                   <span>{activeEffectPreset.name}</span>
                 </button>
               </PopoverTrigger>
-              <PopoverContent side="top" align="end" className="w-56 p-1">
-                <div className="flex items-center justify-between px-2 py-1 text-[10px] font-medium text-muted-foreground">
+              <PopoverContent side="top" align="end" className="w-60 p-1">
+                <div className="flex items-center justify-between px-2.5 py-1.5 text-micro font-medium text-muted-foreground">
                   <span>音效环境预设 (GakuAudio)</span>
                   {!audioEffect.available && <span className="text-amber-500">未加载</span>}
                 </div>
@@ -401,14 +415,14 @@ export function TransportBar() {
                         void motionStore.setAudioEffect(preset.id)
                       }}
                       className={cn(
-                        'flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50',
+                        'flex w-full items-center justify-between gap-2 rounded px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50',
                         active ? 'font-semibold text-primary' : 'text-foreground',
                       )}
                     >
                       <div className="min-w-0">
                         <div className="truncate">{preset.name}</div>
                         {preset.description && (
-                          <div className="truncate text-[10px] text-muted-foreground">{preset.description}</div>
+                          <div className="truncate text-micro text-muted-foreground">{preset.description}</div>
                         )}
                       </div>
                       {active && <RiCheckFill className="size-3.5 shrink-0 text-primary" />}
@@ -428,14 +442,14 @@ export function TransportBar() {
                   aria-label="镜头快捷模式"
                   data-testid="camera-mode-badge"
                   disabled={!supports('camera.set')}
-                  className="inline-flex h-6 items-center gap-1 rounded-[4px] border border-border bg-background/70 px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+                  className="inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-[4px] border border-border bg-background/70 px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
                 >
-                  <RiCameraFill className="size-3 shrink-0" />
+                  <RiCameraFill className="size-3.5 shrink-0" />
                   <span>{CAMERA_MODES[cameraModeIndex] ?? 'VMD'}</span>
                 </button>
               </PopoverTrigger>
-              <PopoverContent side="top" align="end" className="w-36 p-1">
-                <div className="px-2 py-1 text-[10px] font-medium text-muted-foreground">镜头模式</div>
+              <PopoverContent side="top" align="end" className="w-40 p-1">
+                <div className="px-2.5 py-1.5 text-micro font-medium text-muted-foreground">镜头模式</div>
                 {CAMERA_MODES.map((label, index) => {
                   const active = cameraModeIndex === index
                   return (
@@ -449,7 +463,7 @@ export function TransportBar() {
                         void motionStore.setCameraQuickMode(index)
                       }}
                       className={cn(
-                        'flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent',
+                        'flex w-full items-center justify-between rounded px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-accent',
                         active ? 'font-semibold text-primary' : 'text-foreground',
                       )}
                     >
@@ -476,20 +490,20 @@ export function TransportBar() {
                   size="icon"
                   aria-label="播放速度"
                   className={cn(
-                    'size-7 rounded-md',
+                    'size-8 rounded-md',
                     speedModified ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
                   )}
                 >
-                  <RiSpeedUpFill className="size-4" />
+                  <RiSpeedUpFill className="size-[18px]" />
                 </Button>
               </PopoverTrigger>
             </IconTooltip>
             <PopoverContent side="top" align="end" className="w-60 space-y-2.5 p-3">
-              <div className="flex items-center justify-between text-xs">
+              <div className="flex items-center justify-between text-sm">
                 <span className="font-semibold">播放倍速</span>
                 <span className="font-semibold tabular-nums text-primary">{player.speed.toFixed(2)}x</span>
               </div>
-              <div className="grid grid-cols-3 gap-1">
+              <div className="grid grid-cols-3 gap-1.5">
                 {PLAYBACK_SPEEDS.map((speed) => {
                   const active = Math.abs(player.speed - speed) < 0.01
                   return (
@@ -534,11 +548,11 @@ export function TransportBar() {
                   size="icon"
                   aria-label="音量控制"
                   className={cn(
-                    'size-7 rounded-md',
+                    'size-8 rounded-md',
                     showVolumeNotice ? 'text-warning' : 'text-muted-foreground hover:text-foreground',
                   )}
                 >
-                  <VolumeIcon className="size-4" />
+                  <VolumeIcon className="size-[18px]" />
                 </Button>
               </PopoverTrigger>
             </IconTooltip>
@@ -563,14 +577,14 @@ export function TransportBar() {
                   onValueCommit={([value]) => motionStore.commitVolume(value)}
                 />
               </div>
-              <span className="text-[11px] font-medium tabular-nums text-muted-foreground">
+              <span className="text-xs font-medium tabular-nums text-muted-foreground">
                 {volumePercent}%
               </span>
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="size-7 shrink-0 rounded-md"
+                className="size-8 shrink-0 rounded-md"
                 aria-label={volumePercent === 0 ? '取消静音' : '静音'}
                 disabled={!supports('player.setVolume')}
                 onClick={() => {
@@ -581,7 +595,7 @@ export function TransportBar() {
                 <VolumeIcon className="size-4" />
               </Button>
               {showVolumeNotice && (
-                <p className="border-t border-border/60 pt-1.5 text-center text-[11px] leading-snug text-warning">
+                <p className="border-t border-border/60 pt-1.5 text-center text-xs leading-snug text-warning">
                   {musicVolumeSupport < 0
                     ? '当前音乐后端不支持独立音量，音乐仍以原音量播放。'
                     : musicVolumeNotice}
@@ -597,12 +611,12 @@ export function TransportBar() {
                 type="button"
                 variant={precisionOpen ? 'default' : 'outline'}
                 size="icon"
-                className="relative size-7 rounded-md"
+                className="relative size-8 rounded-md"
                 aria-label="精细控制"
                 title="精细控制与专业定位面板"
                 data-testid="precision-control-trigger"
               >
-                <RiEqualizerFill className="size-3.5" />
+                <RiEqualizerFill className="size-4" />
                 {(precisionPinned || navigationError) && !precisionOpen && (
                   <span
                     aria-hidden="true"
@@ -620,6 +634,7 @@ export function TransportBar() {
           </Popover>
         </div>
       </div>
+      <CoverEditorModal owner="transport" />
     </footer>
   )
 }

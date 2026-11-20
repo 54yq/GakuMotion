@@ -1381,6 +1381,250 @@ static void TestAudioPluginClientQueryCopiesStruct()
 		"SetActivePreset forwards to copied service table");
 }
 
+static void TestPlayingTickThrottlingAndClockEvents()
+{
+	BeginTest("playing_tick_throttling_and_clock_events");
+	Core core;
+	core.enforceInjectionPolicy = true;
+	core.injectionPolicy.SetSceneAllowed(true);
+	core.injectionPolicy.SetCaptureHooksReady(true);
+	core.motionsRoot = "synthetic/motions";
+	int audioEffectQueries = 0;
+	HostHooks hooks;
+	hooks.releaseFileDialog = [] {};
+	hooks.pluginVersion = "0.1.1-test";
+	hooks.getAudioEffectsState = [&]() -> AudioEffectState {
+		++audioEffectQueries;
+		return AudioEffectState{true, "flat", {{"flat", "原声", "flat", "直通输出"}}};
+	};
+	hooks.setAudioEffectPreset = [&](const std::string&, std::string&) -> bool {
+		return true;
+	};
+	Bridge bridge(core, hooks);
+	std::vector<std::string> events;
+	bridge.SetEventSink(
+		[](void* userData, const char* json) {
+			static_cast<std::vector<std::string>*>(userData)->push_back(json);
+		},
+		&events);
+	auto countEvents = [&](const std::string& name) {
+		int n = 0;
+		for (const auto& e : events)
+		{
+			const auto v = ParseJson(e);
+			const auto* ev = v.Find("name");
+			if (ev && ev->stringValue == name) ++n;
+		}
+		return n;
+	};
+
+	bridge.OnShow();
+	bridge.OnUiTick(); // baseline
+	const int queriesAtBaseline = audioEffectQueries;
+
+	core.player.state = PlaybackState::Playing;
+	++core.player.evaluatedFrameSerial;
+	bridge.OnUiTick();
+	const int clockCountAfterFirst = countEvents("clock.changed");
+	++core.player.evaluatedFrameSerial;
+	bridge.OnUiTick();
+	Check(countEvents("clock.changed") == clockCountAfterFirst,
+		"playing evaluatedFrameSerial updates throttle clock.changed to ~10Hz");
+	Check(audioEffectQueries == queriesAtBaseline,
+		"playing ticks skip repeated 60Hz audioEffect preset queries");
+
+	bridge.HandleMessageForTest(
+		"{\"v\":1,\"id\":99,\"type\":\"request\",\"method\":\"clock.configure\",\"params\":{\"source\":\"engine_delta\"}}");
+	bridge.OnUiTick();
+	Check(countEvents("clock.changed") == clockCountAfterFirst + 1,
+		"structural clock.configure emits clock.changed immediately even while playing");
+}
+
+namespace Bug5TestFixture
+{
+	inline std::filesystem::path motionsRoot;
+	inline bool importStarted = false;
+	inline bool importReady = false;
+	inline void WriteTinyClip(const std::filesystem::path& path)
+	{
+		std::ofstream file(path, std::ios::binary | std::ios::trunc);
+		const auto write = [&](const auto& value) { file.write(reinterpret_cast<const char*>(&value), sizeof(value)); };
+		file.write("GKCLIPCL", 8);
+		write(uint32_t{4}); write(60.0f); write(uint32_t{2}); write(2.0f / 60.0f); write(uint32_t{1}); write(.083f);
+		write(uint16_t{0}); write(uint8_t{4}); write(uint8_t{0}); file.write("Hips", 4);
+		for (uint32_t frame = 0; frame < 2; ++frame)
+		{
+			write(GakuMotion::Vector3{});
+			write(GakuMotion::Quaternion::Identity());
+		}
+		write(uint8_t{0}); write(uint32_t{0});
+	}
+	inline bool StartImportFn(const GakuMotion::MotionImportRequest&, std::string&)
+	{
+		importStarted = true;
+		std::filesystem::create_directories(motionsRoot / "Gimme_Gimme-70f876a6");
+		WriteTinyClip(motionsRoot / "Gimme_Gimme-70f876a6" / "motion.gkclip");
+		std::ofstream info(motionsRoot / "Gimme_Gimme-70f876a6" / "info.json", std::ios::binary | std::ios::trunc);
+		info << "{\"title\": \"Gimme×Gimme\", \"fps\": 60}\n";
+		importReady = true;
+		return true;
+	}
+	inline int PollImportFn(std::string& message, GakuMotion::ImportProgressState* progress)
+	{
+		if (!importReady) return 0;
+		message = "导入完成";
+		if (progress) { progress->progress = 1.0f; progress->statusText = "导入完成"; }
+		return 1;
+	}
+}
+
+static void TestCoverEditingScreenshotAndDuplicateTitleImport()
+{
+	BeginTest("cover_editing_screenshot_and_duplicate_title_import");
+	using namespace GakuMotion;
+	using namespace GakuMotion::webpanel;
+	namespace fs = std::filesystem;
+
+	const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+	const fs::path root = fs::temp_directory_path() / ("gaku_webpanel_bug5_" + std::to_string(stamp));
+	const fs::path motionsRoot = root / "motions";
+	const fs::path logsRoot = root / "logs";
+	fs::create_directories(motionsRoot / "Gimme x Gimme");
+	fs::create_directories(logsRoot);
+
+	Bug5TestFixture::motionsRoot = motionsRoot;
+	Bug5TestFixture::importStarted = false;
+	Bug5TestFixture::importReady = false;
+	Bug5TestFixture::WriteTinyClip(motionsRoot / "Gimme x Gimme" / "motion.gkclip");
+	{
+		std::ofstream info(motionsRoot / "Gimme x Gimme" / "info.json", std::ios::binary | std::ios::trunc);
+		info << "{\"title\": \"Gimme×Gimme\", \"fps\": 60}\n";
+	}
+
+	const std::string pngDataUri =
+		"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+
+	Core core;
+	core.enforceInjectionPolicy = true;
+	core.injectionPolicy.SetSceneAllowed(true);
+	core.injectionPolicy.SetCaptureHooksReady(true);
+	core.motionsRoot = MotionPathToUtf8(motionsRoot);
+	core.logsRoot = MotionPathToUtf8(logsRoot);
+	core.playlistPath = MotionPathToUtf8(root / "playlist.json");
+	core.RefreshMotionLibrary();
+	Check(core.motions.size() == 1 && core.motions[0].name == "Gimme x Gimme",
+		"initial duplicate-title baseline track scanned");
+
+	core.fnStartImport = Bug5TestFixture::StartImportFn;
+	core.fnPollImportProgress = Bug5TestFixture::PollImportFn;
+
+	HostHooks hooks;
+	hooks.releaseFileDialog = [] {};
+	hooks.readImagePreviewDataUri = [&](const std::string& p) { return p.empty() ? std::string() : pngDataUri; };
+	hooks.getScreenshotCapabilities = []() {
+		ScreenshotCapabilitiesView v;
+		v.available = true; v.runtimeReady = true; v.cameraAvailable = true;
+		v.windowWidth = 1280; v.windowHeight = 720;
+		return v;
+	};
+	hooks.captureScreenshot = [&]() {
+		ScreenshotCaptureView c;
+		c.ok = true; c.width = 1280; c.height = 720; c.dataUri = pngDataUri;
+		return c;
+	};
+	hooks.getTrackCoverDataUri = [&](const std::string& dir) {
+		std::error_code ec;
+		return fs::is_regular_file(MotionPathFromUtf8(dir) / "cover.png", ec) ? pngDataUri : std::string();
+	};
+
+	Bridge bridge(core, hooks);
+	std::vector<std::string> events;
+	bridge.SetEventSink(
+		[](void* ud, const char* json) { static_cast<std::vector<std::string>*>(ud)->push_back(json); },
+		&events);
+	bridge.OnShow();
+	bridge.OnUiTick();
+
+	// 1. Screenshot capabilities & capture
+	const auto caps = ParseJson(bridge.HandleMessageForTest(
+		"{\"v\":1,\"id\":1,\"type\":\"request\",\"method\":\"screenshot.capabilities\",\"params\":{}}"));
+	Check(caps.Find("ok")->boolValue && caps.Find("result")->Find("cameraAvailable")->boolValue,
+		"screenshot.capabilities reports cameraAvailable");
+	const auto shot = ParseJson(bridge.HandleMessageForTest(
+		"{\"v\":1,\"id\":2,\"type\":\"request\",\"method\":\"screenshot.capture\",\"params\":{}}"));
+	Check(shot.Find("ok")->boolValue && shot.Find("result")->Find("dataUri")->stringValue == pngDataUri,
+		"screenshot.capture returns encoded dataUri");
+	const auto preview = ParseJson(bridge.HandleMessageForTest(
+		"{\"v\":1,\"id\":3,\"type\":\"request\",\"method\":\"library.readImagePreview\",\"params\":{\"path\":\"C:\\\\img.png\"}}"));
+	Check(preview.Find("ok")->boolValue && preview.Find("result")->Find("dataUri")->stringValue == pngDataUri,
+		"library.readImagePreview returns dataUri");
+
+	const fs::path synthVmd = root / "dance.vmd";
+	WriteSyntheticVmd(synthVmd, 1, 0, 0);
+
+	// 2. Import with duplicate title + custom coverDataUri + .mp3 audio
+	const std::string importReq =
+		"{\"v\":1,\"id\":4,\"type\":\"request\",\"method\":\"library.import\",\"params\":{\"request\":{"
+		"\"title\":\"Gimme×Gimme\",\"motionFile\":" + JString(MotionPathToUtf8(synthVmd)) +
+		",\"facialFile\":\"（自动：沿用动作 VMD 内表情）\","
+		"\"cameraFile\":\"（留空）\",\"audioFile\":\"C:\\\\song.mp3\",\"disableMorph\":false,\"clearCamera\":false,"
+		"\"clearAudio\":false,\"fps\":0,\"coverDataUri\":\"" + pngDataUri + "\","
+		"\"timing\":{\"motion\":{\"speed\":1,\"offsetSeconds\":0},\"facial\":{\"speed\":1,\"offsetSeconds\":0},"
+		"\"camera\":{\"speed\":1,\"offsetSeconds\":0},\"audio\":{\"speed\":1,\"offsetSeconds\":0}}}}}";
+	const auto imp = ParseJson(bridge.HandleMessageForTest(importReq));
+	Check(imp.Find("ok")->boolValue, "library.import with mp3 and coverDataUri accepted");
+
+	core.ProcessPendingLibraryCommands(); // starts import
+	core.ProcessPendingLibraryCommands(); // polls completion
+	bridge.OnUiTick();
+
+	Check(Bug5TestFixture::importStarted && core.motions.size() == 2, "new duplicate-title track added alongside existing entry");
+	Check(core.lastImportedKey == "Gimme_Gimme-70f876a6", "lastImportedKey resolves exact new folder id");
+	Check(core.loadedMotionKey == "Gimme_Gimme-70f876a6",
+		"PollImport auto-selects newly imported folder id instead of duplicate-title old entry");
+	const int newIdx = FindPlaylistIndex(core.motions, "Gimme_Gimme-70f876a6");
+	Check(newIdx >= 0 && core.motions[newIdx].hasCover && core.motions[newIdx].coverFile == "cover.png",
+		"imported track persisted cover.png and hasCover=true");
+	Check(fs::is_regular_file(motionsRoot / "Gimme_Gimme-70f876a6" / "cover.png"),
+		"cover.png written to newly imported track folder");
+
+	// Check import.progress event carries importedKey
+	bool sawImportedKeyEvent = false;
+	for (const auto& evJson : events)
+	{
+		const auto ev = ParseJson(evJson);
+		if (ev.Find("name") && ev.Find("name")->stringValue == "import.progress")
+		{
+			const auto* payload = ev.Find("payload");
+			if (payload && payload->Find("importedKey") && payload->Find("importedKey")->stringValue == "Gimme_Gimme-70f876a6")
+				sawImportedKeyEvent = true;
+		}
+	}
+	Check(sawImportedKeyEvent, "import.progress event includes importedKey");
+
+	// 3. Direct library.setCover set & clear on old entry
+	const uint64_t revBeforeCover = core.libraryRevision;
+	const auto setCov = ParseJson(bridge.HandleMessageForTest(
+		"{\"v\":1,\"id\":5,\"type\":\"request\",\"method\":\"library.setCover\","
+		"\"params\":{\"key\":\"Gimme x Gimme\",\"coverDataUri\":\"" + pngDataUri + "\"}}"));
+	Check(setCov.Find("ok")->boolValue && setCov.Find("result")->Find("hasCover")->boolValue,
+		"library.setCover saves cover.png");
+	Check(core.libraryRevision == revBeforeCover + 1, "library.setCover bumps libraryRevision");
+	Check(fs::is_regular_file(motionsRoot / "Gimme x Gimme" / "cover.png"),
+		"library.setCover writes cover.png to track dir");
+
+	const auto clrCov = ParseJson(bridge.HandleMessageForTest(
+		"{\"v\":1,\"id\":6,\"type\":\"request\",\"method\":\"library.setCover\","
+		"\"params\":{\"key\":\"Gimme x Gimme\",\"clear\":true}}"));
+	Check(clrCov.Find("ok")->boolValue && !clrCov.Find("result")->Find("hasCover")->boolValue,
+		"library.setCover clear removes cover");
+	Check(!fs::exists(motionsRoot / "Gimme x Gimme" / "cover.png"),
+		"library.setCover clear deletes cover.png");
+
+	std::error_code ec;
+	fs::remove_all(root, ec);
+}
+
 int main()
 {
 	std::setvbuf(stdout, nullptr, _IONBF, 0);
@@ -1409,6 +1653,8 @@ int main()
 	TestDropPeek();
 	TestClockAudioEffectsAndCovers();
 	TestAudioPluginClientQueryCopiesStruct();
+	TestPlayingTickThrottlingAndClockEvents();
+	TestCoverEditingScreenshotAndDuplicateTitleImport();
 	std::printf("\nweb-panel bridge contracts: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail == 0 ? 0 : 1;
 }

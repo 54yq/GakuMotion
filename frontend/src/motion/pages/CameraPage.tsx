@@ -139,12 +139,12 @@ export function CameraPage() {
               >
                 {active && <span aria-hidden="true" className="absolute inset-x-0 top-0 h-[2px] bg-primary" />}
                 <div className="flex w-full items-center justify-between gap-2">
-                  <span className={cn('text-[13px] font-semibold', active ? 'text-primary' : 'text-foreground')}>
+                  <span className={cn('text-base font-semibold', active ? 'text-primary' : 'text-foreground')}>
                     {item.label}
                   </span>
-                  <Icon className={cn('size-3.5', active ? 'text-primary' : 'text-muted-foreground')} />
+                  <Icon className={cn('size-4', active ? 'text-primary' : 'text-muted-foreground')} />
                 </div>
-                <span className="text-[11px] leading-snug text-muted-foreground">{item.desc}</span>
+                <span className="text-xs leading-snug text-muted-foreground">{item.desc}</span>
               </button>
             )
           })}
@@ -193,7 +193,7 @@ export function CameraPage() {
                   value={[draft.vmdRangeScale]}
                   onValueChange={([value]) => patch({ vmdRangeScale: value })}
                 />
-                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                <p className="text-xs leading-relaxed text-muted-foreground">
                   以角色附近为中心缩小轨迹；会改变构图，不能保证避免穿模。点击下方保存镜头设置可保留。
                 </p>
               </div>
@@ -299,7 +299,7 @@ export function CameraPage() {
       >
         {userMode === 0 && (
           <div className="flex items-center justify-between gap-3 px-3.5 py-2.5">
-            <Label htmlFor="camera-follow-actor" className="cursor-pointer text-[13px] font-medium">
+            <Label htmlFor="camera-follow-actor" className="cursor-pointer text-sm font-medium">
               镜头随角色平移
             </Label>
             <Checkbox
@@ -314,7 +314,7 @@ export function CameraPage() {
         {(userMode === 1 || userMode === 2 || draft.followActor) && (
           <div className="space-y-2 px-3.5 py-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h4 className="text-[13px] font-medium">位移比例（旧版跟随幅度）</h4>
+              <h4 className="text-sm font-medium">位移比例（旧版跟随幅度）</h4>
               <Button
                 variant="outline"
                 size="sm"
@@ -343,7 +343,7 @@ export function CameraPage() {
 
         {(userMode === 1 || userMode === 2) && (
           <div className="space-y-3 px-3.5 py-3">
-            <h4 className="text-[13px] font-medium">注视目标偏移 (Target Offset，相对所选部位)</h4>
+            <h4 className="text-sm font-medium">注视目标偏移 (Target Offset，相对所选部位)</h4>
             <Vector3Field
               labelPrefix="注视偏移"
               value={draft.targetOffset}
@@ -375,7 +375,7 @@ export function CameraPage() {
 
         <div className="space-y-2.5 px-3.5 py-3">
           <div className="flex items-center justify-between gap-3">
-            <Label htmlFor="camera-limit-scene" className="cursor-pointer text-[13px] font-medium">
+            <Label htmlFor="camera-limit-scene" className="cursor-pointer text-sm font-medium">
               限制镜头在场景范围内
             </Label>
             <Checkbox

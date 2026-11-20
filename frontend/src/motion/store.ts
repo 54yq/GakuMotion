@@ -39,6 +39,7 @@ import {
   type ImportProgress,
   type ImportRequest,
   type PerformanceTiming,
+  type LibraryEntry,
   type LibraryState,
   type LoadedState,
   type MotionAppearance,
@@ -48,6 +49,7 @@ import {
   type MotionStateSnapshot,
   type PermissionState,
   type PlayerState,
+  type ScreenshotCapabilities,
   type SolePitchState,
   type SoleSettings,
   type SoleState,
@@ -66,6 +68,7 @@ import {
   classifyImportFiles,
   ensembleUiError,
   isSupportedAudioExtension,
+  isSupportedImageExtension,
   isSupportedLibraryFile,
   validateImportForm,
   validateSole,
@@ -90,6 +93,8 @@ export interface ImportSlotState {
   selection: number
 }
 
+export type ImportCoverMode = 'auto' | 'custom' | 'clear'
+
 export interface ImportFormState {
   open: boolean
   mode: 'new' | 'edit'
@@ -105,8 +110,23 @@ export interface ImportFormState {
   unsupportedAudio: number
   probes: Record<string, VmdProbe>
   audioProbe: AudioProbeInfo | null
+  coverMode: ImportCoverMode
+  coverDataUri: string
   activeTrackWarning: string
   pendingStopAndSave: boolean
+}
+
+export interface CoverEditorState {
+  open: boolean
+  owner: 'library' | 'transport' | 'import'
+  mode: 'track' | 'import'
+  trackKey: string
+  trackTitle: string
+  sourceImageUri: string
+  saving: boolean
+  capturing: boolean
+  screenshotCaps: ScreenshotCapabilities | null
+  error: string
 }
 
 export interface ImportUiState {
@@ -122,7 +142,7 @@ export interface ImportUiState {
   errorDetail: string
 }
 
-export type DialogTarget = 'library-add' | 'append' | ImportSlotKey | 'video'
+export type DialogTarget = 'library-add' | 'append' | ImportSlotKey | 'video' | 'cover-image'
 
 export interface DropUiState {
   visual: 'none' | 'armed' | 'hover' | 'invalid'
@@ -130,6 +150,21 @@ export interface DropUiState {
   accepted: number
   hostElevated: boolean
   hostBlocked: boolean
+}
+
+function emptyCoverEditor(): CoverEditorState {
+  return {
+    open: false,
+    owner: 'library',
+    mode: 'track',
+    trackKey: '',
+    trackTitle: '',
+    sourceImageUri: '',
+    saving: false,
+    capturing: false,
+    screenshotCaps: null,
+    error: '',
+  }
 }
 
 function emptyImportForm(): ImportFormState {
@@ -153,6 +188,8 @@ function emptyImportForm(): ImportFormState {
     unsupportedAudio: 0,
     probes: {},
     audioProbe: null,
+    coverMode: 'auto',
+    coverDataUri: '',
     activeTrackWarning: '',
     pendingStopAndSave: false,
   }
@@ -604,6 +641,7 @@ export interface MotionAppState {
   // ---- Phase 2 UI-local state ----
   importForm: ImportFormState
   importUi: ImportUiState
+  coverEditor: CoverEditorState
   dialogBusy: boolean
   drop: DropUiState
   dropNotice: string
@@ -717,6 +755,7 @@ function initialState(): MotionAppState {
     error: null,
     importForm: emptyImportForm(),
     importUi: emptyImportUi(),
+    coverEditor: emptyCoverEditor(),
     dialogBusy: false,
     drop: { visual: 'none', fileCount: 0, accepted: 0, hostElevated: false, hostBlocked: false },
     dropNotice: '',
@@ -757,11 +796,23 @@ export class MotionStore {
   private dialogId = 0
   private dialogTarget: DialogTarget | null = null
   private dropTimer: ReturnType<typeof setInterval> | null = null
+  private dropWatchCount = 0
   private dropTargetActive = false
   private importUiTimer: ReturnType<typeof setInterval> | null = null
   private soleTimer: ReturnType<typeof setInterval> | null = null
   private solePitchTimer: ReturnType<typeof setInterval> | null = null
   private coverPending = new Set<string>()
+  private coverGeneration = 0
+  private coverQueue: string[] = []
+  private coverWorkersRunning = 0
+  private refreshCoverBustPending = false
+  private pendingImportOutcome: {
+    editKey: string
+    existingIds: Set<string>
+    coverMode: ImportCoverMode
+    coverDataUri: string
+    succeededKey: string | null
+  } | null = null
 
   constructor(bridge?: MotionBridgeClient) {
     this.bridge = bridge ?? null
@@ -813,15 +864,43 @@ export class MotionStore {
         this.set(patch)
       }),
       bridge.on('library.changed', (library) => {
+        const previousEntries = this.state.library.entries
         const selectedKey = this.state.selectedLibraryKey
         const stillPresent = selectedKey !== null && library.entries.some((entry) => entry.id === selectedKey)
         const revisionChanged = library.revision !== this.state.library.revision
-        if (revisionChanged) this.coverPending.clear()
+        let nextCoverCache = this.state.coverCache
+        if (revisionChanged) {
+          this.coverGeneration += 1
+          this.coverPending.clear()
+          this.coverQueue = []
+          if (this.refreshCoverBustPending) {
+            nextCoverCache = {}
+            this.refreshCoverBustPending = false
+          } else {
+            const prevById = new Map(previousEntries.map((item) => [item.id, item]))
+            const nextById = new Map(library.entries.map((item) => [item.id, item]))
+            const filtered: Record<string, string> = {}
+            for (const [key, uri] of Object.entries(this.state.coverCache)) {
+              const nextEntry = nextById.get(key)
+              if (!nextEntry) continue
+              const prevEntry = prevById.get(key)
+              const metaChanged =
+                !prevEntry ||
+                Boolean(prevEntry.hasCover) !== Boolean(nextEntry.hasCover) ||
+                (prevEntry.audioFile ?? '') !== (nextEntry.audioFile ?? '') ||
+                this.pendingImportOutcome?.editKey === key
+              if (!metaChanged) filtered[key] = uri
+            }
+            nextCoverCache = filtered
+          }
+        }
         this.set({
           library,
           selectedLibraryKey: stillPresent ? selectedKey : null,
-          ...(revisionChanged ? { coverCache: {} } : {}),
+          ...(revisionChanged ? { coverCache: nextCoverCache } : {}),
         })
+        this.maybeFinalizeImportSelection(library)
+        this.preloadLibraryCovers(library.entries)
       }),
       bridge.on('loaded.changed', (loaded) => {
         const previous = this.state.loaded
@@ -893,6 +972,7 @@ export class MotionStore {
           // Appearance is optional; keep the default theme.
         }
       }
+      this.preloadLibraryCovers(this.state.library.entries)
       await this.loadPhase2Domains()
     } catch (error) {
       this.set({ ready: true, connected: false, error: error instanceof Error ? error.message : String(error) })
@@ -1234,10 +1314,12 @@ export class MotionStore {
   // ---- Library ----
 
   refreshLibrary = async (): Promise<void> => {
+    this.refreshCoverBustPending = true
     try {
       await this.client().request('library.refresh')
       this.set({ actionError: null })
     } catch (error) {
+      this.refreshCoverBustPending = false
       this.reportActionError(error)
     }
   }
@@ -1590,14 +1672,15 @@ export class MotionStore {
       audio: { ...next.slots.audio, candidates: [...next.slots.audio.candidates] },
     }
     for (const file of files) {
-      const ext = file.slice(file.lastIndexOf('.')).toLowerCase()
+      const dot = file.lastIndexOf('.')
+      const ext = dot >= 0 ? file.slice(dot).toLowerCase() : ''
       if (ext === '.vmd') {
         appendUnique(slots.motion.candidates, file)
         appendUnique(slots.facial.candidates, file)
         appendUnique(slots.camera.candidates, file)
       } else if (ext === '.gkcamera') {
         appendUnique(slots.camera.candidates, file)
-      } else if (ext === '.wav') {
+      } else if (isSupportedAudioExtension(file)) {
         appendUnique(slots.audio.candidates, file)
       }
     }
@@ -1657,7 +1740,20 @@ export class MotionStore {
         form.slots.audio.candidates.push(IMPORT_SLOT.keepTrack)
         form.slots.audio.selection = 1
       }
+      const existingCover = this.state.coverCache[info.key] ?? ''
+      if (existingCover) {
+        form.coverDataUri = existingCover
+      }
       this.set({ importForm: form, actionError: null })
+      if ((info.hasCover || info.hasAudio) && !existingCover) {
+        void this.ensureTrackCover(info.key).then(() => {
+          const cur = this.state.importForm
+          if (cur.open && cur.mode === 'edit' && cur.editKey === info.key && cur.coverMode === 'auto') {
+            const loadedCover = this.state.coverCache[info.key] ?? ''
+            if (loadedCover) this.set({ importForm: { ...this.state.importForm, coverDataUri: loadedCover } })
+          }
+        })
+      }
     } catch (error) {
       if (error instanceof BridgeError && error.code === 'stale_revision') {
         this.set({ actionError: '曲库已变化，请刷新后重试。' })
@@ -1684,7 +1780,8 @@ export class MotionStore {
       if (!list.includes(item)) list.push(item)
     }
     for (const file of files) {
-      const ext = file.slice(file.lastIndexOf('.')).toLowerCase()
+      const dot = file.lastIndexOf('.')
+      const ext = dot >= 0 ? file.slice(dot).toLowerCase() : ''
       if (ext === '.vmd') {
         appendUnique(slots.motion.candidates, file)
         appendUnique(slots.facial.candidates, file)
@@ -1756,22 +1853,299 @@ export class MotionStore {
   }
 
   ensureTrackCover = async (key: string): Promise<void> => {
-    if (!key || !this.supports('library.getCover')) return
+    if (!key) return
     if (Object.prototype.hasOwnProperty.call(this.state.coverCache, key) || this.coverPending.has(key)) return
     const entry = this.state.library.entries.find((item) => item.id === key)
-    if (!entry?.hasCover) return
+    if (!entry) return
+    if (!entry.hasCover && !entry.hasAudio) {
+      this.set({ coverCache: { ...this.state.coverCache, [key]: '' } })
+      return
+    }
+    if (!this.supports('library.getCover')) return
+    const generation = this.coverGeneration
     this.coverPending.add(key)
     try {
       const res = await this.client().request('library.getCover', { key })
-      if (res.hasCover && res.coverDataUri) {
-        this.set({ coverCache: { ...this.state.coverCache, [key]: res.coverDataUri } })
-      } else {
-        this.set({ coverCache: { ...this.state.coverCache, [key]: '' } })
-      }
+      if (generation !== this.coverGeneration) return
+      if (!this.state.library.entries.some((item) => item.id === key)) return
+      const uri = res.hasCover && res.coverDataUri ? res.coverDataUri : ''
+      this.set({ coverCache: { ...this.state.coverCache, [key]: uri } })
     } catch {
       // Leave cache clean on transient bridge error so it can retry later.
     } finally {
       this.coverPending.delete(key)
+    }
+  }
+
+  preloadLibraryCovers = (entries: LibraryEntry[], priorityIds: string[] = []): void => {
+    if (!this.supports('library.getCover') || entries.length === 0) return
+    const entryById = new Map(entries.map((item) => [item.id, item]))
+    const orderedIds: string[] = []
+    const seen = new Set<string>()
+    const enqueueIfNeeded = (id: string | null | undefined) => {
+      if (!id || seen.has(id)) return
+      seen.add(id)
+      const entry = entryById.get(id)
+      if (!entry || (!entry.hasCover && !entry.hasAudio)) return
+      if (
+        Object.prototype.hasOwnProperty.call(this.state.coverCache, id) ||
+        this.coverPending.has(id) ||
+        this.coverQueue.includes(id)
+      ) {
+        return
+      }
+      orderedIds.push(id)
+    }
+
+    enqueueIfNeeded(this.state.loaded.motionKey)
+    enqueueIfNeeded(this.state.selectedLibraryKey)
+    for (const id of priorityIds) enqueueIfNeeded(id)
+    for (const entry of entries) enqueueIfNeeded(entry.id)
+
+    if (orderedIds.length === 0) return
+    this.coverQueue.push(...orderedIds)
+
+    const CONCURRENCY = 5
+    const spawnWorker = () => {
+      this.coverWorkersRunning += 1
+      void (async () => {
+        try {
+          while (this.started && this.coverQueue.length > 0) {
+            const nextId = this.coverQueue.shift()
+            if (!nextId) continue
+            await this.ensureTrackCover(nextId)
+          }
+        } finally {
+          this.coverWorkersRunning -= 1
+        }
+      })()
+    }
+    while (this.coverWorkersRunning < CONCURRENCY && this.coverQueue.length > 0) {
+      spawnWorker()
+    }
+  }
+
+  setImportCover = (coverMode: ImportCoverMode, coverDataUri = ''): void => {
+    this.set({
+      importForm: {
+        ...this.state.importForm,
+        coverMode,
+        coverDataUri: coverMode === 'clear' ? '' : coverDataUri,
+      },
+    })
+  }
+
+  openCoverEditorForTrack = (key: string, owner: 'library' | 'transport' = 'library'): void => {
+    const entry = this.state.library.entries.find((item) => item.id === key)
+    if (!entry) return
+    const cached = this.state.coverCache[key] ?? ''
+    this.set({
+      coverEditor: {
+        ...emptyCoverEditor(),
+        open: true,
+        owner,
+        mode: 'track',
+        trackKey: entry.id,
+        trackTitle: entry.title,
+        sourceImageUri: cached,
+      },
+    })
+    this.syncDropTarget()
+    if (!cached && (entry.hasCover || entry.hasAudio)) {
+      void this.ensureTrackCover(entry.id).then(() => {
+        const cur = this.state.coverEditor
+        if (cur.open && cur.mode === 'track' && cur.trackKey === entry.id && !cur.sourceImageUri) {
+          const loaded = this.state.coverCache[entry.id] ?? ''
+          if (loaded) this.set({ coverEditor: { ...this.state.coverEditor, sourceImageUri: loaded } })
+        }
+      })
+    }
+    void this.refreshScreenshotCapabilities()
+  }
+
+  openCoverEditorForImport = (): void => {
+    const form = this.state.importForm
+    if (!form.open) return
+    const initial =
+      form.coverMode === 'custom'
+        ? form.coverDataUri
+        : form.coverMode === 'auto'
+          ? form.audioProbe?.hasCover && form.audioProbe.coverDataUri
+            ? form.audioProbe.coverDataUri
+            : form.coverDataUri
+          : ''
+    this.set({
+      coverEditor: {
+        ...emptyCoverEditor(),
+        open: true,
+        owner: 'import',
+        mode: 'import',
+        trackKey: form.editKey,
+        trackTitle: form.title || '新导入曲目',
+        sourceImageUri: initial,
+      },
+    })
+    this.syncDropTarget()
+    void this.refreshScreenshotCapabilities()
+  }
+
+  closeCoverEditor = (): void => {
+    this.set({ coverEditor: emptyCoverEditor() })
+    this.syncDropTarget()
+  }
+
+  setCoverEditorImageUri = (uri: string): void => {
+    this.set({
+      coverEditor: {
+        ...this.state.coverEditor,
+        sourceImageUri: uri,
+        error: '',
+      },
+    })
+  }
+
+  setCoverEditorError = (error: string): void => {
+    if (!this.state.coverEditor.open) return
+    this.set({
+      coverEditor: {
+        ...this.state.coverEditor,
+        error,
+      },
+    })
+  }
+
+  refreshScreenshotCapabilities = async (): Promise<void> => {
+    if (!this.supports('screenshot.capabilities')) {
+      this.set({
+        coverEditor: {
+          ...this.state.coverEditor,
+          screenshotCaps: {
+            available: false,
+            runtimeReady: false,
+            cameraAvailable: false,
+            windowWidth: 0,
+            windowHeight: 0,
+            notice: '当前桥接不支持 ScreenshotManager 拍照联动',
+          },
+        },
+      })
+      return
+    }
+    try {
+      const caps = await this.client().request('screenshot.capabilities')
+      if (!this.state.coverEditor.open) return
+      this.set({ coverEditor: { ...this.state.coverEditor, screenshotCaps: caps } })
+    } catch {
+      if (!this.state.coverEditor.open) return
+      this.set({
+        coverEditor: {
+          ...this.state.coverEditor,
+          screenshotCaps: {
+            available: false,
+            runtimeReady: false,
+            cameraAvailable: false,
+            windowWidth: 0,
+            windowHeight: 0,
+            notice: 'ScreenshotManager 联动服务暂不可用',
+          },
+        },
+      })
+    }
+  }
+
+  captureScreenshotForCover = async (): Promise<void> => {
+    if (!this.supports('screenshot.capture') || this.state.coverEditor.capturing) return
+    this.set({ coverEditor: { ...this.state.coverEditor, capturing: true, error: '' } })
+    try {
+      const res = await this.client().request('screenshot.capture')
+      if (!this.state.coverEditor.open) return
+      this.set({
+        coverEditor: {
+          ...this.state.coverEditor,
+          capturing: false,
+          sourceImageUri: res.dataUri,
+          error: '',
+        },
+      })
+    } catch (error) {
+      if (!this.state.coverEditor.open) return
+      this.set({
+        coverEditor: {
+          ...this.state.coverEditor,
+          capturing: false,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      })
+    }
+  }
+
+  saveCoverEditor = async (croppedPngDataUri: string): Promise<void> => {
+    const editor = this.state.coverEditor
+    if (!editor.open || editor.saving || !croppedPngDataUri) return
+    if (editor.mode === 'import') {
+      this.setImportCover('custom', croppedPngDataUri)
+      this.closeCoverEditor()
+      return
+    }
+    if (!this.supports('library.setCover')) {
+      this.set({ coverEditor: { ...editor, error: '当前原生桥接不支持保存封面（library.setCover）' } })
+      return
+    }
+    this.set({ coverEditor: { ...editor, saving: true, error: '' } })
+    try {
+      const res = await this.client().request('library.setCover', {
+        key: editor.trackKey,
+        coverDataUri: croppedPngDataUri,
+      })
+      const thumb = res.coverDataUri || croppedPngDataUri
+      this.coverGeneration += 1
+      this.coverPending.delete(editor.trackKey)
+      this.set({
+        coverCache: { ...this.state.coverCache, [editor.trackKey]: thumb },
+        coverEditor: emptyCoverEditor(),
+        actionError: null,
+      })
+    } catch (error) {
+      this.set({
+        coverEditor: {
+          ...this.state.coverEditor,
+          saving: false,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      })
+    }
+  }
+
+  clearCoverFromEditor = async (): Promise<void> => {
+    const editor = this.state.coverEditor
+    if (!editor.open || editor.saving) return
+    if (editor.mode === 'import') {
+      this.setImportCover('clear', '')
+      this.closeCoverEditor()
+      return
+    }
+    if (!this.supports('library.setCover')) {
+      this.set({ coverEditor: { ...editor, error: '当前原生桥接不支持清除封面（library.setCover）' } })
+      return
+    }
+    this.set({ coverEditor: { ...editor, saving: true, error: '' } })
+    try {
+      await this.client().request('library.setCover', { key: editor.trackKey, clear: true })
+      this.coverGeneration += 1
+      this.coverPending.delete(editor.trackKey)
+      this.set({
+        coverCache: { ...this.state.coverCache, [editor.trackKey]: '' },
+        coverEditor: emptyCoverEditor(),
+        actionError: null,
+      })
+    } catch (error) {
+      this.set({
+        coverEditor: {
+          ...this.state.coverEditor,
+          saving: false,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      })
     }
   }
 
@@ -1908,6 +2282,13 @@ export class MotionStore {
       if (picks.audio === IMPORT_SLOT.skip) request.clearAudio = true
       else if (isDisk(picks.audio)) request.audioFile = picks.audio
     }
+    if (form.coverMode === 'clear') {
+      request.clearCover = true
+    } else if (form.coverMode === 'custom' && form.coverDataUri) {
+      request.coverDataUri = form.coverDataUri
+    } else if (form.mode === 'new' && form.audioProbe?.hasCover && form.audioProbe.coverDataUri) {
+      request.coverDataUri = form.audioProbe.coverDataUri
+    }
     return request
   }
 
@@ -1922,10 +2303,19 @@ export class MotionStore {
       })
       return
     }
+    const formSnapshot = this.state.importForm
     const request = this.buildImportRequest()
+    this.pendingImportOutcome = {
+      editKey: formSnapshot.mode === 'edit' ? formSnapshot.editKey : '',
+      existingIds: new Set(this.state.library.entries.map((entry) => entry.id)),
+      coverMode: formSnapshot.coverMode,
+      coverDataUri: request.coverDataUri ?? '',
+      succeededKey: null,
+    }
     try {
       await this.client().request('library.import', { request })
     } catch (error) {
+      this.pendingImportOutcome = null
       this.reportActionError(error)
       return
     }
@@ -1974,15 +2364,60 @@ export class MotionStore {
 
   // ---- Global import progress modal (fix-issue-5 semantics) ----
 
+  private maybeFinalizeImportSelection(library: LibraryState): void {
+    const pending = this.pendingImportOutcome
+    if (!pending) return
+    let targetKey = ''
+    if (pending.succeededKey && library.entries.some((entry) => entry.id === pending.succeededKey)) {
+      targetKey = pending.succeededKey
+    } else if (pending.editKey !== '') {
+      if (pending.succeededKey === null) return
+      if (library.entries.some((entry) => entry.id === pending.editKey)) {
+        targetKey = pending.editKey
+      }
+    } else {
+      const added = library.entries.find((entry) => !pending.existingIds.has(entry.id))
+      if (added) targetKey = added.id
+    }
+    if (!targetKey) return
+    const isNew = pending.editKey === ''
+    const customCover = pending.coverMode === 'custom' ? pending.coverDataUri : ''
+    this.pendingImportOutcome = null
+    const patch: Partial<MotionAppState> = { selectedLibraryKey: targetKey }
+    if (customCover) {
+      patch.coverCache = { ...this.state.coverCache, [targetKey]: customCover }
+    }
+    this.set(patch)
+    if (
+      isNew &&
+      this.state.loaded.motionKey !== targetKey &&
+      !this.state.ensemble.active &&
+      this.state.player.state !== 'playing' &&
+      this.supports('library.select')
+    ) {
+      void this.selectMotion(targetKey, false)
+    }
+  }
+
   private onImportProgress(importProgress: ImportProgress): void {
     this.set({ importProgress })
     const ui = this.state.importUi
-    if (!ui.visible) return
     const now = Date.now()
+    const staleSuccess =
+      ui.visible && ui.awaitingStart && importProgress.finished && importProgress.succeeded && now < ui.startTime + 250
+    if (!staleSuccess && importProgress.finished) {
+      if (importProgress.succeeded) {
+        if (this.pendingImportOutcome) {
+          this.pendingImportOutcome.succeededKey = importProgress.importedKey || this.pendingImportOutcome.editKey || ''
+          this.maybeFinalizeImportSelection(this.state.library)
+        }
+      } else {
+        this.pendingImportOutcome = null
+      }
+    }
+    if (!ui.visible) return
     const next = { ...ui, lastProgress: importProgress }
     if (importProgress.active) next.awaitingStart = false
-    const staleSuccess =
-      ui.awaitingStart && importProgress.finished && importProgress.succeeded && now < ui.startTime + 250
     if (!staleSuccess && importProgress.finished) {
       next.awaitingStart = false
       if (importProgress.succeeded) {
@@ -2160,7 +2595,9 @@ export class MotionStore {
               ? 3
               : target === 'audio'
                 ? 4
-                : 5
+                : target === 'cover-image'
+                  ? 6
+                  : 5
     const multiple = target === 'library-add' || target === 'append'
     try {
       const { dialogId } = await this.client().request('dialog.pickFile', { kind, multiple })
@@ -2185,6 +2622,7 @@ export class MotionStore {
         if (target === 'library-add') await this.openImportNew(result.paths)
         else if (target === 'append') await this.importAppendFiles(result.paths)
         else if (target === 'video') this.set({ studioVideoPath: result.paths[0] })
+        else if (target === 'cover-image') await this.loadCoverPreviewFromPath(result.paths[0])
         else if (target) await this.importPickSlotFile(target, result.paths[0])
       } else if (result.state === 'failed' && result.notice !== '') {
         this.set({ actionError: result.notice })
@@ -2192,6 +2630,29 @@ export class MotionStore {
     } catch (error) {
       this.finishDialog()
       this.reportActionError(error)
+    }
+  }
+
+  loadCoverPreviewFromPath = async (path: string): Promise<void> => {
+    if (!path) return
+    if (!this.supports('library.readImagePreview')) {
+      this.setCoverEditorError('当前原生桥接不支持读取本地图片预览（library.readImagePreview）')
+      return
+    }
+    try {
+      const { dataUri } = await this.client().request('library.readImagePreview', { path })
+      if (dataUri) this.setCoverEditorImageUri(dataUri)
+    } catch (error) {
+      if (this.state.coverEditor.open) {
+        this.set({
+          coverEditor: {
+            ...this.state.coverEditor,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        })
+      } else {
+        this.reportActionError(error)
+      }
     }
   }
 
@@ -2207,15 +2668,30 @@ export class MotionStore {
 
   canAcceptDrop = (): boolean => {
     const state = this.state
+    if (!state.permission.injectionAllowed) return false
+    if (state.importProgress?.active === true) return false
+    if (state.dialogBusy || state.pendingDelete !== null) return false
+    if (state.coverEditor.open) {
+      return !state.coverEditor.saving && !state.coverEditor.capturing
+    }
     return (
-      state.permission.injectionAllowed &&
       state.page === 'library' &&
-      state.importProgress?.active !== true &&
       !state.library.refreshing &&
-      !state.dialogBusy &&
-      !state.importForm.open &&
-      state.pendingDelete === null
+      !state.importForm.open
     )
+  }
+
+  retainDropWatch = (): void => {
+    this.dropWatchCount += 1
+    this.startDropWatch()
+    this.syncDropTarget()
+  }
+
+  releaseDropWatch = (): void => {
+    this.dropWatchCount = Math.max(0, this.dropWatchCount - 1)
+    if (this.dropWatchCount === 0) {
+      this.stopDropWatch()
+    }
   }
 
   startDropWatch = (): void => {
@@ -2271,6 +2747,15 @@ export class MotionStore {
   }
 
   handleDropFiles = (files: string[]): void => {
+    if (this.state.coverEditor.open) {
+      const imagePath = files.find((file) => isSupportedImageExtension(file))
+      if (!imagePath) {
+        this.setCoverEditorError('仅支持拖入图片文件（.png / .jpg / .jpeg / .webp / .bmp）。')
+        return
+      }
+      void this.loadCoverPreviewFromPath(imagePath)
+      return
+    }
     const accepted: string[] = []
     let ignored = 0
     for (const file of files) {
@@ -2281,7 +2766,7 @@ export class MotionStore {
       if (!accepted.includes(file)) accepted.push(file)
     }
     if (accepted.length === 0) {
-      this.set({ dropNotice: '未找到可添加的文件。请拖入 VMD、GKCamera 或 WAV 文件；不支持拖入文件夹。' })
+      this.set({ dropNotice: '未找到可添加的文件。请拖入 VMD、GKCamera 或音频文件（.mp3/.flac/.wav/.ogg/.m4a/.aac/.opus）；不支持拖入文件夹。' })
       return
     }
     this.set({ dropNotice: ignored > 0 ? `已忽略 ${ignored} 个不支持或无法读取的文件。` : '' })
@@ -2674,6 +3159,7 @@ export class MotionStore {
       clearInterval(this.dropTimer)
       this.dropTimer = null
     }
+    this.dropWatchCount = 0
     this.dropTargetActive = false
     this.dialogTarget = null
   }
@@ -2691,6 +3177,11 @@ export class MotionStore {
     this.pendingVolume = null
     this.pendingFacial = null
     this.coverPending.clear()
+    this.coverQueue = []
+    this.coverWorkersRunning = 0
+    this.coverGeneration += 1
+    this.refreshCoverBustPending = false
+    this.pendingImportOutcome = null
     this.bridge = null
     this.started = false
     this.state = initialState()

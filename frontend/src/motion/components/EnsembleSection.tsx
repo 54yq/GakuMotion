@@ -102,14 +102,14 @@ export function EnsembleSection() {
               )}
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <label className="flex items-center gap-2 text-sm font-semibold">
+                <label className="flex items-center gap-2 text-base font-semibold">
                   <Checkbox
                     checked={slot.enabled}
                     onCheckedChange={(checked) => motionStore.patchEnsembleSlot(index, { enabled: checked === true })}
                   />
                   使用 {ENSEMBLE_SLOT_NAMES[index]}
                 </label>
-                <div className="flex items-center gap-1 text-[10px]">
+                <div className="flex items-center gap-1 text-micro">
                   {isMaster && (
                     <span className="rounded bg-primary/15 px-1.5 py-0.5 font-medium text-primary">主槽</span>
                   )}
@@ -145,7 +145,7 @@ export function EnsembleSection() {
                       ))}
                     </SelectContent>
                   </Select>
-                  <span className="block text-[11px] text-muted-foreground">{slot.actorHint || '不绑定角色'}</span>
+                  <span className="block text-xs text-muted-foreground">{slot.actorHint || '不绑定角色'}</span>
                 </div>
 
                 <div className="space-y-1">

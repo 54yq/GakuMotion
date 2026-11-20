@@ -37,7 +37,7 @@ export function PropertySection({
           <div className="min-w-0 flex-1 space-y-0.5">
             {title && (
               <div className="flex flex-wrap items-center gap-2">
-                <h3 className="text-xs font-semibold tracking-wide text-foreground">{title}</h3>
+                <h3 className="text-base font-semibold tracking-wide text-foreground">{title}</h3>
                 {badge}
               </div>
             )}
@@ -106,7 +106,7 @@ export function CollapsiblePropertySection({
         <div className="min-w-0 flex-1 space-y-0.5">
           <div className="flex flex-wrap items-center gap-2">
             <RiArrowRightSFill className="size-4 text-muted-foreground transition-transform duration-150 group-data-[state=open]:rotate-90" />
-            <span className="text-xs font-semibold text-foreground">{title}</span>
+            <span className="text-base font-semibold text-foreground">{title}</span>
             {badge}
           </div>
           {description && <p className="pl-5 text-xs text-muted-foreground">{description}</p>}
@@ -136,11 +136,11 @@ export function PropertyRow({ label, description, htmlFor, className, children }
     <div className={cn('flex flex-wrap items-center justify-between gap-3 px-3.5 py-2.5', className)}>
       <div className="min-w-0 flex-1 space-y-0.5">
         {htmlFor ? (
-          <label htmlFor={htmlFor} className="block cursor-pointer text-[13px] font-medium text-foreground">
+          <label htmlFor={htmlFor} className="block cursor-pointer text-sm font-medium text-foreground">
             {label}
           </label>
         ) : (
-          <div className="text-[13px] font-medium text-foreground">{label}</div>
+          <div className="text-sm font-medium text-foreground">{label}</div>
         )}
         {description && <p className="text-xs text-muted-foreground">{description}</p>}
       </div>

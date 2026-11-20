@@ -37,14 +37,14 @@ import { DeveloperPage } from '../pages/DeveloperPage'
 
 function BootScreen({ error, canReconnect }: { error: string | null; canReconnect: boolean }) {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-muted-foreground">
+    <div className="flex h-full w-full flex-col items-center justify-center gap-4 bg-background p-6 text-muted-foreground">
       {error ? (
         <div className="flex max-w-md flex-col items-center gap-3 rounded-xl border bg-card/85 p-6 text-center shadow-sm">
           <div className="flex size-11 items-center justify-center rounded-full bg-destructive/15 text-destructive">
             <RiPlugFill className="size-5" />
           </div>
           <div className="space-y-1">
-            <p className="text-sm font-medium text-foreground">GakuMotion 原生桥接不可用</p>
+            <p className="text-base font-medium text-foreground">GakuMotion 原生桥接不可用</p>
             <p className="text-xs leading-relaxed text-muted-foreground">{error}</p>
           </div>
           {canReconnect && (
@@ -57,7 +57,7 @@ function BootScreen({ error, canReconnect }: { error: string | null; canReconnec
       ) : (
         <div className="flex flex-col items-center gap-2.5">
           <RiLoader4Fill className="size-7 animate-spin text-primary" />
-          <p className="text-sm">正在连接 GakuMotion…</p>
+          <p className="text-base">正在连接 GakuMotion…</p>
         </div>
       )}
     </div>
@@ -119,7 +119,7 @@ function PreviewFontStats({ appearance }: { appearance: { theme: number; uiScale
   const effectivePx = stats.bodyPx * appearance.uiScale
   return (
     <span
-      className="inline-flex h-6 items-center rounded border bg-background/80 px-2 font-mono text-[11px] text-muted-foreground"
+      className="inline-flex h-6 items-center rounded border bg-background/80 px-2 font-mono text-micro text-muted-foreground"
       data-testid="preview-font-stats"
       title={`html: ${stats.rootPx.toFixed(1)}px | body: ${stats.bodyPx.toFixed(1)}px | zoom: ${Math.round(appearance.uiScale * 100)}% | DPR: ${stats.dpr.toFixed(2)}`}
     >
@@ -376,13 +376,20 @@ export default function MotionApp() {
   const permission = useMotionStore((state) => state.permission)
   const appearance = useMotionStore((state) => state.appearance)
   const page = useMotionStore((state) => state.page)
-  const textInputSupported = useMotionStore((state) => state.capabilities.includes('shell.setTextInputActive'))
+  const capabilities = useMotionStore((state) => state.capabilities)
+  const textInputSupported = capabilities.includes('shell.setTextInputActive')
   const standalonePreview = isStandalonePreview()
   const mainScrollRef = React.useRef<HTMLDivElement>(null)
 
   React.useEffect(() => {
     void motionStore.start()
   }, [])
+
+  React.useEffect(() => {
+    if (!ready || !connected || !permission.injectionAllowed) return
+    motionStore.retainDropWatch()
+    return () => motionStore.releaseDropWatch()
+  }, [ready, connected, permission.injectionAllowed, capabilities])
 
   React.useEffect(() => {
     if (mainScrollRef.current) mainScrollRef.current.scrollTop = 0
@@ -398,7 +405,7 @@ export default function MotionApp() {
         <BootScreen error={error ?? (ready ? '桥已断开' : null)} canReconnect={ready} />
       ) : (
         <TooltipProvider delayDuration={250}>
-          <div className="relative flex h-full flex-col overflow-hidden">
+          <div className="relative flex h-full w-full flex-col overflow-hidden bg-background text-foreground">
             {bridgeKind === 'mock' && (
               <Alert variant="warning" className="rounded-none border-x-0 border-t-0 py-1.5" data-testid="mock-banner">
                 <RiFlaskFill className="size-4" />
@@ -421,9 +428,9 @@ export default function MotionApp() {
               <>
                 <div className="flex min-h-0 flex-1 overflow-hidden">
                   <MotionSidebar />
-                  <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+                  <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
                     <MotionStatusBar />
-                    <div ref={mainScrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+                    <div ref={mainScrollRef} className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
                       <MotionErrorBoundary
                         scope="page"
                         resetKey={page}

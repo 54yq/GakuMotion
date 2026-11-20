@@ -7,6 +7,22 @@
  * preserving full fidelity across GakuLoader's five host ImGui themes (GakuUiTheme 0..4).
  */
 @layer base {
+  :where(:root) {
+    --gaku-font-sans: 'Microsoft YaHei UI', 'PingFang SC', 'Segoe UI', system-ui, sans-serif;
+    --gaku-font-mono: 'Cascadia Mono', 'Consolas', monospace;
+    --gaku-text-micro: 11px;
+    --gaku-text-xs: 12px;
+    --gaku-text-sm: 13px;
+    --gaku-text-base: 14px;
+    --gaku-text-md: 15px;
+    --gaku-text-lg: 18px;
+    --gaku-text-title: 22px;
+    --gaku-row-height: 56px;
+    --gaku-control-height: 34px;
+    --gaku-cover-row: 42px;
+    --gaku-cover-player: 48px;
+  }
+
   :root,
   [data-theme='dark'] {
     --background: 222 12% 11%;
@@ -191,14 +207,22 @@
   html,
   body,
   #root {
+    width: 100%;
     height: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+    background-color: hsl(var(--background));
   }
   body {
     @apply bg-background text-foreground font-sans antialiased;
-    font-family: "Segoe UI", Arial, "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+    font-family: var(--gaku-font-sans, 'Microsoft YaHei UI', 'PingFang SC', 'Segoe UI', system-ui, sans-serif);
     margin: 0;
+    padding: 0;
     overflow: hidden;
-    font-size: 13px;
+    font-size: var(--gaku-text-base, 14px);
+    line-height: 1.45;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }

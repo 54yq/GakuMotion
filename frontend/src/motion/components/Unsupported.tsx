@@ -8,7 +8,7 @@ export function PendingBadge({ className, label = '待迁移' }: { className?: s
   return (
     <Badge
       variant="outline"
-      className={cn('border-warning/60 bg-warning/10 text-warning text-[10px] px-1.5 py-0', className)}
+      className={cn('border-warning/60 bg-warning/10 text-warning text-micro px-1.5 py-0', className)}
       title="原生方法尚未实现，功能不可用"
     >
       {label}

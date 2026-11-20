@@ -20,7 +20,7 @@ export function ImportProgressModal() {
         {isError ? (
           <div className="space-y-3">
             <p className="text-sm text-destructive">导入遇到错误，曲目未导入或保持原状。</p>
-            <pre className="max-h-40 overflow-auto rounded border bg-muted p-2 text-xs whitespace-pre-wrap">
+            <pre className="max-h-40 overflow-auto rounded border bg-muted p-2 text-xs whitespace-pre-wrap break-all [overflow-wrap:anywhere]">
               {ui.errorDetail || '无详细信息'}
             </pre>
             <Button size="sm" onClick={() => motionStore.closeImportError()}>关闭</Button>

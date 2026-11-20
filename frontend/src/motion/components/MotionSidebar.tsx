@@ -38,7 +38,7 @@ export function MotionSidebar() {
         aria-current={active ? 'page' : undefined}
         onClick={() => motionStore.setPage(page)}
         className={cn(
-          'relative h-8 w-full justify-start gap-2.5 rounded-md px-2.5 text-[13px] transition-colors',
+          'relative h-10 w-full justify-start gap-3 rounded-lg px-3 text-base transition-colors',
           active
             ? 'bg-sidebar-accent font-semibold text-sidebar-accent-foreground'
             : 'font-normal text-sidebar-foreground/85 hover:bg-foreground/[0.06] hover:text-sidebar-foreground',
@@ -47,16 +47,16 @@ export function MotionSidebar() {
         {active && (
           <span
             aria-hidden="true"
-            className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r bg-primary"
+            className="absolute left-0 top-2 bottom-2 w-[3px] rounded-r bg-primary"
           />
         )}
-        <Icon className={cn('size-4 shrink-0', active ? 'text-primary' : 'text-muted-foreground')} />
+        <Icon className={cn('size-[18px] shrink-0', active ? 'text-primary' : 'text-muted-foreground')} />
         <span className="truncate">{label}</span>
         {badgeText && (
           <span
             aria-hidden="true"
             className={cn(
-              'ml-auto rounded-[4px] px-1.5 py-0.5 text-[10px] font-medium leading-none tabular-nums',
+              'ml-auto rounded-[4px] px-1.5 py-0.5 text-micro font-medium leading-none tabular-nums',
               active ? 'bg-primary/15 text-primary' : 'text-muted-foreground',
             )}
           >
@@ -69,25 +69,25 @@ export function MotionSidebar() {
 
   return (
     <nav
-      className="flex w-[160px] shrink-0 flex-col bg-sidebar px-2 py-2.5"
+      className="flex w-[212px] shrink-0 flex-col bg-sidebar px-3 py-3"
       aria-label="主导航"
       data-testid="motion-sidebar"
     >
       {/* Brand header — original ImGui Light / Dark wordmark */}
-      <div className="mb-2.5 flex items-center px-1.5 pt-0.5">
+      <div className="mb-3.5 flex items-center px-2 pt-0.5">
         <img
           src={isLightTheme ? wordmarkLight : wordmarkDark}
           alt="GakuMotion"
-          className="h-10 w-auto select-none object-contain"
+          className="h-11 w-auto select-none object-contain"
           draggable={false}
         />
       </div>
 
       {/* Music & Stage workspace */}
-      <div className="px-2 pb-1 text-[10px] font-medium tracking-wider text-muted-foreground/80">
+      <div className="px-2.5 pb-1.5 text-xs font-medium tracking-wider text-muted-foreground/80">
         演出工作区
       </div>
-      <div className="flex flex-col gap-0.5">
+      <div className="flex flex-col gap-1">
         {PRIMARY_NAV.map((item) =>
           renderItem(
             item.page,
@@ -103,7 +103,7 @@ export function MotionSidebar() {
       </div>
 
       {/* System & developer bottom rail */}
-      <div className="mt-auto space-y-0.5 pt-2">
+      <div className="mt-auto space-y-1 pt-2">
         {renderItem('settings', '设置', RiSettings3Fill)}
         {developerMode && renderItem('developer', '[开发]', RiFlaskFill)}
       </div>

@@ -296,10 +296,16 @@ function cleanTitleSuffix(title: string): string {
 }
 
 // Supported local audio formats (decoded via GakuAudio miniaudio / Media Foundation).
-export const SUPPORTED_AUDIO_EXTS = ['.wav', '.mp3', '.flac', '.ogg', '.oga', '.m4a', '.aac', '.opus'] as const
+export const SUPPORTED_AUDIO_EXTS = ['.wav', '.mp3', '.flac', '.ogg', '.oga', '.m4a', '.aac', '.opus', '.wma'] as const
 
 export function isSupportedAudioExtension(path: string): boolean {
   return (SUPPORTED_AUDIO_EXTS as readonly string[]).includes(fileExt(path))
+}
+
+export const SUPPORTED_IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.bmp'] as const
+
+export function isSupportedImageExtension(path: string): boolean {
+  return (SUPPORTED_IMAGE_EXTS as readonly string[]).includes(fileExt(path))
 }
 
 // ClassifyImportFiles port: probes are supplied by the caller (native probe or

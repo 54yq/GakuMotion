@@ -64,6 +64,8 @@ typedef struct GakuMotionClockServiceV1 {
     GakuStatus (*recordingStop)(void* context, uint64_t leaseId);
     GakuStatus (*notifyFrameRendered)(void* context, uint64_t leaseId, uint64_t evaluatedFrameSerial,
         uint32_t advanceFrames);
+    GakuStatus (*beginOffscreenCapture)(void* context);
+    GakuStatus (*endOffscreenCapture)(void* context);
 } GakuMotionClockServiceV1;
 
 #ifdef __cplusplus

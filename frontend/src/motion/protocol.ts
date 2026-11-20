@@ -233,6 +233,16 @@ export interface ImportProgress {
   stage: string
   statusText: string
   errorDetail: string
+  importedKey?: string
+}
+
+export interface ScreenshotCapabilities {
+  available: boolean
+  runtimeReady: boolean
+  cameraAvailable: boolean
+  windowWidth: number
+  windowHeight: number
+  notice: string
 }
 
 export interface MotionAppearance {
@@ -321,6 +331,8 @@ export interface ImportRequest {
   disableMorph: boolean
   clearCamera: boolean
   clearAudio: boolean
+  coverDataUri?: string
+  clearCover?: boolean
   fps: number
   sourceFps?: number
   rebakeOutput?: boolean
@@ -616,6 +628,13 @@ export interface MotionMethods {
   'library.startEdit': { params: { key: string; revision: number }; result: EditEntryInfo }
   'library.probeAudio': { params: { path: string; includeCover?: boolean }; result: AudioProbeInfo }
   'library.getCover': { params: { key?: string; directory?: string }; result: { hasCover: boolean; coverDataUri: string } }
+  'library.setCover': {
+    params: { key: string; coverDataUri?: string; clear?: boolean }
+    result: { hasCover: boolean; coverDataUri: string; revision: number }
+  }
+  'library.readImagePreview': { params: { path: string }; result: { dataUri: string } }
+  'screenshot.capabilities': { params: void; result: ScreenshotCapabilities }
+  'screenshot.capture': { params: void; result: { dataUri: string; width: number; height: number } }
   'clock.setRunMode': { params: { runMode: ClockRunMode }; result: ClockState }
   'clock.configure': { params: { source?: ClockSource; fpsNumerator?: number; fpsDenominator?: number }; result: ClockState }
   'audioEffect.set': { params: { presetId: string }; result: AudioEffectState }
@@ -795,7 +814,7 @@ export const DEFAULT_PLAYER_STATE: PlayerState = {
 // ---- Phase 2 constants ----
 
 // dialog.pickFile kind codes (wire numbers, filters match GuiOverlayCommon.hpp).
-export const DIALOG_KIND = { all: 0, motion: 1, facial: 2, camera: 3, audio: 4, video: 5 } as const
+export const DIALOG_KIND = { all: 0, motion: 1, facial: 2, camera: 3, audio: 4, video: 5, image: 6 } as const
 
 // Import slot sentinel values. They are UI markers, never disk paths; every
 // "is a real file selected" check must exclude them (ImportSlot in GuiLibraryPage).
@@ -805,7 +824,7 @@ export const IMPORT_SLOT = {
   keepTrack: '[保持当前已导入轨道]',
   keepMotion: '[保持当前动作]',
   autoFacial: '（自动：沿用动作 VMD 内表情）',
-  autoAudio: '（自动：同名 WAV 或 song.wav）',
+  autoAudio: '（自动：同名音频或 song.*）',
   skip: '（不导入）',
 } as const
 

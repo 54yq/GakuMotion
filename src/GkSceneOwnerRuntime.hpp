@@ -23,6 +23,7 @@ namespace SceneOwnerRuntime
 	inline bool cachedPageStable = false;
 	inline std::string cachedActiveScene;
 	inline Observation cached;
+	inline std::chrono::steady_clock::time_point lastPhotoLoadedCheckTime{};
 
 	inline bool Resolve()
 	{
@@ -153,29 +154,6 @@ namespace SceneOwnerRuntime
 		return result;
 	}
 
-	inline Observation Read(const std::string& activeScene, bool force = false)
-	{
-		if (!ProtectionOnUnityThread()) return {};
-		const int frame = g_faceUnityFrame ? g_faceUnityFrame() : -1;
-		const bool stable = GakuMotion::capture::IsPageStable();
-		if (!force && frame >= 0 && frame == cachedFrame && stable == cachedPageStable &&
-			activeScene == cachedActiveScene) return cached;
-		cached = Scan(activeScene); // Values only: no managed root or array survives the call.
-		GakuMotion::stage_load::receipt.Observe(cached.owner);
-		cached.context = GakuMotion::stage_load::receipt.Context(activeScene, cached.sceneName, cached.owner);
-		cachedFrame = frame;
-		cachedPageStable = stable;
-		cachedActiveScene = activeScene;
-		return cached;
-	}
-
-	inline void Shutdown()
-	{
-		if (typeHandle && StageLoader::freeHandle) StageLoader::freeHandle(typeHandle);
-		typeHandle = nullptr;
-		cached = {}; cachedFrame = INT_MIN; ready = false;
-	}
-
 	inline bool ConfirmedUnloaded(int handle)
 	{
 		if (!handle || !ProtectionOnUnityThread() || !StageLoader::sceneLoaded) return false;
@@ -184,5 +162,69 @@ namespace SceneOwnerRuntime
 		void* boxed = g_faceRuntime.invoke(StageLoader::sceneLoaded, nullptr, args, &exception);
 		void* value = boxed && !exception ? g_safeBones.unbox(boxed) : nullptr;
 		return value && !*static_cast<bool*>(value);
+	}
+
+	inline bool ReuseConfirmedPhotographyCache(const std::string& activeScene, bool stable)
+	{
+		if (!ready || !cached.owner.confirmed ||
+			cached.owner.role != GakuMotion::injection::OwnerRole::Photography ||
+			!cached.owner.sceneHandle ||
+			stable != cachedPageStable ||
+			activeScene != cachedActiveScene)
+		{
+			return false;
+		}
+		// Zero-allocation check: leaving Photography for OutGame/Produce populates
+		// CampusScenePresenterBase.get_Instance(), which must invalidate immediately.
+		void* currentException = nullptr;
+		void* current = g_faceRuntime.invoke(currentPresenter, nullptr, nullptr, &currentException);
+		if (currentException || current) return false;
+
+		// Avoid 60 Hz UnityEngine.Object.FindObjectsOfType scans and managed array/struct
+		// allocations during steady Photography playback; periodically verify scene load state.
+		const auto now = std::chrono::steady_clock::now();
+		if (lastPhotoLoadedCheckTime == std::chrono::steady_clock::time_point{} ||
+			now - lastPhotoLoadedCheckTime >= std::chrono::milliseconds(100))
+		{
+			lastPhotoLoadedCheckTime = now;
+			if (ConfirmedUnloaded(cached.owner.sceneHandle)) return false;
+		}
+		return true;
+	}
+
+	inline Observation Read(const std::string& activeScene, bool force = false)
+	{
+		if (!ProtectionOnUnityThread()) return {};
+		const int frame = g_faceUnityFrame ? g_faceUnityFrame() : -1;
+		const bool stable = GakuMotion::capture::IsPageStable();
+		if (!force && frame >= 0 && stable == cachedPageStable && activeScene == cachedActiveScene)
+		{
+			if (frame == cachedFrame) return cached;
+			if (ReuseConfirmedPhotographyCache(activeScene, stable))
+			{
+				GakuMotion::stage_load::receipt.Observe(cached.owner);
+				cached.context = GakuMotion::stage_load::receipt.Context(activeScene, cached.sceneName, cached.owner);
+				cachedFrame = frame;
+				return cached;
+			}
+		}
+		cached = Scan(activeScene); // Values only: no managed root or array survives the call.
+		GakuMotion::stage_load::receipt.Observe(cached.owner);
+		cached.context = GakuMotion::stage_load::receipt.Context(activeScene, cached.sceneName, cached.owner);
+		cachedFrame = frame;
+		cachedPageStable = stable;
+		cachedActiveScene = activeScene;
+		lastPhotoLoadedCheckTime = std::chrono::steady_clock::now();
+		return cached;
+	}
+
+	inline void Shutdown()
+	{
+		if (typeHandle && StageLoader::freeHandle) StageLoader::freeHandle(typeHandle);
+		typeHandle = nullptr;
+		cached = {}; cachedFrame = INT_MIN; cachedPageStable = false;
+		cachedActiveScene.clear();
+		lastPhotoLoadedCheckTime = {};
+		ready = false;
 	}
 }

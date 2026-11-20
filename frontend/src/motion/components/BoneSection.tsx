@@ -123,7 +123,7 @@ export function BoneSection() {
             ) : (
               filteredGroups.map((group) => (
                 <div key={group.title}>
-                  <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     {group.title}
                   </p>
                   <div className="flex flex-wrap gap-1">

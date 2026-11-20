@@ -2,7 +2,8 @@ import { useMotionStore } from '../store'
 
 export function DropOverlay() {
   const drop = useMotionStore((state) => state.drop)
-  if (drop.visual === 'none') return null
+  const coverEditorOpen = useMotionStore((state) => state.coverEditor.open)
+  if (coverEditorOpen || drop.visual === 'none') return null
   const isHover = drop.visual === 'hover'
   const isInvalid = drop.visual === 'invalid'
   return (
@@ -12,7 +13,7 @@ export function DropOverlay() {
       }`}
       data-testid="drop-overlay"
     >
-      <p className="text-sm font-medium">
+      <p className="text-md font-medium">
         {isInvalid ? '没有可导入的有效文件' : isHover ? `松开导入 ${drop.accepted} 个文件` : '拖放文件到此处导入曲库'}
       </p>
       {drop.fileCount > 0 && <p className="text-xs text-muted-foreground">共 {drop.fileCount} 个文件</p>}

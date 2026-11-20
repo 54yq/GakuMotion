@@ -163,6 +163,25 @@ namespace GakuMotion::webpanel
 		std::string coverDataUri;
 	};
 
+	struct ScreenshotCapabilitiesView
+	{
+		bool available{false};
+		bool runtimeReady{false};
+		bool cameraAvailable{false};
+		uint32_t windowWidth{0};
+		uint32_t windowHeight{0};
+		std::string notice;
+	};
+
+	struct ScreenshotCaptureView
+	{
+		bool ok{false};
+		uint32_t width{0};
+		uint32_t height{0};
+		std::string dataUri;
+		std::string error;
+	};
+
 	struct HostHooks
 	{
 		// Ordered asset-directory candidates supplied by the plugin (the plugin
@@ -178,6 +197,9 @@ namespace GakuMotion::webpanel
 		std::function<AppearanceInfo()> appearance;
 		std::function<AudioProbeView(const std::string& pathUtf8, bool includeCover)> probeAudio;
 		std::function<std::string(const std::string& trackDirUtf8)> getTrackCoverDataUri;
+		std::function<std::string(const std::string& pathUtf8)> readImagePreviewDataUri;
+		std::function<ScreenshotCapabilitiesView()> getScreenshotCapabilities;
+		std::function<ScreenshotCaptureView()> captureScreenshot;
 		std::function<AudioEffectState()> getAudioEffectsState;
 		std::function<bool(const std::string& presetId, std::string& error)> setAudioEffectPreset;
 		std::string pluginVersion{"0.1.1"};
@@ -215,7 +237,8 @@ namespace GakuMotion::webpanel
 		"playlist.setMode",
 		"library.refresh", "library.select", "library.delete", "library.openFolder",
 		"library.import", "library.probeFiles", "library.startEdit",
-		"library.probeAudio", "library.getCover",
+		"library.probeAudio", "library.getCover", "library.setCover", "library.readImagePreview",
+		"screenshot.capabilities", "screenshot.capture",
 		"clock.setRunMode", "clock.configure",
 		"audioEffect.set",
 		"actors.selectTarget",
@@ -311,6 +334,7 @@ namespace GakuMotion::webpanel
 			std::string response;
 			try { response = DispatchRequest(requestJson); }
 			catch (...) { response = MakeError(0, "internal", "Unhandled bridge exception"); }
+			forceDomainRefresh_.store(true, std::memory_order_release);
 			const uint64_t needed = static_cast<uint64_t>(response.size()) + 1;
 			if (needed > 0xFFFFFFFFull) return GAKU_E_LIMIT;
 			if (requiredBytes) *requiredBytes = static_cast<uint32_t>(needed);
@@ -658,6 +682,10 @@ namespace GakuMotion::webpanel
 			if (method == "library.startEdit") return LibraryStartEdit(params);
 			if (method == "library.probeAudio") return LibraryProbeAudio(params);
 			if (method == "library.getCover") return LibraryGetCover(params);
+			if (method == "library.setCover") return LibrarySetCover(params);
+			if (method == "library.readImagePreview") return LibraryReadImagePreview(params);
+			if (method == "screenshot.capabilities") return ScreenshotCapabilitiesMethod();
+			if (method == "screenshot.capture") return ScreenshotCaptureMethod();
 
 			// Clock & Audio Effects ---------------------------------------------
 			if (method == "clock.setRunMode") return ClockSetRunMode(params);
@@ -941,8 +969,8 @@ namespace GakuMotion::webpanel
 		{
 			int64_t kind = -1;
 			bool multiple = false;
-			if (!IntParam(params, "kind", kind) || kind < 0 || kind > 5)
-				return CmdResult::Err("invalid_params", "kind must be 0..5");
+			if (!IntParam(params, "kind", kind) || kind < 0 || kind > 6)
+				return CmdResult::Err("invalid_params", "kind must be 0..6");
 			if (!BoolParam(params, "multiple", multiple))
 				return CmdResult::Err("invalid_params", "multiple must be a boolean");
 			if (!hooks_.beginWebFileDialog && !core_.fnBeginPickFile)
@@ -1263,6 +1291,95 @@ namespace GakuMotion::webpanel
 				",\"coverDataUri\":" + JString(dataUri) + "}");
 		}
 
+		CmdResult LibrarySetCover(const jsonlite::Value& params)
+		{
+			std::string key;
+			if (!StringParam(params, "key", key) || key.empty())
+				return CmdResult::Err("invalid_params", "key is required");
+			bool clear = false;
+			if (params.Find("clear") && !BoolParam(params, "clear", clear))
+				return CmdResult::Err("invalid_params", "clear must be a boolean");
+			std::string coverDataUri;
+			if (!clear)
+			{
+				if (!StringParam(params, "coverDataUri", coverDataUri) || coverDataUri.empty())
+					return CmdResult::Err("invalid_params", "coverDataUri is required when clear is false");
+				if (coverDataUri.size() > 16ULL * 1024ULL * 1024ULL ||
+					coverDataUri.rfind("data:image/", 0) != 0)
+					return CmdResult::Err("invalid_params", "coverDataUri must be a valid image data URI");
+			}
+
+			std::string thumbnailUri;
+			std::string error;
+			if (!core_.SetTrackCover(key, clear, coverDataUri, thumbnailUri, error))
+			{
+				if (error.find("正在导入") != std::string::npos)
+					return CmdResult::Err("busy", error);
+				if (error.find("not found") != std::string::npos)
+					return CmdResult::Err("not_found", error);
+				return CmdResult::Err("failed", error.empty() ? "Failed to save track cover" : error);
+			}
+			forceDomainRefresh_.store(true, std::memory_order_release);
+			uint64_t rev = 0;
+			{
+				std::lock_guard<std::recursive_mutex> lock(core_.stateMutex);
+				rev = core_.libraryRevision;
+			}
+			return CmdResult::Ok("{\"hasCover\":" + JBool(!clear) +
+				",\"coverDataUri\":" + JString(thumbnailUri) +
+				",\"revision\":" + JNum(static_cast<double>(rev)) + "}");
+		}
+
+		CmdResult LibraryReadImagePreview(const jsonlite::Value& params)
+		{
+			std::string path;
+			if (!StringParam(params, "path", path) || path.empty() || path.size() > 32767)
+				return CmdResult::Err("invalid_params", "path must be a non-empty string");
+			if (IsNetworkAudioPath(path))
+				return CmdResult::Err("invalid_params", "不支持网络路径，请选择本地图片文件");
+			if (!hooks_.readImagePreviewDataUri)
+				return CmdResult::Err("not_implemented", "Image preview hook is unavailable");
+			const std::string dataUri = hooks_.readImagePreviewDataUri(path);
+			if (dataUri.empty())
+				return CmdResult::Err("failed", "无法读取或解码所选图片文件");
+			return CmdResult::Ok("{\"dataUri\":" + JString(dataUri) + "}");
+		}
+
+		CmdResult ScreenshotCapabilitiesMethod()
+		{
+			ScreenshotCapabilitiesView caps;
+			if (hooks_.getScreenshotCapabilities)
+			{
+				caps = hooks_.getScreenshotCapabilities();
+			}
+			else
+			{
+				caps.available = false;
+				caps.notice = "ScreenshotManager 联动服务不可用";
+			}
+			return CmdResult::Ok("{\"available\":" + JBool(caps.available) +
+				",\"runtimeReady\":" + JBool(caps.runtimeReady) +
+				",\"cameraAvailable\":" + JBool(caps.cameraAvailable) +
+				",\"windowWidth\":" + JNum(caps.windowWidth) +
+				",\"windowHeight\":" + JNum(caps.windowHeight) +
+				",\"notice\":" + JString(caps.notice) + "}");
+		}
+
+		CmdResult ScreenshotCaptureMethod()
+		{
+			if (!hooks_.captureScreenshot)
+				return CmdResult::Err("not_implemented", "ScreenshotManager 联动拍照服务不可用");
+			const ScreenshotCaptureView captured = hooks_.captureScreenshot();
+			if (!captured.ok || captured.dataUri.empty())
+			{
+				return CmdResult::Err("failed",
+					captured.error.empty() ? "ScreenshotManager 拍照失败" : captured.error);
+			}
+			return CmdResult::Ok("{\"dataUri\":" + JString(captured.dataUri) +
+				",\"width\":" + JNum(captured.width) +
+				",\"height\":" + JNum(captured.height) + "}");
+		}
+
 		CmdResult ClockSetRunMode(const jsonlite::Value& params)
 		{
 			uint32_t rawMode = GAKUMOTION_RUN_REALTIME;
@@ -1346,6 +1463,7 @@ namespace GakuMotion::webpanel
 			std::string error;
 			if (!hooks_.setAudioEffectPreset(presetId, error))
 				return CmdResult::Err("failed", error.empty() ? "Failed to switch audio effect" : error);
+			forceAudioEffectRefresh_.store(true, std::memory_order_release);
 			return CmdResult::Ok(BuildAudioEffectJson());
 		}
 
@@ -1373,7 +1491,9 @@ namespace GakuMotion::webpanel
 		{
 			return !value.empty() && value != "（留空）" && value != "（留空 / 清除）" &&
 				value != "[保持当前已导入轨道]" && value != "[保持当前动作]" &&
-				value != "（自动：沿用动作 VMD 内表情）" && value != "（自动：同名 WAV 或 song.wav）" &&
+				value != "（自动：沿用动作 VMD 内表情）" &&
+				value != "（自动：同名 WAV 或 song.wav）" &&
+				value != "（自动：同名音频或 song.*）" &&
 				value != "（不导入）";
 		}
 
@@ -1576,6 +1696,24 @@ namespace GakuMotion::webpanel
 				}
 			}
 
+			bool clearCover = false;
+			if (draft->Find("clearCover") && !BoolParam(*draft, "clearCover", clearCover))
+				return CmdResult::Err("invalid_params", "clearCover must be a boolean");
+			std::string coverDataUri;
+			bool hasCoverDataUri = false;
+			if (draft->Find("coverDataUri"))
+			{
+				if (!StringParam(*draft, "coverDataUri", coverDataUri))
+					return CmdResult::Err("invalid_params", "coverDataUri must be a string");
+				if (!coverDataUri.empty())
+				{
+					if (coverDataUri.size() > 16ULL * 1024ULL * 1024ULL ||
+						coverDataUri.rfind("data:image/", 0) != 0)
+						return CmdResult::Err("invalid_params", "coverDataUri must be a valid image data URI");
+					hasCoverDataUri = true;
+				}
+			}
+
 			std::lock_guard<std::recursive_mutex> lock(core_.stateMutex);
 			if (core_.importBusy || core_.cameraImportBusy || core_.libraryScan.valid())
 				return CmdResult::Err("busy", "正在导入，请等待完成后保存");
@@ -1599,6 +1737,9 @@ namespace GakuMotion::webpanel
 			}
 			GuiCommand command{GuiAction::Import};
 			command.import = std::move(request);
+			command.importCoverSet = hasCoverDataUri && !clearCover;
+			command.importCoverClear = clearCover;
+			command.importCoverDataUri = clearCover ? std::string() : std::move(coverDataUri);
 			core_.QueueGui(std::move(command));
 			return CmdResult::Ok("{\"started\":true}");
 		}
@@ -2751,7 +2892,7 @@ namespace GakuMotion::webpanel
 			return nodes;
 		}
 
-		std::string StageJsonLocked() const
+		std::string StageJsonWithNodesLocked(const std::string& nodesJson) const
 		{
 			StageSettings settings;
 			std::string sceneName, statusNotice, mountedKey;
@@ -2767,7 +2908,12 @@ namespace GakuMotion::webpanel
 				",\"statusNotice\":" + JString(statusNotice) +
 				",\"mountedKey\":" + JString(mountedKey) +
 				",\"loadNotice\":" + JString(core_.stageLoadNotice) +
-				",\"candidates\":" + StageNodesJsonLocked() + "}";
+				",\"candidates\":" + nodesJson + "}";
+		}
+
+		std::string StageJsonLocked() const
+		{
+			return StageJsonWithNodesLocked(StageNodesJsonLocked());
 		}
 
 		std::string FacialJsonLocked() const
@@ -2809,13 +2955,19 @@ namespace GakuMotion::webpanel
 		{
 			const auto& progress = core_.importProgress;
 			if (!progress.active && !progress.finished) return "null";
-			return "{\"active\":" + JBool(progress.active) +
+			std::string json = "{\"active\":" + JBool(progress.active) +
 				",\"finished\":" + JBool(progress.finished) +
 				",\"succeeded\":" + JBool(progress.succeeded) +
 				",\"progress\":" + JNum(progress.progress) +
 				",\"stage\":" + JString(progress.stage) +
 				",\"statusText\":" + JString(progress.statusText) +
-				",\"errorDetail\":" + JString(progress.errorDetail) + "}";
+				",\"errorDetail\":" + JString(progress.errorDetail);
+			if (progress.finished && progress.succeeded && !core_.lastImportedKey.empty())
+			{
+				json += ",\"importedKey\":" + JString(core_.lastImportedKey);
+			}
+			json += "}";
+			return json;
 		}
 
 		std::string GazeJsonLocked() const
@@ -3143,10 +3295,10 @@ namespace GakuMotion::webpanel
 				",\"dpiScale\":1,\"scaleLimited\":false}";
 		}
 
-		std::string ClockJsonLocked() const
+		std::string ClockJsonLocked(std::string* outMeta = nullptr) const
 		{
 			GakuMotionClockSnapshotV1 snap{};
-			core_.ReadClockSnapshot(&snap);
+			core_.ReadClockSnapshot(&snap, false);
 			const char* rm = snap.runMode == GAKUMOTION_RUN_RECORDING ? "recording" : "realtime";
 			auto srcName = [](uint32_t s) -> const char*
 			{
@@ -3158,15 +3310,16 @@ namespace GakuMotion::webpanel
 				default: return "audio";
 				}
 			};
-			return "{\"runMode\":" + JString(rm) +
+			std::string meta = "{\"runMode\":" + JString(rm) +
 				",\"configuredSource\":" + JString(srcName(snap.configuredSource)) +
 				",\"effectiveSource\":" + JString(srcName(snap.effectiveSource)) +
 				",\"fpsNumerator\":" + JNum(snap.fpsNumerator) +
 				",\"fpsDenominator\":" + JNum(snap.fpsDenominator) +
 				",\"waitingForRenderComplete\":" + JBool(snap.waitingForRenderComplete != 0) +
 				",\"leaseId\":" + JNum(static_cast<double>(snap.leaseId)) +
-				",\"leaseOwner\":" + JString(snap.leaseOwner) +
-				",\"evaluatedFrameSerial\":" + JNum(static_cast<double>(snap.evaluatedFrameSerial)) + "}";
+				",\"leaseOwner\":" + JString(snap.leaseOwner);
+			if (outMeta) *outMeta = meta;
+			return meta + ",\"evaluatedFrameSerial\":" + JNum(static_cast<double>(snap.evaluatedFrameSerial)) + "}";
 		}
 
 		std::string BuildAudioEffectJson() const
@@ -3194,6 +3347,7 @@ namespace GakuMotion::webpanel
 
 		std::string BuildSnapshotLocked() const
 		{
+			const std::string stageNodes = StageNodesJsonLocked();
 			return "{\"permission\":" + PermissionJsonLocked() +
 				",\"player\":" + PlayerStateJsonLocked() +
 				",\"library\":" + LibraryJsonLocked() +
@@ -3201,8 +3355,8 @@ namespace GakuMotion::webpanel
 				",\"playlist\":" + PlaylistJsonLocked() +
 				",\"actors\":" + ActorsJsonLocked() +
 				",\"camera\":" + CameraJsonLocked() +
-				",\"stage\":" + StageJsonLocked() +
-				",\"stageNodes\":" + StageNodesJsonLocked() +
+				",\"stage\":" + StageJsonWithNodesLocked(stageNodes) +
+				",\"stageNodes\":" + stageNodes +
 				",\"facial\":" + FacialJsonLocked() +
 				",\"position\":" + PositionJsonLocked() +
 				",\"ensemble\":" + EnsembleJsonLocked() +
@@ -3233,8 +3387,14 @@ namespace GakuMotion::webpanel
 		{
 			baselinePending_ = true;
 			forcePlayerEvent_ = false;
+			forceDomainRefresh_.store(true, std::memory_order_release);
+			forceAudioEffectRefresh_.store(true, std::memory_order_release);
 			lastPermissionAllowed_ = false;
 			lastInjectionSession_ = 0;
+			lastPlayerEmit_ = {};
+			lastClockEmit_ = {};
+			lastSlowDomainPoll_ = {};
+			lastAudioEffectPoll_ = {};
 			lastPhysicsBackend_ = -1;
 			lastPermission_.clear();
 			lastPlayer_.clear();
@@ -3257,6 +3417,7 @@ namespace GakuMotion::webpanel
 			lastStudio_.clear();
 			lastExperiments_.clear();
 			lastClock_.clear();
+			lastClockMeta_.clear();
 			lastAudioEffect_.clear();
 		}
 
@@ -3293,44 +3454,73 @@ namespace GakuMotion::webpanel
 			}
 			if (!visible_ && !baselinePending_) return;
 
+			const auto now = std::chrono::steady_clock::now();
 			std::string permission, player, library, loaded, playlist, actors, camera, stage, stageNodes,
 				facial, position, ensemble, importProgress, appearance,
-				gaze, bone, sole, solePitch, studio, experiments, clock, audioEffect;
+				gaze, bone, sole, solePitch, studio, experiments, clock, clockMeta, audioEffect;
 			int physicsBackend = 0;
 			bool injectionAllowed = false;
 			bool scrubbing = false;
 			float scrubTime = 0.0f;
 			uint64_t injectionSession = 0;
+			bool playing = false;
+			bool refreshSlowDomains = false;
+			bool refreshAudioEffect = false;
 			{
 				std::lock_guard<std::recursive_mutex> lock(core_.stateMutex);
 				injectionAllowed = core_.InjectionAllowed();
 				injectionSession = core_.injectionSession;
 				scrubbing = core_.player.scrubbing;
 				scrubTime = core_.player.currentTime;
+				playing = core_.player.state == PlaybackState::Playing;
 				permission = PermissionJsonLocked();
 				player = PlayerStateJsonLocked();
-				library = LibraryJsonLocked();
-				loaded = LoadedJsonLocked();
-				playlist = PlaylistJsonLocked();
-				actors = ActorsJsonLocked();
-				camera = CameraJsonLocked();
-				stage = StageJsonLocked();
-				stageNodes = StageNodesJsonLocked();
-				facial = FacialJsonLocked();
-				position = PositionJsonLocked();
-				ensemble = EnsembleJsonLocked();
-				importProgress = ImportProgressJsonLocked();
+				clock = ClockJsonLocked(&clockMeta);
 				physicsBackend = core_.guiPhysicsBackend.load();
-				gaze = GazeJsonLocked();
-				bone = BoneJsonLocked();
-				sole = SoleJsonLocked();
-				solePitch = SolePitchJsonLocked();
-				studio = StudioJsonLocked();
-				experiments = ExperimentsJsonLocked();
-				clock = ClockJsonLocked();
+
+				const bool forceSlowRefresh = forceDomainRefresh_.exchange(false, std::memory_order_acq_rel);
+				const bool permissionOrSessionChanged =
+					permission != lastPermission_ ||
+					(lastPermissionAllowed_ && !injectionAllowed) ||
+					(injectionSession != lastInjectionSession_ && lastInjectionSession_ != 0);
+				refreshSlowDomains = baselinePending_ || forceSlowRefresh ||
+					!playing || permissionOrSessionChanged ||
+					(now - lastSlowDomainPoll_ >= std::chrono::milliseconds(100));
+				if (refreshSlowDomains)
+				{
+					lastSlowDomainPoll_ = now;
+					library = LibraryJsonLocked();
+					loaded = LoadedJsonLocked();
+					playlist = PlaylistJsonLocked();
+					actors = ActorsJsonLocked();
+					camera = CameraJsonLocked();
+					stageNodes = StageNodesJsonLocked();
+					stage = StageJsonWithNodesLocked(stageNodes);
+					facial = FacialJsonLocked();
+					position = PositionJsonLocked();
+					ensemble = EnsembleJsonLocked();
+					importProgress = ImportProgressJsonLocked();
+					gaze = GazeJsonLocked();
+					bone = BoneJsonLocked();
+					sole = SoleJsonLocked();
+					solePitch = SolePitchJsonLocked();
+					studio = StudioJsonLocked();
+					experiments = ExperimentsJsonLocked();
+				}
 			}
-			appearance = BuildAppearanceJson();
-			audioEffect = BuildAudioEffectJson();
+			if (refreshSlowDomains)
+			{
+				appearance = BuildAppearanceJson();
+				const bool forceAudioRefresh = forceAudioEffectRefresh_.exchange(false, std::memory_order_acq_rel);
+				refreshAudioEffect = baselinePending_ || forceAudioRefresh ||
+					!playing || lastAudioEffect_.empty() ||
+					(now - lastAudioEffectPoll_ >= std::chrono::milliseconds(250));
+				if (refreshAudioEffect)
+				{
+					lastAudioEffectPoll_ = now;
+					audioEffect = BuildAudioEffectJson();
+				}
+			}
 
 			// Permission loss / session change: the frontend drops its scrub without
 			// sending scrubEnd, so finish the native scrub state through the queue.
@@ -3356,31 +3546,45 @@ namespace GakuMotion::webpanel
 				}
 			};
 			emitChanged("permission.changed", permission, lastPermission_);
-			emitChanged("library.changed", library, lastLibrary_);
-			emitChanged("loaded.changed", loaded, lastLoaded_);
-			emitChanged("playlist.changed", playlist, lastPlaylist_);
-			emitChanged("actors.changed", actors, lastActors_);
-			emitChanged("camera.changed", camera, lastCamera_);
-			emitChanged("stage.changed", stage, lastStage_);
-			if (baseline || stageNodes != lastStageNodes_)
+			if (refreshSlowDomains)
 			{
-				lastStageNodes_ = stageNodes;
-				Emit("stage.nodesChanged", "{\"nodes\":" + stageNodes + "}");
+				emitChanged("library.changed", library, lastLibrary_);
+				emitChanged("loaded.changed", loaded, lastLoaded_);
+				emitChanged("playlist.changed", playlist, lastPlaylist_);
+				emitChanged("actors.changed", actors, lastActors_);
+				emitChanged("camera.changed", camera, lastCamera_);
+				emitChanged("stage.changed", stage, lastStage_);
+				if (baseline || stageNodes != lastStageNodes_)
+				{
+					lastStageNodes_ = stageNodes;
+					Emit("stage.nodesChanged", "{\"nodes\":" + stageNodes + "}");
+				}
+				emitChanged("facial.changed", facial, lastFacial_);
+				emitChanged("position.changed", position, lastPosition_);
+				emitChanged("ensemble.changed", ensemble, lastEnsemble_);
+				if (importProgress != "null")
+					emitChanged("import.progress", importProgress, lastImportProgress_);
+				emitChanged("appearance.changed", appearance, lastAppearance_);
+				emitChanged("gaze.changed", gaze, lastGaze_);
+				emitChanged("bone.changed", bone, lastBone_);
+				emitChanged("sole.changed", sole, lastSole_);
+				emitChanged("solePitch.changed", solePitch, lastSolePitch_);
+				emitChanged("studio.changed", studio, lastStudio_);
+				emitChanged("experiments.changed", experiments, lastExperiments_);
+				if (refreshAudioEffect)
+					emitChanged("audioEffect.changed", audioEffect, lastAudioEffect_);
 			}
-			emitChanged("facial.changed", facial, lastFacial_);
-			emitChanged("position.changed", position, lastPosition_);
-			emitChanged("ensemble.changed", ensemble, lastEnsemble_);
-			if (importProgress != "null")
-				emitChanged("import.progress", importProgress, lastImportProgress_);
-			emitChanged("appearance.changed", appearance, lastAppearance_);
-			emitChanged("gaze.changed", gaze, lastGaze_);
-			emitChanged("bone.changed", bone, lastBone_);
-			emitChanged("sole.changed", sole, lastSole_);
-			emitChanged("solePitch.changed", solePitch, lastSolePitch_);
-			emitChanged("studio.changed", studio, lastStudio_);
-			emitChanged("experiments.changed", experiments, lastExperiments_);
-			emitChanged("clock.changed", clock, lastClock_);
-			emitChanged("audioEffect.changed", audioEffect, lastAudioEffect_);
+			// clock.changed: immediate on baseline or structural clock config change,
+			// throttled to ~10 Hz while playing for high-frequency evaluatedFrameSerial ticks.
+			const bool clockThrottled = playing && !baseline && clockMeta == lastClockMeta_ &&
+				now - lastClockEmit_ < std::chrono::milliseconds(100);
+			if (!clockThrottled && (baseline || clock != lastClock_))
+			{
+				lastClock_ = clock;
+				lastClockMeta_ = clockMeta;
+				lastClockEmit_ = now;
+				Emit("clock.changed", clock);
+			}
 			if (baseline || physicsBackend != lastPhysicsBackend_)
 			{
 				lastPhysicsBackend_ = physicsBackend;
@@ -3389,8 +3593,6 @@ namespace GakuMotion::webpanel
 
 			// player.stateChanged: immediate after commands, ~10 Hz while playing,
 			// otherwise only on change.
-			const auto now = std::chrono::steady_clock::now();
-			const bool playing = player.find("\"state\":\"playing\"") != std::string::npos;
 			const bool throttled = playing && !forcePlayerEvent_ && !baseline &&
 				now - lastPlayerEmit_ < std::chrono::milliseconds(100);
 			if (!throttled && (baseline || forcePlayerEvent_ || player != lastPlayer_))
@@ -3455,13 +3657,18 @@ namespace GakuMotion::webpanel
 
 		// Event change detection.
 		bool forcePlayerEvent_{false};
+		std::atomic<bool> forceDomainRefresh_{true};
+		std::atomic<bool> forceAudioEffectRefresh_{true};
 		bool lastPermissionAllowed_{false};
 		uint64_t lastInjectionSession_{0};
 		std::chrono::steady_clock::time_point lastPlayerEmit_{};
+		std::chrono::steady_clock::time_point lastClockEmit_{};
+		std::chrono::steady_clock::time_point lastSlowDomainPoll_{};
+		std::chrono::steady_clock::time_point lastAudioEffectPoll_{};
 		std::string lastPermission_, lastPlayer_, lastLibrary_, lastLoaded_, lastPlaylist_,
 			lastActors_, lastCamera_, lastStage_, lastStageNodes_, lastFacial_, lastPosition_,
 			lastEnsemble_, lastImportProgress_, lastAppearance_, lastGaze_, lastBone_, lastSole_,
-			lastSolePitch_, lastStudio_, lastExperiments_, lastClock_, lastAudioEffect_;
+			lastSolePitch_, lastStudio_, lastExperiments_, lastClock_, lastClockMeta_, lastAudioEffect_;
 		int lastPhysicsBackend_{-1};
 	};
 } // namespace GakuMotion::webpanel

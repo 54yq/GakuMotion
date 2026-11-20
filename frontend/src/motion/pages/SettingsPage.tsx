@@ -105,11 +105,11 @@ export function SettingsPage() {
                 {HOTKEY_ROWS.map(([key, func, desc]) => (
                   <TableRow key={key}>
                     <TableCell>
-                      <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px] text-primary">
+                      <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-xs text-primary">
                         {key}
                       </kbd>
                     </TableCell>
-                    <TableCell className="text-xs font-medium">{func}</TableCell>
+                    <TableCell className="text-sm font-medium">{func}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">{desc}</TableCell>
                   </TableRow>
                 ))}
@@ -122,7 +122,7 @@ export function SettingsPage() {
             <div className="grid gap-1.5 sm:grid-cols-2">
               {PANEL_SHORTCUTS.map(([key, desc]) => (
                 <div key={key} className="flex items-center justify-between gap-2 rounded-md border bg-background/50 px-3 py-1.5 text-xs">
-                  <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground">
+                  <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground">
                     {key}
                   </kbd>
                   <span className="text-muted-foreground">{desc}</span>
@@ -145,7 +145,7 @@ export function SettingsPage() {
       >
         <PropertyRow
           label="曲库根目录"
-          description={<code className="font-mono text-[11px]">{motionsRoot || 'gakumas-local/motions'}</code>}
+          description={<code className="font-mono text-xs">{motionsRoot || 'gakumas-local/motions'}</code>}
         >
           <Button
             variant="outline"
@@ -164,7 +164,7 @@ export function SettingsPage() {
           htmlFor="developer-mode"
           description="开启后在侧边栏显示 [开发] 页，包含诊断、鞋底测量、探针与实验性开关。会话内有效，不持久化。"
         >
-          <span className="rounded-[4px] border border-border bg-muted/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+          <span className="rounded-[4px] border border-border bg-muted/60 px-1.5 py-0.5 font-mono text-micro text-muted-foreground">
             {bridgeKind} {pluginVersion || ''}
           </span>
           <Switch

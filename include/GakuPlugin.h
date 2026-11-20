@@ -44,6 +44,7 @@ extern "C" {
 #define GAKU_SERVICE_FILE_DIALOG "gakuloader.file-dialog"
 #define GAKU_SERVICE_HOTKEYS "gakuloader.hotkeys"
 #define GAKU_SERVICE_ACTOR_ENTRY "gakuloader.actor-entry"
+#define GAKU_SERVICE_RENDER_FRAME "gakuloader.render-frame"
 
 typedef int32_t GakuStatus;
 #define GAKU_OK ((GakuStatus)0)
@@ -260,6 +261,26 @@ typedef struct GakuActorEntryService {
     GakuStatus (*registerEntry)(void* context, const GakuActorEntryBinding* binding);
     GakuStatus (*unregisterEntry)(void* context, uint32_t phase);
 } GakuActorEntryService;
+
+typedef void (*GakuRenderFrameFn)(void* userData, int isNormalOuterFrame);
+typedef struct GakuRenderFrameBinding {
+    uint32_t abiVersion;
+    uint32_t structSize;
+    /* Diagnostic only, copied immediately; may be NULL. */
+    const char* name;
+    GakuRenderFrameFn onBeforeRender; /* Unity main thread, before outer DoRenderLoop_Internal */
+    GakuRenderFrameFn onAfterRender;  /* Unity main thread, after outer DoRenderLoop_Internal */
+    void* userData;
+} GakuRenderFrameBinding;
+typedef struct GakuRenderFrameService {
+    uint32_t abiVersion;
+    uint32_t structSize;
+    void* context;
+    /* Register an observer on UnityEngine.Rendering.RenderPipelineManager::DoRenderLoop_Internal.
+       One binding per owner; re-registering replaces it. Installed on-demand after runtime-ready. */
+    GakuStatus (*registerObserver)(void* context, const GakuRenderFrameBinding* binding);
+    GakuStatus (*unregisterObserver)(void* context);
+} GakuRenderFrameService;
 
 typedef struct GakuPluginDescriptor {
     uint32_t abiVersion; uint32_t structSize;
