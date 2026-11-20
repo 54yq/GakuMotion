@@ -11,12 +11,14 @@ namespace LiveAspectPreview
     {
         uintptr_t owner{};
         int scene{};
+        StageLoader::Handle camera{};
         StageLoader::Handle helper{};
         StageLoader::Handle fitter{};
         const void* setCamera{};
         const void* setRatio{};
         const void* getRatio{};
         float originalRatio{}, originalCameraAspect{};
+        bool restoring{};
     };
 
     inline Lease lease;
@@ -24,7 +26,7 @@ namespace LiveAspectPreview
     inline const void *getProjection{}, *setProjection{}, *resetProjection{}, *getAspect{}, *getStereo{};
     inline CameraBridge::Render managerEnd{};
     inline StageLoader::Handle projectedCamera{};
-    inline Projection originalProjection{}, writtenProjection{};
+    inline Projection writtenProjection{};
     inline bool projectionObserved{};
     using SetupParaffin = void (*)(void*, void*, float, void*, const void*);
     using ValidParaffinAspect = bool (*)(void*, float, const void*);
@@ -101,10 +103,9 @@ namespace LiveAspectPreview
             if (!LiveLetterboxProbe::Read(getProjection, camera, actual)) return false;
             // Another writer owns a different matrix. Leave its write intact.
             if (actual == writtenProjection) {
+                // Restore Unity's automatic projection. Reassigning the previous
+                // matrix here freezes subsequent native lens updates.
                 if (!Invoke(resetProjection, camera, nullptr)) return false;
-                if (renderedCamera && LiveLetterboxProbe::Read(getProjection, camera, actual) &&
-                    actual != originalProjection && !Invoke(setProjection, camera, originalProjection.data()))
-                    return false;
             }
         }
         StageLoader::freeHandle(projectedCamera);
@@ -120,7 +121,7 @@ namespace LiveAspectPreview
 
     inline void BeforeCamera(void* camera)
     {
-        if (!lease.owner || lease.owner != g_sceneOwner.presenterIdentity ||
+        if (!lease.owner || lease.restoring || lease.owner != g_sceneOwner.presenterIdentity ||
             lease.scene != g_sceneOwner.sceneHandle || projectedCamera || !CameraBridge::getMain ||
             camera != CameraBridge::getMain(nullptr) || !CameraBridge::IsAlive(camera) ||
             GakuMotion::camera_handoff::Requested() ||
@@ -137,7 +138,6 @@ namespace LiveAspectPreview
         if (!GakuMotion::live_aspect::PreserveHorizontalFraming(widened, lease.originalCameraAspect, aspect)) return;
         projectedCamera = StageLoader::newHandle(camera, false);
         if (!projectedCamera) return;
-        originalProjection = native;
         writtenProjection = widened;
         if (!Invoke(setProjection, camera, widened.data())) {
             ReleaseProjection(camera);
@@ -174,6 +174,7 @@ namespace LiveAspectPreview
     inline void DropLease()
     {
         CameraBridge::projectionBegin = nullptr;
+        if (lease.camera) StageLoader::freeHandle(lease.camera);
         if (lease.helper) StageLoader::freeHandle(lease.helper);
         if (lease.fitter) StageLoader::freeHandle(lease.fitter);
         lease = {};
@@ -181,23 +182,31 @@ namespace LiveAspectPreview
 
     inline bool Restore(bool sameOwner)
     {
+        if (!lease.owner) return ReleaseProjection();
+        lease.restoring = true;
         if (!ReleaseProjection()) return false;
-        if (!lease.owner) return true;
         const auto target = LiveActorProps::Target();
         if (!target) return false;
         void* helper = target(lease.helper);
         void* fitter = target(lease.fitter);
+        void* camera = target(lease.camera);
+        // The native output camera can survive a Live presenter change.
+        const bool reusedCamera = CameraBridge::IsAlive(camera) && CameraBridge::getMain &&
+            camera == CameraBridge::getMain(nullptr);
+        float currentAspect{};
+        const bool needsCameraRestore = sameOwner || (reusedCamera &&
+            LiveLetterboxProbe::Read(getAspect, camera, currentAspect) && Matches(currentAspect, previewRatio));
         bool useNativeWide = false;
-        const bool cameraOk = !sameOwner || Invoke(lease.setCamera, helper, &useNativeWide);
+        const bool cameraOk = !needsCameraRestore || Invoke(lease.setCamera, helper, &useNativeWide);
         float ratio = 0.0f;
         const bool uiOk = !fitter || !CameraBridge::IsAlive(fitter) ||
             (Invoke(lease.setRatio, fitter, &lease.originalRatio) &&
              LiveLetterboxProbe::Read(lease.getRatio, fitter, ratio) && Matches(ratio, lease.originalRatio));
         const bool ok = cameraOk && uiOk;
         if (g_hostContext.logInfo)
-            g_hostContext.logInfo("[GakuMotion][LiveAspectPreview] restore scene=%d same_owner=%d camera=%d ui=%d",
-                lease.scene, int(sameOwner), int(cameraOk), int(uiOk));
-        if (ok || !sameOwner) DropLease();
+            g_hostContext.logInfo("[GakuMotion][LiveAspectPreview] restore scene=%d same_owner=%d camera_requested=%d camera_ok=%d ui=%d",
+                lease.scene, int(sameOwner), int(needsCameraRestore), int(cameraOk), int(uiOk));
+        if (ok) DropLease();
         return ok;
     }
 
@@ -228,9 +237,10 @@ namespace LiveAspectPreview
         const void* setRatio = md.Find(ui.fitterClass, "set_aspectRatio", false, {0x01}, {{0x0c}});
         if (!setCamera || !setRatio) return false;
 
-        lease = {owner, scene, StageLoader::newHandle(helper, false), StageLoader::newHandle(ui.fitter, false),
+        lease = {owner, scene, StageLoader::newHandle(camera, false),
+            StageLoader::newHandle(helper, false), StageLoader::newHandle(ui.fitter, false),
             setCamera, setRatio, ui.getRatio, ui.ratio, originalCameraAspect};
-        if (!lease.helper || !lease.fitter) {
+        if (!lease.camera || !lease.helper || !lease.fitter) {
             DropLease();
             return false;
         }
@@ -287,12 +297,14 @@ namespace LiveAspectPreview
                 static_cast<unsigned long long>(CameraBridge::dofRenderSkipped.load(std::memory_order_relaxed)));
         }
 
-        if (lease.owner && (!requested || !sameOwner)) {
-            if (!sameOwner || (!protectedCamera && now >= restoreAt)) {
+        if (lease.owner && (lease.restoring || !requested || !sameOwner)) {
+            if (!protectedCamera && now >= restoreAt) {
                 restoreAt = now + std::chrono::milliseconds(300);
                 if (Restore(sameOwner)) {
-                    attemptedOwner = 0;
-                    attemptedScene = 0;
+                    if (!requested || !sameOwner) {
+                        attemptedOwner = 0;
+                        attemptedScene = 0;
+                    }
                     inspectAt = {};
                     LiveLetterboxProbe::Report(scene);
                 }
