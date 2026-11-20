@@ -31,7 +31,8 @@ namespace FixedActorLighting
 		Root(const Root&) = delete;
 		Root& operator=(const Root&) = delete;
 	};
-	inline Root volumeObject, profileObject, parameterObject;
+	inline Root volumeObject, profileObject, parameterObject, volumeComponent;
+	inline uint64_t appliedStyleRevision{};
 	inline uintptr_t owner{};
 	inline int scene{}, layer{-1};
 	inline bool ready{};
@@ -120,6 +121,7 @@ namespace FixedActorLighting
 	{
 		if ((volumeObject.handle || profileObject.handle || parameterObject.handle) && !ProtectionOnUnityThread()) return false;
 		if (!Destroy(volumeObject, true)) return false;
+		volumeComponent.Reset();
 		const bool parameter = Destroy(parameterObject);
 		const bool profile = Destroy(profileObject);
 		if (!parameter || !profile) return false;
@@ -244,19 +246,18 @@ namespace FixedActorLighting
 			std::isfinite(sample.keyAngle.y) && std::isfinite(sample.rimAngle.x) &&
 			std::isfinite(sample.rimAngle.y) && std::isfinite(sample.rimPower);
 	}
-	inline bool ApplyStrengths(const GakuMotion::Core::ActorLightingStrengths& strengths, bool sampled)
+	inline bool ApplyStrengths(const GakuMotion::Core& core)
 	{
-		const auto gray = [](float value) { return Color{value, value, value, 1.f}; };
-		const auto scaled = [&](Color color, float next) {
-			const float original = Strength(color);
-			if (original == next) return color;
-			if (!original) return gray(next);
-			return Color{color.r / original * next, color.g / original * next, color.b / original * next, color.a};
+		const auto& strengths = core.actorLightingStrengths;
+		const auto& style = core.actorLightingStyle;
+		const bool sampled = core.actorLightingSampled;
+		const auto tint = [](GakuMotion::Vector3 color, float strength, float alpha) {
+			return Color{color.x * strength, color.y * strength, color.z * strength, alpha};
 		};
-		const Color key = sampled ? scaled(sampledLight.key, strengths.key) : gray(strengths.key);
-		const Color shade = sampled ? sampledLight.shade : key;
-		const Color fill = sampled ? scaled(sampledLight.fill, strengths.fill) : gray(strengths.fill);
-		const Color rim = sampled ? scaled(sampledLight.rim, strengths.rim) : gray(strengths.rim);
+		const Color key = tint(style.colors[0], strengths.key, sampled ? sampledLight.key.a : 1.f);
+		const Color shade = sampled ? sampledLight.shade : Color{strengths.key, strengths.key, strengths.key, 1.f};
+		const Color fill = tint(style.colors[1], strengths.fill, sampled ? sampledLight.fill.a : 1.f);
+		const Color rim = tint(style.colors[2], strengths.rim, sampled ? sampledLight.rim.a : 1.f);
 		const Angles keyAngle = sampled ? sampledLight.keyAngle : Angles{-15.f, 25.f};
 		const Angles rimAngle = sampled ? sampledLight.rimAngle : Angles{35.f, 15.f};
 		const float rimPower = sampled ? sampledLight.rimPower : 8.f;
@@ -268,10 +269,11 @@ namespace FixedActorLighting
 			!Parameter("rimAngle", {0x11, anglesClass}, &rimAngle) ||
 			!Parameter("rimPower", {0x0c}, &rimPower)) return false;
 		appliedStrengths = strengths;
+		appliedStyleRevision = core.actorLightingStyleRevision;
 		appliedSampled = sampled;
 		return true;
 	}
-	inline bool Create(int targetLayer, const GakuMotion::Core::ActorLightingStrengths& strengths, bool sampled)
+	inline bool Create(int targetLayer, const GakuMotion::Core& core)
 	{
 		Root name, profileType, parameterType, volumeType;
 		if (!name.Keep(StageLoader::stringNew("GakuMotion Fixed Actor Lighting")) ||
@@ -291,17 +293,16 @@ namespace FixedActorLighting
 		void* parameter = nullptr;
 		if (!Call(addParameter, profileObject.Get(), addArgs, &parameter) || !parameterObject.Keep(parameter)) return false;
 		const float noStageAdditive = 0.f;
-		if (!ApplyStrengths(strengths, sampled) ||
+		if (!ApplyStrengths(core) ||
 			!Parameter("additiveLightScale", {0x0c}, &noStageAdditive)) return false;
 		void* volumeArgs[]{volumeType.Get()};
-		Root volume;
-		if (!volume.Keep(StageLoader::Invoke(addComponent, volumeObject.Get(), volumeArgs))) return false;
+		if (!volumeComponent.Keep(StageLoader::Invoke(addComponent, volumeObject.Get(), volumeArgs))) return false;
 		bool global = true;
-		float weight = 1.f, priority = 10000.f;
+		float weight = core.actorLightingStyle.weight, priority = 10000.f;
 		void* globalArgs[]{&global};
 		void* sharedArgs[]{profileObject.Get()};
-		if (!Call(setGlobal, volume.Get(), globalArgs) || !Call(setProfile, volume.Get(), sharedArgs) ||
-			!Write(volume.Get(), "weight", {0x0c}, &weight) || !Write(volume.Get(), "priority", {0x0c}, &priority)) return false;
+		if (!Call(setGlobal, volumeComponent.Get(), globalArgs) || !Call(setProfile, volumeComponent.Get(), sharedArgs) ||
+			!Write(volumeComponent.Get(), "weight", {0x0c}, &weight) || !Write(volumeComponent.Get(), "priority", {0x0c}, &priority)) return false;
 		active = true;
 		return Call(StageLoader::setActive, volumeObject.Get(), activeArgs);
 	}
@@ -316,6 +317,8 @@ namespace FixedActorLighting
 		if (core.actorLightingSampled && (sampledOwner != core.liveOwnerToken || sampledScene != core.liveOwnerScene)) {
 			core.actorLightingSampled = false;
 			core.actorLightingStrengths = {};
+			core.actorLightingStyle = {};
+			++core.actorLightingStyleRevision;
 			core.actorLightingLimits = {1.f, .25f, .25f};
 		}
 		if (const auto requestedActor = core.actorLightingSampleActor) {
@@ -327,6 +330,16 @@ namespace FixedActorLighting
 				sampledLight = next;
 				sampledOwner = core.liveOwnerToken; sampledScene = core.liveOwnerScene;
 				core.actorLightingStrengths = {Strength(next.key), Strength(next.fill), Strength(next.rim)};
+				const auto rgb = [](Color color, float strength) {
+					if (!strength) return GakuMotion::Vector3{1,1,1};
+					return GakuMotion::Vector3{color.r / strength, color.g / strength, color.b / strength};
+				};
+				auto& style = core.actorLightingStyle;
+				style.colors[0] = rgb(next.key, core.actorLightingStrengths.key);
+				style.colors[1] = rgb(next.fill, core.actorLightingStrengths.fill);
+				style.colors[2] = rgb(next.rim, core.actorLightingStrengths.rim);
+				style.weight = 1.f;
+				++core.actorLightingStyleRevision;
 				const auto upper = [](float standard, float value) {
 					return (std::max)(standard, std::ceil(value * 1000.f) / 1000.f);
 				};
@@ -342,8 +355,9 @@ namespace FixedActorLighting
 			if (!Release()) core.fixedActorLightingNotice = "角色光照覆盖清理失败，正在重试";
 			return;
 		}
-		if (volumeObject.handle && (core.actorLightingStrengths != appliedStrengths || core.actorLightingSampled != appliedSampled) &&
-			!ApplyStrengths(core.actorLightingStrengths, core.actorLightingSampled)) {
+		if (volumeObject.handle && (core.actorLightingStrengths != appliedStrengths || core.actorLightingSampled != appliedSampled ||
+			core.actorLightingStyleRevision != appliedStyleRevision) &&
+			(!ApplyStrengths(core) || !Write(volumeComponent.Get(), "weight", {0x0c}, &core.actorLightingStyle.weight))) {
 			core.fixedActorLighting = false;
 			core.fixedActorLightingNotice = Release() ? "无法更新角色光照，已恢复原打光" : "角色光照覆盖清理失败，正在重试";
 			return;
@@ -355,7 +369,7 @@ namespace FixedActorLighting
 			nextCameraCheck = now + std::chrono::milliseconds(500);
 			return;
 		}
-		if (!Release() || targetLayer < 0 || !Create(targetLayer, core.actorLightingStrengths, core.actorLightingSampled)) {
+		if (!Release() || targetLayer < 0 || !Create(targetLayer, core)) {
 			core.fixedActorLighting = false;
 			core.fixedActorLightingNotice = Release() ? "当前 Live 的角色光照接口不可用" : "角色光照覆盖清理失败，正在重试";
 			return;

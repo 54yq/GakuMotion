@@ -81,6 +81,7 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
   const [nodeFilter, setNodeFilter] = React.useState('')
   const [expandedNodes, setExpandedNodes] = React.useState<Set<number>>(() => new Set())
 
+  const lightingStyle = fork?.actorLightingStyle
   const lightingStrengths = fork?.actorLightingStrengths
   const settings = stage.settings
   const sceneBgEnabled = !settings.hideBackground
@@ -345,6 +346,31 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
                   恢复默认打光
                 </Button>
               </div>
+            )}
+            {fork.active && fork.fixedActorLighting && lightingStyle && (
+              <CollapsiblePropertySection title="颜色与原场光照混合" className="mx-3.5 mb-2.5">
+                <div className="flex flex-wrap items-center gap-4">
+                  {([{ channel: 'key', label: '主光颜色' },
+                    { channel: 'fill', label: '暗部补光颜色' },
+                    { channel: 'rim', label: '轮廓光颜色' }] as const).map(({ channel, label }) => {
+                    const color = lightingStyle[channel]
+                    return <label key={channel} className="flex items-center gap-2 text-xs text-muted-foreground">
+                      {label}
+                      <input type="color" className="h-7 w-10 cursor-pointer rounded border bg-background"
+                        value={rgbToHex([color.x, color.y, color.z])}
+                        onChange={event => {
+                          const [x, y, z] = hexToRgb(event.currentTarget.value)
+                          void forkCommand('live.actorLightingColor', { channel, value: { x, y, z } })
+                        }} />
+                    </label>
+                  })}
+                  <NumberField label="固定打光占比" ariaLabel="固定打光占比" unit="%"
+                    min={0} max={100} step={1} decimals={0} value={lightingStyle.weight * 100}
+                    onChange={value => void forkCommand('live.actorLightingWeight', { value: value / 100 }, true)}
+                    onCommit={value => void forkCommand('live.actorLightingWeight', { value: value / 100 })} />
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">0% 使用原场角色光照，100% 使用固定打光。</p>
+              </CollapsiblePropertySection>
             )}
           </>
         )}

@@ -134,6 +134,12 @@ namespace GakuMotion
 			float key{0.40f}, fill{0.035f}, rim{0.25f};
 			bool operator==(const ActorLightingStrengths&) const = default;
 		};
+		struct ActorLightingStyle {
+			Vector3 colors[3]{{1,1,1},{1,1,1},{1,1,1}};
+			float weight{1.f};
+		};
+		ActorLightingStyle actorLightingStyle;
+		uint64_t actorLightingStyleRevision{};
 		ActorLightingStrengths actorLightingStrengths;
 		ActorLightingStrengths actorLightingLimits{1.f, .25f, .25f};
 		uint64_t actorLightingSampleActor{};

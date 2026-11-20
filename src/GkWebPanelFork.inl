@@ -66,6 +66,10 @@
 				",\"actorLightingStrengths\":{\"key\":" + JNum(core_.actorLightingStrengths.key) +
 					",\"fill\":" + JNum(core_.actorLightingStrengths.fill) +
 					",\"rim\":" + JNum(core_.actorLightingStrengths.rim) + "}" +
+				",\"actorLightingStyle\":{\"key\":" + JVec(core_.actorLightingStyle.colors[0]) +
+					",\"fill\":" + JVec(core_.actorLightingStyle.colors[1]) +
+					",\"rim\":" + JVec(core_.actorLightingStyle.colors[2]) +
+					",\"weight\":" + JNum(core_.actorLightingStyle.weight) + "}" +
 				",\"actorLightingLimits\":{\"key\":" + JNum(core_.actorLightingLimits.key) +
 					",\"fill\":" + JNum(core_.actorLightingLimits.fill) +
 					",\"rim\":" + JNum(core_.actorLightingLimits.rim) + "}" +
@@ -127,10 +131,32 @@
 					else if (channel == "rim") core_.actorLightingStrengths.rim = value;
 					else return CmdResult::Err("invalid_params", "无效的角色光照通道");
 				}
+				else if ((action == "live.actorLightingColor" || action == "live.actorLightingWeight") &&
+					ctx.liveTakeoverActive && core_.fixedActorLighting && !visual_handoff::Requested())
+				{
+					auto& style = core_.actorLightingStyle;
+					if (action == "live.actorLightingWeight") {
+						if (!NumberParam(params, "value", number) || number < 0 || number > 1)
+							return CmdResult::Err("invalid_params", "固定打光占比超出范围");
+						style.weight = static_cast<float>(number);
+					} else {
+						std::string channel;
+						Vector3 rgb;
+						if (!StringParam(params, "channel", channel) || !VecParam(params, "value", rgb) ||
+							rgb.x < 0 || rgb.x > 1 || rgb.y < 0 || rgb.y > 1 || rgb.z < 0 || rgb.z > 1)
+							return CmdResult::Err("invalid_params", "角色打光颜色无效");
+						const int index = channel == "key" ? 0 : channel == "fill" ? 1 : channel == "rim" ? 2 : -1;
+						if (index < 0) return CmdResult::Err("invalid_params", "无效的角色光照通道");
+						style.colors[index] = rgb;
+					}
+					++core_.actorLightingStyleRevision;
+				}
 				else if (action == "live.actorLightingReset" && ctx.liveTakeoverActive &&
 					core_.fixedActorLighting && !visual_handoff::Requested())
 				{
 					core_.actorLightingStrengths = {};
+					core_.actorLightingStyle = {};
+					++core_.actorLightingStyleRevision;
 					core_.actorLightingLimits = {1.f, .25f, .25f};
 					core_.actorLightingSampled = false;
 					core_.actorLightingSampleActor = 0;

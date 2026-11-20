@@ -25,6 +25,7 @@ const mockState: ForkState = {
     { key: 'sample-baton', actorToken: 0, actor: '舞台灯柱', name: 'Geo_baton_01', hidden: false, editable: true, active: true, timeline: true },
   ],
   propsCanScan: true, propsScanning: false, propsNotice: '',
+  actorLightingStyle: { key: { x: 1, y: 1, z: 1 }, fill: { x: 1, y: 1, z: 1 }, rim: { x: 1, y: 1, z: 1 }, weight: 1 },
   actorLightingStrengths: { key: 0.40, fill: 0.035, rim: 0.25 },
   actorLightingLimits: { key: 1, fill: 0.25, rim: 0.25 },
   livePostEffects: { paraffinEnabled: true, paraffinAvailable: true, disableDepthOfField: false,
@@ -79,8 +80,12 @@ export function useForkWorkspace(preview = false) {
         setState({ ...current, actorLightingStrengths: { ...current.actorLightingStrengths, [String(fields.channel)]: Number(fields.value) } })
       if (action === 'live.actorLightingSample')
         setState({ ...current, fixedActorLighting: true, fixedActorLightingNotice: '预览模式使用示例打光' })
+      if (action === 'live.actorLightingColor' && current.actorLightingStyle)
+        setState({ ...current, actorLightingStyle: { ...current.actorLightingStyle, [String(fields.channel)]: fields.value } })
+      if (action === 'live.actorLightingWeight' && current.actorLightingStyle)
+        setState({ ...current, actorLightingStyle: { ...current.actorLightingStyle, weight: Number(fields.value) } })
       if (action === 'live.actorLightingReset')
-        setState({ ...current, actorLightingStrengths: mockState.actorLightingStrengths })
+        setState({ ...current, actorLightingStrengths: mockState.actorLightingStrengths, actorLightingStyle: mockState.actorLightingStyle })
       if (current.livePostEffects && (action === 'live.paraffin' || action === 'live.depthOfField' || action === 'live.depthOfFieldAuto')) {
         const effects = current.livePostEffects
         setState({ ...current, livePostEffects: action === 'live.paraffin'

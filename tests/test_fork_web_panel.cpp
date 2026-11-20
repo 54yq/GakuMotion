@@ -92,6 +92,11 @@ int main()
 		!core.ShouldDisableLiveDof(), "Manual override can restore depth of field in VMD mode");
 	check(ok(request("fork.command", R"({"action":"live.depthOfFieldAuto","session":12,"owner":19})")) &&
 		core.ShouldDisableLiveDof() && core.liveDepthOfFieldOverride < 0, "Automatic VMD depth of field behavior can be restored");
+	check(ok(request("fork.command", R"({"action":"live.actorLightingColor","session":12,"owner":19,"channel":"key","value":{"x":1,"y":0.5,"z":0.25}})")) &&
+		core.actorLightingStyle.colors[0].y == .5f && core.actorLightingStyle.colors[1].y == 1.f,
+		"Only the chosen lighting channel receives the custom color");
+	check(ok(request("fork.command", R"({"action":"live.actorLightingWeight","session":12,"owner":19,"value":0.4})")) &&
+		core.actorLightingStyle.weight == .4f, "Fixed lighting can be blended with native lighting");
 	const auto defaults = core.actorLightingStrengths;
 	check(defaults.key == .40f && defaults.fill == .035f && defaults.rim == .25f,
 		"The new lighting defaults match the selected strengths");
