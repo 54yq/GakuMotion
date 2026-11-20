@@ -575,7 +575,7 @@ export interface ForkState {
     depthOfFieldUnavailable: boolean
   }
   fixedActorLighting?: boolean
-  actorLightingStyle?: { key: Vector3; fill: Vector3; rim: Vector3; weight: number }
+  actorLightingStyle?: { key: Vector3; fill: Vector3; rim: Vector3; weight: number; keyAngle?: Vector3; rimAngle?: Vector3 }
   actorLightingStrengths?: { key: number; fill: number; rim: number }
   actorLightingLimits?: { key: number; fill: number; rim: number }
   fixedActorLightingNotice?: string

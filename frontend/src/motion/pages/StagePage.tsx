@@ -310,12 +310,6 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
                     : '接管 Live 后可开启')}
                 </span>
               </div>
-              {fork.actorLightingLimits && (
-                <Button size="sm" variant="outline" disabled={!fork.active}
-                  onClick={() => void forkCommand('live.actorLightingSample')}>
-                  读取并应用主角色打光
-                </Button>
-              )}
               <Checkbox
                 id="stage-fixed-actor-lighting"
                 checked={fork.fixedActorLighting}
@@ -334,7 +328,7 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
                     ariaLabel={label}
                     unit="%"
                     min={0}
-                    max={Math.max(max, Math.round((fork.actorLightingLimits?.[channel] ?? 0) * 1000) / 10)}
+                    max={Math.max(max, (fork.actorLightingLimits?.[channel] ?? 0) * 100)}
                     step={0.5}
                     decimals={1}
                     value={lightingStrengths[channel] * 100}
@@ -342,13 +336,25 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
                     onCommit={(value) => void forkCommand('live.actorLightingStrength', { channel, value: value / 100 })}
                   />
                 ))}
-                <Button size="sm" variant="outline" onClick={() => void forkCommand('live.actorLightingReset')}>
-                  恢复默认打光
-                </Button>
+              </div>
+            )}
+            {(fork.actorLightingLimits || (fork.active && fork.fixedActorLighting && lightingStrengths)) && (
+              <div className="flex flex-wrap items-center gap-2 px-3.5 pb-2.5">
+                {fork.actorLightingLimits && (
+                  <Button size="sm" variant="outline" disabled={!fork.active}
+                    onClick={() => void forkCommand('live.actorLightingSample')}>
+                    读取并应用主角色打光
+                  </Button>
+                )}
+                {fork.active && fork.fixedActorLighting && lightingStrengths && (
+                  <Button size="sm" variant="outline" onClick={() => void forkCommand('live.actorLightingReset')}>
+                    恢复默认打光
+                  </Button>
+                )}
               </div>
             )}
             {fork.active && fork.fixedActorLighting && lightingStyle && (
-              <CollapsiblePropertySection title="颜色与原场光照混合" className="mx-3.5 mb-2.5">
+              <CollapsiblePropertySection title={lightingStyle.keyAngle ? "颜色、打光方向与原场光照混合" : "颜色与原场光照混合"} className="mx-3.5 mb-2.5">
                 <div className="flex flex-wrap items-center gap-4">
                   {([{ channel: 'key', label: '主光颜色' },
                     { channel: 'fill', label: '暗部补光颜色' },
@@ -369,6 +375,20 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
                     onChange={value => void forkCommand('live.actorLightingWeight', { value: value / 100 }, true)}
                     onCommit={value => void forkCommand('live.actorLightingWeight', { value: value / 100 })} />
                 </div>
+                {([{ channel: 'key', label: '主光方向', angle: lightingStyle.keyAngle },
+                  { channel: 'rim', label: '轮廓光方向', angle: lightingStyle.rimAngle }] as const)
+                  .map(({ channel, label, angle }) => angle && (
+                    <div key={channel} className="mt-2 flex flex-wrap items-center gap-3">
+                      <span className="text-xs text-muted-foreground">{label}</span>
+                      {([{ axis: 'x', axisLabel: '水平' }, { axis: 'y', axisLabel: '垂直' }] as const)
+                        .map(({ axis, axisLabel }) => (
+                          <NumberField key={axis} label={axisLabel} ariaLabel={label + axisLabel} unit="°"
+                            min={-180} max={180} step={1} decimals={1} value={angle[axis]}
+                            onChange={value => void forkCommand('live.actorLightingDirection', { channel, axis, value }, true)}
+                            onCommit={value => void forkCommand('live.actorLightingDirection', { channel, axis, value })} />
+                        ))}
+                    </div>
+                  ))}
                 <p className="mt-2 text-xs text-muted-foreground">0% 使用原场角色光照，100% 使用固定打光。</p>
               </CollapsiblePropertySection>
             )}

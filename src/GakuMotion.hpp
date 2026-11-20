@@ -24,6 +24,7 @@
 
 #include <cstdarg>
 #include <cstdio>
+#include <limits>
 #include <string>
 #include <vector>
 #include <filesystem>
@@ -134,14 +135,16 @@ namespace GakuMotion
 			float key{0.40f}, fill{0.035f}, rim{0.25f};
 			bool operator==(const ActorLightingStrengths&) const = default;
 		};
+		struct ActorLightingAngles { float x, y; };
 		struct ActorLightingStyle {
+			ActorLightingAngles keyAngle{-15.f, 25.f}, rimAngle{35.f, 15.f};
 			Vector3 colors[3]{{1,1,1},{1,1,1},{1,1,1}};
 			float weight{1.f};
 		};
 		ActorLightingStyle actorLightingStyle;
 		uint64_t actorLightingStyleRevision{};
 		ActorLightingStrengths actorLightingStrengths;
-		ActorLightingStrengths actorLightingLimits{1.f, .25f, .25f};
+		static constexpr float actorLightingMax = (std::numeric_limits<float>::max)();
 		uint64_t actorLightingSampleActor{};
 		uintptr_t actorLightingSampleOwner{};
 		bool actorLightingSampled{};

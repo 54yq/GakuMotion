@@ -108,8 +108,19 @@ int main()
 	check(ok(request("fork.command", R"({"action":"live.actorLightingStrength","session":12,"owner":19,"channel":"rim","value":0})")) &&
 		core.actorLightingStrengths.rim == 0 && core.actorLightingStrengths.key == defaults.key &&
 		core.actorLightingStrengths.fill == defaults.fill, "Rim light can be turned off independently");
-	check(!ok(request("fork.command", R"({"action":"live.actorLightingStrength","session":12,"owner":19,"channel":"fill","value":0.9})")) &&
-		core.actorLightingStrengths.fill == defaults.fill, "Out-of-range fill is rejected");
+	for (const auto* channel : {"key", "fill", "rim"}) {
+		const auto prefix = std::string(R"({"action":"live.actorLightingStrength","session":12,"owner":19,"channel":")") +
+			channel + R"(","value":)";
+		check(ok(request("fork.command", prefix + "2.5}")), "HDR intensity is accepted above the old limits");
+		check(!ok(request("fork.command", prefix + "3.5e38}")), "Float overflow is rejected");
+	}
+	check(core.actorLightingStrengths == GakuMotion::Core::ActorLightingStrengths{2.5f, 2.5f, 2.5f},
+		"HDR intensities are stored for all three channels");
+	check(ok(request("fork.command", R"({"action":"live.actorLightingDirection","session":12,"owner":19,"channel":"rim","axis":"x","value":-58})")) &&
+		core.actorLightingStyle.rimAngle.x == -58 && core.actorLightingStyle.rimAngle.y == 15,
+		"Rim direction edits only the selected axis");
+	check(!ok(request("fork.command", R"({"action":"live.actorLightingDirection","session":12,"owner":19,"channel":"fill","axis":"x","value":42})")),
+		"The additive fill channel has no direction");
 	check(ok(request("fork.command", R"({"action":"live.actorLightingReset","session":12,"owner":19})")) &&
 		core.actorLightingStrengths == defaults && !core.actorLightingSampleActor, "Reset restores strengths and cancels a pending capture");
 	check(ok(request("fork.command", R"({"action":"live.fixedActorLighting","session":12,"owner":19,"value":false})")) &&

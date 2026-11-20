@@ -5,7 +5,7 @@ namespace FixedActorLighting
 {
 	using Type = GakuMotion::ExactMethodMetadata::Type;
 	struct Color { float r, g, b, a; };
-	struct Angles { float x, y; };
+	using Angles = GakuMotion::Core::ActorLightingAngles;
 	struct Sample {
 		Color key, shade, fill, rim;
 		Angles keyAngle, rimAngle;
@@ -258,8 +258,8 @@ namespace FixedActorLighting
 		const Color shade = sampled ? sampledLight.shade : Color{strengths.key, strengths.key, strengths.key, 1.f};
 		const Color fill = tint(style.colors[1], strengths.fill, sampled ? sampledLight.fill.a : 1.f);
 		const Color rim = tint(style.colors[2], strengths.rim, sampled ? sampledLight.rim.a : 1.f);
-		const Angles keyAngle = sampled ? sampledLight.keyAngle : Angles{-15.f, 25.f};
-		const Angles rimAngle = sampled ? sampledLight.rimAngle : Angles{35.f, 15.f};
+		const Angles keyAngle = style.keyAngle;
+		const Angles rimAngle = style.rimAngle;
 		const float rimPower = sampled ? sampledLight.rimPower : 8.f;
 		if (!Parameter("lightColor", {0x11, colorClass}, &key) ||
 			!Parameter("shadeColorMultiply", {0x11, colorClass}, &shade) ||
@@ -319,7 +319,6 @@ namespace FixedActorLighting
 			core.actorLightingStrengths = {};
 			core.actorLightingStyle = {};
 			++core.actorLightingStyleRevision;
-			core.actorLightingLimits = {1.f, .25f, .25f};
 		}
 		if (const auto requestedActor = core.actorLightingSampleActor) {
 			core.actorLightingSampleActor = 0;
@@ -340,11 +339,8 @@ namespace FixedActorLighting
 				style.colors[2] = rgb(next.rim, core.actorLightingStrengths.rim);
 				style.weight = 1.f;
 				++core.actorLightingStyleRevision;
-				const auto upper = [](float standard, float value) {
-					return (std::max)(standard, std::ceil(value * 1000.f) / 1000.f);
-				};
-				const auto& value = core.actorLightingStrengths;
-				core.actorLightingLimits = {upper(1.f, value.key), upper(.25f, value.fill), upper(.25f, value.rim)};
+				style.keyAngle = next.keyAngle;
+				style.rimAngle = next.rimAngle;
 				core.actorLightingSampled = true;
 				appliedSampled = false;
 				core.fixedActorLighting = true;
