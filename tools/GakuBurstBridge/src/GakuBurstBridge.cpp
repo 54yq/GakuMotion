@@ -176,6 +176,88 @@ class Bridge {
             std::memcpy(&header, reinterpret_cast<void*>(container), sizeof(header)); return true;
         } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
     }
+    struct SwingVisit {
+        int frame{-1};
+        uintptr_t job{}, caller{}, stream{};
+        float dt{};
+        std::array<uintptr_t,4> payloads{};
+        std::array<int32_t,4> lengths{};
+    };
+    std::array<ListObservation,4> repeatLayouts_{};
+    bool repeatLayoutsReady_{};
+    uint64_t repeatGeneration_{};
+    unsigned repeatBudget_{};
+    SwingVisit repeatFirst_, repeatSecond_;
+    bool repeatPending_{};
+
+    // Called with mutex_ held after a verified input write. The original
+    // solver is still forwarded exactly once for each callback.
+    void NoteSwingVisit(const Snapshot& s, void* job, void* swing, void* stream, uintptr_t caller, float dt) {
+        if (!repeatLayoutsReady_) return;
+        if (repeatGeneration_ != s.generation) {
+            repeatGeneration_ = s.generation;
+            repeatBudget_ = 180;
+            repeatFirst_ = {};
+            repeatPending_ = false;
+        }
+        if (!repeatBudget_) return;
+        --repeatBudget_;
+        SwingVisit visit;
+        visit.frame = s.frame;
+        visit.job = reinterpret_cast<uintptr_t>(job);
+        visit.caller = caller;
+        visit.stream = reinterpret_cast<uintptr_t>(stream);
+        visit.dt = dt;
+        for (unsigned i=0; i<repeatLayouts_.size(); ++i) {
+            const auto& layout = repeatLayouts_[i];
+            uintptr_t container{};
+            ListHeader header{};
+            if (layout.layoutVerified && ReadListHeader(swing,ListOffsets[i],container,header) &&
+                ValidListHeader(header,layout.stride) && header.length > 0) {
+                visit.payloads[i] = header.payload;
+                visit.lengths[i] = header.length;
+            }
+        }
+        if (repeatFirst_.frame == visit.frame) {
+            repeatSecond_ = visit;
+            repeatPending_ = true;
+            repeatBudget_ = 0;
+        } else repeatFirst_ = visit;
+    }
+
+    void ReportSwingRepeat(const GbbFrame& frame) {
+        if (!repeatLayoutsReady_) {
+            const auto layouts = PrepareListLayouts();
+            std::lock_guard<std::mutex> lock(mutex_);
+            repeatLayouts_ = layouts;
+            repeatLayoutsReady_ = true;
+        }
+        SwingVisit a,b;
+        GbbLogFn log{};
+        void* context{};
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (!repeatPending_) return;
+            repeatPending_ = false;
+            if (repeatGeneration_ != generation_.load(std::memory_order_relaxed) || current_.actor != frame.actor) return;
+            a = repeatFirst_; b = repeatSecond_;
+            log = log_; context = logContext_;
+        }
+        if (!log) return;
+        char detail[640]{};
+        std::snprintf(detail,sizeof(detail),
+            "[SwingRepeat] actor=%p input_frame=%d next_publish_frame=%d job=%llx/%llx caller=%llx/%llx stream=%llx/%llx dt=%.6f/%.6f dynamic=%llx:%d/%llx:%d static=%llx:%d/%llx:%d breast=%llx:%d/%llx:%d chain=%llx:%d/%llx:%d",
+            frame.actor,a.frame,frame.unity_frame,
+            static_cast<unsigned long long>(a.job),static_cast<unsigned long long>(b.job),
+            static_cast<unsigned long long>(a.caller),static_cast<unsigned long long>(b.caller),
+            static_cast<unsigned long long>(a.stream),static_cast<unsigned long long>(b.stream),a.dt,b.dt,
+            static_cast<unsigned long long>(a.payloads[0]),a.lengths[0],static_cast<unsigned long long>(b.payloads[0]),b.lengths[0],
+            static_cast<unsigned long long>(a.payloads[1]),a.lengths[1],static_cast<unsigned long long>(b.payloads[1]),b.lengths[1],
+            static_cast<unsigned long long>(a.payloads[2]),a.lengths[2],static_cast<unsigned long long>(b.payloads[2]),b.lengths[2],
+            static_cast<unsigned long long>(a.payloads[3]),a.lengths[3],static_cast<unsigned long long>(b.payloads[3]),b.lengths[3]);
+        NotifyGuarded(log,context,1,detail);
+    }
+
     void ObserveLists(void* swing) {
         for (unsigned i=0;i<4;++i) {
             auto& row=actorLists_[i]; if (!row.layoutVerified || row.samples+row.failures>=64) continue;
@@ -717,6 +799,7 @@ class Bridge {
             if (!stopped_.load(std::memory_order_acquire) &&
                 generation_.load(std::memory_order_relaxed) == s.generation) {
                 if (ok) { d.sequence = matches_.fetch_add(1, std::memory_order_relaxed) + 1; diagnostic_ = d;
+                    if (d.injected) NoteSwingVisit(s,job,swing,stream,caller,d.dt);
                     if (s.beforeQuartz) {
                         pairedPasses_.fetch_add(1,std::memory_order_relaxed);
                         pairedGeneration_.store(s.generation,std::memory_order_release);
@@ -975,6 +1058,7 @@ public:
             return Reject(GBB_E_UNAVAILABLE, initializationFailure_);
         }
         if (readOnlyProbeActive_) return GBB_PENDING;
+        ReportSwingRepeat(*frame);
         if (readOnlyProbeSuspended_) {
             if (!actualCaller_.load(std::memory_order_acquire)) {
                 const auto status = MH_EnableHook(deltaTarget_);
