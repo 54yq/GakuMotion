@@ -324,10 +324,12 @@ namespace
 			if (core.followerPhysicsStatus.size() <= i) core.followerPhysicsStatus.resize(i + 1);
 			auto& slot = g_followerPhysics[i];
 			if (slot.frame == frame && slot.actor == actor) return;
-			const int requested = core.config.secondaryPhysicsBackend;
+			const bool paused = GakuMotion::live_physics_clock::IsTransportPaused(
+                core.liveTakeoverActive, core.player.state == GakuMotion::PlaybackState::Paused);
+            const int requested = paused ? 0 : core.config.secondaryPhysicsBackend;
 			if (slot.actor != actor || slot.bindingGeneration != follower.bindingGeneration || slot.backend != requested ||
 			    slot.quartz != core.config.beforeQuartzExperiment || slot.diagnostics != core.config.sleeveMuscleDiagnostics ||
-			    slot.seeks != core.player.SeekCount() || core.player.scrubbing || player.currentTime + .001f < slot.time)
+			    (!paused && (slot.seeks != core.player.SeekCount() || core.player.scrubbing || player.currentTime + .001f < slot.time)))
 			{
 				if (!ClearFollowerPhysics(i, &player))
 				{
@@ -346,14 +348,14 @@ namespace
 			slot.lastTick = now;
 			const bool started = core.player.state == GakuMotion::PlaybackState::Playing || g_followerBridge.State(i).outstanding;
 			const bool native = requested == 2 && started && g_followerBridge.Publish(i, binding->second, ctrl, player.currentTime, frame, slot.quartz, slot.diagnostics);
-			const std::string reason = requested == 0 ? "off" : requested == 1 ? "fallback" :
+			const std::string reason = paused ? "transport_paused" : requested == 0 ? "off" : requested == 1 ? "fallback" :
 				!started ? "native_waiting_for_playback" : g_followerBridge.State(i).reason == "not_requested" ? g_followerBridge.reason : g_followerBridge.State(i).reason;
 			const int actual = GakuMotion::SelectSecondaryPhysicsBackend(requested, native, core.liveTakeoverActive, reason);
 			if (requested == 2 && actual != 1 && slot.actual == 1)
 				ReleaseFallbackToNative(slot.fallback, binding->second, ctrl, static_cast<unsigned>(i + 2));
 			slot.actual = actual;
 			if (slot.actual == 1) PublishFallbackPhysics(core, slot.fallback, binding->second, player, static_cast<unsigned>(i + 2), dt, frame);
-			core.followerPhysicsStatus[i] = slot.actual == 2 ? "原生运行中" :
+			core.followerPhysicsStatus[i] = paused ? "动作已暂停" : slot.actual == 2 ? "原生运行中" :
 				slot.actual == 0 ? (requested == 2 ? "等待原生任务" : "已关闭") :
 				reason == "native_pending_stale" ? "内建（等待原生任务）" :
 				reason == "native_pending" || reason == "native_waiting_for_playback" ? "内建（原生待确认）" :
@@ -1044,7 +1046,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.21-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.22-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -3338,8 +3340,23 @@ static bool RefreshSceneActors(GakuMotion::Core& core, bool force, bool refreshP
 	return true;
 }
 
+namespace {
+    using PluginTickClock = std::chrono::steady_clock;
+    thread_local PluginTickClock::duration g_actorTickTime{};
+    thread_local PluginTickClock::duration g_frameTickTime{};
+    thread_local unsigned g_actorTickCalls{};
+
+    struct PluginTickTimer {
+        PluginTickClock::duration& total;
+        PluginTickClock::time_point begin = PluginTickClock::now();
+        ~PluginTickTimer() { total += PluginTickClock::now() - begin; }
+    };
+}
+
 void MotionActorTick(void*, void* activeActor, float deltaTime)
 {
+    ++g_actorTickCalls;
+    const PluginTickTimer profile{g_actorTickTime};
 	if (g_restoringNative) return;
 	if (!EnsureRuntimeReadyForActor(activeActor, MotionRuntimeReady)) return;
 	if (activeActor) ActorGroundShadow::BindUnityThread();
@@ -3966,11 +3983,13 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 		}
 		else if (frame != g_physicsFrame || g_physicsActor != activeActor)
 		{
-			const int requested = core.config.secondaryPhysicsBackend;
+			const bool paused = GakuMotion::live_physics_clock::IsTransportPaused(
+                core.liveTakeoverActive, player.state == GakuMotion::PlaybackState::Paused);
+            const int requested = paused ? 0 : core.config.secondaryPhysicsBackend;
 			if (requested != g_physicsBackend || core.config.beforeQuartzExperiment != g_physicsBeforeQuartz ||
 				core.config.sleeveMuscleDiagnostics != g_physicsSleeveDiagnostics ||
 				activeActor != g_physicsActor || core.loadedMotionGeneration != g_physicsMotionGeneration ||
-				player.SeekCount() != g_physicsSeeks || player.scrubbing || player.currentTime + .001f < g_physicsTime)
+				(!paused && (player.SeekCount() != g_physicsSeeks || player.scrubbing || player.currentTime + .001f < g_physicsTime)))
 			{
 				if (g_physicsActor == activeActor)
 				{
@@ -3999,7 +4018,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 				                         : std::chrono::duration<float>(dispatchBegin - g_physicsLastTick).count();
 			g_physicsLastTick = dispatchBegin;
 			// A seek or track change invalidates the packet. The same role clock
-			// can receive the replacement pose in pause or track preview.
+			// can receive the replacement pose in track preview.
 			const bool nativeReadyToStart = GakuMotion::live_physics_clock::CanPublish(
 				player.state == GakuMotion::PlaybackState::Playing,
 				player.state == GakuMotion::PlaybackState::Paused, g_burstBridge.HasCaptureInput(),
@@ -4009,7 +4028,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 			                                                      player.currentTime, frame,
 			                                                      core.config.beforeQuartzExperiment,
 			                                                      core.config.sleeveMuscleDiagnostics);
-			const std::string reason = requested == 2 ? (nativeReadyToStart ? g_burstBridge.reason : "native_waiting_for_playback") : requested == 1 ? "fallback" : "off";
+			const std::string reason = paused ? "transport_paused" : requested == 2 ? (nativeReadyToStart ? g_burstBridge.reason : "native_waiting_for_playback") : requested == 1 ? "fallback" : "off";
 			const int actual = GakuMotion::SelectSecondaryPhysicsBackend(requested, native, core.liveTakeoverActive, reason);
 			if (requested == 2 && actual != 1 && g_physicsActual == 1)
 			{
@@ -4414,6 +4433,12 @@ GakuStatus MotionActivate(const GakuHostApi* host, void** pluginState)
 // MotionActorTick.
 void MotionTick(void*, float)
 {
+    const auto actorTickTime = g_actorTickTime;
+    const auto frameTickTime = g_frameTickTime;
+    const auto actorTickCalls = g_actorTickCalls;
+    g_actorTickTime = g_frameTickTime = {};
+    g_actorTickCalls = 0;
+    const PluginTickTimer profile{g_frameTickTime};
 	// Preferences and file jobs do not need a dancer. The import UI is already
 	// usable in Photography preparation, before any actor callback can arrive.
 	// Playback and scene commands retain their actor timing and queue order.
@@ -4441,10 +4466,12 @@ void MotionTick(void*, float)
             GakuMotion_GetFrameContext(&context, sizeof(context));
             const auto& frame = core.liveFrameMonitor.display;
             SYSTEMTIME time{}; GetLocalTime(&time);
-            g_hostContext.logWarn("[GakuMotion][LiveFrame][Stall] time=%04u-%02u-%02uT%02u:%02u:%02u.%03u frame_ms=%.2f baseline_ms=%.2f fps_1s=%.1f live_time=%.3f motion_time=%.3f live_paused=%u takeover=%u followers=%u physics_requested=%u physics_actual=%u physics_dispatch_ms=%.3f physics_native_avg_ms=%.3f physics_solver_avg_ms=%.3f failures=%llu expired=%llu identity_skips=%llu",
+            g_hostContext.logWarn("[GakuMotion][LiveFrame][Stall] time=%04u-%02u-%02uT%02u:%02u:%02u.%03u frame_ms=%.2f baseline_ms=%.2f fps_1s=%.1f live_time=%.3f motion_time=%.3f live_paused=%u takeover=%u followers=%u motion_state=%d plugin_frame_tick_ms=%.3f plugin_actor_ticks=%u plugin_actor_tick_ms=%.3f physics_requested=%u physics_actual=%u physics_dispatch_ms=%.3f physics_native_avg_ms=%.3f physics_solver_avg_ms=%.3f failures=%llu expired=%llu identity_skips=%llu",
                 time.wYear,time.wMonth,time.wDay,time.wHour,time.wMinute,time.wSecond,time.wMilliseconds,
                 frame.lastStallMs,frame.baselineMs,frame.fps,context.liveTime,context.motionTime,context.livePaused,context.takeover,
-                context.boundFollowers,context.physicsRequested,context.physicsActual,context.physicsDispatchNs/1e6,
+                context.boundFollowers,static_cast<int>(core.player.state),
+                std::chrono::duration<double, std::milli>(frameTickTime).count(),actorTickCalls,
+                std::chrono::duration<double, std::milli>(actorTickTime).count(),context.physicsRequested,context.physicsActual,context.physicsDispatchNs/1e6,
                 context.physicsNativeNs/1e6,context.physicsSolverNs/1e6,
                 static_cast<unsigned long long>(context.physicsFailures),static_cast<unsigned long long>(context.physicsExpired),
                 static_cast<unsigned long long>(context.physicsIdentitySkips));
@@ -4823,7 +4850,9 @@ void MotionTick(void*, float)
 				std::abs(core.liveObservation.time-core.liveActorClockOrigin)<=0.1f&&core.injectionPolicy.Read().captureDepth==0&&GakuMotion::capture::LiveAutoPhotoIdle();
 			const bool independentContextOk = !g_primaryUsesIndependentGraph ||
 				(mmdMatches && !core.liveActorClockFault && CameraBridge::IsAlive(core.player.controller.targetActor));
-			const bool loopOk = independentContextOk && (!LiveActorClockMvp::active || !loopContext || TickPrimaryActorClock(now));
+			const bool clockStopping = LiveActorClockMvp::active && LiveActorClockMvp::mmdSession && !mmdWanted;
+            const bool loopOk = independentContextOk && (!LiveActorClockMvp::active || !loopContext ||
+                clockStopping || TickPrimaryActorClock(now));
 			if(LiveActorClockMvp::active && ((request==2&&requestMatches) || (!LiveActorClockMvp::mmdSession&&now-LiveActorClockMvp::started>=3.0) ||
 				(LiveActorClockMvp::mmdSession&&(!mmdWanted||!mmdMatches)) || !LiveActorClockMvp::SameOwner() ||
 				!core.liveObservation.confirmed || !core.liveObservation.paused || std::abs(core.liveObservation.time-core.liveActorClockOrigin)>0.1f ||

@@ -134,14 +134,14 @@ struct {void(*logInfo)(const char*,...){};}g_hostContext;
 struct ClockTest : LiveActorClockMvp { static int Run(){
  using GakuMotion::live_physics_clock::ShouldRun;
  CHECK(ShouldRun(true,false,2,true,false,true));
- CHECK(ShouldRun(true,false,2,false,true,true));
+ CHECK(!ShouldRun(true,false,2,false,true,true));
  CHECK(!ShouldRun(true,false,2,false,true,false)); // paused preview cannot start a new lease
  CHECK(!ShouldRun(true,false,2,false,false,true));
  CHECK(!ShouldRun(false,false,2,false,true,true));
  CHECK(!ShouldRun(true,true,2,false,true,true));
  CHECK(!ShouldRun(true,false,1,false,true,true));
  using GakuMotion::live_physics_clock::CanPublish;
- CHECK(ShouldRun(true,false,2,false,true,false,true)); // Seek clears the packet, not an owned role clock.
+ CHECK(!ShouldRun(true,false,2,false,true,false,true)); // An owned clock stops on transport pause.
  CHECK(ShouldRun(true,false,2,true,false,false,true));
  CHECK(CanPublish(false,true,false,true));
  CHECK(!CanPublish(false,true,false,false));
@@ -228,7 +228,7 @@ struct ClockTest : LiveActorClockMvp { static int Run(){
  CHECK(Start(10,true) && mmdSession && playingValue==1 && modeValue==1);
  CHECK(clipEnd.ClipCount()==1 && std::abs(clipTime-(4.0+1.0/60.0))<1e-8 && clipSpeed==0.0 && clipWrap==0);
  const bool ownsClock = active && mmdSession && SameOwner();
- CHECK(ShouldRun(true,false,2,false,true,false,ownsClock));
+ CHECK(!ShouldRun(true,false,2,false,true,false,ownsClock));
  CHECK(CanPublish(false,true,false,ownsClock));
  CHECK(TickLoop(10.5) && clipEnd.ClipCount()==1 && clipSpeed==0.0 && playingValue==1);
  // Track selection clears the native packet. The same actor keeps its clock,
