@@ -116,7 +116,7 @@ export interface ImportUiState {
   errorDetail: string
 }
 
-export type DialogTarget = 'library-add' | 'append' | ImportSlotKey | 'video'
+export type DialogTarget = 'library-add' | ImportSlotKey | 'video'
 
 export interface DropUiState {
   visual: 'none' | 'armed' | 'hover' | 'invalid'
@@ -2027,7 +2027,7 @@ export class MotionStore {
   browseFiles = async (target: DialogTarget): Promise<void> => {
     if (this.state.dialogBusy || !this.supports('dialog.pickFile')) return
     const kind =
-      target === 'library-add' || target === 'append'
+      target === 'library-add'
         ? 0
         : target === 'motion'
           ? 1
@@ -2038,7 +2038,7 @@ export class MotionStore {
               : target === 'audio'
                 ? 4
                 : 5
-    const multiple = target === 'library-add' || target === 'append'
+    const multiple = target === 'library-add'
     const session = this.importSession
     try {
       const { dialogId } = await this.client().request('dialog.pickFile', { kind, multiple })
@@ -2064,8 +2064,7 @@ export class MotionStore {
         if (target === 'library-add') await this.openImportNew(result.paths)
         else if (target === 'video') this.set({ studioVideoPath: result.paths[0] })
         else if (target && this.dialogImportSession === this.importSession && this.state.importForm.open) {
-          if (target === 'append') await this.importAppendFiles(result.paths)
-          else await this.importPickSlotFile(target, result.paths[0])
+          await this.importPickSlotFile(target, result.paths[0])
         }
       } else if (result.state === 'failed' && result.notice !== '') {
         this.set({ actionError: result.notice })

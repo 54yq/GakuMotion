@@ -2,7 +2,6 @@ import {
   RiAlertFill,
   RiCameraFill,
   RiEmotionHappyFill,
-  RiFolderAddFill,
   RiInformationFill,
   RiMusic2Fill,
   RiSparkling2Fill,
@@ -108,23 +107,17 @@ export function ImportDialog() {
           <div className="space-y-2.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm font-medium">演出轨道与同步参数</p>
-              <div className="flex flex-wrap items-center gap-2">
-                {!editing && <Button variant="outline" size="sm" disabled={busy || !dialogSupported}
-                  onClick={() => void motionStore.browseFiles('motion')}>
-                  导入文件…
-                </Button>}
-                <Button
-                  title="将更多文件加入轨道下拉候选"
-                  variant="outline"
-                  size="sm"
-                  disabled={busy || !dialogSupported}
-                  onClick={() => void motionStore.browseFiles('append')}
-                >
-                  <RiFolderAddFill className="size-3.5" />
-                  追加文件…
-                </Button>
-                {!dialogSupported && <PendingBadge />}
-              </div>
+              {(!editing || !dialogSupported) && (
+                <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+                  {!editing && (
+                    <Button variant="outline" size="sm" disabled={busy || !dialogSupported}
+                      onClick={() => void motionStore.browseFiles('motion')}>
+                      导入文件…
+                    </Button>
+                  )}
+                  {!dialogSupported && <PendingBadge />}
+                </div>
+              )}
             </div>
 
             <div className="divide-y divide-border/60 rounded-lg border bg-card">
@@ -212,7 +205,7 @@ export function ImportDialog() {
 
             {unsupportedAudio > 0 && (
               <p className="text-xs text-muted-foreground">
-                {unsupportedAudio} 个非 WAV 音频未自动填入，可用“追加文件”后手动选择。
+                {unsupportedAudio} 个非 WAV 音频未自动填入，请选择 WAV 文件。
               </p>
             )}
 
