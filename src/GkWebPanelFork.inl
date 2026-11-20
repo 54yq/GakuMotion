@@ -210,7 +210,12 @@
 					(enable ? ctx.liveActorClockAvailable && ctx.livePaused && !ctx.liveTakeoverActive : ctx.liveActorClockActive))
 					ctx.fnActorClockTrial(ctx.self, enable);
 				else if (action == "live.armDiagnostics" && BoolParam(params, "value", enable))
+				{
 					ctx.fnSetContinuousArmDiagnostics(ctx.self, enable);
+					if (enable && ctx.liveTakeoverActive && ctx.injectionAllowed && ctx.physicsBackend != 0 &&
+						ctx.player && ctx.player->state != PlaybackState::Stopped)
+						ctx.fnCaptureCostumePhysics(ctx.self);
+				}
 				else return CmdResult::Err("not_ready", "当前 Live 状态不支持此操作");
 				return CmdResult::Ok();
 			}

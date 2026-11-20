@@ -1050,7 +1050,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.25-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.26-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -3634,7 +3634,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	}
 	uint64_t requestedArmSnapshot = 0;
 	uint64_t periodicArmSnapshot = 0;
-	if (core.liveContinuousArmDiagnostics && core.liveViewingConfirmed && core.liveObservation.confirmed && g_sceneOwner.Valid() &&
+	if (core.liveContinuousArmDiagnostics && !g_costumeCapture.Opened() && core.liveViewingConfirmed && core.liveObservation.confirmed && g_sceneOwner.Valid() &&
 		core.liveOwnerToken && sceneHandle == core.liveOwnerScene && sceneHandle == g_sceneOwner.sceneHandle &&
 		core.injectionPolicy.Read().captureDepth == 0 && GakuMotion::capture::LiveAutoPhotoIdle()) {
 		static GakuMotion::live_arm_snapshot::Schedule schedule;
