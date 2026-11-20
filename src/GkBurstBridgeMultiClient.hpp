@@ -1,6 +1,6 @@
 #pragma once
 #include "GakuBurstBridge.h"
-#include "GkIdolController.hpp"
+#include "GkNativeSwingRenderPose.hpp"
 #include <deque>
 #include <chrono>
 #include <string>
@@ -19,6 +19,8 @@ public:
         int minimumFrame{-1};
         std::chrono::steady_clock::time_point matched{};
         GbbStatus status{}; GbbPerf perf{};
+        GbbFrame previousRenderInput{};
+        bool renderPoseAligned{};
         std::string reason{"not_requested"};
     };
 private:
@@ -99,7 +101,7 @@ public:
         api_=next; reason="discovering"; return true;
     }
     bool Publish(size_t index,const IdolBoneBinding& binding,const IdolController& ctrl,float time,int frame,
-        bool quartz=false,bool diagnostics=false) {
+        bool quartz=false,bool diagnostics=false,bool alignRenderPose=false) {
         if (!Ensure()) return false;
         if (slots_.size() <= index) slots_.resize(index + 1);
         auto& slot=slots_[index]; if (slot.faulted) return false;
@@ -129,6 +131,9 @@ public:
             ctrl.fnGetLocalRotation(pose.transform,&pose.local_rotation.x);
             ctrl.fnGetLocalPosition(pose.transform,&pose.local_position.x);
         }
+        const auto previousRenderInput = slot.previousRenderInput;
+        slot.previousRenderInput = alignRenderPose ? packet : GbbFrame{};
+        slot.renderPoseAligned = false;
         slot.outstanding=true;
         const auto result=PublishApi(api_,slot.token,&packet);
         slot.status={}; slot.status.size=sizeof(slot.status); slot.status.version=GBB_API_VERSION;
@@ -153,14 +158,19 @@ public:
             if (static_cast<int64_t>(frame)-slot.status.source_frame>4 || now-slot.matched>std::chrono::milliseconds(100)) {
                 slot.reason="native_pending_stale"; return false;
             }
-            slot.reason="native"; return true;
+            slot.reason="native";
+            if (alignRenderPose) slot.renderPoseAligned = AlignNativeSwingRenderPose(previousRenderInput, packet, slot.status, ctrl);
+            return true;
         }
         slot.reason="native_pending"; return false;
     }
     bool HasCaptureInput() const { for (const auto& slot:slots_) if (slot.outstanding) return true; return false; }
     bool ClearForCapture(size_t index) {
         if (index>=slots_.size()) return true;
-        auto& slot=slots_[index]; if (!slot.outstanding) return true;
+        auto& slot=slots_[index];
+        slot.previousRenderInput = {};
+        slot.renderPoseAligned = false;
+        if (!slot.outstanding) return true;
         if (!slot.token || !api_.clear_context) return false;
         GbbStatus before{}; before.size=sizeof(before); before.version=GBB_API_VERSION;
         if (Status(api_,slot.token,&before)!=GBB_OK || before.size!=sizeof(before) || before.version!=GBB_API_VERSION ||

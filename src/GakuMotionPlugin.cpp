@@ -307,7 +307,7 @@ namespace
 		return clean;
 	}
 
-	void DispatchFollowerPhysics(GakuMotion::Core& core, void* actor, int frame)
+	void DispatchFollowerPhysics(GakuMotion::Core& core, void* actor, int frame, bool hasUnityFrame)
 	{
 		const auto& followers = core.ensemble.Followers();
 		for (size_t i = 0; i < followers.size(); ++i)
@@ -347,7 +347,8 @@ namespace
 			const float dt = slot.lastTick.time_since_epoch().count() ? std::chrono::duration<float>(now - slot.lastTick).count() : 0.f;
 			slot.lastTick = now;
 			const bool started = core.player.state == GakuMotion::PlaybackState::Playing || g_followerBridge.State(i).outstanding;
-			const bool native = requested == 2 && started && g_followerBridge.Publish(i, binding->second, ctrl, player.currentTime, frame, slot.quartz, slot.diagnostics);
+			const bool native = requested == 2 && started && g_followerBridge.Publish(i, binding->second, ctrl, player.currentTime, frame, slot.quartz, slot.diagnostics,
+                hasUnityFrame && core.liveTakeoverActive && core.player.state == GakuMotion::PlaybackState::Playing);
 			const std::string reason = paused ? "transport_paused" : requested == 0 ? "off" : requested == 1 ? "fallback" :
 				!started ? "native_waiting_for_playback" : g_followerBridge.State(i).reason == "not_requested" ? g_followerBridge.reason : g_followerBridge.State(i).reason;
 			const int actual = GakuMotion::SelectSecondaryPhysicsBackend(requested, native, core.liveTakeoverActive, reason);
@@ -401,9 +402,9 @@ namespace
         SYSTEMTIME wall{};
         GetLocalTime(&wall);
         auto log = [&](size_t role, bool observed, bool active, int actual, const char* reason,
-                       const GbbStatus& status, const GbbPerf& perf, bool identity, bool publishedQuartz) {
+                       const GbbStatus& status, const GbbPerf& perf, bool identity, bool publishedQuartz, bool aligned) {
             const bool paired = publishedQuartz && actual == 2 && identity && status.injected && status.writes;
-            g_hostContext.logInfo("[GakuMotion][EnsemblePhysicsHealth] slot=%zu observed=%d active=%d actual=%d reason=%s state=%u injected=%u writes=%u sequence=%llu matched=%llu failed=%llu swing=%llu native=%llu expired=%llu identity_skips=%llu actor_matches=%d clock_active=%d clock_fault=%d live_paused=%d before_quartz_requested=%d paired=%d source_frame=%d seeks=%d motion_time=%.3f live_time=%.3f time=%04u-%02u-%02uT%02u:%02u:%02u.%03u",
+            g_hostContext.logInfo("[GakuMotion][EnsemblePhysicsHealth] slot=%zu observed=%d active=%d actual=%d reason=%s state=%u injected=%u writes=%u sequence=%llu matched=%llu failed=%llu swing=%llu native=%llu expired=%llu identity_skips=%llu actor_matches=%d clock_active=%d clock_fault=%d live_paused=%d before_quartz_requested=%d paired=%d source_frame=%d render_pose_aligned=%d seeks=%d motion_time=%.3f live_time=%.3f time=%04u-%02u-%02uT%02u:%02u:%02u.%03u",
                 role, int(observed), int(active), actual, reason, status.state, status.injected, status.writes,
                 static_cast<unsigned long long>(status.sequence), static_cast<unsigned long long>(status.matched_passes),
                 static_cast<unsigned long long>(status.failed_passes), static_cast<unsigned long long>(status.swing_calls),
@@ -411,7 +412,7 @@ namespace
                 static_cast<unsigned long long>(perf.identity_skips), int(identity), int(core.liveActorClockActive),
                 int(core.liveActorClockFault), int(core.liveObservation.paused), int(requestedQuartz),
                 int(requestedQuartz && paired), actual == 2 && identity ? status.source_frame : -1,
-                seeks, core.player.currentTime, core.liveObservation.time, wall.wYear, wall.wMonth, wall.wDay,
+                int(actual == 2 && identity && aligned), seeks, core.player.currentTime, core.liveObservation.time, wall.wYear, wall.wMonth, wall.wDay,
                 wall.wHour, wall.wMinute, wall.wSecond, wall.wMilliseconds);
         };
         void* primary = core.player.controller.targetActor;
@@ -422,7 +423,7 @@ namespace
             const auto& perf = observed ? g_burstBridge.perf : emptyPerf;
             log(1, observed, observed, observed ? g_physicsActual : 0,
                 observed ? g_burstBridge.reason.c_str() : "awaiting_callback", status, perf,
-                observed && status.actor == primary, observed && g_physicsBeforeQuartz);
+                observed && status.actor == primary, observed && g_physicsBeforeQuartz, g_burstBridge.renderPoseAligned);
         }
         const auto& followers = core.ensemble.Followers();
         for (size_t i=0; i<followers.size(); ++i) {
@@ -438,7 +439,7 @@ namespace
             log(i+2, observed, follower.active, observed ? g_followerPhysics[i].actual : 0,
                 observed ? g_followerPhysics[i].reason.c_str() : "awaiting_callback", status, perf,
                 observed && status.actor == follower.player->controller.targetActor,
-                observed && g_followerPhysics[i].quartz);
+                observed && g_followerPhysics[i].quartz, bridge.renderPoseAligned);
         }
     }
 
@@ -1046,7 +1047,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.23-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.24-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -3953,7 +3954,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
         }
     }
 	if (player.state != GakuMotion::PlaybackState::Stopped)
-		DispatchFollowerPhysics(core, activeActor, unityFrame >= 0 ? unityFrame : s_fallbackFrame);
+		DispatchFollowerPhysics(core, activeActor, unityFrame >= 0 ? unityFrame : s_fallbackFrame, unityFrame >= 0);
 	NativeAudio::Sync();
 	if (isNewPhysicalFrame && !GakuMotion::visual_handoff::IsReleased())
 	{
@@ -4027,7 +4028,8 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 			bool native = requested == 2 && nativeReadyToStart && g_burstBridge.Publish(binding->second, player.controller,
 			                                                      player.currentTime, frame,
 			                                                      core.config.beforeQuartzExperiment,
-			                                                      core.config.sleeveMuscleDiagnostics);
+			                                                      core.config.sleeveMuscleDiagnostics,
+                                                          unityFrame >= 0 && core.liveTakeoverActive && player.state == GakuMotion::PlaybackState::Playing);
 			const std::string reason = paused ? "transport_paused" : requested == 2 ? (nativeReadyToStart ? g_burstBridge.reason : "native_waiting_for_playback") : requested == 1 ? "fallback" : "off";
 			const int actual = GakuMotion::SelectSecondaryPhysicsBackend(requested, native, core.liveTakeoverActive, reason);
 			if (requested == 2 && actual != 1 && g_physicsActual == 1)

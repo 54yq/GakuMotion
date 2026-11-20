@@ -1,6 +1,6 @@
 #pragma once
 #include "GakuBurstBridge.h"
-#include "GkIdolController.hpp"
+#include "GkNativeSwingRenderPose.hpp"
 #include <windows.h>
 #include <string>
 
@@ -20,6 +20,7 @@ namespace GakuMotion
 		uint64_t lastSequence_{};
 		std::chrono::steady_clock::time_point lastMatch_{};
 		GbbConfig config_{};
+		GbbFrame previousRenderInput_{};
 
 		static HMODULE LoadGuarded(const wchar_t* path)
 		{
@@ -103,6 +104,7 @@ namespace GakuMotion
 		}
 
 	public:
+		bool renderPoseAligned{};
 		std::string reason{"not_requested"};
 		GbbStatus status{};
 		GbbPerf perf{};
@@ -131,6 +133,8 @@ namespace GakuMotion
 
 		bool ClearForCapture()
 		{
+			previousRenderInput_ = {};
+			renderPoseAligned = false;
 			if (!captureInputOutstanding_) return true;
 			if (!api_.publish) return !captureInputOutstanding_;
 			GbbStatus observed{};
@@ -226,7 +230,7 @@ namespace GakuMotion
 		}
 
 		bool Publish(const IdolBoneBinding& b, const IdolController& ctrl, float time, int frame,
-		             bool beforeQuartz = false, bool sleeveDiagnostics = false)
+		             bool beforeQuartz = false, bool sleeveDiagnostics = false, bool alignRenderPose = false)
 		{
 			if (!Ensure()) return false;
 			if (faulted_) return false;
@@ -260,6 +264,9 @@ namespace GakuMotion
 				ctrl.fnGetLocalRotation(pose.transform, &pose.local_rotation.x);
 				ctrl.fnGetLocalPosition(pose.transform, &pose.local_position.x);
 			}
+			const auto previousRenderInput = previousRenderInput_;
+			previousRenderInput_ = alignRenderPose ? packet : GbbFrame{};
+			renderPoseAligned = false;
 			captureInputOutstanding_ = true;
 			const int result = PublishGuarded(api_, &packet);
 			lastPublishResult = result;
@@ -297,6 +304,7 @@ namespace GakuMotion
 					return false;
 				}
 				reason = "native";
+				if (alignRenderPose) renderPoseAligned = AlignNativeSwingRenderPose(previousRenderInput, packet, status, ctrl);
 				return true;
 			}
 			reason = "native_pending";
@@ -339,6 +347,7 @@ namespace GakuMotion
 
 		void Clear()
 		{
+			previousRenderInput_ = {};
 			if (api_.clear && ClearGuarded(api_, GBB_CLEAR_RESET_FAULT) == GBB_OK)
 				captureInputOutstanding_ = false;
 			status = {};
