@@ -124,7 +124,6 @@ namespace LiveAspectPreview
         if (!lease.owner || lease.restoring || lease.owner != g_sceneOwner.presenterIdentity ||
             lease.scene != g_sceneOwner.sceneHandle || projectedCamera || !CameraBridge::getMain ||
             camera != CameraBridge::getMain(nullptr) || !CameraBridge::IsAlive(camera) ||
-            GakuMotion::camera_handoff::Requested() ||
             GakuMotion::Core::Instance().injectionPolicy.Read().captureDepth != 0 ||
             !GakuMotion::capture::LiveAutoPhotoIdle()) return;
         bool stereo{};
@@ -277,21 +276,24 @@ namespace LiveAspectPreview
             ? g_sceneOwner.presenterIdentity : 0;
         const int scene = owner ? g_sceneOwner.sceneHandle : 0;
         const bool takeover = owner && owner == core.liveOwnerToken && scene == core.liveOwnerScene &&
-            core.liveTakeoverActive && !core.liveTakeoverFault && !GakuMotion::camera_handoff::Requested();
+            core.liveTakeoverActive && !core.liveTakeoverFault;
+        // The handoff releases pose and lens driving. The render-scoped
+        // framing lease can continue using Unity's current projection/FOV.
         const bool requested = takeover && core.liveAspectPreviewRequested;
+        const bool cameraEffects = takeover && !GakuMotion::camera_handoff::Requested();
         const bool sameOwner = lease.owner && lease.owner == owner && lease.scene == scene;
         const bool protectedCamera = core.injectionPolicy.Read().captureDepth != 0 ||
             !GakuMotion::capture::LiveAutoPhotoIdle();
         if (takeover && !protectedCamera && !flareHooksAttempted && g_gameAssembly)
             PrepareParaffin(GroundShadowProbeBootstrap::Resolve(g_gameAssembly).method);
         core.liveParaffinAvailable = flareAspectHookReady;
-        suppressParaffin.store(takeover && !protectedCamera && core.liveParaffinAvailable && !core.liveParaffinEnabled,
+        suppressParaffin.store(cameraEffects && !protectedCamera && core.liveParaffinAvailable && !core.liveParaffinEnabled,
             std::memory_order_release);
         if (!core.liveTakeoverActive) {
             core.liveParaffinEnabled = true;
             core.liveDepthOfFieldOverride = -1;
         }
-        const bool disableDepth = takeover && !protectedCamera && core.ShouldDisableLiveDof();
+        const bool disableDepth = cameraEffects && !protectedCamera && core.ShouldDisableLiveDof();
         const bool depthInstalled = disableDepth && CameraBridge::InstallIndependentDof();
         core.liveDepthOfFieldUnavailable = disableDepth && !depthInstalled;
         CameraBridge::independentDofDisabled.store(depthInstalled, std::memory_order_release);
