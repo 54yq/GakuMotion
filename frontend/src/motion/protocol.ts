@@ -132,6 +132,7 @@ export interface StageSettings {
   stagePosXOffset: number
   stagePosZOffset: number
   lightingEffectsEnabled: boolean
+  muteNativeBgm: boolean
   customNodeControl: boolean
 }
 
@@ -575,6 +576,7 @@ export interface ForkState {
     depthOfFieldUnavailable: boolean
   }
   fixedActorLighting?: boolean
+  actorLightingStyle?: { key: Vector3; fill: Vector3; rim: Vector3; weight: number; keyAngle?: Vector3; rimAngle?: Vector3 }
   actorLightingStrengths?: { key: number; fill: number; rim: number }
   actorLightingLimits?: { key: number; fill: number; rim: number }
   fixedActorLightingNotice?: string
@@ -638,6 +640,7 @@ export interface MotionMethods {
     result: { state: 'pending' | 'accepted' | 'cancelled' | 'failed'; paths: string[]; notice: string }
   }
   'library.import': { params: { request: ImportRequest }; result: { started: boolean } }
+  'library.findSiblingMedia': { params: { motionPath: string }; result: { audio: string[]; camera: string[] } }
   'library.probeFiles': {
     params: { paths: string[] }
     result: { classification: ImportClassification; probes: VmdProbe[] }
@@ -779,6 +782,7 @@ export const DEFAULT_STAGE_SETTINGS: StageSettings = {
   stagePosXOffset: 0,
   stagePosZOffset: 0,
   lightingEffectsEnabled: true,
+  muteNativeBgm: false,
   customNodeControl: false,
 }
 

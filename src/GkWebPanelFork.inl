@@ -66,9 +66,15 @@
 				",\"actorLightingStrengths\":{\"key\":" + JNum(core_.actorLightingStrengths.key) +
 					",\"fill\":" + JNum(core_.actorLightingStrengths.fill) +
 					",\"rim\":" + JNum(core_.actorLightingStrengths.rim) + "}" +
-				",\"actorLightingLimits\":{\"key\":" + JNum(core_.actorLightingLimits.key) +
-					",\"fill\":" + JNum(core_.actorLightingLimits.fill) +
-					",\"rim\":" + JNum(core_.actorLightingLimits.rim) + "}" +
+				",\"actorLightingStyle\":{\"key\":" + JVec(core_.actorLightingStyle.colors[0]) +
+					",\"fill\":" + JVec(core_.actorLightingStyle.colors[1]) +
+					",\"rim\":" + JVec(core_.actorLightingStyle.colors[2]) +
+					",\"weight\":" + JNum(core_.actorLightingStyle.weight) +
+					",\"keyAngle\":" + JVec({core_.actorLightingStyle.keyAngle.x, core_.actorLightingStyle.keyAngle.y, 0.f}) +
+					",\"rimAngle\":" + JVec({core_.actorLightingStyle.rimAngle.x, core_.actorLightingStyle.rimAngle.y, 0.f}) + "}" +
+				",\"actorLightingLimits\":{\"key\":" + JNum(core_.actorLightingMax) +
+					",\"fill\":" + JNum(core_.actorLightingMax) +
+					",\"rim\":" + JNum(core_.actorLightingMax) + "}" +
 				",\"fixedActorLightingNotice\":" + JString(core_.fixedActorLightingNotice) +
 				",\"followYaw\":" + JBool(core_.camera.settings.followPlacementYaw) +
 				",\"liveClock\":" + JBool(ctx.liveActorClockActive) + ",\"liveClockAvailable\":" + JBool(ctx.liveActorClockAvailable) +
@@ -117,9 +123,7 @@
 				{
 					std::string channel;
 					if (!StringParam(params, "channel", channel)) return CmdResult::Err("invalid_params", "缺少角色光照通道");
-					const auto& limits = core_.actorLightingLimits;
-					const float limit = channel == "key" ? limits.key : channel == "fill" ? limits.fill : limits.rim;
-					if (!NumberParam(params, "value", number) || number < 0.0 || number > limit + .00001)
+					if (!NumberParam(params, "value", number) || number < 0.0 || number > core_.actorLightingMax)
 						return CmdResult::Err("invalid_params", "角色光照强度超出范围");
 					const auto value = static_cast<float>(number);
 					if (channel == "key") core_.actorLightingStrengths.key = value;
@@ -127,11 +131,45 @@
 					else if (channel == "rim") core_.actorLightingStrengths.rim = value;
 					else return CmdResult::Err("invalid_params", "无效的角色光照通道");
 				}
+				else if (action == "live.actorLightingDirection" && ctx.liveTakeoverActive &&
+					core_.fixedActorLighting && !visual_handoff::Requested())
+				{
+					std::string channel, axis;
+					if (!StringParam(params, "channel", channel) || (channel != "key" && channel != "rim") ||
+						!StringParam(params, "axis", axis) || (axis != "x" && axis != "y") ||
+						!NumberParam(params, "value", number) || number < -180 || number > 180)
+						return CmdResult::Err("invalid_params", "角色打光方向无效");
+					auto& style = core_.actorLightingStyle;
+					auto& angle = channel == "key" ? style.keyAngle : style.rimAngle;
+					(axis == "x" ? angle.x : angle.y) = static_cast<float>(number);
+					++core_.actorLightingStyleRevision;
+				}
+				else if ((action == "live.actorLightingColor" || action == "live.actorLightingWeight") &&
+					ctx.liveTakeoverActive && core_.fixedActorLighting && !visual_handoff::Requested())
+				{
+					auto& style = core_.actorLightingStyle;
+					if (action == "live.actorLightingWeight") {
+						if (!NumberParam(params, "value", number) || number < 0 || number > 1)
+							return CmdResult::Err("invalid_params", "固定打光占比超出范围");
+						style.weight = static_cast<float>(number);
+					} else {
+						std::string channel;
+						Vector3 rgb;
+						if (!StringParam(params, "channel", channel) || !VecParam(params, "value", rgb) ||
+							rgb.x < 0 || rgb.x > 1 || rgb.y < 0 || rgb.y > 1 || rgb.z < 0 || rgb.z > 1)
+							return CmdResult::Err("invalid_params", "角色打光颜色无效");
+						const int index = channel == "key" ? 0 : channel == "fill" ? 1 : channel == "rim" ? 2 : -1;
+						if (index < 0) return CmdResult::Err("invalid_params", "无效的角色光照通道");
+						style.colors[index] = rgb;
+					}
+					++core_.actorLightingStyleRevision;
+				}
 				else if (action == "live.actorLightingReset" && ctx.liveTakeoverActive &&
 					core_.fixedActorLighting && !visual_handoff::Requested())
 				{
 					core_.actorLightingStrengths = {};
-					core_.actorLightingLimits = {1.f, .25f, .25f};
+					core_.actorLightingStyle = {};
+					++core_.actorLightingStyleRevision;
 					core_.actorLightingSampled = false;
 					core_.actorLightingSampleActor = 0;
 					core_.fixedActorLightingNotice.clear();
@@ -172,7 +210,12 @@
 					(enable ? ctx.liveActorClockAvailable && ctx.livePaused && !ctx.liveTakeoverActive : ctx.liveActorClockActive))
 					ctx.fnActorClockTrial(ctx.self, enable);
 				else if (action == "live.armDiagnostics" && BoolParam(params, "value", enable))
+				{
 					ctx.fnSetContinuousArmDiagnostics(ctx.self, enable);
+					if (enable && ctx.liveTakeoverActive && ctx.injectionAllowed && ctx.physicsBackend != 0 &&
+						ctx.player && ctx.player->state != PlaybackState::Stopped)
+						ctx.fnCaptureCostumePhysics(ctx.self);
+				}
 				else return CmdResult::Err("not_ready", "当前 Live 状态不支持此操作");
 				return CmdResult::Ok();
 			}

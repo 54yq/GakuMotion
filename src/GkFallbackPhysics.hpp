@@ -74,6 +74,53 @@ namespace GakuMotion
 				if (bone.garment) visit(bone.name, bone.length, bone.axis, bone.rest);
 		}
 
+        static bool SampleHeadWorld(const IdolBoneBinding& binding, const IdolController& controller, Quaternion& rotation)
+        {
+            if (!controller.fnGetWorldRotation) return false;
+            for (size_t i=0; i<binding.boneTransforms.size() && i<binding.boneHids.size(); ++i) {
+                if (binding.boneHids[i] == 10 && binding.boneTransforms[i])
+                    return CaptureRotation(controller.fnGetWorldRotation, binding.boneTransforms[i], rotation);
+            }
+            return false;
+        }
+
+        void* FindSampledSecondary(const IdolBoneBinding& binding, const IdolController& controller, const char* name)
+        {
+            if (!HasApi(controller) || !binding.actorTransform) return nullptr;
+            if (!SameBinding(binding)) Bind(binding,controller);
+            for (const auto& bone : bones_)
+                if (bone.name == name) return bone.transform;
+            return nullptr;
+        }
+
+        template<class Visit>
+        void VisitBoundSecondary(const IdolBoneBinding& binding, const IdolController& controller, Visit&& visit)
+        {
+            if (!HasApi(controller) || !binding.actorTransform) return;
+            if (!SameBinding(binding)) Bind(binding,controller);
+            for (const auto& bone : bones_) visit(bone.transform,bone.name);
+        }
+
+        // Read-only sampling uses a dedicated instance, never the active solver.
+        template<class Visit>
+        void SampleSecondaryLocal(const IdolBoneBinding& binding, const IdolController& controller, Visit&& visit)
+        {
+            if (!HasApi(controller) || !binding.actorTransform) return;
+            if (!SameBinding(binding)) Bind(binding, controller);
+            unsigned hair = 0, garment = 0;
+            for (const auto& bone : bones_) {
+                auto& count = bone.garment ? garment : hair;
+                if (count >= 4) continue;
+                Quaternion rotation{};
+                if (!CaptureRotation(controller.fnGetLocalRotation, bone.transform, rotation)) continue;
+                Quaternion parentWorld{};
+                const bool parentValid = bone.parent &&
+                    CaptureRotation(controller.fnGetWorldRotation, bone.parent, parentWorld);
+                visit(bone.name, rotation, parentValid ? &parentWorld : nullptr);
+                ++count;
+            }
+        }
+
 		FallbackPhysics() = default;
 
 		explicit FallbackPhysics(Settings settings) : settings_(settings)

@@ -104,6 +104,8 @@ namespace GakuMotion
 	{
 		StageSettings settings = ctx.stageSettings;
 		bool stageChanged = false;
+		if (ImGui::Checkbox("屏蔽场景音乐", &settings.muteNativeBgm)) stageChanged = true;
+		if (ImGui::IsItemHovered()) ImGui::SetTooltip("无需开始播放即可屏蔽场景 BGM。动作播放或预览期间仍会自动屏蔽场景 BGM。");
 		if (ImGui::Checkbox("屏蔽游戏音效", &settings.muteNativeSoundEffects)) stageChanged = true;
 		if (ImGui::IsItemHovered()) ImGui::SetTooltip("屏蔽支持的预览场景中的游戏音效（含界面音效），不影响动作歌曲；关闭或离开支持场景后恢复。");
 		ImGui::Spacing();

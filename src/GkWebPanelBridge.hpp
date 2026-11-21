@@ -182,7 +182,7 @@ namespace GakuMotion::webpanel
 		"player.setSpeed", "player.setVolume", "player.saveVolume", "player.reload",
 		"playlist.setMode",
 		"library.refresh", "library.select", "library.delete", "library.openFolder",
-		"library.import", "library.probeFiles", "library.startEdit",
+		"library.import", "library.probeFiles", "library.findSiblingMedia", "library.startEdit",
 		"actors.selectTarget",
 		"facial.setWeights", "facial.save",
 		"position.set", "position.save",
@@ -627,6 +627,7 @@ namespace GakuMotion::webpanel
 			}
 			if (method == "library.import") return LibraryImport(params);
 			if (method == "library.probeFiles") return LibraryProbeFiles(params);
+			if (method == "library.findSiblingMedia") return LibraryFindSiblingMedia(params);
 			if (method == "library.startEdit") return LibraryStartEdit(params);
 
 			// Actors ------------------------------------------------------------
@@ -1076,6 +1077,44 @@ namespace GakuMotion::webpanel
 			};
 			return track("motion", timing.motion) && track("facial", timing.facial) &&
 				track("camera", timing.camera) && track("audio", timing.audio);
+		}
+
+		CmdResult LibraryFindSiblingMedia(const jsonlite::Value& params)
+		{
+			std::string path;
+			if (!StringParam(params, "motionPath", path) || path.empty() || path.size() > 32767)
+				return CmdResult::Err("invalid_params", "请选择主动作文件");
+			const auto motion = MotionPathFromUtf8(path);
+			std::error_code error;
+			if (!motion.is_absolute() || !std::filesystem::is_regular_file(motion, error))
+				return CmdResult::Err("invalid_params", "主动作文件不可读取");
+			std::vector<std::string> audio, camera;
+			std::filesystem::directory_iterator it(motion.parent_path(), error), end;
+			for (size_t scanned = 0; !error && it != end && scanned < 1024; ++scanned, it.increment(error))
+			{
+				std::error_code entryError;
+				if (!it->is_regular_file(entryError)) continue;
+				auto ext = MotionPathToUtf8(it->path().extension());
+				for (char& ch : ext) if (ch >= 'A' && ch <= 'Z') ch += 'a' - 'A';
+				if (ext == ".wav" && audio.size() < 256) audio.push_back(MotionPathToUtf8(it->path()));
+				else if (camera.size() < 256 && (ext == ".gkcamera" || ext == ".vmd")) {
+					auto candidate = MotionPathToUtf8(it->path());
+					const auto probe = ProbeCameraOrVmdFile(candidate);
+					if (probe.valid && (probe.isGkCamera || probe.cameraFrames > 0))
+						camera.push_back(std::move(candidate));
+				}
+			}
+			if (error) return CmdResult::Err("failed", "无法读取主动作所在目录");
+			const auto encode = [](auto& paths) {
+				std::sort(paths.begin(), paths.end());
+				std::string result = "[";
+				for (const auto& value : paths) {
+					if (result.size() > 1) result += ",";
+					result += JString(value);
+				}
+				return result + "]";
+			};
+			return CmdResult::Ok("{\"audio\":" + encode(audio) + ",\"camera\":" + encode(camera) + "}");
 		}
 
 		CmdResult LibraryProbeFiles(const jsonlite::Value& params)
@@ -2030,6 +2069,7 @@ namespace GakuMotion::webpanel
 				floatField("stagePosXOffset", settings.stagePosXOffset) &&
 				floatField("stagePosZOffset", settings.stagePosZOffset) &&
 				boolField("lightingEffectsEnabled", settings.lightingEffectsEnabled) &&
+				boolField("muteNativeBgm", settings.muteNativeBgm) &&
 				boolField("customNodeControl", settings.customNodeControl);
 		}
 
@@ -2229,6 +2269,7 @@ namespace GakuMotion::webpanel
 				",\"stagePosXOffset\":" + JNum(settings.stagePosXOffset) +
 				",\"stagePosZOffset\":" + JNum(settings.stagePosZOffset) +
 				",\"lightingEffectsEnabled\":" + JBool(settings.lightingEffectsEnabled) +
+				",\"muteNativeBgm\":" + JBool(settings.muteNativeBgm) +
 				",\"customNodeControl\":" + JBool(settings.customNodeControl) + "}";
 		}
 

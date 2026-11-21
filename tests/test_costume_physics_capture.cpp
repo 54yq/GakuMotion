@@ -3,6 +3,7 @@
 #endif
 #include <windows.h>
 #include "GkCostumePhysicsCapture.hpp"
+#include "GkNativeSwingRenderFilter.hpp"
 #include "GkPhysicsMonitor.hpp"
 #include <cassert>
 #include <iostream>
@@ -49,6 +50,50 @@ struct Rig
 
 int main()
 {
+    native_swing::CameraPair pair;
+    int mainCamera{}, overlayCamera{};
+    // 7435 is the unpaired camera-begin from the existing Live trace.
+    assert(!pair.Begin(&mainCamera,7435));
+    assert(!pair.End(&overlayCamera,7435));
+    assert(!pair.End(&mainCamera,7436));
+    assert(pair.pending == &mainCamera);
+    pair = {};
+    assert(!pair.Begin(&mainCamera,7436));
+    assert(pair.End(&mainCamera,7436));
+    assert(pair.Begin(&mainCamera,7437));
+    assert(!pair.Begin(&mainCamera,7437));
+    assert(!pair.End(&overlayCamera,7437));
+    assert(pair.End(&mainCamera,7437));
+    assert(!pair.End(&mainCamera,7437));
+    assert(!pair.Begin(&overlayCamera,7438));
+    assert(pair.End(&overlayCamera,7438));
+    assert(!pair.Begin(&overlayCamera,7440)); // Missing prior frame
+    assert(pair.End(&overlayCamera,7440));
+
+    native_swing::RotationSmoother filter;
+    const auto rotation = [](float degrees) {
+        const float half = degrees * .00872664626f;
+        return Quaternion(0,0,std::sin(half),std::cos(half));
+    };
+    Quaternion smoothed{};
+    float center{};
+    assert(!filter.Push(0.f,rotation(1.f),smoothed,center));
+    for (unsigned i=1;i<80;++i) {
+        const float time = float(i)/60.f;
+        const float offset = i%2 ? -1.f : 1.f;
+        assert(filter.Push(time,rotation(time*50.f + offset),smoothed,center));
+        if (i>=6) {
+            assert(std::fabs(center - (time-.05f)) < .00001f);
+            assert(native_swing::Angle(rotation(center*50.f),smoothed) < .14f);
+        }
+    }
+    filter.Reset();
+    assert(!filter.Push(80.f,rotation(16.f),smoothed,center));
+    assert(filter.Push(80.017f,rotation(16.f),smoothed,center));
+    assert(native_swing::Angle(rotation(16.f),smoothed) < .1f);
+    const auto hairB = rotation(16.f);
+    const auto hair = rotation(15.5f);
+
 	using Frame = FallbackPhysics::CostumeFrame;
 	Rig sampled, control;
 	Frame first;
@@ -72,9 +117,39 @@ int main()
 	assert(a.x == b.x && a.y == b.y && a.z == b.z && a.w == b.w);
 	assert(sampled.solver.GetStats().clamps == control.solver.GetStats().clamps);
 
+    CostumePhysicsCapture swingTargets;
+    Rig iris, star;
+    iris.hair.name = "LeftFrontHair1_S";
+    iris.skirt.name = "RigntBackCloth1_S";
+    star.hair.name = "LeftAddHair1_S";
+    star.skirt.name = "LeftFrontSideSkirt1_S";
+    assert(swingTargets.FindSwingTarget(iris.binding,iris.controller,0).transform == &iris.hair);
+    assert(swingTargets.FindSwingTarget(iris.binding,iris.controller,1).transform == &iris.skirt);
+    const auto hairTarget = swingTargets.FindSwingTarget(star.binding,star.controller,0);
+    const auto skirtTarget = swingTargets.FindSwingTarget(star.binding,star.controller,1);
+    assert(hairTarget.transform == &star.hair && std::string_view(hairTarget.name) == star.hair.name);
+    assert(skirtTarget.transform == &star.skirt && std::string_view(skirtTarget.name) == star.skirt.name);
+    assert(CostumePhysicsCapture::DetailedSwingBone(hairTarget.name));
+    assert(CostumePhysicsCapture::DetailedSwingBone(skirtTarget.name));
+    assert(!swingTargets.FindSwingTarget(sampled.binding,sampled.controller,0).transform);
+
 	CostumePhysicsCapture capture;
 	const auto tick = CostumePhysicsCapture::Clock::now().time_since_epoch().count();
 	const auto path = std::filesystem::current_path() / ("synthetic_costume_" + std::to_string(tick) + ".jsonl");
+    // Exercise separate batches and confirm close persists the last one.
+    {
+        CaptureFileWriter writer;
+        const auto writerPath = path.parent_path() / (path.stem().string() + "_batches.jsonl");
+        assert(writer.Open(writerPath));
+        for (unsigned i=0;i<24;++i)
+            assert(writer.Submit(std::string(8192,static_cast<char>('A'+i))));
+        assert(writer.Close());
+        std::ifstream data(writerPath,std::ios::binary);
+        const std::string saved((std::istreambuf_iterator<char>(data)), {});
+        assert(saved.size() == 24u*8192u);
+        for (unsigned i=0;i<24;++i)
+            assert(saved.compare(i*8192u,8192u,std::string(8192,static_cast<char>('A'+i))) == 0);
+    }
 	assert(capture.Open(path, "synthetic \"costume\"", 42));
 	capture.Record(2, sampled.binding.actor, 2, 103.126f, .02f, 1, 0, false, sampled.solver, second);
 
@@ -83,7 +158,62 @@ int main()
 	assert(sampled.solver.Publish(sampled.binding, sampled.controller, .02f, 3, &jumped));
 	assert(jumped.poseResets == 1 && !jumped.timeReset && jumped.maxima[Frame::Acceleration] < 0.f);
 	capture.Record(2, sampled.binding.actor, 3, 103.126f, .02f, 2, 0, false, sampled.solver, jumped);
-	assert(capture.Close("synthetic") && capture.Frames() == 2);
+	sampled.skirt.position = {};
+	const auto beforeSample = sampled.skirt.rotation;
+	capture.RecordActorPose("after_plugin_pose", sampled.binding, sampled.controller, 3, 103.126f, 2, 2, 2, .02f);
+	assert(sampled.skirt.rotation.x == beforeSample.x && sampled.skirt.rotation.w == beforeSample.w);
+    GbbSwingStateSample swing{};
+    swing.source_frame = 2;
+    swing.before_count = swing.after_count = 1;
+    swing.delta_time = .02f;
+    swing.local_rotation.w = 1.f;
+    swing.before[0].hit_checks = 255;
+    swing.before[0].child_speed = {1.f, 2.f, 3.f};
+    swing.after[0] = swing.before[0];
+    capture.RecordSwingState("LeftFrontHair1_S", sampled.binding, 3, 13.157f, swing);
+    swing.before[0].hit_checks = INT32_MIN;
+    swing.after[0].use_limit = INT32_MIN+1;
+    capture.RecordSwingState("RigntBackCloth1_S", sampled.binding, 3, 13.157f, swing);
+    capture.RecordSwingRender("LeftFrontHair1_S", sampled.binding.actor, 7893, 13.161f,
+        13.144f, hairB, hair, hairB, "camera_end", true);
+    GbbSwingInputSample inputs{};
+    inputs.size=sizeof(inputs);
+    inputs.source_frame=7891;
+    inputs.anchor_mask=1;
+    inputs.count=1;
+    inputs.indices[0]=7;
+    inputs.stream_anchor[0]={1.f,2.f,3.f};
+    inputs.properties[0]=.5f;
+    inputs.property_mask=1;
+    swing.source_frame=7891;
+    swing.before_count=swing.after_count=2;
+    swing.before[1].index=swing.after[1].index=7;
+    swing.after[1].hit_checks=1;
+    capture.RecordSwingInputs("RigntBackCloth1_S",sampled.binding,7892,13.144f,1,swing,&inputs);
+    ++inputs.source_frame;
+    ++swing.source_frame;
+    inputs.stream_anchor[0].z=3.5f;
+    capture.RecordSwingInputs("RigntBackCloth1_S",sampled.binding,7893,13.161f,1,swing,&inputs);
+    capture.RecordSwingRenderSummary(sampled.binding.actor,7893,13.161f,15,15,15,"camera_end");
+	assert(capture.Close("synthetic") && capture.Frames() == 3);
+	{
+		std::ifstream recorded(path);
+		const std::string contents((std::istreambuf_iterator<char>(recorded)), {});
+		assert(contents.find("\"event\":\"actor_pose\"") != std::string::npos);
+		assert(contents.find("\"source_frame\":2,\"native_dt_s\":0.02") != std::string::npos);
+		const auto actorPose = contents.substr(contents.find("\"event\":\"actor_pose\""));
+		assert(actorPose.find("Skirt1_S") != std::string::npos && actorPose.find("Hair1_S") != std::string::npos);
+        assert(contents.find("\"restore_phase\":\"camera_end\",\"restored\":true") != std::string::npos);
+        const auto hair = contents.find("\"event\":\"swing_state\",\"bone\":\"LeftFrontHair1_S\"");
+        const auto cloth = contents.find("\"event\":\"swing_state\",\"bone\":\"RigntBackCloth1_S\"");
+        assert(hair < cloth && cloth != std::string::npos);
+        assert(contents.substr(hair, cloth - hair).find("\"hit_checks\":255") != std::string::npos);
+        const auto clothState = contents.substr(cloth);
+        assert(clothState.find("\"hit_checks\":null") != std::string::npos);
+        assert(clothState.find("\"child_speed\":[1,2,3]") != std::string::npos);
+        assert(clothState.find("\"field_errors\":{\"hit_checks\":\"layout_unavailable\"}") != std::string::npos);
+        assert(clothState.find("\"field_errors\":{\"use_limit\":\"read_fault\"}") != std::string::npos);
+	}
 	assert(!capture.Open(path, "must not overwrite", 43));
 
 	Rig handoff;

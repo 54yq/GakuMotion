@@ -25,8 +25,9 @@ const mockState: ForkState = {
     { key: 'sample-baton', actorToken: 0, actor: '舞台灯柱', name: 'Geo_baton_01', hidden: false, editable: true, active: true, timeline: true },
   ],
   propsCanScan: true, propsScanning: false, propsNotice: '',
+  actorLightingStyle: { key: { x: 1, y: 1, z: 1 }, fill: { x: 1, y: 1, z: 1 }, rim: { x: 1, y: 1, z: 1 }, weight: 1, keyAngle: { x: -15, y: 25, z: 0 }, rimAngle: { x: 35, y: 15, z: 0 } },
   actorLightingStrengths: { key: 0.40, fill: 0.035, rim: 0.25 },
-  actorLightingLimits: { key: 1, fill: 0.25, rim: 0.25 },
+  actorLightingLimits: { key: 10, fill: 10, rim: 10 },
   livePostEffects: { paraffinEnabled: true, paraffinAvailable: true, disableDepthOfField: false,
     manualDepthOfField: false, depthOfFieldUnavailable: false },
   propsEditable: true, fixedActorLighting: false, followYaw: false, liveClock: false, liveClockAvailable: true,
@@ -79,8 +80,17 @@ export function useForkWorkspace(preview = false) {
         setState({ ...current, actorLightingStrengths: { ...current.actorLightingStrengths, [String(fields.channel)]: Number(fields.value) } })
       if (action === 'live.actorLightingSample')
         setState({ ...current, fixedActorLighting: true, fixedActorLightingNotice: '预览模式使用示例打光' })
+      if (action === 'live.actorLightingColor' && current.actorLightingStyle)
+        setState({ ...current, actorLightingStyle: { ...current.actorLightingStyle, [String(fields.channel)]: fields.value } })
+      if (action === 'live.actorLightingDirection' && current.actorLightingStyle) {
+        const channel = fields.channel === 'key' ? 'keyAngle' : 'rimAngle'
+        setState({ ...current, actorLightingStyle: { ...current.actorLightingStyle,
+          [channel]: { ...current.actorLightingStyle[channel], [String(fields.axis)]: Number(fields.value) } } })
+      }
+      if (action === 'live.actorLightingWeight' && current.actorLightingStyle)
+        setState({ ...current, actorLightingStyle: { ...current.actorLightingStyle, weight: Number(fields.value) } })
       if (action === 'live.actorLightingReset')
-        setState({ ...current, actorLightingStrengths: mockState.actorLightingStrengths })
+        setState({ ...current, actorLightingStrengths: mockState.actorLightingStrengths, actorLightingStyle: mockState.actorLightingStyle })
       if (current.livePostEffects && (action === 'live.paraffin' || action === 'live.depthOfField' || action === 'live.depthOfFieldAuto')) {
         const effects = current.livePostEffects
         setState({ ...current, livePostEffects: action === 'live.paraffin'

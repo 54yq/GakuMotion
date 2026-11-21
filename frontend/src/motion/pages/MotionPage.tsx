@@ -1,13 +1,9 @@
 import * as React from 'react'
 import {
-  RiAlertFill,
   RiBodyScanFill,
-  RiDiscFill,
   RiEmotionHappyFill,
   RiGroup2Fill,
   RiMapPin2Fill,
-  RiPlayList2Fill,
-  RiRefreshFill,
   RiRestartFill,
   RiSave3Fill,
   RiUserFollowFill,
@@ -19,7 +15,6 @@ import { Slider } from '@/components/ui/slider'
 import { cn } from '@/lib/utils'
 import type { FacialWeights } from '../protocol'
 import { motionStore, useMotionStore } from '../store'
-import { formatMmSs } from '../time'
 import { BoneSection } from '../components/BoneSection'
 import { EnsembleSection } from '../components/EnsembleSection'
 import { ForkEnsembleControls, ForkPlacementFields, type ForkCommand } from '../components/ForkWorkspace'
@@ -75,9 +70,6 @@ export function MotionPage({ fork, forkCommand }: { fork?: ForkState | null; for
   const facial = useMotionStore((state) => state.facial)
   const position = useMotionStore((state) => state.position)
   const ensemble = useMotionStore((state) => state.ensemble)
-  const player = useMotionStore((state) => state.player)
-  const loaded = useMotionStore((state) => state.loaded)
-  const libraryEntries = useMotionStore((state) => state.library.entries)
   const boneCount = useMotionStore((state) => state.bone.overrides.length)
   const capabilities = useMotionStore((state) => state.capabilities)
   const supports = (method: string) => capabilities.includes(method)
@@ -85,92 +77,9 @@ export function MotionPage({ fork, forkCommand }: { fork?: ForkState | null; for
 
   const selectedActor = actors.actors.find((actor) => actor.selected)
   const actorLabel = actors.actors.length === 0 ? '当前场景没有可驱动角色' : actors.targetLabel || '正在识别角色'
-  const loadedEntry = React.useMemo(
-    () => libraryEntries.find((entry) => entry.id === loaded.motionKey) ?? null,
-    [libraryEntries, loaded.motionKey],
-  )
 
   return (
     <div className="mx-auto max-w-5xl space-y-4" data-testid="motion-page">
-      {/* Compact Active Track Strip */}
-      <PropertySection divided={false} bodyClassName="px-3.5 py-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <div
-              aria-hidden="true"
-              className={cn(
-                'flex size-9 shrink-0 items-center justify-center rounded-md border',
-                loadedEntry || loaded.motionKey
-                  ? 'border-primary/30 bg-primary/10 text-primary'
-                  : 'border-border bg-muted/60 text-muted-foreground',
-              )}
-            >
-              <RiDiscFill className="size-4" />
-            </div>
-            <div className="min-w-0 space-y-0.5">
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="truncate text-sm font-semibold text-foreground">
-                  {loadedEntry?.title ?? (loaded.motionKey ? player.title : '尚未加载动作素材')}
-                </h1>
-                {loadedEntry && (
-                  <span className="rounded-[4px] border border-border bg-muted/60 px-1.5 py-0 text-[11px] tabular-nums text-muted-foreground">
-                    {formatMmSs(loadedEntry.durationSeconds)} · {loadedEntry.totalFrames} 帧 · {Number(player.fps.toPrecision(4))} fps
-                  </span>
-                )}
-                {ensemble.active && (
-                  <Badge variant="outline" className="rounded-[4px] border-primary/35 bg-primary/10 text-primary">
-                    多人舞台模式
-                  </Badge>
-                )}
-              </div>
-              {loadedEntry ? (
-                <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                  <span className="truncate">目录：{loadedEntry.directory}</span>
-                  {loadedEntry.hasMotion && <span className="rounded-[4px] border border-border bg-muted/50 px-1.5 py-0 text-[10px]">动作</span>}
-                  {loadedEntry.hasFacial && <span className="rounded-[4px] border border-border bg-muted/50 px-1.5 py-0 text-[10px]">表情</span>}
-                  {loadedEntry.hasCamera && <span className="rounded-[4px] border border-border bg-muted/50 px-1.5 py-0 text-[10px]">镜头</span>}
-                  {loadedEntry.hasAudio && <span className="rounded-[4px] border border-border bg-muted/50 px-1.5 py-0 text-[10px]">音乐</span>}
-                </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  从曲库加载或播放演出后，可在此实时微调驱动角色、表情幅度、初始站位与骨骼覆盖。
-                </p>
-              )}
-            </div>
-          </div>
-
-          <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-            {loaded.motionKey !== '' && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 text-xs"
-                disabled={loaded.sourceMissing || !supports('player.reload')}
-                onClick={() => void motionStore.reloadMotion()}
-              >
-                <RiRefreshFill className="size-3.5" />
-                重载当前动作
-              </Button>
-            )}
-            <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => motionStore.setPage('library')}>
-              <RiPlayList2Fill className="size-3.5" />
-              前往曲库
-            </Button>
-          </div>
-        </div>
-
-        {(loaded.sourceMissing || loaded.sourceChanged) && (
-          <div className="mt-2.5 flex items-center gap-2 rounded-md border border-warning/40 bg-warning/10 px-2.5 py-1.5 text-xs text-warning">
-            <RiAlertFill className="size-3.5 shrink-0" />
-            <span>
-              {loaded.sourceMissing
-                ? '当前曲目的源文件已移除，无法重载；请先恢复磁盘文件。'
-                : '检测到曲目源文件已更新，可点击右侧“重载当前动作”应用最新改动。'}
-            </span>
-          </div>
-        )}
-      </PropertySection>
-
       {!ensemble.active && (
         <div className="grid items-start gap-4 lg:grid-cols-2">
           {/* Drive Actor & Stage Position */}

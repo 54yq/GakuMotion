@@ -1,6 +1,5 @@
 import * as React from 'react'
 import {
-  RiGroup2Fill,
   RiPaletteFill,
   RiRefreshFill,
   RiSearchFill,
@@ -13,9 +12,8 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
-import { ENSEMBLE_SLOT_NAMES, type ForkState, type StageNode } from '../protocol'
+import { type ForkState, type StageNode } from '../protocol'
 import { motionStore, useMotionStore } from '../store'
 import { CollapsiblePropertySection, PropertyRow, PropertySection } from '../components/PropertyGroup'
 import { NumberField } from '../components/NumberField'
@@ -70,23 +68,20 @@ function hexToRgb(hex: string): [number, number, number] {
 
 export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; forkCommand?: ForkCommand } = {}) {
   const stage = useMotionStore((state) => state.stage)
-  const actors = useMotionStore((state) => state.actors)
-  const ensemble = useMotionStore((state) => state.ensemble)
   const rawNodes = useMotionStore((state) => state.stageNodes)
   const safeNodes = Array.isArray(rawNodes) ? rawNodes : []
   const supported = useMotionStore((state) => state.capabilities.includes('stage.set'))
   const scanSupported = useMotionStore((state) => state.capabilities.includes('stage.scan'))
-  const actorSelectSupported = useMotionStore((state) => state.capabilities.includes('actors.selectTarget'))
   const [scanning, setScanning] = React.useState(false)
   const [nodeFilter, setNodeFilter] = React.useState('')
   const [expandedNodes, setExpandedNodes] = React.useState<Set<number>>(() => new Set())
 
+  const lightingStyle = fork?.actorLightingStyle
   const lightingStrengths = fork?.actorLightingStrengths
   const settings = stage.settings
   const sceneBgEnabled = !settings.hideBackground
   const customNodeActive = settings.customNodeControl
   const disabled = !supported
-  const selectedActor = actors.actors.find((actor) => actor.selected)
 
   const triggerScan = React.useCallback(async () => {
     if (!scanSupported || scanning) return
@@ -143,7 +138,7 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
   return (
     <div className="mx-auto max-w-5xl space-y-4" data-testid="stage-page">
       {/* Stage Context & Roster Overview */}
-      <div className="grid items-start gap-4 lg:grid-cols-2">
+      <div className="grid items-start gap-4">
         <PropertySection
           title={
             <span className="inline-flex items-center gap-1.5">
@@ -166,6 +161,14 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
               {sceneBgEnabled ? '原景模式' : '纯色幕布'}
             </Badge>
           </PropertyRow>
+          <PropertyRow label={<Label htmlFor="stage-mute-bgm">屏蔽场景音乐</Label>}>
+            <Checkbox
+              id="stage-mute-bgm"
+              checked={settings.muteNativeBgm ?? false}
+              disabled={disabled}
+              onCheckedChange={(checked) => motionStore.patchStage({ muteNativeBgm: checked === true })}
+            />
+          </PropertyRow>
           {(stage.statusNotice || settings.loadReplacementKey !== '') && (
             <div className="space-y-1.5 px-3.5 py-2.5 text-xs">
               {stage.statusNotice && (
@@ -179,64 +182,6 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
                 </p>
               )}
             </div>
-          )}
-        </PropertySection>
-
-        <PropertySection
-          title={
-            <span className="inline-flex items-center gap-1.5">
-              <RiGroup2Fill className="size-3.5 text-primary" />
-              <span>舞台角色阵容</span>
-            </span>
-          }
-          description={ensemble.active ? '当前处于多人舞台编排模式' : '切换当前单人舞台驱动角色；支持扩展多人同台演出'}
-          actions={
-            <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={() => motionStore.setPage('motion')}>
-              前往编排
-            </Button>
-          }
-        >
-          {ensemble.active ? (
-            <div className="grid grid-cols-3 divide-x divide-border/60">
-              {ensemble.settings.slots.map((slot, index) => (
-                <div
-                  key={index}
-                  className={cn(
-                    'px-3 py-2.5 text-xs',
-                    slot.enabled ? 'bg-card' : 'bg-muted/25 opacity-60',
-                  )}
-                >
-                  <div className="font-semibold text-foreground">{ENSEMBLE_SLOT_NAMES[index]}</div>
-                  <div className="truncate text-muted-foreground">{slot.actorHint || '未绑定'}</div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <>
-              <PropertyRow label="驱动角色" description={`当前场景共识别 ${actors.actors.length} 名角色`}>
-                <Select
-                  value={selectedActor ? String(selectedActor.token) : undefined}
-                  disabled={actors.actors.length === 0 || !actorSelectSupported}
-                  onValueChange={(value) => void motionStore.selectActor(Number(value))}
-                >
-                  <SelectTrigger className="h-8 w-[180px] text-xs" aria-label="舞台驱动角色">
-                    <SelectValue placeholder={actors.targetLabel || '尚未识别角色'} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {actors.actors.map((actor) => (
-                      <SelectItem key={actor.token} value={String(actor.token)}>
-                        {actor.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </PropertyRow>
-              <PropertyRow label="当前绑定状态">
-                <span className="rounded-[4px] border border-border bg-muted/60 px-2 py-0.5 text-xs text-muted-foreground">
-                  已绑定：{actors.boundLabel || '尚未绑定'}
-                </span>
-              </PropertyRow>
-            </>
           )}
         </PropertySection>
       </div>
@@ -309,12 +254,6 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
                     : '接管 Live 后可开启')}
                 </span>
               </div>
-              {fork.actorLightingLimits && (
-                <Button size="sm" variant="outline" disabled={!fork.active}
-                  onClick={() => void forkCommand('live.actorLightingSample')}>
-                  读取并应用主角色打光
-                </Button>
-              )}
               <Checkbox
                 id="stage-fixed-actor-lighting"
                 checked={fork.fixedActorLighting}
@@ -333,7 +272,7 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
                     ariaLabel={label}
                     unit="%"
                     min={0}
-                    max={Math.max(max, Math.round((fork.actorLightingLimits?.[channel] ?? 0) * 1000) / 10)}
+                    max={Math.max(max, (fork.actorLightingLimits?.[channel] ?? 0) * 100)}
                     step={0.5}
                     decimals={1}
                     value={lightingStrengths[channel] * 100}
@@ -341,10 +280,61 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
                     onCommit={(value) => void forkCommand('live.actorLightingStrength', { channel, value: value / 100 })}
                   />
                 ))}
-                <Button size="sm" variant="outline" onClick={() => void forkCommand('live.actorLightingReset')}>
-                  恢复默认打光
-                </Button>
               </div>
+            )}
+            {(fork.actorLightingLimits || (fork.active && fork.fixedActorLighting && lightingStrengths)) && (
+              <div className="flex flex-wrap items-center gap-2 px-3.5 pb-2.5">
+                {fork.actorLightingLimits && (
+                  <Button size="sm" variant="outline" disabled={!fork.active}
+                    onClick={() => void forkCommand('live.actorLightingSample')}>
+                    读取并应用主角色打光
+                  </Button>
+                )}
+                {fork.active && fork.fixedActorLighting && lightingStrengths && (
+                  <Button size="sm" variant="outline" onClick={() => void forkCommand('live.actorLightingReset')}>
+                    恢复默认打光
+                  </Button>
+                )}
+              </div>
+            )}
+            {fork.active && fork.fixedActorLighting && lightingStyle && (
+              <CollapsiblePropertySection title={lightingStyle.keyAngle ? "颜色、打光方向与原场光照混合" : "颜色与原场光照混合"} className="mx-3.5 mb-2.5">
+                <div className="flex flex-wrap items-center gap-4">
+                  {([{ channel: 'key', label: '主光颜色' },
+                    { channel: 'fill', label: '暗部补光颜色' },
+                    { channel: 'rim', label: '轮廓光颜色' }] as const).map(({ channel, label }) => {
+                    const color = lightingStyle[channel]
+                    return <label key={channel} className="flex items-center gap-2 text-xs text-muted-foreground">
+                      {label}
+                      <input type="color" className="h-7 w-10 cursor-pointer rounded border bg-background"
+                        value={rgbToHex([color.x, color.y, color.z])}
+                        onChange={event => {
+                          const [x, y, z] = hexToRgb(event.currentTarget.value)
+                          void forkCommand('live.actorLightingColor', { channel, value: { x, y, z } })
+                        }} />
+                    </label>
+                  })}
+                  <NumberField label="固定打光占比" ariaLabel="固定打光占比" unit="%"
+                    min={0} max={100} step={1} decimals={0} value={lightingStyle.weight * 100}
+                    onChange={value => void forkCommand('live.actorLightingWeight', { value: value / 100 }, true)}
+                    onCommit={value => void forkCommand('live.actorLightingWeight', { value: value / 100 })} />
+                </div>
+                {([{ channel: 'key', label: '主光方向', angle: lightingStyle.keyAngle },
+                  { channel: 'rim', label: '轮廓光方向', angle: lightingStyle.rimAngle }] as const)
+                  .map(({ channel, label, angle }) => angle && (
+                    <div key={channel} className="mt-2 flex flex-wrap items-center gap-3">
+                      <span className="text-xs text-muted-foreground">{label}</span>
+                      {([{ axis: 'x', axisLabel: '水平' }, { axis: 'y', axisLabel: '垂直' }] as const)
+                        .map(({ axis, axisLabel }) => (
+                          <NumberField key={axis} label={axisLabel} ariaLabel={label + axisLabel} unit="°"
+                            min={-180} max={180} step={1} decimals={1} value={angle[axis]}
+                            onChange={value => void forkCommand('live.actorLightingDirection', { channel, axis, value }, true)}
+                            onCommit={value => void forkCommand('live.actorLightingDirection', { channel, axis, value })} />
+                        ))}
+                    </div>
+                  ))}
+                <p className="mt-2 text-xs text-muted-foreground">0% 使用原场角色光照，100% 使用固定打光。</p>
+              </CollapsiblePropertySection>
             )}
           </>
         )}

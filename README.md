@@ -8,7 +8,7 @@
 
 GakuMotion 是《学园偶像大师》的 GakuLoader 演出插件，用游戏原有角色、服装和渲染环境播放外部 MMD 动作、表情、镜头与音乐。此分支由[野生的空白（54yq）](https://github.com/54yq)维护，基于 [crested-ezios/GakuMotion](https://github.com/crested-ezios/GakuMotion)。
 
-**当前分支为 v4.3.16-web，加载器显示 `v0.2.0+fork.4.3.16-web`。** Live 接管、原生物理与风场仍属于实验功能，表现取决于游戏版本、人物和服装。[分支更新记录](docs/CHANGELOG.md) · [Web 看板说明](docs/WEB_PANEL_BRIDGE.md)
+**当前分支为 v4.3.43-web，加载器显示 `v0.2.0+fork.4.3.43-web`。** Live 接管、原生物理与风场仍属于实验功能，表现取决于游戏版本、人物和服装。[分支更新记录](docs/CHANGELOG.md) · [Web 看板说明](docs/WEB_PANEL_BRIDGE.md)
 
 [上游安装指南](https://github.com/crested-ezios/GakuMotion/blob/main/docs/INSTALLATION.md) · [上游使用指南](https://github.com/crested-ezios/GakuMotion/blob/main/docs/USAGE.md) · [上游常见问题](https://github.com/crested-ezios/GakuMotion/blob/main/docs/TROUBLESHOOTING.md)
 

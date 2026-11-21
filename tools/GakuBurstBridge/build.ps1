@@ -32,13 +32,17 @@ try {
     & cl.exe @gbbCommon /c @gbbMinHookSources "-Fo$gbbObj/"
     if ($LASTEXITCODE -ne 0) { throw 'MinHook compilation failed.' }
     $gbbMinHookObjects = @('hook.obj','buffer.obj','trampoline.obj','hde64.obj') | ForEach-Object { Join-Path $gbbObj $_ }
+    $gbbStepObject = Join-Path $gbbObj 'SwingStepStubs.obj'
+    & ml64.exe /nologo /c "/Fo$gbbStepObject" (Join-Path $gbbRoot 'src\SwingStepStubs.asm')
+    if ($LASTEXITCODE -ne 0) { throw 'Swing step shim assembly failed.' }
+    $gbbBridgeObjects = $gbbMinHookObjects + $gbbStepObject
     $gbbRc = Join-Path $gbbSdk ('bin\' + $gbbSdkVersion.Name + '\x64\rc.exe')
     if (-not (Test-Path -LiteralPath $gbbRc)) { throw 'Windows SDK resource compiler missing.' }
     $gbbRes = Join-Path $gbbObj 'GakuBurstBridge.res'
     & $gbbRc /nologo /fo $gbbRes (Join-Path $gbbRoot 'src\GakuBurstBridge.rc')
     if ($LASTEXITCODE -ne 0) { throw 'Version resource compilation failed.' }
     $gbbDll = Join-Path $gbbBuild 'GakuBurstBridge.dll'
-    & cl.exe @gbbCommon /std:c++20 /EHsc /LD /DGBB_BUILD_DLL (Join-Path $gbbRoot 'src\GakuBurstBridge.cpp') @gbbMinHookObjects $gbbRes "-Fo$gbbObj/" "-Fe$gbbDll" /link /INCREMENTAL:NO /DYNAMICBASE /NXCOMPAT
+    & cl.exe @gbbCommon /std:c++20 /EHsc /LD /DGBB_BUILD_DLL (Join-Path $gbbRoot 'src\GakuBurstBridge.cpp') @gbbBridgeObjects $gbbRes "-Fo$gbbObj/" "-Fe$gbbDll" /link /INCREMENTAL:NO /DYNAMICBASE /NXCOMPAT
     if ($LASTEXITCODE -ne 0) { throw 'GakuBurstBridge compilation failed.' }
     if ($RunTests) {
         & cl.exe @gbbCommon /TC /c (Join-Path $gbbRoot 'tests\abi_c.c') "-Fo$gbbObj/abi_c.obj"
@@ -48,13 +52,16 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'ABI test compilation failed.' }
         & $gbbAbiTest $gbbDll
         if ($LASTEXITCODE -ne 0) { throw 'ABI tests failed.' }
+        $gbbStepFixture = Join-Path $gbbObj 'SwingStepFixture.obj'
+        & ml64.exe /nologo /c "/Fo$gbbStepFixture" (Join-Path $gbbRoot 'tests\SwingStepFixture.asm')
+        if ($LASTEXITCODE -ne 0) { throw 'Swing step fixture assembly failed.' }
         $gbbCoreTest = Join-Path $gbbBuild 'core_tests.exe'
-        & cl.exe @gbbCommon /std:c++20 /EHsc /DGBB_TESTING (Join-Path $gbbRoot 'tests\core_tests.cpp') @gbbMinHookObjects "-Fo$gbbObj/" "-Fe$gbbCoreTest"
+        & cl.exe @gbbCommon /std:c++20 /EHsc /DGBB_TESTING (Join-Path $gbbRoot 'tests\core_tests.cpp') @gbbBridgeObjects $gbbStepFixture "-Fo$gbbObj/" "-Fe$gbbCoreTest"
         if ($LASTEXITCODE -ne 0) { throw 'Core test compilation failed.' }
         & $gbbCoreTest
         if ($LASTEXITCODE -ne 0) { throw 'Core tests failed.' }
         $gbbQuartzTest = Join-Path $gbbBuild 'quartz_experiment_tests.exe'
-        & cl.exe @gbbCommon /std:c++20 /EHsc /DGBB_TESTING (Join-Path $gbbRoot 'tests\quartz_experiment_tests.cpp') @gbbMinHookObjects "-Fo$gbbObj/" "-Fe$gbbQuartzTest"
+        & cl.exe @gbbCommon /std:c++20 /EHsc /DGBB_TESTING (Join-Path $gbbRoot 'tests\quartz_experiment_tests.cpp') @gbbBridgeObjects "-Fo$gbbObj/" "-Fe$gbbQuartzTest"
         if ($LASTEXITCODE -ne 0) { throw 'Quartz experiment test compilation failed.' }
         & $gbbQuartzTest
         if ($LASTEXITCODE -ne 0) { throw 'Quartz experiment tests failed.' }
@@ -64,7 +71,7 @@ try {
         & $gbbSleeveTest
         if ($LASTEXITCODE -ne 0) { throw 'Sleeve probe tests failed.' }
         $gbbMultiTest = Join-Path $gbbBuild 'multi_context_tests.exe'
-        & cl.exe @gbbCommon /std:c++20 /EHsc /DGBB_TESTING (Join-Path $gbbRoot 'tests\multi_context_tests.cpp') @gbbMinHookObjects "-Fo$gbbObj/" "-Fe$gbbMultiTest"
+        & cl.exe @gbbCommon /std:c++20 /EHsc /DGBB_TESTING (Join-Path $gbbRoot 'tests\multi_context_tests.cpp') @gbbBridgeObjects "-Fo$gbbObj/" "-Fe$gbbMultiTest"
         if ($LASTEXITCODE -ne 0) { throw 'Multi-context test compilation failed.' }
         & $gbbMultiTest
         if ($LASTEXITCODE -ne 0) { throw 'Multi-context tests failed.' }

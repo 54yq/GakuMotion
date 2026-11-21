@@ -6,6 +6,7 @@
 // Included in the plugin namespace. Metadata enumeration and bounded code reads
 // only. No runtime_invoke, hooks, memory protection changes, or object writes.
 namespace LiveCodeCapture {
+    inline bool enabled{};
     inline std::set<void*> classes;
     inline std::set<uintptr_t> addresses;
     inline std::set<std::string> rows;
@@ -17,6 +18,7 @@ namespace LiveCodeCapture {
     using GakuMotion::code_read::CopyCode;
     using GakuMotion::code_read::Executable;
     inline bool Open() {
+        if (!enabled) return false;
         if(manifest.is_open()) return true;
         const auto& root=GakuMotion::Core::Instance().diagnosticsRoot;
         if(root.empty()) return false;

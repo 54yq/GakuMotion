@@ -1,3 +1,4 @@
+#include <limits>
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -17,9 +18,20 @@
 #include "Il2CppAccess.hpp"
 #include "QuartzExperiment.hpp"
 #include "QuartzProfile.hpp"
+#include "SwingStepProfile.hpp"
 #include "SleeveMuscleProbe.hpp"
 #include "NativeListObservation.hpp"
 
+extern "C" {
+alignas(4) LONG GbbSwingStepActive{};
+uint32_t GbbSwingStepAvx{};
+void* GbbSwingStepTrampolines[gbb::profile::SwingStepCount]{};
+void GbbSwingAnchorReady();
+void GbbSwingForceGate();
+void GbbSwingVelocityStored();
+void GbbSwingContactResult();
+void GbbSwingTranslationStored();
+}
 namespace gbb {
 static_assert(sizeof(void*) == 8, "Only measured Windows AMD64 is supported");
 struct Handle { uint32_t version{}; int index{-1}, skeleton{-1}; };
@@ -98,6 +110,7 @@ class Bridge {
 #endif
     using SwingFn = void(*)(void*, void*);
     using DeltaFn = float(*)(void*);
+    using PropertyReaderFn = void*(*)(const void*, void*, void*);
     using BindFn = void(*)(void*, void*, Handle*, const void*);
     using ResolveFn = void(*)(Handle*, void*);
     using QuatFn = void(*)(Handle*, void*, GbbQuaternion*);
@@ -109,6 +122,9 @@ class Bridge {
     BindFn bind_{}; GetRigFn getRig_{}; ResolveFn resolve_{};
     QuatFn readRotation_{}, writeRotation_{}, readWorldRotation_{};
     PosFn writePosition_{}, readWorldPosition_{};
+    PropertyReaderFn originalPropertyReader_{};
+    uintptr_t propertyReaderReturn_{};
+    std::atomic<const char*> propertyReaderStatus_{"native_property_reader_not_initialized"};
     DeltaFn originalDelta_{}; SwingFn originalSwing_{};
     void* deltaTarget_{}; void* swingTarget_{};
     SwingFn originalQuartz_{};
@@ -176,6 +192,556 @@ class Bridge {
             std::memcpy(&header, reinterpret_cast<void*>(container), sizeof(header)); return true;
         } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
     }
+    struct BoneStateLayout {
+        size_t stride{};
+        int driven{}, parent{}, child{}, speed{}, normal{}, point{}, hits{};
+        int useLimit{}, positive{}, negative{}, wind{}, globalWind{};
+        bool limitIsInt{}, hitsIsInt{};
+        const char* failure{};
+        static BoneStateLayout Rejected(const char* reason) {
+            BoneStateLayout layout{};
+            layout.failure=reason;
+            return layout;
+        }
+    };
+    struct InputLayout {
+        int parent{-1}, self{-1};
+    };
+    InputLayout inputLayout_{};
+    std::array<GbbSwingInputSample,2> inputResults_{};
+    std::array<GbbSwingStepSample,2> stepResults_{};
+    const profile::SwingStepVariant* stepVariant_{};
+    std::atomic<const char*> stepStatus_{"native_steps_not_initialized"};
+
+    InputLayout PrepareInputLayout()
+    {
+        InputLayout input{};
+        uint32_t align{};
+        const auto actor = [&](const char* name) { return meta_.Class("ActorAnimation.Runtime.dll","ActorAnimation",name); };
+        const auto offset = [&](void* owner,const char* name,int code,size_t size,void* type=nullptr) {
+            if (!owner || !meta_.classFromType) return -1;
+            const auto field = meta_.Field(owner,name,code);
+            if (!field || (type && meta_.classFromType(meta_.fieldType(field)) != type)) return -1;
+            const int at = meta_.fieldOffset(field)-profile::BoxHeader;
+            const int bytes = meta_.valueSize(owner,&align);
+            return at >= 0 && bytes >= at && size <= static_cast<size_t>(bytes-at) ? at : -1;
+        };
+        const auto dynamic = actor("ActorSwingJobDynamicBone");
+        const auto affine = actor("ActorSwingAffineTransform");
+        if (affine) {
+            const int translation = offset(affine,"translation",0x11,sizeof(GbbVector3));
+            const int bytes = meta_.valueSize(affine,&align);
+            const int parent = offset(dynamic,"parentTx",0x11,bytes,affine);
+            const int self = offset(dynamic,"selfTx",0x11,bytes,affine);
+            if (translation >= 0 && parent >= 0) input.parent = parent+translation;
+            if (translation >= 0 && self >= 0) input.self = self+translation;
+        }
+        return input;
+    }
+
+    BoneStateLayout stateLayout_{};
+    bool stateLayoutChecked_{};
+
+    BoneStateLayout PrepareBoneStateLayout() {
+        if (!meta_.classFromType) return BoneStateLayout::Rejected("metadata_class_from_type_missing");
+        auto find = [&](const char* name) { return meta_.Class("ActorAnimation.Runtime.dll","ActorAnimation",name); };
+        const auto dynamic = find("ActorSwingJobDynamicBone");
+        const auto collision = find("CollisionInfo");
+        const auto limit = find("ActorSwingJobLimitInfo");
+        if (!dynamic) return BoneStateLayout::Rejected("dynamic_bone_type_missing");
+        auto typeOf = [&](void* klass,const char* name) -> void* {
+            const auto field = meta_.Field(klass,name,0x11);
+            return field ? meta_.classFromType(meta_.fieldType(field)) : nullptr;
+        };
+        const auto driven = typeOf(dynamic,"driven");
+        const auto handle = driven ? typeOf(driven,"m_Handle") : nullptr;
+        uint32_t alignment{};
+        if (!handle || meta_.valueSize(handle,&alignment) != sizeof(Handle) ||
+            !meta_.Layout(handle,profile::HandleFields) || !meta_.Offset(driven,"m_Handle",0,0x11))
+            return BoneStateLayout::Rejected("driven_transform_handle_layout");
+        const bool collisionMatches = collision && typeOf(dynamic,"collision") == collision;
+        const bool limitMatches = limit && typeOf(dynamic,"limit") == limit;
+        auto offset = [&](void* cls,const char* name,int type,size_t bytes) {
+            const auto field = meta_.Field(cls,name,type);
+            if (!field) return -1;
+            const int value = meta_.fieldOffset(field) - profile::BoxHeader;
+            const int size = meta_.valueSize(cls,&alignment);
+            return value >= 0 && size >= value && bytes <= static_cast<size_t>(size-value) ? value : -1;
+        };
+        const int bodySize = meta_.valueSize(dynamic,&alignment);
+        if (bodySize != 956) return BoneStateLayout::Rejected("dynamic_bone_stride");
+        const auto embeddedOffset = [&](void* cls, const char* name, int type, size_t bytes,
+                                        int containerOffset) {
+            const int member = containerOffset < 0 ? -1 : offset(cls,name,type,bytes);
+            return member < 0 ? -1 : containerOffset + member;
+        };
+        const int collisionBase = collisionMatches ?
+            offset(dynamic,"collision",0x11,meta_.valueSize(collision,&alignment)) : -1;
+        const int limitBase = limitMatches ?
+            offset(dynamic,"limit",0x11,meta_.valueSize(limit,&alignment)) : -1;
+        const bool integerHits = collisionMatches && meta_.Field(collision,"hitCheckCount",0x08);
+        const bool integerLimit = limitMatches && meta_.Field(limit,"useLimit",0x08);
+        BoneStateLayout layout{
+            static_cast<size_t>(bodySize),offset(dynamic,"driven",0x11,sizeof(Handle)),
+            offset(dynamic,"parentIndex",0x08,4),offset(dynamic,"childIndex",0x08,4),
+            offset(dynamic,"childSpeed",0x11,12),
+            embeddedOffset(collision,"normal",0x11,12,collisionBase),
+            embeddedOffset(collision,"position",0x11,12,collisionBase),
+            embeddedOffset(collision,"hitCheckCount",integerHits ? 0x08 : 0x05,integerHits ? 4 : 1,collisionBase),
+            embeddedOffset(limit,"useLimit",integerLimit ? 0x08 : 0x05,integerLimit ? 4 : 1,limitBase),
+            embeddedOffset(limit,"positive",0x11,12,limitBase),
+            embeddedOffset(limit,"negative",0x11,12,limitBase),
+            offset(dynamic,"wind",0x0c,4),offset(dynamic,"useWindGlobalForce",0x02,1),
+            integerLimit,integerHits};
+        if (layout.useLimit < 0 && !integerLimit)
+            layout.useLimit=embeddedOffset(limit,"useLimit",0x02,1,limitBase);
+        if (layout.driven < 0) return BoneStateLayout::Rejected("driven");
+        return layout;
+    }
+
+    template<class T> static T ReadStateField(const unsigned char* row,int offset) {
+        T value{};
+        std::memcpy(&value,row+offset,sizeof(value));
+        return value;
+    }
+
+    template<class T> static T ReadOptionalStateField(const unsigned char* row,int offset,T invalidLayout,T readFault) {
+        if (offset < 0) return invalidLayout;
+        __try { return ReadStateField<T>(row,offset); }
+        __except(EXCEPTION_EXECUTE_HANDLER) { return readFault; }
+    }
+
+    static int32_t ReadStateInteger(const unsigned char* row,int offset,bool wide) {
+        if (offset < 0) return INT32_MIN;
+        __try { return wide ? ReadStateField<int32_t>(row,offset) : ReadStateField<uint8_t>(row,offset); }
+        __except(EXCEPTION_EXECUTE_HANDLER) { return INT32_MIN+1; }
+    }
+
+    static bool FiniteVector(const GbbVector3& v) {
+        return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+    }
+    static float ReadSwingInputTime(void* swing) {
+        __try {
+            return ReadStateField<float>(static_cast<const unsigned char*>(swing),profile::SwingTime);
+        } __except(EXCEPTION_EXECUTE_HANDLER) {
+            return std::numeric_limits<float>::quiet_NaN();
+        }
+    }
+    static void ReadNativePropertyOutput(const void* table,const void* output,GbbSwingInputSample& sample) {
+        const char* reason = "";
+        __try {
+            const auto* properties = static_cast<const unsigned char*>(table);
+            const auto* data = static_cast<const unsigned char*>(output);
+            const bool defaults = !ReadStateField<uint8_t>(properties,profile::SwingPropertyTableValid);
+            for (unsigned i=0;i<std::size(sample.properties);++i) {
+                const float value = ReadStateField<float>(data,profile::SwingPropertyForceOffset+i*sizeof(float));
+                if (!std::isfinite(value)) continue;
+                sample.properties[i]=value;
+                sample.property_mask |= 1u<<i;
+            }
+            if (sample.property_mask != (1u<<std::size(sample.properties))-1)
+                reason = "native_property_output_nonfinite";
+            else if (defaults) reason = "native_property_table_uses_defaults";
+        } __except(EXCEPTION_EXECUTE_HANDLER) { reason = "native_property_output_fault"; }
+        std::snprintf(sample.property_reason,sizeof(sample.property_reason),"%s",reason);
+    }
+    void ReadInputAnchors(const InputLayout& layout,const BoneStateLayout& boneLayout,void* swing,void* stream,
+                         const GbbSwingBoneState* bones,unsigned count,GbbSwingInputSample& out) {
+        const char* reason = "anchor_list_unavailable";
+        __try {
+            uintptr_t container{};
+            ListHeader header{};
+            if (ReadListHeader(swing,ListOffsets[0],container,header) && ValidListHeader(header,boneLayout.stride) && header.payload) {
+                reason = "anchor_layout_or_handle_unavailable";
+                for (unsigned i=0;i<count && i<4;++i) {
+                    const int index=bones[i].index;
+                    if (index<0 || index>=header.length) break;
+                    out.indices[i]=index;
+                    out.count=i+1;
+                    const auto* row=reinterpret_cast<const unsigned char*>(header.payload)+index*boneLayout.stride;
+                    if (layout.parent>=0) {
+                        out.cached_parent[i]=ReadStateField<GbbVector3>(row,layout.parent);
+                        if (FiniteVector(out.cached_parent[i])) out.anchor_mask |= 1u<<(4+i);
+                    }
+                    if (layout.self>=0) {
+                        out.cached_self[i]=ReadStateField<GbbVector3>(row,layout.self);
+                        if (FiniteVector(out.cached_self[i])) out.anchor_mask |= 1u<<(8+i);
+                    }
+                    auto handle=ReadStateField<Handle>(row,boneLayout.driven);
+                    if (!readWorldPosition_ || handle.index<0) continue;
+                    resolve_(&handle,stream);
+                    if (handle.skeleton<0) continue;
+                    readWorldPosition_(&handle,stream,&out.stream_anchor[i]);
+                    if (FiniteVector(out.stream_anchor[i])) out.anchor_mask |= 1u<<i;
+                }
+                const unsigned full=(1u<<out.count)-1;
+                if (out.count && out.anchor_mask==(full|(full<<4)|(full<<8))) reason="";
+            }
+        } __except(EXCEPTION_EXECUTE_HANDLER) { reason="anchor_read_fault"; }
+        std::snprintf(out.anchor_reason,sizeof(out.anchor_reason),"%s",reason);
+    }
+
+    // Match the transform handle in the same stream before following child
+    // indices. A missing or ambiguous match is reported as an empty sample.
+    static unsigned ReadBoneStates(Bridge* bridge,const BoneStateLayout& l,Handle handle,
+                                   void* swing,void* stream,GbbSwingBoneState* rows,
+                                   const char** failure = nullptr) {
+        if (failure) *failure="dynamic_list_unreadable";
+        if (!l.stride) return 0;
+        __try {
+            uintptr_t container{};
+            ListHeader header{};
+            if (!ReadListHeader(swing,ListOffsets[0],container,header) ||
+                !ValidListHeader(header,l.stride) || !header.payload || header.length > 2048) return 0;
+            if (failure) *failure="target_handle_unresolved";
+            bridge->resolve_(&handle,stream);
+            if (handle.skeleton < 0 || handle.index < 0) return 0;
+            const auto* base = reinterpret_cast<const unsigned char*>(header.payload);
+            int index = -1;
+            for (int i=0;i<header.length;++i) {
+                Handle bone = ReadStateField<Handle>(base + i*l.stride,l.driven);
+                if (bone.index < 0) continue;
+                if (bone.version != handle.version || bone.skeleton < 0)
+                    bridge->resolve_(&bone,stream);
+                if (bone.skeleton != handle.skeleton || bone.version != handle.version) continue;
+                if (index >= 0) {
+                    if (failure) *failure="ambiguous_dynamic_bone";
+                    return 0;
+                }
+                index = i;
+            }
+            if (failure) *failure=index < 0 ? "dynamic_bone_not_found" : nullptr;
+            unsigned count = 0;
+            while (count < 4 && index >= 0 && index < header.length) {
+                const auto* row = base + index*l.stride;
+                auto& out = rows[count++];
+                out.index = index;
+                const float missing = std::numeric_limits<float>::infinity();
+                const GbbVector3 missingVector{missing,missing,missing};
+                const GbbVector3 faultVector{-missing,-missing,-missing};
+                out.parent_index = ReadStateInteger(row,l.parent,true);
+                out.child_index = ReadStateInteger(row,l.child,true);
+                out.child_speed = ReadOptionalStateField(row,l.speed,missingVector,faultVector);
+                out.hit_checks = ReadStateInteger(row,l.hits,l.hitsIsInt);
+                out.contact_point = ReadOptionalStateField(row,l.point,missingVector,faultVector);
+                out.contact_normal = ReadOptionalStateField(row,l.normal,missingVector,faultVector);
+                out.use_limit = ReadStateInteger(row,l.useLimit,l.limitIsInt);
+                out.limit_positive = ReadOptionalStateField(row,l.positive,missingVector,faultVector);
+                out.limit_negative = ReadOptionalStateField(row,l.negative,missingVector,faultVector);
+                out.wind = ReadOptionalStateField(row,l.wind,missing,-missing);
+                out.use_global_wind = ReadStateInteger(row,l.globalWind,false);
+                index = out.child_index;
+                for (unsigned j=0;j<count;++j) if (rows[j].index==index) return count;
+                if (index >= 0 && index < header.length &&
+                    ReadStateInteger(base+index*l.stride,l.parent,true)!=out.index) break;
+            }
+            return count;
+        } __except(EXCEPTION_EXECUTE_HANDLER) {
+            if (failure) *failure="dynamic_bone_read_fault";
+            return 0;
+        }
+    }
+
+    struct OutputProbe {
+        Handle handle{};
+        void* transform{};
+        int frame{-1};
+        uint64_t generation{};
+        float dt{};
+    };
+    OutputProbe requestedOutput_{};
+    GbbSwingOutputSample completedOutput_{};
+    std::array<OutputProbe,2> stateRequests_{};
+    std::array<GbbSwingStateSample,2> stateResults_{};
+    struct StateWork {
+        std::array<OutputProbe,2> requests{};
+        std::array<GbbSwingStateSample,2> samples{};
+        std::array<const char*,2> inputFailures{};
+        BoneStateLayout layout{};
+        InputLayout inputLayout{};
+        std::array<GbbSwingInputSample,2> inputs{};
+        const profile::SwingStepVariant* stepsProfile{};
+        ListHeader stepsList{};
+        std::array<GbbSwingStepSample,2> steps{};
+    };
+
+    static inline thread_local StateWork* propertyCapture_{};
+
+    static GbbSwingStep ReadSwingStep(const StateWork& work,unsigned phase,int index,
+                                     const unsigned char* row,const void* nativeFrame,
+                                     const unsigned char* xmm,int pendingHits) {
+        const float missing = std::numeric_limits<float>::quiet_NaN();
+        const GbbVector3 absent{missing,missing,missing};
+        GbbSwingStep step{
+            phase,work.stepsProfile->sites[phase],index,ReadStateField<int32_t>(row,136),
+            ReadStateField<GbbVector3>(row,228),absent,ReadStateField<GbbVector3>(row,284),
+            absent,absent,-1,-1,-1,absent,absent};
+        const auto* child = step.child_index>=0 && step.child_index<work.stepsList.length ?
+            reinterpret_cast<const unsigned char*>(work.stepsList.payload) + work.layout.stride*step.child_index : nullptr;
+        if (child) step.child_position = ReadStateField<GbbVector3>(child,228);
+        if (phase==GBB_SWING_GLOBAL_FORCE_GATE) {
+            step.use_global_force = ReadStateField<uint8_t>(row,832);
+            if (step.use_global_force) {
+                const auto* properties = ReadStateField<const unsigned char*>(
+                    static_cast<const unsigned char*>(nativeFrame),work.stepsProfile->forcePointerOffset);
+                if (properties) step.force = ReadStateField<GbbVector3>(properties,profile::SwingPropertyForceOffset);
+            }
+        }
+        if (phase==GBB_SWING_VELOCITY_STORED && child) {
+            step.child_type = ReadStateField<int32_t>(child,8);
+            step.predicted_position = ReadStateField<GbbVector3>(xmm,16*(work.stepsProfile->avx ? 10 : 11));
+        }
+        if (phase==GBB_SWING_CONTACT_RESULT && child) {
+            step.pending_hits = pendingHits;
+            step.contact_point = ReadStateField<GbbVector3>(child,work.layout.point);
+            step.contact_normal = ReadStateField<GbbVector3>(child,work.layout.normal);
+            step.predicted_position = ReadStateField<GbbVector3>(xmm,16*10);
+        }
+        return step;
+    }
+
+    void InstallSwingSteps(const BoneStateLayout& bone,const InputLayout& input) {
+        if (owner_) { owner_->InstallSwingSteps(bone,input); return; }
+        if (!swingTarget_ || stopped_.load(std::memory_order_acquire) ||
+            std::strcmp(stepStatus_.load(std::memory_order_relaxed),"native_steps_not_initialized")) return;
+        const auto fail = [this](const char* reason) { stepStatus_.store(reason,std::memory_order_release); };
+        const auto* variant = profile::VerifySwingSteps(burst_,reinterpret_cast<uintptr_t>(swingTarget_));
+        if (!variant) { fail("native_steps_profile_unverified"); return; }
+        const auto klass = meta_.Class("ActorAnimation.Runtime.dll","ActorAnimation","ActorSwingJobDynamicBone");
+        // Both verified instruction profiles use a 32-bit comparison for DynamicType.
+        if (!klass || !meta_.Offset(klass,"dynamicType",8) || bone.stride!=956 || input.self!=228 ||
+            bone.child!=136 || bone.speed!=284 || bone.globalWind!=832 || bone.point!=112 || bone.normal!=100) {
+            fail("native_steps_bone_layout_unverified"); return;
+        }
+        int cpu[4]{};
+        __cpuid(cpu,1);
+        if (variant->avx && ((cpu[2]&0x1c000000)!=0x1c000000 || (_xgetbv(0)&7)!=7)) {
+            fail("native_steps_avx_state_unavailable"); return;
+        }
+        GbbSwingStepAvx=variant->avx;
+        void* const detours[]{reinterpret_cast<void*>(&GbbSwingAnchorReady),reinterpret_cast<void*>(&GbbSwingForceGate),
+            reinterpret_cast<void*>(&GbbSwingVelocityStored),reinterpret_cast<void*>(&GbbSwingContactResult),
+            reinterpret_cast<void*>(&GbbSwingTranslationStored)};
+        const auto base = reinterpret_cast<uintptr_t>(burst_);
+        unsigned created=0;
+        for (;created<profile::SwingStepCount;++created) {
+            auto* site = reinterpret_cast<void*>(base+variant->sites[created]);
+            if (MH_CreateHook(site,detours[created],&GbbSwingStepTrampolines[created])!=MH_OK) break;
+        }
+        if (created!=profile::SwingStepCount) {
+            for (unsigned i=0;i<created;++i) MH_RemoveHook(reinterpret_cast<void*>(base+variant->sites[i]));
+            fail("native_steps_hook_create_failed");
+            return;
+        }
+        bool queued=true;
+        for (auto site:variant->sites)
+            queued &= MH_QueueEnableHook(reinterpret_cast<void*>(base+site))==MH_OK;
+        if (!queued || MH_ApplyQueued()!=MH_OK) {
+            for (auto site:variant->sites) MH_RemoveHook(reinterpret_cast<void*>(base+site));
+            fail("native_steps_hook_enable_failed");
+            return;
+        }
+        stepVariant_=variant;
+        fail("native_steps_not_reached");
+    }
+
+    static void PrepareSwingSteps(StateWork& work,void* swing,const profile::SwingStepVariant* variant) {
+        __try {
+            uintptr_t container{};
+            if (variant && ReadListHeader(swing,ListOffsets[0],container,work.stepsList) &&
+                ValidListHeader(work.stepsList,work.layout.stride) && work.stepsList.payload)
+                work.stepsProfile=variant;
+        } __except(EXCEPTION_EXECUTE_HANDLER) { work.stepsProfile=nullptr; }
+    }
+
+    static void* PropertyReaderDetour(const void* table,void* output,void* stream) {
+        auto* self = self_;
+        const auto caller = reinterpret_cast<uintptr_t>(_ReturnAddress());
+        auto* result = self->originalPropertyReader_(table,output,stream);
+        if (caller==self->propertyReaderReturn_ && propertyCapture_) {
+            for (auto& sample:propertyCapture_->inputs)
+                if (sample.size) ReadNativePropertyOutput(table,output,sample);
+        }
+        return result;
+    }
+    void RunSwingWithPropertyCapture(void* swing,void* stream,StateWork* capture) {
+        auto* previous = propertyCapture_;
+        propertyCapture_ = capture;
+        const bool steps = capture && capture->stepsProfile;
+        if (steps) InterlockedIncrement(&GbbSwingStepActive);
+        __try { originalSwing_(swing,stream); }
+        __finally {
+            if (steps) InterlockedDecrement(&GbbSwingStepActive);
+            propertyCapture_ = previous;
+        }
+    }
+
+    void InstallPropertyReader() {
+        if (owner_) { owner_->InstallPropertyReader(); return; }
+        if (!swingTarget_ || stopped_.load(std::memory_order_acquire) ||
+            std::strcmp(propertyReaderStatus_.load(std::memory_order_relaxed),"native_property_reader_not_initialized")) return;
+        const auto fail = [this](const char* reason) { propertyReaderStatus_.store(reason,std::memory_order_release); };
+        const auto* variant = profile::VerifySwingPropertyReader(burst_,reinterpret_cast<uintptr_t>(swingTarget_));
+        if (!variant) { fail("native_property_reader_profile_unverified"); return; }
+        const auto data = meta_.Class("ActorAnimation.Runtime.dll","ActorAnimation","ActorAnimationManagePropertyData");
+        uint32_t align{};
+        if (!data || meta_.valueSize(data,&align)!=104 ||
+            !meta_.Offset(data,"globalForce",profile::SwingPropertyForceOffset,0x11) ||
+            !meta_.Offset(data,"windDirection",44,0x11)) {
+            fail("native_property_output_layout_unverified"); return;
+        }
+        static constexpr const char* floats[]{
+            "windPower","windFluctuation","windWaveAmplitude","windWaveFrequency","windWavePhase",
+            "windRangeMax","windRangeMin","windRangeFrequency","windRangePhase","randomPower","randomFluctuation"};
+        for (unsigned i=0;i<std::size(floats);++i) {
+            if (!meta_.Offset(data,floats[i],56+i*sizeof(float),0x0c)) {
+                fail("native_property_output_layout_unverified"); return;
+            }
+        }
+        const auto base = reinterpret_cast<uintptr_t>(burst_);
+        auto* reader = reinterpret_cast<void*>(base+variant->reader);
+        propertyReaderReturn_ = base+variant->callReturn;
+        if (MH_CreateHook(reader,reinterpret_cast<void*>(&PropertyReaderDetour),
+                          reinterpret_cast<void**>(&originalPropertyReader_)) != MH_OK) {
+            fail("native_property_reader_hook_create_failed"); return;
+        }
+        if (MH_EnableHook(reader) != MH_OK) {
+            MH_RemoveHook(reader);
+            originalPropertyReader_=nullptr;
+            fail("native_property_reader_hook_enable_failed"); return;
+        }
+        fail("native_property_reader_not_observed");
+    }
+
+    void FinishBoneStates(StateWork& work,void* swing,void* stream) {
+        for (size_t i=0;i<work.requests.size();++i) {
+            const auto& request=work.requests[i];
+            if (!request.transform) continue;
+            auto& sample=work.samples[i];
+            const char* outputFailure{};
+            sample.after_count=ReadBoneStates(this,work.layout,request.handle,swing,stream,sample.after,&outputFailure);
+            if (!ReadSwingOutput(this,request.handle,stream,&sample.local_rotation))
+                sample.local_rotation={};
+            if (!sample.before_count)
+                std::snprintf(sample.reason,sizeof(sample.reason),"before:%s",work.inputFailures[i] ? work.inputFailures[i] : "empty");
+            else if (!sample.after_count)
+                std::snprintf(sample.reason,sizeof(sample.reason),"after:%s",outputFailure ? outputFailure : "empty");
+            sample.size=sizeof(sample);
+            sample.source_frame=request.frame;
+            sample.delta_time=request.dt;
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (stateRequests_[i].transform==request.transform && stateRequests_[i].frame==request.frame &&
+                generation_.load(std::memory_order_relaxed)==request.generation) {
+                stateResults_[i]=sample;
+                inputResults_[i]=work.inputs[i];
+                auto& steps=work.steps[i];
+                if (steps.count) steps.reason[0]=0;
+                stepResults_[i]=steps;
+            }
+        }
+    }
+
+    static bool ReadSwingOutput(Bridge* bridge, Handle handle, void* stream, GbbQuaternion* rotation) {
+        __try {
+            bridge->resolve_(&handle,stream);
+            if (handle.skeleton < 0) return false;
+            bridge->readRotation_(&handle,stream,rotation);
+            return ValidQuat(*rotation);
+        } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+    }
+
+    void FinishSwingOutput(const OutputProbe& request, void* stream) {
+        if (!request.transform) return;
+        GbbQuaternion result{};
+        if (!ReadSwingOutput(this,request.handle,stream,&result)) return;
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (requestedOutput_.transform == request.transform && requestedOutput_.generation == request.generation &&
+            requestedOutput_.frame == request.frame && generation_.load(std::memory_order_relaxed) == request.generation)
+            completedOutput_ = {sizeof(GbbSwingOutputSample),request.frame,result,request.dt};
+    }
+
+    struct SwingVisit {
+        int frame{-1};
+        uintptr_t job{}, caller{}, stream{};
+        float dt{};
+        std::array<uintptr_t,4> payloads{};
+        std::array<int32_t,4> lengths{};
+    };
+    std::array<ListObservation,4> repeatLayouts_{};
+    bool repeatLayoutsReady_{};
+    uint64_t repeatGeneration_{};
+    unsigned repeatBudget_{};
+    SwingVisit repeatFirst_, repeatSecond_;
+    bool repeatPending_{};
+
+    // Called with mutex_ held after a verified input write. The original
+    // solver is still forwarded exactly once for each callback.
+    void NoteSwingVisit(const Snapshot& s, void* job, void* swing, void* stream, uintptr_t caller, float dt) {
+        if (!repeatLayoutsReady_) return;
+        if (repeatGeneration_ != s.generation) {
+            repeatGeneration_ = s.generation;
+            repeatBudget_ = 180;
+            repeatFirst_ = {};
+            repeatPending_ = false;
+        }
+        if (!repeatBudget_) return;
+        --repeatBudget_;
+        SwingVisit visit;
+        visit.frame = s.frame;
+        visit.job = reinterpret_cast<uintptr_t>(job);
+        visit.caller = caller;
+        visit.stream = reinterpret_cast<uintptr_t>(stream);
+        visit.dt = dt;
+        for (unsigned i=0; i<repeatLayouts_.size(); ++i) {
+            const auto& layout = repeatLayouts_[i];
+            uintptr_t container{};
+            ListHeader header{};
+            if (layout.layoutVerified && ReadListHeader(swing,ListOffsets[i],container,header) &&
+                ValidListHeader(header,layout.stride) && header.length > 0) {
+                visit.payloads[i] = header.payload;
+                visit.lengths[i] = header.length;
+            }
+        }
+        if (repeatFirst_.frame == visit.frame) {
+            repeatSecond_ = visit;
+            repeatPending_ = true;
+            repeatBudget_ = 0;
+        } else repeatFirst_ = visit;
+    }
+
+    void ReportSwingRepeat(const GbbFrame& frame) {
+        if (!repeatLayoutsReady_) {
+            const auto layouts = PrepareListLayouts();
+            std::lock_guard<std::mutex> lock(mutex_);
+            repeatLayouts_ = layouts;
+            repeatLayoutsReady_ = true;
+        }
+        SwingVisit a,b;
+        GbbLogFn log{};
+        void* context{};
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (!repeatPending_) return;
+            repeatPending_ = false;
+            if (repeatGeneration_ != generation_.load(std::memory_order_relaxed) || current_.actor != frame.actor) return;
+            a = repeatFirst_; b = repeatSecond_;
+            log = log_; context = logContext_;
+        }
+        if (!log) return;
+        char detail[640]{};
+        std::snprintf(detail,sizeof(detail),
+            "[SwingRepeat] actor=%p input_frame=%d next_publish_frame=%d job=%llx/%llx caller=%llx/%llx stream=%llx/%llx dt=%.6f/%.6f dynamic=%llx:%d/%llx:%d static=%llx:%d/%llx:%d breast=%llx:%d/%llx:%d chain=%llx:%d/%llx:%d",
+            frame.actor,a.frame,frame.unity_frame,
+            static_cast<unsigned long long>(a.job),static_cast<unsigned long long>(b.job),
+            static_cast<unsigned long long>(a.caller),static_cast<unsigned long long>(b.caller),
+            static_cast<unsigned long long>(a.stream),static_cast<unsigned long long>(b.stream),a.dt,b.dt,
+            static_cast<unsigned long long>(a.payloads[0]),a.lengths[0],static_cast<unsigned long long>(b.payloads[0]),b.lengths[0],
+            static_cast<unsigned long long>(a.payloads[1]),a.lengths[1],static_cast<unsigned long long>(b.payloads[1]),b.lengths[1],
+            static_cast<unsigned long long>(a.payloads[2]),a.lengths[2],static_cast<unsigned long long>(b.payloads[2]),b.lengths[2],
+            static_cast<unsigned long long>(a.payloads[3]),a.lengths[3],static_cast<unsigned long long>(b.payloads[3]),b.lengths[3]);
+        NotifyGuarded(log,context,1,detail);
+    }
+
     void ObserveLists(void* swing) {
         for (unsigned i=0;i<4;++i) {
             auto& row=actorLists_[i]; if (!row.layoutVerified || row.samples+row.failures>=64) continue;
@@ -675,7 +1241,7 @@ class Bridge {
         if (matched && !target->PairState().Finish(reinterpret_cast<uintptr_t>(target),target->generation_.load(std::memory_order_acquire)))
             target->PairRejected(experiment::Reject::Generation,false,generation);
     }
-    bool BeforeSwing(void* swing, void* stream, uintptr_t caller = 0,uint64_t admittedGeneration=0) {
+    bool BeforeSwing(void* swing, void* stream, uintptr_t caller,uint64_t admittedGeneration,OutputProbe& outputProbe, StateWork& stateWork) {
         const auto start = Ticks();
         swingCalls_.fetch_add(1, std::memory_order_relaxed);
         if (!Observing()) return false;
@@ -717,6 +1283,23 @@ class Bridge {
             if (!stopped_.load(std::memory_order_acquire) &&
                 generation_.load(std::memory_order_relaxed) == s.generation) {
                 if (ok) { d.sequence = matches_.fetch_add(1, std::memory_order_relaxed) + 1; diagnostic_ = d;
+                    if (d.injected) {
+                        NoteSwingVisit(s,job,swing,stream,caller,d.dt);
+                        if (requestedOutput_.generation == s.generation && requestedOutput_.frame == s.frame) {
+                            outputProbe = requestedOutput_;
+                            outputProbe.dt = d.dt;
+                        }
+                        if (stateLayout_.stride) {
+                            stateWork.layout = stateLayout_;
+                            stateWork.inputLayout = inputLayout_;
+                            for (size_t i=0;i<stateRequests_.size();++i) {
+                                const auto& request=stateRequests_[i];
+                                if (request.generation!=s.generation || request.frame!=s.frame || !request.transform) continue;
+                                stateWork.requests[i]=request;
+                                stateWork.requests[i].dt=d.dt;
+                            }
+                        }
+                    }
                     if (s.beforeQuartz) {
                         pairedPasses_.fetch_add(1,std::memory_order_relaxed);
                         pairedGeneration_.store(s.generation,std::memory_order_release);
@@ -732,30 +1315,64 @@ class Bridge {
         nativeTimer_.Add(Ticks() - start);
         return true; // Time original solver only for the two-key Actor match.
     }
-    static bool BeforeSwingCpp(Bridge* target,void* swing, void* stream, uintptr_t caller,uint64_t admittedGeneration) noexcept {
-        try { return target && target->BeforeSwing(swing, stream, caller,admittedGeneration); }
+#ifdef GBB_TESTING
+    bool BeforeSwing(void* swing, void* stream, uintptr_t caller = 0, uint64_t generation = 0) {
+        OutputProbe output{}; StateWork state{};
+        return BeforeSwing(swing,stream,caller,generation,output,state);
+    }
+#endif
+    static bool BeforeSwingCpp(Bridge* target,void* swing, void* stream, uintptr_t caller,uint64_t admittedGeneration, OutputProbe& outputProbe, StateWork& stateWork) noexcept {
+        try { return target && target->BeforeSwing(swing, stream, caller,admittedGeneration,outputProbe,stateWork); }
         catch (...) { if (target) target->CallbackFault(admittedGeneration); return false; }
     }
-    static bool BeforeSwingGuarded(Bridge* target,void* swing, void* stream, uintptr_t caller,uint64_t admittedGeneration) {
-        __try { return BeforeSwingCpp(target,swing, stream, caller,admittedGeneration); }
+    static bool BeforeSwingGuarded(Bridge* target,void* swing, void* stream, uintptr_t caller,uint64_t admittedGeneration, OutputProbe& outputProbe, StateWork& stateWork) {
+        __try { return BeforeSwingCpp(target,swing, stream, caller,admittedGeneration,outputProbe,stateWork); }
         __except(EXCEPTION_EXECUTE_HANDLER) { if (target) target->CallbackFault(admittedGeneration); return false; }
     }
     static void SwingDetour(void* swing, void* stream) {
         auto* self = self_;
         if (!self->observing_.load(std::memory_order_acquire)) {
-            self->originalSwing_(swing, stream); return;
+            self->RunSwingWithPropertyCapture(swing,stream,nullptr); return;
         }
         const auto actorTiming = ObserveActorSwingGuarded(self, swing);
         void* job=reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(swing)-profile::Swing);
         uint64_t admittedGeneration{};
         auto* target=self->RouteJob(job,&admittedGeneration);
-        const bool matched = BeforeSwingGuarded(target,swing, stream, reinterpret_cast<uintptr_t>(_ReturnAddress()),admittedGeneration);
+        OutputProbe outputProbe{};
+        StateWork stateWork{};
+        const bool matched = BeforeSwingGuarded(target,swing, stream, reinterpret_cast<uintptr_t>(_ReturnAddress()),admittedGeneration,outputProbe,stateWork);
+        const char* propertyStatus = self->propertyReaderStatus_.load(std::memory_order_acquire);
+        const char* stepStatus = self->stepStatus_.load(std::memory_order_acquire);
+        bool captureProperties = false;
+        for (size_t i=0;i<stateWork.requests.size();++i) {
+            const auto& request=stateWork.requests[i];
+            if (!request.transform) continue;
+            auto& sample = stateWork.samples[i];
+            sample.before_count = ReadBoneStates(target,stateWork.layout,request.handle,swing,stream,sample.before,&stateWork.inputFailures[i]);
+            auto& input = stateWork.inputs[i];
+            input.size=sizeof(input);
+            input.source_frame=request.frame;
+            input.swing_time=ReadSwingInputTime(swing);
+            std::snprintf(input.property_reason,sizeof(input.property_reason),"%s",propertyStatus);
+            auto& steps = stateWork.steps[i];
+            steps.size=sizeof(steps);
+            steps.source_frame=request.frame;
+            std::snprintf(steps.reason,sizeof(steps.reason),"%s",stepStatus);
+            captureProperties = true;
+            target->ReadInputAnchors(stateWork.inputLayout,stateWork.layout,swing,stream,sample.before,sample.before_count,input);
+        }
+        if (captureProperties && std::strcmp(stepStatus,"native_steps_not_reached")==0)
+            PrepareSwingSteps(stateWork,swing,self->stepVariant_);
         const uint64_t start = matched ? Ticks() : 0;
         // Never manually execute or skip the engine solver. Its own behavior
         // (including an engine fault) is outside the bridge exception boundary.
-        self->originalSwing_(swing, stream);
+        self->RunSwingWithPropertyCapture(swing,stream,captureProperties ? &stateWork : nullptr);
         FinishActorTimingGuarded(self, actorTiming);
-        if (matched) target->solverTimer_.Add(Ticks() - start);
+        if (matched) {
+            target->solverTimer_.Add(Ticks() - start);
+            target->FinishSwingOutput(outputProbe,stream);
+            target->FinishBoneStates(stateWork,swing,stream);
+        }
     }
     int Reject(int result, const char* why) {
         Cancel(false);
@@ -763,6 +1380,130 @@ class Bridge {
         return result;
     }
 public:
+    int SampleSwingOutput(void* actor, void* transform, int frame, GbbSwingOutputSample* out) {
+        if (!out || out->size != sizeof(*out) || !transform || !MainThread(false)) return GBB_E_ARGUMENT;
+        std::unique_lock<std::mutex> lock(mutex_);
+        const auto generation = generation_.load(std::memory_order_relaxed);
+        void* const animator = current_.animator;
+        if (current_.actor != actor || current_.frame != frame || !animator || !bind_) return GBB_PENDING;
+        const bool same = requestedOutput_.generation == generation && requestedOutput_.transform == transform;
+        const bool ready = same && completedOutput_.size == sizeof(*out) && completedOutput_.source_frame == frame - 1;
+        if (ready) *out = completedOutput_;
+        if (!same) {
+            Handle h{};
+            lock.unlock();
+            if (!BindGuarded(bind_,animator,transform,&h,bindInfo_)) return GBB_E_BINDING;
+            lock.lock();
+            if (generation_.load(std::memory_order_relaxed) != generation || current_.actor != actor ||
+                current_.animator != animator || current_.frame != frame) return GBB_PENDING;
+            requestedOutput_ = {h,transform,frame,generation,0.f};
+            completedOutput_ = {};
+        } else requestedOutput_.frame = frame;
+        return ready ? GBB_OK : GBB_PENDING;
+    }
+
+    int SampleSwingState(void* actor,void* transform,uint32_t slot,int frame,GbbSwingStateSample* out) {
+        if (!out || out->size!=sizeof(*out) || !transform || slot>=stateRequests_.size() ||
+            !MainThread(false) || frame<=0) return GBB_E_ARGUMENT;
+        std::unique_lock<std::mutex> lock(mutex_);
+        const auto generation=generation_.load(std::memory_order_relaxed);
+        void* const animator=current_.animator;
+        const auto fail = [&](int code,const char* reason) {
+            std::snprintf(out->reason,sizeof(out->reason),"%s",reason);
+            return code;
+        };
+        if (current_.actor!=actor || current_.frame!=frame || !animator || !bind_)
+            return fail(GBB_PENDING,"published_actor_or_frame_unavailable");
+        if (!stateLayoutChecked_) {
+            lock.unlock();
+            const auto layout=PrepareBoneStateLayout();
+            const auto inputs=PrepareInputLayout();
+            InstallPropertyReader();
+            InstallSwingSteps(layout,inputs);
+            lock.lock();
+            stateLayout_=layout;
+            inputLayout_=inputs;
+            stateLayoutChecked_=true;
+        }
+        if (!stateLayout_.stride) {
+            std::snprintf(out->reason,sizeof(out->reason),"layout:%s",stateLayout_.failure ? stateLayout_.failure : "unknown");
+            return GBB_E_UNAVAILABLE;
+        }
+        auto& request=stateRequests_[slot];
+        auto& result=stateResults_[slot];
+        const bool same=request.generation==generation && request.transform==transform;
+        const bool ready=same && result.size==sizeof(*out) && result.source_frame==frame-1;
+        if (ready) *out=result;
+        if (!same) {
+            Handle h{};
+            lock.unlock();
+            if (!BindGuarded(bind_,animator,transform,&h,bindInfo_))
+                return fail(GBB_E_BINDING,"bind_target_transform_failed");
+            lock.lock();
+            if (generation_.load(std::memory_order_relaxed)!=generation || current_.actor!=actor ||
+                current_.animator!=animator || current_.frame!=frame) return GBB_PENDING;
+            request={h,transform,frame,generation,0.f};
+            result={};
+            inputResults_[slot]={};
+            stepResults_[slot]={};
+        } else request.frame=frame;
+        if (!ready) return fail(GBB_PENDING,same ? "awaiting_matching_solver_frame" : "probe_armed");
+        return result.reason[0] ? GBB_E_BINDING : GBB_OK;
+    }
+
+    int ReadSwingInputs(void* actor,void* transform,uint32_t slot,int frame,GbbSwingInputSample* out) {
+        if (!out || out->size!=sizeof(*out) || !transform || slot>=stateRequests_.size() ||
+            !MainThread(false) || frame<=0) return GBB_E_ARGUMENT;
+        std::lock_guard lock(mutex_);
+        const auto& request = stateRequests_[slot];
+        const auto& input = inputResults_[slot];
+        if (current_.actor!=actor || current_.frame!=frame || request.transform!=transform ||
+            request.generation!=generation_.load(std::memory_order_relaxed) ||
+            input.size!=sizeof(*out) || input.source_frame!=frame-1) return GBB_PENDING;
+        *out=input;
+        return GBB_OK;
+    }
+
+    int ReadSwingSteps(void* actor,void* transform,uint32_t slot,int frame,GbbSwingStepSample* out) {
+        if (!out || out->size!=sizeof(*out) || !transform || slot>=stateRequests_.size() ||
+            !MainThread(false) || frame<=0) return GBB_E_ARGUMENT;
+        std::lock_guard lock(mutex_);
+        const auto& request=stateRequests_[slot];
+        const auto& result=stepResults_[slot];
+        if (current_.actor!=actor || current_.frame!=frame || request.transform!=transform ||
+            request.generation!=generation_.load(std::memory_order_relaxed) ||
+            result.size!=sizeof(*out) || result.source_frame!=frame-1) return GBB_PENDING;
+        *out=result;
+        return GBB_OK;
+    }
+
+    static void ObserveSwingStep(unsigned phase,const unsigned char* row,const void* nativeFrame,
+                                 const unsigned char* xmm,int pendingHits) noexcept {
+        auto* const work=propertyCapture_;
+        if (!work || !work->stepsProfile || phase>=profile::SwingStepCount) return;
+        const auto base=work->stepsList.payload;
+        const auto addr=reinterpret_cast<uintptr_t>(row);
+        if (!work->layout.stride || addr<base) return;
+        const auto bytes=addr-base;
+        const auto index=bytes/work->layout.stride;
+        if (index>=static_cast<unsigned>(work->stepsList.length) || bytes%work->layout.stride) return;
+        __try {
+            for (unsigned slot=0;slot<work->samples.size();++slot) {
+                const auto& state=work->samples[slot];
+                bool matched=false;
+                for (unsigned i=0;i<state.before_count;++i)
+                    matched |= state.before[i].index==static_cast<int>(index);
+                if (!matched) continue;
+                auto& result=work->steps[slot];
+                if (result.count==GBB_SWING_STEP_LIMIT) { ++result.dropped; continue; }
+                result.steps[result.count]=ReadSwingStep(*work,phase,static_cast<int>(index),row,nativeFrame,xmm,pendingHits);
+                ++result.count;
+            }
+        } __except(EXCEPTION_EXECUTE_HANDLER) {
+            for (auto& result:work->steps) ++result.dropped;
+        }
+    }
+
     explicit Bridge(bool detourOwner=true) { if (detourOwner) self_ = this; }
     int CreateContext(GbbContext* out) {
         if (!out) return GBB_E_ARGUMENT;
@@ -975,6 +1716,7 @@ public:
             return Reject(GBB_E_UNAVAILABLE, initializationFailure_);
         }
         if (readOnlyProbeActive_) return GBB_PENDING;
+        ReportSwingRepeat(*frame);
         if (readOnlyProbeSuspended_) {
             if (!actualCaller_.load(std::memory_order_acquire)) {
                 const auto status = MH_EnableHook(deltaTarget_);
@@ -1421,5 +2163,30 @@ extern "C" GBB_EXPORT int32_t GBB_CALL GakuBurstBridge_ObserveActor(void* actor,
 }
 extern "C" GBB_EXPORT int32_t GBB_CALL GakuBurstBridge_ReadActorObservation(void** actor, uint64_t* matched, uint64_t* other, uint64_t* bad) {
     __try { return gbb::CppBoundary([&] { return gbb::instance.ReadActorObservation(actor, matched, other, bad); }); }
+    __except(EXCEPTION_EXECUTE_HANDLER) { return GBB_E_FAULT; }
+}
+
+extern "C" GBB_EXPORT int32_t GBB_CALL GakuBurstBridge_SampleSwingOutput(void* actor, void* transform, int32_t frame, GbbSwingOutputSample* out) {
+    __try { return gbb::CppBoundary([&] { return gbb::instance.SampleSwingOutput(actor,transform,frame,out); }); }
+    __except(EXCEPTION_EXECUTE_HANDLER) { return GBB_E_FAULT; }
+}
+
+extern "C" void GbbObserveSwingStep(unsigned phase,const unsigned char* row,const void* nativeFrame,
+                                       const unsigned char* xmm,int pendingHits) {
+    gbb::Bridge::ObserveSwingStep(phase,row,nativeFrame,xmm,pendingHits);
+}
+
+extern "C" GBB_EXPORT int32_t GBB_CALL GakuBurstBridge_ReadSwingSteps(void* actor,void* transform,uint32_t slot,int32_t frame,GbbSwingStepSample* out) {
+    __try { return gbb::CppBoundary([&] { return gbb::instance.ReadSwingSteps(actor,transform,slot,frame,out); }); }
+    __except(EXCEPTION_EXECUTE_HANDLER) { return GBB_E_FAULT; }
+}
+
+extern "C" GBB_EXPORT int32_t GBB_CALL GakuBurstBridge_ReadSwingInputs(void* actor, void* transform, uint32_t slot, int32_t frame, GbbSwingInputSample* out) {
+    __try { return gbb::CppBoundary([&] { return gbb::instance.ReadSwingInputs(actor,transform,slot,frame,out); }); }
+    __except(EXCEPTION_EXECUTE_HANDLER) { return GBB_E_UNAVAILABLE; }
+}
+
+extern "C" GBB_EXPORT int32_t GBB_CALL GakuBurstBridge_SampleSwingState(void* actor, void* transform, uint32_t slot, int32_t frame, GbbSwingStateSample* out) {
+    __try { return gbb::CppBoundary([&] { return gbb::instance.SampleSwingState(actor,transform,slot,frame,out); }); }
     __except(EXCEPTION_EXECUTE_HANDLER) { return GBB_E_FAULT; }
 }

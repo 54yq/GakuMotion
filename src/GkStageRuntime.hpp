@@ -26,7 +26,7 @@ namespace StageLoader
 	inline std::atomic<bool> pendingTypeObjects{false};
 	inline bool ownerTypeWanted[2]{}, actorTypeWanted[2]{};
 	inline const void *ownerBackground[2]{}, *loadMethod = nullptr, *unloadMethod = nullptr;
-	inline const void *findAll = nullptr, *goScene = nullptr, *sceneName = nullptr, *sceneLoaded = nullptr;
+	inline const void *findAll = nullptr, *findAllUnsorted = nullptr, *goScene = nullptr, *sceneName = nullptr, *sceneLoaded = nullptr;
 	inline const void *instanceId = nullptr, *goTransform = nullptr, *componentGo = nullptr;
 	inline const void *parent = nullptr, *childCount = nullptr, *child = nullptr, *objectName = nullptr;
 	inline const void *setActive = nullptr, *activeSelf = nullptr;
@@ -473,8 +473,14 @@ namespace StageLoader
 			return metadata.Find(klass, name, stat, ret, args);
 		};
 		findAll = find(object, "FindObjectsOfType", true, {0x1d, array}, {{0x12, type}, {0x02}});
+        uint32_t alignment = 0;
+        void* inactive = unity("FindObjectsInactive");
+        void* sortMode = unity("FindObjectsSortMode");
+        if (inactive && sortMode && valueSize && valueSize(inactive,&alignment) == sizeof(int) &&
+            valueSize(sortMode,&alignment) == sizeof(int))
+            findAllUnsorted = find(object,"FindObjectsByType",true,{0x1d,array},
+                {{0x12,type},{0x11,inactive},{0x11,sortMode}});
 		goScene = find(goClass, "get_scene", false, {0x11, scene}, {});
-		uint32_t alignment = 0;
 		if (!scene || !valueSize || valueSize(scene, &alignment) != sizeof(int)) goScene = nullptr;
 		sceneName = find(scene, "GetNameInternal", true, {0x0e}, {{0x08}});
 		sceneLoaded = find(scene, "GetIsLoadedInternal", true, {0x02}, {{0x08}});

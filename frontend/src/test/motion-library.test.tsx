@@ -136,6 +136,17 @@ describe('LibraryPage', () => {
     expect(within(dialog).getAllByRole('button', { name: '浏览…' })[0]).toBeDisabled()
   })
 
+  it('selects an appended motion and uses its full filename stem as the default title', async () => {
+    await motionStore.openImportNew([])
+    await motionStore.importAppendFiles(['C:/Sample/BackupDance_motion.vmd'])
+    expect(motionStore.importFormPicks().motion).toBe('C:/Sample/BackupDance_motion.vmd')
+    expect(motionStore.getState().importForm.title).toBe('BackupDance_motion')
+    motionStore.setImportTitle('自定义标题')
+    await motionStore.importAppendFiles(['C:/Sample/Another_motion.vmd'])
+    expect(motionStore.importFormPicks().motion).toBe('C:/Sample/BackupDance_motion.vmd')
+    expect(motionStore.getState().importForm.title).toBe('自定义标题')
+  })
+
   it('imports a performance through full mock dialog & progress pipeline', async () => {
     const user = userEvent.setup()
     render(<LibraryPage />)
@@ -143,7 +154,11 @@ describe('LibraryPage', () => {
     const dialog = await screen.findByTestId('import-dialog')
     await user.type(within(dialog).getByLabelText('曲目标题'), 'StageLive')
     await user.type(within(dialog).getByLabelText('副标题 / 作者'), '作者A, 作者B')
-    await user.click(within(dialog).getAllByRole('button', { name: '浏览…' })[0])
+    await user.click(within(dialog).getByRole('button', { name: '导入文件…' }))
+    await waitFor(() => expect(motionStore.importFormPicks().audio).toContain('NewDance_song.wav'))
+    expect(motionStore.getState().importForm.slots.camera.candidates).toEqual(expect.arrayContaining([
+      expect.stringContaining('NewDance_camera.vmd'), expect.stringContaining('NewDance_wide.gkcamera'),
+    ]))
     await waitFor(() => expect(within(dialog).getByRole('button', { name: '导入' })).toBeEnabled())
     await user.click(within(dialog).getByRole('button', { name: '导入' }))
     await waitFor(() => expect(screen.getByTestId('library-count')).toHaveTextContent('显示 6 / 6 个曲目'))

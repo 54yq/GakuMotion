@@ -102,6 +102,20 @@ namespace SceneOwnerRuntime
 		return result;
 	}
 
+    inline void* ActivePresenters(void* type, void*& exception)
+    {
+        if (StageLoader::findAllUnsorted) {
+            int excludeInactive = 0, noSort = 0;
+            void* args[]{type,&excludeInactive,&noSort};
+            void* result = g_faceRuntime.invoke(StageLoader::findAllUnsorted,nullptr,args,&exception);
+            if (result && !exception) return result;
+            exception = nullptr;
+        }
+        bool includeInactive = false;
+        void* args[]{type,&includeInactive};
+        return g_faceRuntime.invoke(StageLoader::findAll,nullptr,args,&exception);
+    }
+
 	inline Observation Scan(const std::string& activeScene)
 	{
 		Observation result;
@@ -131,10 +145,8 @@ namespace SceneOwnerRuntime
 		}
 		void* type = typeHandle ? handleTarget(typeHandle) : nullptr;
 		if (!type) { result.reason = "presenter-type-unconfirmed"; return result; }
-		bool includeInactive = false;
-		void* args[]{type, &includeInactive};
 		void* exception = nullptr;
-		void* array = g_faceRuntime.invoke(StageLoader::findAll, nullptr, args, &exception);
+        void* array = ActivePresenters(type,exception);
 		if (!array || exception) { result.reason = "active-presenter-query-unconfirmed"; return result; }
 		struct ArrayRoot
 		{
@@ -158,9 +170,8 @@ namespace SceneOwnerRuntime
 				}
 				void* liveType = liveTypeHandle ? handleTarget(liveTypeHandle) : nullptr;
 				if (!liveType) { result.reason = "live-presenter-type-unconfirmed"; return result; }
-				void* liveArgs[]{liveType, &includeInactive};
 				exception = nullptr;
-				void* liveArray = g_faceRuntime.invoke(StageLoader::findAll, nullptr, liveArgs, &exception);
+                void* liveArray = ActivePresenters(liveType,exception);
 				if (!liveArray || exception) { result.reason = "live-presenter-query-unconfirmed"; return result; }
 				ArrayRoot liveRoot{StageLoader::newHandle(liveArray, false)};
 				if (!liveRoot.handle) { result.reason = "live-presenter-array-unrooted"; return result; }
@@ -195,6 +206,7 @@ namespace SceneOwnerRuntime
 		const bool stable = GakuMotion::capture::IsPageStable();
 		if (!force && frame >= 0 && frame == cachedFrame && stable == cachedPageStable &&
 			activeScene == cachedActiveScene) return cached;
+		const LivePhaseTimer timer{g_livePerf.presenterScan};
 		cached = Scan(activeScene); // Values only: no managed root or array survives the call.
 		GakuMotion::stage_load::receipt.Observe(cached.owner);
 		cached.context = GakuMotion::stage_load::receipt.Context(activeScene, cached.sceneName, cached.owner);

@@ -92,6 +92,11 @@ int main()
 		!core.ShouldDisableLiveDof(), "Manual override can restore depth of field in VMD mode");
 	check(ok(request("fork.command", R"({"action":"live.depthOfFieldAuto","session":12,"owner":19})")) &&
 		core.ShouldDisableLiveDof() && core.liveDepthOfFieldOverride < 0, "Automatic VMD depth of field behavior can be restored");
+	check(ok(request("fork.command", R"({"action":"live.actorLightingColor","session":12,"owner":19,"channel":"key","value":{"x":1,"y":0.5,"z":0.25}})")) &&
+		core.actorLightingStyle.colors[0].y == .5f && core.actorLightingStyle.colors[1].y == 1.f,
+		"Only the chosen lighting channel receives the custom color");
+	check(ok(request("fork.command", R"({"action":"live.actorLightingWeight","session":12,"owner":19,"value":0.4})")) &&
+		core.actorLightingStyle.weight == .4f, "Fixed lighting can be blended with native lighting");
 	const auto defaults = core.actorLightingStrengths;
 	check(defaults.key == .40f && defaults.fill == .035f && defaults.rim == .25f,
 		"The new lighting defaults match the selected strengths");
@@ -103,8 +108,19 @@ int main()
 	check(ok(request("fork.command", R"({"action":"live.actorLightingStrength","session":12,"owner":19,"channel":"rim","value":0})")) &&
 		core.actorLightingStrengths.rim == 0 && core.actorLightingStrengths.key == defaults.key &&
 		core.actorLightingStrengths.fill == defaults.fill, "Rim light can be turned off independently");
-	check(!ok(request("fork.command", R"({"action":"live.actorLightingStrength","session":12,"owner":19,"channel":"fill","value":0.9})")) &&
-		core.actorLightingStrengths.fill == defaults.fill, "Out-of-range fill is rejected");
+	for (const auto* channel : {"key", "fill", "rim"}) {
+		const auto prefix = std::string(R"({"action":"live.actorLightingStrength","session":12,"owner":19,"channel":")") +
+			channel + R"(","value":)";
+		check(ok(request("fork.command", prefix + "10}")), "HDR intensity is accepted above the old limits");
+		check(!ok(request("fork.command", prefix + "10.01}")), "The 1000 percent limit is enforced");
+	}
+	check(core.actorLightingStrengths == GakuMotion::Core::ActorLightingStrengths{10.f, 10.f, 10.f},
+		"HDR intensities are stored for all three channels");
+	check(ok(request("fork.command", R"({"action":"live.actorLightingDirection","session":12,"owner":19,"channel":"rim","axis":"x","value":-58})")) &&
+		core.actorLightingStyle.rimAngle.x == -58 && core.actorLightingStyle.rimAngle.y == 15,
+		"Rim direction edits only the selected axis");
+	check(!ok(request("fork.command", R"({"action":"live.actorLightingDirection","session":12,"owner":19,"channel":"fill","axis":"x","value":42})")),
+		"The additive fill channel has no direction");
 	check(ok(request("fork.command", R"({"action":"live.actorLightingReset","session":12,"owner":19})")) &&
 		core.actorLightingStrengths == defaults && !core.actorLightingSampleActor, "Reset restores strengths and cancels a pending capture");
 	check(ok(request("fork.command", R"({"action":"live.fixedActorLighting","session":12,"owner":19,"value":false})")) &&
