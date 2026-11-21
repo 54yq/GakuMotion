@@ -120,6 +120,20 @@ int main()
 	CostumePhysicsCapture capture;
 	const auto tick = CostumePhysicsCapture::Clock::now().time_since_epoch().count();
 	const auto path = std::filesystem::current_path() / ("synthetic_costume_" + std::to_string(tick) + ".jsonl");
+    // Exercise separate batches and confirm close persists the last one.
+    {
+        CaptureFileWriter writer;
+        const auto writerPath = path.parent_path() / (path.stem().string() + "_batches.jsonl");
+        assert(writer.Open(writerPath));
+        for (unsigned i=0;i<24;++i)
+            assert(writer.Submit(std::string(8192,static_cast<char>('A'+i))));
+        assert(writer.Close());
+        std::ifstream data(writerPath,std::ios::binary);
+        const std::string saved((std::istreambuf_iterator<char>(data)), {});
+        assert(saved.size() == 24u*8192u);
+        for (unsigned i=0;i<24;++i)
+            assert(saved.compare(i*8192u,8192u,std::string(8192,static_cast<char>('A'+i))) == 0);
+    }
 	assert(capture.Open(path, "synthetic \"costume\"", 42));
 	capture.Record(2, sampled.binding.actor, 2, 103.126f, .02f, 1, 0, false, sampled.solver, second);
 

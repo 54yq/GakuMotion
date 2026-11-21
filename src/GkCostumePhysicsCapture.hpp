@@ -3,12 +3,13 @@
 #include "GakuBurstBridge.h"
 #include "GkJsonLite.hpp"
 #include <filesystem>
-#include <fstream>
+#include "GkCaptureFileWriter.hpp"
+#include <sstream>
 #include <locale>
 
 namespace GakuMotion
 {
-	// Main-thread, bounded recorder for solver and actor pose diagnostics.
+	// Bounded diagnostic recorder. The Unity thread formats records; a worker writes batches.
 	class CostumePhysicsCapture
 	{
 	public:
@@ -20,11 +21,10 @@ namespace GakuMotion
 		{
 			std::error_code error;
 			std::filesystem::create_directories(path.parent_path(), error);
-			if (error || std::filesystem::exists(path, error) || error) return false;
+			if (Opened() || error || std::filesystem::exists(path, error) || error || !writer_.Open(path)) return false;
+			out_.str({});
 			out_.clear();
 			out_.imbue(std::locale::classic());
-			out_.open(path, std::ios::binary);
-			if (!out_) return false;
 			state_ = {};
             poseSampler_.Clear();
             swingStatus_ = {};
@@ -39,8 +39,8 @@ namespace GakuMotion
 			return true;
 		}
 
-		bool Active() const { return out_.is_open() && out_.good() && frames_ < kFrameLimit; }
-		bool Opened() const { return out_.is_open(); }
+		bool Active() const { return Opened() && writer_.Good() && out_.good() && frames_ < kFrameLimit; }
+		bool Opened() const { return writer_.Opened(); }
 		bool Expired(Clock::time_point now) const { return now - started_ >= duration_; }
 		uint64_t Session() const { return session_; }
 		unsigned Frames() const { return frames_; }
@@ -48,9 +48,10 @@ namespace GakuMotion
 		bool Close(const char* reason)
 		{
 			out_ << "{\"event\":\"end\",\"reason\":\"" << reason << "\",\"frames\":" << frames_ << "}\n";
-			out_.close();
+			const bool submitted = Flush();
+			const bool saved = writer_.Close();
             poseSampler_.Clear();
-			return out_.good();
+			return submitted && saved && out_.good();
 		}
 
 		void Record(unsigned slot, const void* actor, int frame, float time, float dt, int transport, int seeks,
@@ -112,7 +113,7 @@ namespace GakuMotion
 			++frames_;
 			if (now >= nextFlush_)
 			{
-				out_.flush();
+				Flush();
 				nextFlush_ = now + std::chrono::seconds(1);
 			}
 		}
@@ -272,7 +273,7 @@ namespace GakuMotion
             ++frames_;
             const auto now = Clock::now();
             if (now >= nextFlush_) {
-                out_.flush();
+                Flush();
                 nextFlush_ = now + std::chrono::seconds(1);
             }
         }
@@ -286,7 +287,15 @@ namespace GakuMotion
 			bool pendingRest{}, scrubbing{};
 		};
 		std::array<Role, 16> state_{};
-		std::ofstream out_;
+		CaptureFileWriter writer_;
+		std::ostringstream out_;
+
+		bool Flush()
+		{
+			auto batch = std::move(out_).str();
+			out_.str({});
+			return writer_.Submit(std::move(batch));
+		}
 		Clock::time_point started_{}, nextFlush_{};
         std::chrono::seconds duration_{};
 		uint64_t session_{};

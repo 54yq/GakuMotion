@@ -52,6 +52,7 @@ namespace NativeSwingRenderPreview
     inline void Restore(void* camera, const char* phase)
     {
         if (!activeCamera || camera != activeCamera || !CameraBridge::OnUnityThread()) return;
+        const LivePhaseTimer timer{g_livePerf.renderRestore};
         auto& core = GakuMotion::Core::Instance();
         const bool recording = g_costumeCapture.Active() && CostumeCaptureMatches(core);
         unsigned written = 0, restoredCount = 0;
@@ -145,6 +146,7 @@ namespace NativeSwingRenderPreview
             core.sceneActorRegistry.Epoch() != epoch || core.player.controller.targetActor != actor ||
             core.player.state != GakuMotion::PlaybackState::Playing) return;
         if (!cameraPair.Begin(camera,frame)) return;
+        const LivePhaseTimer timer{g_livePerf.renderApply};
         const bool recording = g_costumeCapture.Active() && CostumeCaptureMatches(core);
         for (auto& joint : joints) {
             if (!joint.ready || !CameraBridge::IsAlive(joint.transform)) continue;
@@ -205,6 +207,7 @@ namespace NativeSwingRenderPreview
         }
         read = controller.fnGetLocalRotation;
         write = controller.fnSetLocalRotation;
+        const LivePhaseTimer timer{g_livePerf.smooth};
         size_t index = 0;
         boneLookup.VisitBoundSecondary(binding->second,controller,[&](void* transform,const std::string& name) {
             if (index == joints.size()) joints.emplace_back();
