@@ -1,3 +1,4 @@
+#include <limits>
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -178,9 +179,9 @@ class Bridge {
     }
     struct BoneStateLayout {
         size_t stride{};
-        int driven{}, parent{}, child{}, speed{}, collision{}, normal{}, point{}, hits{};
-        int limit{}, useLimit{}, positive{}, negative{}, wind{}, globalWind{};
-        bool limitIsInt{};
+        int driven{}, parent{}, child{}, speed{}, normal{}, point{}, hits{};
+        int useLimit{}, positive{}, negative{}, wind{}, globalWind{};
+        bool limitIsInt{}, hitsIsInt{};
         const char* failure{};
         static BoneStateLayout Rejected(const char* reason) {
             BoneStateLayout layout{};
@@ -198,8 +199,6 @@ class Bridge {
         const auto collision = find("CollisionInfo");
         const auto limit = find("ActorSwingJobLimitInfo");
         if (!dynamic) return BoneStateLayout::Rejected("dynamic_bone_type_missing");
-        if (!collision) return BoneStateLayout::Rejected("collision_info_type_missing");
-        if (!limit) return BoneStateLayout::Rejected("limit_info_type_missing");
         auto typeOf = [&](void* klass,const char* name) -> void* {
             const auto field = meta_.Field(klass,name,0x11);
             return field ? meta_.classFromType(meta_.fieldType(field)) : nullptr;
@@ -210,8 +209,8 @@ class Bridge {
         if (!handle || meta_.valueSize(handle,&alignment) != sizeof(Handle) ||
             !meta_.Layout(handle,profile::HandleFields) || !meta_.Offset(driven,"m_Handle",0,0x11))
             return BoneStateLayout::Rejected("driven_transform_handle_layout");
-        if (typeOf(dynamic,"collision") != collision) return BoneStateLayout::Rejected("dynamic_bone_collision_type");
-        if (typeOf(dynamic,"limit") != limit) return BoneStateLayout::Rejected("dynamic_bone_limit_type");
+        const bool collisionMatches = collision && typeOf(dynamic,"collision") == collision;
+        const bool limitMatches = limit && typeOf(dynamic,"limit") == limit;
         auto offset = [&](void* cls,const char* name,int type,size_t bytes) {
             const auto field = meta_.Field(cls,name,type);
             if (!field) return -1;
@@ -221,28 +220,51 @@ class Bridge {
         };
         const int bodySize = meta_.valueSize(dynamic,&alignment);
         if (bodySize != 956) return BoneStateLayout::Rejected("dynamic_bone_stride");
-        const bool integerLimit = meta_.Field(limit,"useLimit",0x08) != nullptr;
-        BoneStateLayout l{
+        const auto embeddedOffset = [&](void* cls, const char* name, int type, size_t bytes,
+                                        int containerOffset) {
+            const int member = containerOffset < 0 ? -1 : offset(cls,name,type,bytes);
+            return member < 0 ? -1 : containerOffset + member;
+        };
+        const int collisionBase = collisionMatches ?
+            offset(dynamic,"collision",0x11,meta_.valueSize(collision,&alignment)) : -1;
+        const int limitBase = limitMatches ?
+            offset(dynamic,"limit",0x11,meta_.valueSize(limit,&alignment)) : -1;
+        const bool integerHits = collisionMatches && meta_.Field(collision,"hitCheckCount",0x08);
+        const bool integerLimit = limitMatches && meta_.Field(limit,"useLimit",0x08);
+        BoneStateLayout layout{
             static_cast<size_t>(bodySize),offset(dynamic,"driven",0x11,sizeof(Handle)),
             offset(dynamic,"parentIndex",0x08,4),offset(dynamic,"childIndex",0x08,4),
-            offset(dynamic,"childSpeed",0x11,12),offset(dynamic,"collision",0x11,meta_.valueSize(collision,&alignment)),
-            offset(collision,"normal",0x11,12),offset(collision,"position",0x11,12),offset(collision,"hitCheckCount",0x08,4),
-            offset(dynamic,"limit",0x11,meta_.valueSize(limit,&alignment)),
-            offset(limit,"useLimit",integerLimit ? 0x08 : 0x02,integerLimit ? 4 : 1),offset(limit,"positive",0x11,12),offset(limit,"negative",0x11,12),
-            offset(dynamic,"wind",0x0c,4),offset(dynamic,"useWindGlobalForce",0x02,1),integerLimit};
-        const std::pair<int,const char*> fields[]{
-            {l.driven,"driven"},{l.parent,"parentIndex"},{l.child,"childIndex"},{l.speed,"childSpeed"},
-            {l.collision,"collision"},{l.normal,"collision.normal"},{l.point,"collision.position"},{l.hits,"collision.hitCheckCount"},
-            {l.limit,"limit"},{l.useLimit,"limit.useLimit"},{l.positive,"limit.positive"},{l.negative,"limit.negative"},
-            {l.wind,"wind"},{l.globalWind,"useWindGlobalForce"}};
-        for (const auto& [value,name]:fields) if (value<0) return BoneStateLayout::Rejected(name);
-        return l;
+            offset(dynamic,"childSpeed",0x11,12),
+            embeddedOffset(collision,"normal",0x11,12,collisionBase),
+            embeddedOffset(collision,"position",0x11,12,collisionBase),
+            embeddedOffset(collision,"hitCheckCount",integerHits ? 0x08 : 0x05,integerHits ? 4 : 1,collisionBase),
+            embeddedOffset(limit,"useLimit",integerLimit ? 0x08 : 0x05,integerLimit ? 4 : 1,limitBase),
+            embeddedOffset(limit,"positive",0x11,12,limitBase),
+            embeddedOffset(limit,"negative",0x11,12,limitBase),
+            offset(dynamic,"wind",0x0c,4),offset(dynamic,"useWindGlobalForce",0x02,1),
+            integerLimit,integerHits};
+        if (layout.useLimit < 0 && !integerLimit)
+            layout.useLimit=embeddedOffset(limit,"useLimit",0x02,1,limitBase);
+        if (layout.driven < 0) return BoneStateLayout::Rejected("driven");
+        return layout;
     }
 
     template<class T> static T ReadStateField(const unsigned char* row,int offset) {
         T value{};
         std::memcpy(&value,row+offset,sizeof(value));
         return value;
+    }
+
+    template<class T> static T ReadOptionalStateField(const unsigned char* row,int offset,T invalidLayout,T readFault) {
+        if (offset < 0) return invalidLayout;
+        __try { return ReadStateField<T>(row,offset); }
+        __except(EXCEPTION_EXECUTE_HANDLER) { return readFault; }
+    }
+
+    static int32_t ReadStateInteger(const unsigned char* row,int offset,bool wide) {
+        if (offset < 0) return INT32_MIN;
+        __try { return wide ? ReadStateField<int32_t>(row,offset) : ReadStateField<uint8_t>(row,offset); }
+        __except(EXCEPTION_EXECUTE_HANDLER) { return INT32_MIN+1; }
     }
 
     // Match the transform handle in the same stream before following child
@@ -280,22 +302,24 @@ class Bridge {
                 const auto* row = base + index*l.stride;
                 auto& out = rows[count++];
                 out.index = index;
-                out.parent_index = ReadStateField<int32_t>(row,l.parent);
-                out.child_index = ReadStateField<int32_t>(row,l.child);
-                out.child_speed = ReadStateField<GbbVector3>(row,l.speed);
-                out.hit_checks = ReadStateField<int32_t>(row,l.collision+l.hits);
-                out.contact_point = ReadStateField<GbbVector3>(row,l.collision+l.point);
-                out.contact_normal = ReadStateField<GbbVector3>(row,l.collision+l.normal);
-                out.use_limit = l.limitIsInt ? ReadStateField<int32_t>(row,l.limit+l.useLimit) :
-                    ReadStateField<uint8_t>(row,l.limit+l.useLimit);
-                out.limit_positive = ReadStateField<GbbVector3>(row,l.limit+l.positive);
-                out.limit_negative = ReadStateField<GbbVector3>(row,l.limit+l.negative);
-                out.wind = ReadStateField<float>(row,l.wind);
-                out.use_global_wind = ReadStateField<uint8_t>(row,l.globalWind);
+                const float missing = std::numeric_limits<float>::infinity();
+                const GbbVector3 missingVector{missing,missing,missing};
+                const GbbVector3 faultVector{-missing,-missing,-missing};
+                out.parent_index = ReadStateInteger(row,l.parent,true);
+                out.child_index = ReadStateInteger(row,l.child,true);
+                out.child_speed = ReadOptionalStateField(row,l.speed,missingVector,faultVector);
+                out.hit_checks = ReadStateInteger(row,l.hits,l.hitsIsInt);
+                out.contact_point = ReadOptionalStateField(row,l.point,missingVector,faultVector);
+                out.contact_normal = ReadOptionalStateField(row,l.normal,missingVector,faultVector);
+                out.use_limit = ReadStateInteger(row,l.useLimit,l.limitIsInt);
+                out.limit_positive = ReadOptionalStateField(row,l.positive,missingVector,faultVector);
+                out.limit_negative = ReadOptionalStateField(row,l.negative,missingVector,faultVector);
+                out.wind = ReadOptionalStateField(row,l.wind,missing,-missing);
+                out.use_global_wind = ReadStateInteger(row,l.globalWind,false);
                 index = out.child_index;
                 for (unsigned j=0;j<count;++j) if (rows[j].index==index) return count;
                 if (index >= 0 && index < header.length &&
-                    ReadStateField<int32_t>(base+index*l.stride,l.parent)!=out.index) break;
+                    ReadStateInteger(base+index*l.stride,l.parent,true)!=out.index) break;
             }
             return count;
         } __except(EXCEPTION_EXECUTE_HANDLER) {
@@ -329,13 +353,12 @@ class Bridge {
             auto& sample=work.samples[i];
             const char* outputFailure{};
             sample.after_count=ReadBoneStates(this,work.layout,request.handle,swing,stream,sample.after,&outputFailure);
-            const bool rotation=ReadSwingOutput(this,request.handle,stream,&sample.local_rotation);
+            if (!ReadSwingOutput(this,request.handle,stream,&sample.local_rotation))
+                sample.local_rotation={};
             if (!sample.before_count)
                 std::snprintf(sample.reason,sizeof(sample.reason),"before:%s",work.inputFailures[i] ? work.inputFailures[i] : "empty");
             else if (!sample.after_count)
                 std::snprintf(sample.reason,sizeof(sample.reason),"after:%s",outputFailure ? outputFailure : "empty");
-            else if (!rotation)
-                std::snprintf(sample.reason,sizeof(sample.reason),"swing_output_rotation_unreadable");
             sample.size=sizeof(sample);
             sample.source_frame=request.frame;
             sample.delta_time=request.dt;

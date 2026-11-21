@@ -55,22 +55,27 @@ struct BridgeTestAccess {
         {
             // A serialized DynamicBone list must bind by handle, then follow
             // only a reciprocal child link. No stream transform is written.
-            const Bridge::BoneStateLayout layout{128,0,12,16,20,32,0,12,24,60,0,4,16,88,92};
-            alignas(16) unsigned char records[2][128]{}, swing[208]{};
+            // DynamicBone offsets from the game's boxed metadata, minus the
+            // 16-byte object header. The nested layout uses Byte for both flags.
+            const Bridge::BoneStateLayout layout{
+                956,296,132,136,284,100,112,124,836,840,852,364,832};
+            alignas(16) unsigned char records[2][956]{}, swing[208]{};
             auto field = [&](int row, int offset, const auto& value) {
                 std::memcpy(records[row]+offset,&value,sizeof(value));
             };
-            field(0,0,Handle{2,0,0}); field(1,0,Handle{2,1,1});
-            field(0,12,int32_t{-1}); field(0,16,int32_t{1});
-            field(1,12,int32_t{0}); field(1,16,int32_t{-1});
-            field(1,20,GbbVector3{1,2,3}); field(1,56,int32_t{2});
-            field(1,60,uint8_t{1}); field(1,88,0.5f); field(1,92,uint8_t{1});
+            field(0,layout.driven,Handle{2,0,0}); field(1,layout.driven,Handle{2,1,1});
+            field(0,layout.parent,int32_t{-1}); field(0,layout.child,int32_t{1});
+            field(1,layout.parent,int32_t{0}); field(1,layout.child,int32_t{-1});
+            field(1,layout.speed,GbbVector3{1,2,3});
+            field(1,layout.hits,uint8_t{255}); field(1,layout.hits+1,uint8_t{83});
+            field(1,layout.useLimit,uint8_t{1}); field(1,layout.wind,0.5f);
+            field(1,layout.globalWind,uint8_t{1});
             ListHeader header{reinterpret_cast<uintptr_t>(records),2,2,0,0};
             const auto pointer=reinterpret_cast<uintptr_t>(&header);
             std::memcpy(swing+Bridge::ListOffsets[0],&pointer,sizeof(pointer));
             GbbSwingBoneState sample[4]{};
             CHECK(Bridge::ReadBoneStates(&b,layout,Handle{2,0,-1},swing,&stream,sample)==2);
-            CHECK(sample[1].index==1 && sample[1].child_speed.z==3 && sample[1].hit_checks==2);
+            CHECK(sample[1].index==1 && sample[1].child_speed.z==3 && sample[1].hit_checks==255);
             CHECK(sample[1].use_limit==1 && sample[1].use_global_wind==1 && sample[1].wind==0.5f);
             Bridge::StateWork work{};
             work.layout=layout;
@@ -87,7 +92,11 @@ struct BridgeTestAccess {
                 CHECK(result.before_count==(slot==0 ? 2u : 1u) && result.after_count==result.before_count);
                 CHECK(result.before[0].index==static_cast<int>(slot) && result.after[0].index==static_cast<int>(slot));
             }
-            field(1,0,Handle{2,0,0});
+            auto partial=layout;
+            partial.hits=-1;
+            CHECK(Bridge::ReadBoneStates(&b,partial,Handle{2,1,-1},swing,&stream,sample)==1);
+            CHECK(sample[0].hit_checks==INT32_MIN && sample[0].child_speed.z==3 && sample[0].wind==0.5f);
+            field(1,layout.driven,Handle{2,0,0});
             CHECK(Bridge::ReadBoneStates(&b,layout,Handle{2,0,-1},swing,&stream,sample)==0);
             CHECK(stream.rotations==0 && stream.positions==0);
         }

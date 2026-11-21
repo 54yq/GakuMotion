@@ -87,6 +87,18 @@ int main()
 	const auto beforeSample = sampled.skirt.rotation;
 	capture.RecordActorPose("after_plugin_pose", sampled.binding, sampled.controller, 3, 103.126f, 2, 2, 2, .02f);
 	assert(sampled.skirt.rotation.x == beforeSample.x && sampled.skirt.rotation.w == beforeSample.w);
+    GbbSwingStateSample swing{};
+    swing.source_frame = 2;
+    swing.before_count = swing.after_count = 1;
+    swing.delta_time = .02f;
+    swing.local_rotation.w = 1.f;
+    swing.before[0].hit_checks = 255;
+    swing.before[0].child_speed = {1.f, 2.f, 3.f};
+    swing.after[0] = swing.before[0];
+    capture.RecordSwingState("LeftFrontHair1_S", sampled.binding, 3, 13.157f, swing);
+    swing.before[0].hit_checks = INT32_MIN;
+    swing.after[0].use_limit = INT32_MIN+1;
+    capture.RecordSwingState("RigntBackCloth1_S", sampled.binding, 3, 13.157f, swing);
 	assert(capture.Close("synthetic") && capture.Frames() == 3);
 	{
 		std::ifstream recorded(path);
@@ -95,6 +107,15 @@ int main()
 		assert(contents.find("\"source_frame\":2,\"native_dt_s\":0.02") != std::string::npos);
 		const auto actorPose = contents.substr(contents.find("\"event\":\"actor_pose\""));
 		assert(actorPose.find("Skirt1_S") != std::string::npos && actorPose.find("Hair1_S") != std::string::npos);
+        const auto hair = contents.find("\"event\":\"swing_state\",\"bone\":\"LeftFrontHair1_S\"");
+        const auto cloth = contents.find("\"event\":\"swing_state\",\"bone\":\"RigntBackCloth1_S\"");
+        assert(hair < cloth && cloth != std::string::npos);
+        assert(contents.substr(hair, cloth - hair).find("\"hit_checks\":255") != std::string::npos);
+        const auto clothState = contents.substr(cloth);
+        assert(clothState.find("\"hit_checks\":null") != std::string::npos);
+        assert(clothState.find("\"child_speed\":[1,2,3]") != std::string::npos);
+        assert(clothState.find("\"field_errors\":{\"hit_checks\":\"layout_unavailable\"}") != std::string::npos);
+        assert(clothState.find("\"field_errors\":{\"use_limit\":\"read_fault\"}") != std::string::npos);
 	}
 	assert(!capture.Open(path, "must not overwrite", 43));
 

@@ -138,23 +138,61 @@ namespace GakuMotion
             Number(sample.delta_time);
             out_ << ",\"output_local\":";
             const auto& q=sample.local_rotation;
-            Rotation(Quaternion(q.x,q.y,q.z,q.w));
-            const auto vector = [&](const GbbVector3& v) { Vector(Vector3(v.x,v.y,v.z)); };
+            if (q.x || q.y || q.z || q.w) Rotation(Quaternion(q.x,q.y,q.z,q.w));
+            else out_ << "null,\"output_local_error\":\"rotation_unreadable\"";
             const auto phase = [&](const GbbSwingBoneState* rows,uint32_t count) {
                 out_ << '[';
                 for (uint32_t i=0;i<(std::min)(count,4u);++i) {
                     if (i) out_ << ',';
                     const auto& row=rows[i];
-                    out_ << "{\"index\":" << row.index << ",\"parent_index\":" << row.parent_index
-                         << ",\"child_index\":" << row.child_index << ",\"hit_checks\":" << row.hit_checks
-                         << ",\"use_limit\":" << row.use_limit << ",\"use_global_wind\":" << row.use_global_wind
-                         << ",\"wind_coefficient\":";
-                    Number(row.wind);
-                    out_ << ",\"child_speed\":"; vector(row.child_speed);
-                    out_ << ",\"contact_point\":"; vector(row.contact_point);
-                    out_ << ",\"contact_normal\":"; vector(row.contact_normal);
-                    out_ << ",\"limit_positive\":"; vector(row.limit_positive);
-                    out_ << ",\"limit_negative\":"; vector(row.limit_negative);
+                    out_ << "{\"index\":" << row.index;
+                    const char* errorFields[11]{};
+                    const char* errorReasons[11]{};
+                    unsigned errors = 0;
+                    const auto unavailable = [&](const char* field, const char* reason) {
+                        out_ << "null";
+                        errorFields[errors]=field;
+                        errorReasons[errors++]=reason;
+                    };
+                    const auto intField = [&](const char* field, int32_t value) {
+                        out_ << ','; Name(field); out_ << ':';
+                        if (value == INT32_MIN) unavailable(field,"layout_unavailable");
+                        else if (value == INT32_MIN+1) unavailable(field,"read_fault");
+                        else out_ << value;
+                    };
+                    const auto floatError = [](float value) {
+                        if (std::isnan(value)) return "nonfinite_value";
+                        return value > 0 ? "layout_unavailable" : "read_fault";
+                    };
+                    const auto vectorField = [&](const char* field, const GbbVector3& value) {
+                        out_ << ','; Name(field); out_ << ':';
+                        if (std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z))
+                            Vector(Vector3(value.x,value.y,value.z));
+                        else if (value.x == value.y && value.y == value.z)
+                            unavailable(field,floatError(value.x));
+                        else unavailable(field,"nonfinite_value");
+                    };
+                    intField("parent_index",row.parent_index);
+                    intField("child_index",row.child_index);
+                    intField("hit_checks",row.hit_checks);
+                    intField("use_limit",row.use_limit);
+                    intField("use_global_wind",row.use_global_wind);
+                    out_ << ",\"wind_coefficient\":";
+                    if (std::isfinite(row.wind)) Number(row.wind);
+                    else unavailable("wind_coefficient",floatError(row.wind));
+                    vectorField("child_speed",row.child_speed);
+                    vectorField("contact_point",row.contact_point);
+                    vectorField("contact_normal",row.contact_normal);
+                    vectorField("limit_positive",row.limit_positive);
+                    vectorField("limit_negative",row.limit_negative);
+                    if (errors) {
+                        out_ << ",\"field_errors\":{";
+                        for (unsigned error=0;error<errors;++error) {
+                            if (error) out_ << ',';
+                            Name(errorFields[error]); out_ << ':'; Name(errorReasons[error]);
+                        }
+                        out_ << '}';
+                    }
                     out_ << '}';
                 }
                 out_ << ']';
