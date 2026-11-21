@@ -46,4 +46,36 @@ inline const QuartzVariant* VerifyQuartz(HMODULE module, uintptr_t swing) {
         return nullptr;
     } __except(EXCEPTION_EXECUTE_HANDLER) { return nullptr; }
 }
+// These exact readers consume 26 native 8-byte handles and a validity flag.
+inline constexpr unsigned SwingPropertyTableValid = 0xd0;
+inline constexpr unsigned SwingPropertyForceOffset = 0x20;
+struct SwingPropertyReaderVariant {
+    uint32_t swing, reader, end, callReturn;
+    uint64_t fingerprint;
+    unsigned char callArguments[16];
+};
+inline constexpr SwingPropertyReaderVariant SwingPropertyReaders[]{
+    {0x280b0,0x100f0,0x11369,0x282ca,0x6fe5efa5a3a6e6deull,
+     {0x4d,0xb8,0x48,0x8d,0x95,0x8c,0,0,0,0x4c,0x8d,0x85,0xe0,1,0,0}},
+    {0xcc8e0,0xade00,0xaeddb,0xcca83,0x7c92f037b1f1b135ull,
+     {0x8d,0x95,0x8c,0,0,0,0x4c,0x8d,0x85,0xf8,1,0,0,0xc5,0xf8,0x77}}
+};
+inline const SwingPropertyReaderVariant* VerifySwingPropertyReader(HMODULE module,uintptr_t swing) {
+    __try {
+        const auto base = reinterpret_cast<uintptr_t>(module);
+        const auto size = ImageSize(module);
+        for (const auto& v:SwingPropertyReaders) {
+            if (swing != base+v.swing) continue;
+            const auto* bytes = reinterpret_cast<const unsigned char*>(base+v.reader);
+            if (v.end>size || v.callReturn>size || !Executable(bytes) ||
+                !ExactFunction(base,v.reader,v.end) || !RelativeCall(base,v.callReturn,v.reader) ||
+                std::memcmp(reinterpret_cast<void*>(base+v.callReturn-5-sizeof(v.callArguments)),
+                            v.callArguments,sizeof(v.callArguments))) return nullptr;
+            uint64_t hash = 14695981039346656037ull;
+            for (uint32_t i=0;i<v.end-v.reader;++i) hash = (hash^bytes[i])*1099511628211ull;
+            return hash==v.fingerprint ? &v : nullptr;
+        }
+        return nullptr;
+    } __except(EXCEPTION_EXECUTE_HANDLER) { return nullptr; }
+}
 } // namespace gbb::profile

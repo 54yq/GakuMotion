@@ -117,6 +117,22 @@ int main()
 	assert(a.x == b.x && a.y == b.y && a.z == b.z && a.w == b.w);
 	assert(sampled.solver.GetStats().clamps == control.solver.GetStats().clamps);
 
+    CostumePhysicsCapture swingTargets;
+    Rig iris, star;
+    iris.hair.name = "LeftFrontHair1_S";
+    iris.skirt.name = "RigntBackCloth1_S";
+    star.hair.name = "LeftAddHair1_S";
+    star.skirt.name = "LeftFrontSideSkirt1_S";
+    assert(swingTargets.FindSwingTarget(iris.binding,iris.controller,0).transform == &iris.hair);
+    assert(swingTargets.FindSwingTarget(iris.binding,iris.controller,1).transform == &iris.skirt);
+    const auto hairTarget = swingTargets.FindSwingTarget(star.binding,star.controller,0);
+    const auto skirtTarget = swingTargets.FindSwingTarget(star.binding,star.controller,1);
+    assert(hairTarget.transform == &star.hair && std::string_view(hairTarget.name) == star.hair.name);
+    assert(skirtTarget.transform == &star.skirt && std::string_view(skirtTarget.name) == star.skirt.name);
+    assert(CostumePhysicsCapture::DetailedSwingBone(hairTarget.name));
+    assert(CostumePhysicsCapture::DetailedSwingBone(skirtTarget.name));
+    assert(!swingTargets.FindSwingTarget(sampled.binding,sampled.controller,0).transform);
+
 	CostumePhysicsCapture capture;
 	const auto tick = CostumePhysicsCapture::Clock::now().time_since_epoch().count();
 	const auto path = std::filesystem::current_path() / ("synthetic_costume_" + std::to_string(tick) + ".jsonl");

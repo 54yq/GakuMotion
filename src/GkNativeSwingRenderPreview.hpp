@@ -216,7 +216,7 @@ namespace NativeSwingRenderPreview
                 joint = {};
                 joint.transform = transform;
                 joint.name = name;
-                joint.detailed = name == "LeftFrontHair1_S" || name == "RigntBackCloth1_S" || name == "RigntBackCloth2_S";
+                joint.detailed = GakuMotion::CostumePhysicsCapture::DetailedSwingBone(name);
             }
             const auto raw = Read(transform);
             const float norm = Quaternion::Dot(raw,raw);

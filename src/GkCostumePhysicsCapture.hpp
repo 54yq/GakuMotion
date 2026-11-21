@@ -119,9 +119,26 @@ namespace GakuMotion
 			}
 		}
 
-        void* SwingOutputTarget(const IdolBoneBinding& binding, const IdolController& controller, const char* name = "LeftFrontHair1_S")
+        struct SwingTarget {
+            const char* name;
+            void* transform;
+        };
+
+        SwingTarget FindSwingTarget(const IdolBoneBinding& binding, const IdolController& controller, unsigned slot)
         {
-            return poseSampler_.FindSampledSecondary(binding,controller,name);
+            for (const char* name : swingTargetNames_[slot]) {
+                if (auto* transform = poseSampler_.FindSampledSecondary(binding,controller,name))
+                    return {name,transform};
+            }
+            return {swingTargetNames_[slot][0],nullptr};
+        }
+
+        static bool DetailedSwingBone(std::string_view name)
+        {
+            for (const auto& candidates : swingTargetNames_)
+                for (const char* candidate : candidates)
+                    if (name == candidate) return true;
+            return name == "RigntBackCloth2_S";
         }
 
         bool SwingStatusChanged(unsigned slot, const char* status)
@@ -294,7 +311,8 @@ namespace GakuMotion
 
         void RecordActorPose(const char* stage, const IdolBoneBinding& binding, const IdolController& controller,
                              int frame, float time, int requested, int actual, int sourceFrame, float nativeDt,
-                             float frameDt = 0.f, const GbbSwingOutputSample* swingOutput = nullptr)
+                             float frameDt = 0.f, const GbbSwingOutputSample* swingOutput = nullptr,
+                             const char* swingBone = "LeftFrontHair1_S")
         {
             if (!Active()) return;
             out_ << "{\"event\":\"actor_pose\",\"stage\":";
@@ -310,7 +328,9 @@ namespace GakuMotion
             if (FallbackPhysics::SampleHeadWorld(binding, controller, head)) Rotation(head); else out_ << "null";
             out_ << ",\"swing_output\":";
             if (swingOutput) {
-                out_ << "{\"bone\":\"LeftFrontHair1_S\",\"source_frame\":" << swingOutput->source_frame << ",\"local\":";
+                out_ << "{\"bone\":";
+                Name(swingBone);
+                out_ << ",\"source_frame\":" << swingOutput->source_frame << ",\"local\":";
                 const auto& q = swingOutput->local_rotation;
                 Rotation(Quaternion(q.x,q.y,q.z,q.w));
                 out_ << '}';
@@ -341,6 +361,10 @@ namespace GakuMotion
         struct LastInputs { void* actor{}; GbbSwingInputSample sample{}; };
         std::array<LastInputs,2> lastInputs_{};
         FallbackPhysics poseSampler_;
+        static constexpr const char* swingTargetNames_[2][2]{
+            {"LeftFrontHair1_S","LeftAddHair1_S"},
+            {"RigntBackCloth1_S","LeftFrontSideSkirt1_S"}
+        };
         std::array<std::string,2> swingStatus_{};
 		struct Role
 		{

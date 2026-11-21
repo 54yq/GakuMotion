@@ -99,9 +99,7 @@ class Bridge {
 #endif
     using SwingFn = void(*)(void*, void*);
     using DeltaFn = float(*)(void*);
-    struct PropertyHandle { uint32_t version; int handle, value, type; };
-    using PropertyResolveFn = void(*)(PropertyHandle*,void*);
-    using PropertyReadFn = float(*)(PropertyHandle*,void*);
+    using PropertyReaderFn = void*(*)(const void*, void*, void*);
     using BindFn = void(*)(void*, void*, Handle*, const void*);
     using ResolveFn = void(*)(Handle*, void*);
     using QuatFn = void(*)(Handle*, void*, GbbQuaternion*);
@@ -113,8 +111,9 @@ class Bridge {
     BindFn bind_{}; GetRigFn getRig_{}; ResolveFn resolve_{};
     QuatFn readRotation_{}, writeRotation_{}, readWorldRotation_{};
     PosFn writePosition_{}, readWorldPosition_{};
-    PropertyResolveFn resolveProperty_{};
-    PropertyReadFn readProperty_{};
+    PropertyReaderFn originalPropertyReader_{};
+    uintptr_t propertyReaderReturn_{};
+    std::atomic<const char*> propertyReaderStatus_{"native_property_reader_not_initialized"};
     DeltaFn originalDelta_{}; SwingFn originalSwing_{};
     void* deltaTarget_{}; void* swingTarget_{};
     SwingFn originalQuartz_{};
@@ -195,9 +194,7 @@ class Bridge {
         }
     };
     struct InputLayout {
-        int manage{-1}, valid{-1}, parent{-1}, self{-1};
-        std::array<int,17> properties{};
-        bool managed{};
+        int parent{-1}, self{-1};
     };
     InputLayout inputLayout_{};
     std::array<GbbSwingInputSample,2> inputResults_{};
@@ -205,7 +202,6 @@ class Bridge {
     InputLayout PrepareInputLayout()
     {
         InputLayout input{};
-        input.properties.fill(-1);
         uint32_t align{};
         const auto actor = [&](const char* name) { return meta_.Class("ActorAnimation.Runtime.dll","ActorAnimation",name); };
         const auto offset = [&](void* owner,const char* name,int code,size_t size,void* type=nullptr) {
@@ -226,30 +222,6 @@ class Bridge {
             if (translation >= 0 && parent >= 0) input.parent = parent+translation;
             if (translation >= 0 && self >= 0) input.self = self+translation;
         }
-        const auto swing = actor("ActorAnimationSwingJobSkeleton");
-        const auto manage = actor("ActorAnimationManageProperty");
-        const auto handle = meta_.Class("UnityEngine.AnimationModule.dll","UnityEngine.Animations","PropertyStreamHandle");
-        const auto property = meta_.Class("Unity.Animation.Rigging.dll","UnityEngine.Animations.Rigging","FloatProperty");
-        if (!manage || !handle || !property || !resolveProperty_ || !readProperty_ ||
-            meta_.valueSize(handle,&align)!=sizeof(PropertyHandle) ||
-            !meta_.Offset(handle,"m_AnimatorBindingsVersion",0,0x09) ||
-            !meta_.Offset(handle,"handleIndex",4,0x08) || !meta_.Offset(handle,"valueArrayIndex",8,0x08) ||
-            !meta_.Offset(handle,"bindType",12,0x08)) return input;
-        const int value = offset(property,"value",0x11,sizeof(PropertyHandle),handle);
-        const int propertyBytes = meta_.valueSize(property,&align);
-        const int manageBytes = meta_.valueSize(manage,&align);
-        input.manage = offset(swing,"<manageProperty>k__BackingField",0x11,manageBytes,manage);
-        input.valid = offset(manage,"valid",0x02,1);
-        if (value<0 || input.manage<0 || input.valid<0) return input;
-        static constexpr const char* names[]{
-            "globalForceX","globalForceY","globalForceZ","windDirectionX","windDirectionY","windDirectionZ",
-            "windPower","windFluctuation","windWaveAmplitude","windWaveFrequency","windWavePhase",
-            "windRangeMax","windRangeMin","windRangeFrequency","windRangePhase","randomPower","randomFluctuation"};
-        for (size_t i=0;i<std::size(names);++i) {
-            const int member = offset(manage,names[i],0x11,propertyBytes,property);
-            if (member>=0) input.properties[i]=member+value;
-        }
-        input.managed = true;
         return input;
     }
 
@@ -334,32 +306,30 @@ class Bridge {
     static bool FiniteVector(const GbbVector3& v) {
         return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
     }
-    void ReadInputProperties(const InputLayout& layout,void* swing,void* stream,GbbSwingInputSample& out) {
-        const char* reason = "property_layout_or_icall_unavailable";
+    static float ReadSwingInputTime(void* swing) {
         __try {
-            out.swing_time = ReadStateField<float>(static_cast<unsigned char*>(swing),profile::SwingTime);
-            if (layout.managed) {
-                const auto* manage = static_cast<unsigned char*>(swing)+layout.manage;
-                reason = "manage_property_unbound";
-                if (ReadStateField<uint8_t>(manage,layout.valid)) {
-                    const uint32_t version = ReadStateField<uint32_t>(static_cast<unsigned char*>(stream),0);
-                    reason = "property_missing_or_unresolved";
-                    for (unsigned i=0;i<std::size(layout.properties);++i) {
-                        if (layout.properties[i]<0) continue;
-                        auto handle = ReadStateField<PropertyHandle>(manage,layout.properties[i]);
-                        if (handle.handle<0 || handle.type<=0 || !handle.version) continue;
-                        if (handle.version!=version || handle.value<0) resolveProperty_(&handle,stream);
-                        if (handle.version!=version || handle.value<0) continue;
-                        const float value = readProperty_(&handle,stream);
-                        if (!std::isfinite(value)) continue;
-                        out.properties[i]=value;
-                        out.property_mask |= 1u<<i;
-                    }
-                    if (out.property_mask == (1u<<std::size(layout.properties))-1) reason="";
-                }
+            return ReadStateField<float>(static_cast<const unsigned char*>(swing),profile::SwingTime);
+        } __except(EXCEPTION_EXECUTE_HANDLER) {
+            return std::numeric_limits<float>::quiet_NaN();
+        }
+    }
+    static void ReadNativePropertyOutput(const void* table,const void* output,GbbSwingInputSample& sample) {
+        const char* reason = "";
+        __try {
+            const auto* properties = static_cast<const unsigned char*>(table);
+            const auto* data = static_cast<const unsigned char*>(output);
+            const bool defaults = !ReadStateField<uint8_t>(properties,profile::SwingPropertyTableValid);
+            for (unsigned i=0;i<std::size(sample.properties);++i) {
+                const float value = ReadStateField<float>(data,profile::SwingPropertyForceOffset+i*sizeof(float));
+                if (!std::isfinite(value)) continue;
+                sample.properties[i]=value;
+                sample.property_mask |= 1u<<i;
             }
-        } __except(EXCEPTION_EXECUTE_HANDLER) { reason="property_read_fault"; }
-        std::snprintf(out.property_reason,sizeof(out.property_reason),"%s",reason);
+            if (sample.property_mask != (1u<<std::size(sample.properties))-1)
+                reason = "native_property_output_nonfinite";
+            else if (defaults) reason = "native_property_table_uses_defaults";
+        } __except(EXCEPTION_EXECUTE_HANDLER) { reason = "native_property_output_fault"; }
+        std::snprintf(sample.property_reason,sizeof(sample.property_reason),"%s",reason);
     }
     void ReadInputAnchors(const InputLayout& layout,const BoneStateLayout& boneLayout,void* swing,void* stream,
                          const GbbSwingBoneState* bones,unsigned count,GbbSwingInputSample& out) {
@@ -477,6 +447,62 @@ class Bridge {
         InputLayout inputLayout{};
         std::array<GbbSwingInputSample,2> inputs{};
     };
+
+    static inline thread_local StateWork* propertyCapture_{};
+
+    static void* PropertyReaderDetour(const void* table,void* output,void* stream) {
+        auto* self = self_;
+        const auto caller = reinterpret_cast<uintptr_t>(_ReturnAddress());
+        auto* result = self->originalPropertyReader_(table,output,stream);
+        if (caller==self->propertyReaderReturn_ && propertyCapture_) {
+            for (auto& sample:propertyCapture_->inputs)
+                if (sample.size) ReadNativePropertyOutput(table,output,sample);
+        }
+        return result;
+    }
+    void RunSwingWithPropertyCapture(void* swing,void* stream,StateWork* capture) {
+        auto* previous = propertyCapture_;
+        propertyCapture_ = capture;
+        __try { originalSwing_(swing,stream); }
+        __finally { propertyCapture_ = previous; }
+    }
+
+    void InstallPropertyReader() {
+        if (owner_) { owner_->InstallPropertyReader(); return; }
+        if (!swingTarget_ || stopped_.load(std::memory_order_acquire) ||
+            std::strcmp(propertyReaderStatus_.load(std::memory_order_relaxed),"native_property_reader_not_initialized")) return;
+        const auto fail = [this](const char* reason) { propertyReaderStatus_.store(reason,std::memory_order_release); };
+        const auto* variant = profile::VerifySwingPropertyReader(burst_,reinterpret_cast<uintptr_t>(swingTarget_));
+        if (!variant) { fail("native_property_reader_profile_unverified"); return; }
+        const auto data = meta_.Class("ActorAnimation.Runtime.dll","ActorAnimation","ActorAnimationManagePropertyData");
+        uint32_t align{};
+        if (!data || meta_.valueSize(data,&align)!=104 ||
+            !meta_.Offset(data,"globalForce",profile::SwingPropertyForceOffset,0x11) ||
+            !meta_.Offset(data,"windDirection",44,0x11)) {
+            fail("native_property_output_layout_unverified"); return;
+        }
+        static constexpr const char* floats[]{
+            "windPower","windFluctuation","windWaveAmplitude","windWaveFrequency","windWavePhase",
+            "windRangeMax","windRangeMin","windRangeFrequency","windRangePhase","randomPower","randomFluctuation"};
+        for (unsigned i=0;i<std::size(floats);++i) {
+            if (!meta_.Offset(data,floats[i],56+i*sizeof(float),0x0c)) {
+                fail("native_property_output_layout_unverified"); return;
+            }
+        }
+        const auto base = reinterpret_cast<uintptr_t>(burst_);
+        auto* reader = reinterpret_cast<void*>(base+variant->reader);
+        propertyReaderReturn_ = base+variant->callReturn;
+        if (MH_CreateHook(reader,reinterpret_cast<void*>(&PropertyReaderDetour),
+                          reinterpret_cast<void**>(&originalPropertyReader_)) != MH_OK) {
+            fail("native_property_reader_hook_create_failed"); return;
+        }
+        if (MH_EnableHook(reader) != MH_OK) {
+            MH_RemoveHook(reader);
+            originalPropertyReader_=nullptr;
+            fail("native_property_reader_hook_enable_failed"); return;
+        }
+        fail("native_property_reader_not_observed");
+    }
 
     void FinishBoneStates(StateWork& work,void* swing,void* stream) {
         for (size_t i=0;i<work.requests.size();++i) {
@@ -653,7 +679,7 @@ class Bridge {
         // Main-thread-only; worker callbacks are installed once by the owner.
         meta_=source.meta_; rigType_=source.rigType_; jobClass_=source.jobClass_;
         bindInfo_=source.bindInfo_; getRigInfo_=source.getRigInfo_; bind_=source.bind_; getRig_=source.getRig_;
-        resolve_=source.resolve_; resolveProperty_=source.resolveProperty_; readProperty_=source.readProperty_; readRotation_=source.readRotation_; writeRotation_=source.writeRotation_;
+        resolve_=source.resolve_; readRotation_=source.readRotation_; writeRotation_=source.writeRotation_;
         readWorldRotation_=source.readWorldRotation_; writePosition_=source.writePosition_; readWorldPosition_=source.readWorldPosition_;
         originalDelta_=source.originalDelta_; burst_=source.burst_; burstSize_=source.burstSize_;
         discoveryStarted_=source.discoveryStarted_;
@@ -782,10 +808,6 @@ class Bridge {
         writePosition_ = reinterpret_cast<PosFn>(meta_.icall("UnityEngine.Animations.TransformStreamHandle::SetLocalPositionInternal_Injected"));
         readWorldRotation_ = reinterpret_cast<QuatFn>(meta_.icall("UnityEngine.Animations.TransformStreamHandle::GetRotationInternal_Injected"));
         readWorldPosition_ = reinterpret_cast<PosFn>(meta_.icall("UnityEngine.Animations.TransformStreamHandle::GetPositionInternal_Injected"));
-        resolveProperty_ = reinterpret_cast<PropertyResolveFn>(meta_.icall("UnityEngine.Animations.PropertyStreamHandle::ResolveInternal"));
-        readProperty_ = reinterpret_cast<PropertyReadFn>(meta_.icall("UnityEngine.Animations.PropertyStreamHandle::GetFloatInternal"));
-        if (!profile::Executable(reinterpret_cast<void*>(resolveProperty_))) resolveProperty_ = nullptr;
-        if (!profile::Executable(reinterpret_cast<void*>(readProperty_))) readProperty_ = nullptr;
         deltaTarget_ = meta_.icall("UnityEngine.Animations.AnimationStream::GetDeltaTime");
         const void* required[] = {reinterpret_cast<void*>(bind_), reinterpret_cast<void*>(getRig_),
             reinterpret_cast<void*>(resolve_), reinterpret_cast<void*>(readRotation_),
@@ -1198,7 +1220,7 @@ class Bridge {
     static void SwingDetour(void* swing, void* stream) {
         auto* self = self_;
         if (!self->observing_.load(std::memory_order_acquire)) {
-            self->originalSwing_(swing, stream); return;
+            self->RunSwingWithPropertyCapture(swing,stream,nullptr); return;
         }
         const auto actorTiming = ObserveActorSwingGuarded(self, swing);
         void* job=reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(swing)-profile::Swing);
@@ -1207,6 +1229,8 @@ class Bridge {
         OutputProbe outputProbe{};
         StateWork stateWork{};
         const bool matched = BeforeSwingGuarded(target,swing, stream, reinterpret_cast<uintptr_t>(_ReturnAddress()),admittedGeneration,outputProbe,stateWork);
+        const char* propertyStatus = self->propertyReaderStatus_.load(std::memory_order_acquire);
+        bool captureProperties = false;
         for (size_t i=0;i<stateWork.requests.size();++i) {
             const auto& request=stateWork.requests[i];
             if (!request.transform) continue;
@@ -1215,14 +1239,15 @@ class Bridge {
             auto& input = stateWork.inputs[i];
             input.size=sizeof(input);
             input.source_frame=request.frame;
-            input.swing_time=std::numeric_limits<float>::quiet_NaN();
-            target->ReadInputProperties(stateWork.inputLayout,swing,stream,input);
+            input.swing_time=ReadSwingInputTime(swing);
+            std::snprintf(input.property_reason,sizeof(input.property_reason),"%s",propertyStatus);
+            captureProperties = true;
             target->ReadInputAnchors(stateWork.inputLayout,stateWork.layout,swing,stream,sample.before,sample.before_count,input);
         }
         const uint64_t start = matched ? Ticks() : 0;
         // Never manually execute or skip the engine solver. Its own behavior
         // (including an engine fault) is outside the bridge exception boundary.
-        self->originalSwing_(swing, stream);
+        self->RunSwingWithPropertyCapture(swing,stream,captureProperties ? &stateWork : nullptr);
         FinishActorTimingGuarded(self, actorTiming);
         if (matched) {
             target->solverTimer_.Add(Ticks() - start);
@@ -1274,6 +1299,7 @@ public:
             lock.unlock();
             const auto layout=PrepareBoneStateLayout();
             const auto inputs=PrepareInputLayout();
+            InstallPropertyReader();
             lock.lock();
             stateLayout_=layout;
             inputLayout_=inputs;

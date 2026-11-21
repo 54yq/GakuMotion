@@ -93,37 +93,31 @@ struct BridgeTestAccess {
                 CHECK(result.before[0].index==static_cast<int>(slot) && result.after[0].index==static_cast<int>(slot));
             }
             Bridge::InputLayout inputLayout{};
-            inputLayout.properties.fill(-1);
-            inputLayout.manage=340;
-            inputLayout.valid=272;
-            inputLayout.properties[0]=0;
-            inputLayout.properties[6]=16;
             inputLayout.parent=260;
             inputLayout.self=272;
-            inputLayout.managed=true;
-            const uint8_t enabled=1;
-            // Keep the valid flag inside the fixture (the real location is
-            // resolved from metadata, like each FloatProperty handle).
-            inputLayout.valid=250;
-            std::memcpy(swing+inputLayout.manage+inputLayout.valid,&enabled,sizeof(enabled));
-            const Bridge::PropertyHandle force{2,0,0,5}, wind{1,4,-1,5};
-            std::memcpy(swing+340,&force,sizeof(force));
-            std::memcpy(swing+356,&wind,sizeof(wind));
-            b.resolveProperty_=+[](Bridge::PropertyHandle* h,void* stream) {
-                h->version=static_cast<TestStream*>(stream)->version; h->value=h->handle;
-            };
-            b.readProperty_=+[](Bridge::PropertyHandle* h,void*) { return static_cast<float>(h->value)+.25f; };
+            unsigned char properties[212]{};
+            properties[profile::SwingPropertyTableValid]=1;
+            float output[26]{};
+            output[8]=.25f;
+            output[14]=4.25f;
+            output[24]=std::numeric_limits<float>::quiet_NaN();
             b.readWorldPosition_=+[](Handle* h,void*,GbbVector3* p) { *p={float(h->index),2.f,3.f}; };
             field(1,260,GbbVector3{4.f,5.f,6.f});
             field(1,272,GbbVector3{7.f,8.f,9.f});
             GbbSwingInputSample input{};
-            b.ReadInputProperties(inputLayout,swing,&stream,input);
+            b.ReadNativePropertyOutput(properties,output,input);
             b.ReadInputAnchors(inputLayout,layout,swing,&stream,sample,2,input);
-            CHECK(input.property_mask==((1u<<0)|(1u<<6)) && input.properties[0]==.25f && input.properties[6]==4.25f);
+            CHECK(input.property_mask==0xffffu && input.properties[0]==.25f && input.properties[6]==4.25f);
             CHECK(input.count==2 && input.indices[1]==1 && input.anchor_mask==0x333u);
             CHECK(input.stream_anchor[1].z==3.f && input.cached_parent[1].x==4.f && input.cached_self[1].y==8.f);
             CHECK(!input.anchor_reason[0] && input.property_reason[0]);
-            CHECK(std::memcmp(swing+356,&wind,sizeof(wind))==0);
+            CHECK(std::strcmp(input.property_reason,"native_property_output_nonfinite")==0);
+            properties[profile::SwingPropertyTableValid]=0;
+            output[24]=0.f;
+            GbbSwingInputSample defaults{};
+            b.ReadNativePropertyOutput(properties,output,defaults);
+            CHECK(defaults.property_mask==0x1ffffu && defaults.properties[16]==0.f);
+            CHECK(std::strcmp(defaults.property_reason,"native_property_table_uses_defaults")==0);
             auto partial=layout;
             partial.hits=-1;
             CHECK(Bridge::ReadBoneStates(&b,partial,Handle{2,1,-1},swing,&stream,sample)==1);

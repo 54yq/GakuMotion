@@ -1081,7 +1081,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.39-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.40-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -4000,13 +4000,16 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
         const auto& native = g_burstBridge.status;
         const bool currentNative = actual == 2 && native.actor == activeActor && native.injected;
         GbbSwingOutputSample swingOutput{};
-        const bool sampledSwing = currentNative && g_burstBridge.SampleSwingOutput(activeActor,
-            g_costumeCapture.SwingOutputTarget(binding->second,controller), unityFrame,swingOutput);
+        const char* swingBone = nullptr;
+        bool sampledSwing = false;
         if (currentNative) {
-            static constexpr const char* bones[]{"LeftFrontHair1_S","RigntBackCloth1_S"};
-            for (uint32_t slot=0; slot<std::size(bones); ++slot) {
+            for (uint32_t slot=0; slot<2; ++slot) {
                 GbbSwingStateSample state{};
-                const auto transform = g_costumeCapture.SwingOutputTarget(binding->second,controller,bones[slot]);
+                const auto [bone,transform] = g_costumeCapture.FindSwingTarget(binding->second,controller,slot);
+                if (slot==0 && transform) {
+                    swingBone = bone;
+                    sampledSwing = g_burstBridge.SampleSwingOutput(activeActor,transform,unityFrame,swingOutput);
+                }
                 const int result = g_burstBridge.SampleSwingState(activeActor,transform,slot,unityFrame,state);
                 const bool valid = result==GBB_OK && state.source_frame==unityFrame-1 &&
                     state.before_count && state.after_count && state.before_count<=4 && state.after_count<=4 &&
@@ -4015,18 +4018,18 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
                     result==GBB_OK ? "invalid_frame_or_chain" : "bridge_rejected_sample";
                 if (g_costumeCapture.SwingStatusChanged(slot,reason) && g_hostContext.logInfo)
                     g_hostContext.logInfo("[GakuMotion][SwingStateCapture] bone=%s result=%d reason=%s frame=%d source_frame=%d before=%u after=%u",
-                        bones[slot],result,reason,unityFrame,state.source_frame,state.before_count,state.after_count);
+                        bone,result,reason,unityFrame,state.source_frame,state.before_count,state.after_count);
                 if (valid) {
-                    g_costumeCapture.RecordSwingState(bones[slot],binding->second,unityFrame,player.currentTime,state);
+                    g_costumeCapture.RecordSwingState(bone,binding->second,unityFrame,player.currentTime,state);
                     GbbSwingInputSample input{};
                     const bool sampled = g_burstBridge.ReadSwingInputs(activeActor,transform,slot,unityFrame,input);
-                    g_costumeCapture.RecordSwingInputs(bones[slot],binding->second,unityFrame,player.currentTime,
+                    g_costumeCapture.RecordSwingInputs(bone,binding->second,unityFrame,player.currentTime,
                         slot,state,sampled ? &input : nullptr);
                 }
             }
         }
         g_costumeCapture.RecordActorPose(stage, binding->second, controller, unityFrame, player.currentTime,
-            core.config.secondaryPhysicsBackend, actual, currentNative ? native.source_frame : -1, native.delta_time, realDeltaTime, sampledSwing ? &swingOutput : nullptr);
+            core.config.secondaryPhysicsBackend, actual, currentNative ? native.source_frame : -1, native.delta_time, realDeltaTime, sampledSwing ? &swingOutput : nullptr, swingBone);
     };
     recordMainActorPose("before_plugin_pose", false);
 	EyeGazeProbe::Before(activeActor);
