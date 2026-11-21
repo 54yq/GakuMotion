@@ -120,15 +120,18 @@ namespace NativeAudio
 	}
 	inline void Sync()
 	{
-		const auto& player = GakuMotion::Core::Instance().player;
+		const auto& core = GakuMotion::Core::Instance();
+		const auto& player = core.player;
 		const bool active = g_motionSceneAllowed && player.clip.total_frames != 0 &&
 			player.state != GakuMotion::PlaybackState::Stopped;
 		// Ownership follows the performance, including preview, pause, scrub,
 		// muted songs and clips without song.wav. Stop/scene loss releases it.
-		const Status bgmStatus = g_bgmLease.Sync(BackendFor(bgm), active, 1);
+		const bool muteBgm = g_motionSceneAllowed && core.InjectionAllowed() &&
+			core.stageManager.settings.muteNativeBgm;
+		const Status bgmStatus = g_bgmLease.Sync(BackendFor(bgm), active || muteBgm, 1);
 		const Status voiceStatus = g_voiceLease.Sync(BackendFor(voice), active, 1);
-		const bool muteSe = g_motionSceneAllowed && GakuMotion::Core::Instance().InjectionAllowed() &&
-			GakuMotion::Core::Instance().stageManager.settings.muteNativeSoundEffects;
+		const bool muteSe = g_motionSceneAllowed && core.InjectionAllowed() &&
+			core.stageManager.settings.muteNativeSoundEffects;
 		const Status seStatus = g_seLease.Sync(BackendFor(se), muteSe, 1);
 		static Status previousSe = Status::Idle;
 		if (previousSe != seStatus) GM_DEBUG("[GakuMotion][NativeAudio] Se=%s switch=%d", StatusName(seStatus), muteSe);

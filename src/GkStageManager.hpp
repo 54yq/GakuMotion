@@ -60,6 +60,7 @@ namespace GakuMotion
 	// -----------------------------------------------------------------------------
 	struct StageSettings
 	{
+		bool muteNativeBgm{false};
 		bool muteNativeSoundEffects{false};
 		bool hideBackground{false};
 		bool greenScreenActive{false};
@@ -84,7 +85,8 @@ namespace GakuMotion
 
 		bool operator==(const StageSettings& rhs) const noexcept
 		{
-			return muteNativeSoundEffects == rhs.muteNativeSoundEffects &&
+			return muteNativeBgm == rhs.muteNativeBgm &&
+				muteNativeSoundEffects == rhs.muteNativeSoundEffects &&
 			       hideBackground == rhs.hideBackground &&
 			       greenScreenActive == rhs.greenScreenActive &&
 			       greenScreenColor[0] == rhs.greenScreenColor[0] &&

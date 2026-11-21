@@ -132,6 +132,7 @@ export interface StageSettings {
   stagePosXOffset: number
   stagePosZOffset: number
   lightingEffectsEnabled: boolean
+  muteNativeBgm: boolean
   customNodeControl: boolean
 }
 
@@ -781,6 +782,7 @@ export const DEFAULT_STAGE_SETTINGS: StageSettings = {
   stagePosXOffset: 0,
   stagePosZOffset: 0,
   lightingEffectsEnabled: true,
+  muteNativeBgm: false,
   customNodeControl: false,
 }
 

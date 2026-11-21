@@ -2069,6 +2069,7 @@ namespace GakuMotion::webpanel
 				floatField("stagePosXOffset", settings.stagePosXOffset) &&
 				floatField("stagePosZOffset", settings.stagePosZOffset) &&
 				boolField("lightingEffectsEnabled", settings.lightingEffectsEnabled) &&
+				boolField("muteNativeBgm", settings.muteNativeBgm) &&
 				boolField("customNodeControl", settings.customNodeControl);
 		}
 
@@ -2268,6 +2269,7 @@ namespace GakuMotion::webpanel
 				",\"stagePosXOffset\":" + JNum(settings.stagePosXOffset) +
 				",\"stagePosZOffset\":" + JNum(settings.stagePosZOffset) +
 				",\"lightingEffectsEnabled\":" + JBool(settings.lightingEffectsEnabled) +
+				",\"muteNativeBgm\":" + JBool(settings.muteNativeBgm) +
 				",\"customNodeControl\":" + JBool(settings.customNodeControl) + "}";
 		}
 

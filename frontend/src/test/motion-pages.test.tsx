@@ -49,6 +49,26 @@ describe('CameraPage', () => {
 })
 
 describe('StagePage', () => {
+  it('sends scene music changes through stage settings in both directions', async () => {
+    const user = userEvent.setup()
+    const request = vi.spyOn(bridge, 'request')
+    render(<StagePage />)
+    const checkbox = screen.getByRole('checkbox', { name: '屏蔽场景音乐' })
+    expect(checkbox).not.toBeChecked()
+
+    await user.click(checkbox)
+    expect(checkbox).toBeChecked()
+    expect(request).toHaveBeenCalledWith('stage.set', {
+      settings: expect.objectContaining({ muteNativeBgm: true }),
+    })
+
+    await user.click(checkbox)
+    expect(checkbox).not.toBeChecked()
+    expect(request).toHaveBeenLastCalledWith('stage.set', {
+      settings: expect.objectContaining({ muteNativeBgm: false }),
+    })
+  })
+
   it('toggles lighting and keeps the native camera shadow linkage', async () => {
     const user = userEvent.setup()
     render(<StagePage />)

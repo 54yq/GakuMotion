@@ -161,6 +161,14 @@ export function StagePage({ fork, forkCommand }: { fork?: ForkState | null; fork
               {sceneBgEnabled ? '原景模式' : '纯色幕布'}
             </Badge>
           </PropertyRow>
+          <PropertyRow label={<Label htmlFor="stage-mute-bgm">屏蔽场景音乐</Label>}>
+            <Checkbox
+              id="stage-mute-bgm"
+              checked={settings.muteNativeBgm ?? false}
+              disabled={disabled}
+              onCheckedChange={(checked) => motionStore.patchStage({ muteNativeBgm: checked === true })}
+            />
+          </PropertyRow>
           {(stage.statusNotice || settings.loadReplacementKey !== '') && (
             <div className="space-y-1.5 px-3.5 py-2.5 text-xs">
               {stage.statusNotice && (
