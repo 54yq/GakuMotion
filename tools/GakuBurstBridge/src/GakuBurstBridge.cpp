@@ -40,7 +40,7 @@ struct Pose { Handle handle; GbbQuaternion rotation{}; GbbVector3 position{}; in
 struct Snapshot {
     void* actor{}; void* animator{}; void* rig{};
     uintptr_t hair{}, arm{}; uint64_t generation{}, ticks{};
-    float time{}; int frame{-1}; bool inject{}, worldValid{}, beforeQuartz{}, sleeveDiagnostics{}; uint32_t count{};
+    float time{}; int frame{-1}; bool inject{}, worldValid{}, beforeQuartz{}, sleeveDiagnostics{}, noSceneForces{}; uint32_t count{};
     std::array<Pose, GBB_MAX_BONES> poses{};
     std::array<void*, GBB_MAX_BONES> transforms{};
     std::array<GbbWorldPose, 2> anchors{};
@@ -460,6 +460,8 @@ class Bridge {
         BoneStateLayout layout{};
         InputLayout inputLayout{};
         std::array<GbbSwingInputSample,2> inputs{};
+        Bridge* filterOwner{};
+        uint64_t filterGeneration{};
         const profile::SwingStepVariant* stepsProfile{};
         ListHeader stepsList{};
         std::array<GbbSwingStepSample,2> steps{};
@@ -554,13 +556,31 @@ class Bridge {
         } __except(EXCEPTION_EXECUTE_HANDLER) { work.stepsProfile=nullptr; }
     }
 
+    static bool ClearSceneForceFields(void* output) {
+        if (!output) return false;
+        __try {
+            // Leave the eight motion/solver weights and prewarm count intact.
+            std::memset(static_cast<unsigned char*>(output)+profile::SwingPropertyForceOffset,0,17*sizeof(float));
+            return true;
+        } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+    }
+
     static void* PropertyReaderDetour(const void* table,void* output,void* stream) {
         auto* self = self_;
         const auto caller = reinterpret_cast<uintptr_t>(_ReturnAddress());
         auto* result = self->originalPropertyReader_(table,output,stream);
         if (caller==self->propertyReaderReturn_ && propertyCapture_) {
-            for (auto& sample:propertyCapture_->inputs)
-                if (sample.size) ReadNativePropertyOutput(table,output,sample);
+            auto& work = *propertyCapture_;
+            const auto* owner = work.filterOwner;
+            const bool filtered = result==output && owner && owner->Observing() &&
+                owner->generation_.load(std::memory_order_acquire)==work.filterGeneration &&
+                ClearSceneForceFields(output);
+            for (auto& sample:work.inputs) {
+                if (!sample.size) continue;
+                ReadNativePropertyOutput(table,output,sample);
+                if (filtered && sample.property_mask==0x1ffffu)
+                    std::snprintf(sample.property_reason,sizeof(sample.property_reason),"%s","scene_forces_filtered");
+            }
         }
         return result;
     }
@@ -1104,6 +1124,7 @@ class Bridge {
         next.inject = (frame.flags & GBB_FRAME_INJECT) != 0;
         next.beforeQuartz = (frame.flags & GBB_FRAME_BEFORE_QUARTZ) != 0; next.ticks = Ticks();
         next.sleeveDiagnostics = (frame.flags & GBB_FRAME_SLEEVE_DIAGNOSTICS) != 0;
+        next.noSceneForces = next.inject && (frame.flags & GBB_FRAME_NO_SCENE_FORCES) != 0;
         return true;
     }
     bool NativePass(Snapshot& s, void* stream, Diagnostic& d) {
@@ -1284,6 +1305,10 @@ class Bridge {
                 generation_.load(std::memory_order_relaxed) == s.generation) {
                 if (ok) { d.sequence = matches_.fetch_add(1, std::memory_order_relaxed) + 1; diagnostic_ = d;
                     if (d.injected) {
+                        if (s.noSceneForces) {
+                            stateWork.filterOwner=this;
+                            stateWork.filterGeneration=s.generation;
+                        }
                         NoteSwingVisit(s,job,swing,stream,caller,d.dt);
                         if (requestedOutput_.generation == s.generation && requestedOutput_.frame == s.frame) {
                             outputProbe = requestedOutput_;
@@ -1341,6 +1366,7 @@ class Bridge {
         OutputProbe outputProbe{};
         StateWork stateWork{};
         const bool matched = BeforeSwingGuarded(target,swing, stream, reinterpret_cast<uintptr_t>(_ReturnAddress()),admittedGeneration,outputProbe,stateWork);
+        if (!matched) stateWork.filterOwner=nullptr;
         const char* propertyStatus = self->propertyReaderStatus_.load(std::memory_order_acquire);
         const char* stepStatus = self->stepStatus_.load(std::memory_order_acquire);
         bool captureProperties = false;
@@ -1366,7 +1392,8 @@ class Bridge {
         const uint64_t start = matched ? Ticks() : 0;
         // Never manually execute or skip the engine solver. Its own behavior
         // (including an engine fault) is outside the bridge exception boundary.
-        self->RunSwingWithPropertyCapture(swing,stream,captureProperties ? &stateWork : nullptr);
+        self->RunSwingWithPropertyCapture(swing,stream,
+            captureProperties || stateWork.filterOwner ? &stateWork : nullptr);
         FinishActorTimingGuarded(self, actorTiming);
         if (matched) {
             target->solverTimer_.Add(Ticks() - start);
@@ -1691,7 +1718,7 @@ public:
     }
     static bool ValidFrame(const GbbFrame& f) {
         if (f.size != sizeof(f) || !f.actor || !f.animator || !f.bone_count || f.bone_count > GBB_MAX_BONES ||
-            f.flags & ~(GBB_FRAME_INJECT | GBB_FRAME_WORLD_DIAGNOSTICS | GBB_FRAME_BEFORE_QUARTZ | GBB_FRAME_SLEEVE_DIAGNOSTICS) || !std::isfinite(f.clip_time)) return false;
+            f.flags & ~(GBB_FRAME_INJECT | GBB_FRAME_WORLD_DIAGNOSTICS | GBB_FRAME_BEFORE_QUARTZ | GBB_FRAME_SLEEVE_DIAGNOSTICS | GBB_FRAME_NO_SCENE_FORCES) || !std::isfinite(f.clip_time)) return false;
         bool head{}, hips{};
         for (uint32_t i = 0; i < f.bone_count; ++i) {
             const auto& b = f.bones[i];
@@ -1740,6 +1767,7 @@ public:
               current_.rig != next.rig || current_.hair != next.hair || current_.arm != next.arm ||
               current_.count != next.count || current_.transforms != next.transforms
               || current_.inject != next.inject || current_.beforeQuartz != next.beforeQuartz || current_.sleeveDiagnostics != next.sleeveDiagnostics ||
+              current_.noSceneForces != next.noSceneForces ||
               (next.beforeQuartz && experiment::TimelineBoundary(current_.frame,current_.time,next.frame,next.time))
               );
           if (changed) { generation_.fetch_add(1, std::memory_order_release); diagnostic_ = {}; }
@@ -1755,6 +1783,12 @@ public:
             return GBB_PENDING;
         }
         const bool inject = (frame->flags & GBB_FRAME_INJECT) != 0;
+        const char* forces = nullptr;
+        if (next.noSceneForces) {
+            InstallPropertyReader();
+            const auto* reader = owner_ ? owner_ : this;
+            forces = reader->propertyReaderStatus_.load(std::memory_order_acquire);
+        }
         if (next.beforeQuartz || next.sleeveDiagnostics) {
             if (!EnableQuartzExperiment()) return Reject(GBB_E_UNAVAILABLE,"BeforeQuartz experiment rejected: verified entry unavailable; OFF path remains available");
             if (next.sleeveDiagnostics && !SleeveProbe().Install(meta_,burst_,quartzVariant_))
@@ -1765,7 +1799,9 @@ public:
             if (awaiting != GBB_OK) return fault_.load(std::memory_order_acquire) ? GBB_E_FAULT : awaiting;
         }
         State(inject ? GBB_STATE_INJECTING : GBB_STATE_OBSERVING, GBB_OK,
-              next.beforeQuartz ? "EXPERIMENTAL BeforeQuartz + Swing same-source injection enabled" :
+              forces && std::strcmp(forces,"native_property_reader_not_observed")==0 ?
+              "Native stream injection enabled; scene force filter armed" :
+              forces ? forces : next.beforeQuartz ? "EXPERIMENTAL BeforeQuartz + Swing same-source injection enabled" :
               inject ? "Native stream injection enabled; BeforeQuartz experiment OFF" : "Native stream observation enabled");
         return GBB_OK;
     }
@@ -2128,6 +2164,8 @@ int GBB_CALL ContextPerf(GbbContext token,GbbPerf* out) {
     __except(EXCEPTION_EXECUTE_HANDLER) { return GBB_E_ARGUMENT; }
 }
 } // namespace gbb
+
+extern "C" GBB_EXPORT uint32_t GBB_CALL GakuBurstBridge_SupportsSceneForceFilter() { return 1; }
 
 extern "C" GBB_EXPORT int32_t GBB_CALL GakuBurstBridge_GetApi(uint32_t version, void* raw) {
     __try {

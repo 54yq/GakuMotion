@@ -109,7 +109,9 @@ namespace LiveWindOverride
         return true;
     }
     inline void Tick(GakuMotion::Core& core) {
-        const bool wanted=core.liveTakeoverActive && !core.liveTakeoverFault && core.liveViewingConfirmed &&
+        // Native takeover filters in the matched Swing job, leaving the shared manager for other actors.
+        const bool wanted=core.config.secondaryPhysicsBackend!=2 &&
+            core.liveTakeoverActive && !core.liveTakeoverFault && core.liveViewingConfirmed &&
             core.liveObservation.confirmed && core.liveObservation.paused && core.liveOwnerToken && core.liveOwnerScene &&
             core.injectionPolicy.Read().captureDepth==0 && GakuMotion::capture::LiveAutoPhotoIdle();
         if (!wanted) { if (lease.active) Restore(core.liveOwnerToken,core.liveOwnerScene); return; }
