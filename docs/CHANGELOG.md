@@ -2,6 +2,11 @@
 
 插件显示 `v<上游版本>+fork.<分支版本>`，Git 标签使用 `fork-v<分支版本>`。分支版本按自己的节奏递增。
 
+## 分支 v4.3.48-web
+
+- 外部舞台通过 Unity 异步打开本地 AssetBundle，并按 GameObject 类型读取预制体。
+- 摄影的场景音乐开关同时控制 CampusSoundManager 当前 BGM 播放源，关闭时恢复音量。
+
 ## 分支 v4.3.47-web
 
 - 外部舞台改由 Unity 主线程帧回调加载，并逐阶段记录载入结果。

@@ -1086,7 +1086,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.47-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.48-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -1648,6 +1648,7 @@ static void ResetPlacementDynamicBone(void* actor)
 #include "GkSceneOwnerRuntime.hpp"
 #include "GkFixedActorLighting.hpp"
 #include "GkExternalStage.hpp"
+#include "GkPhotographyBgm.hpp"
 #include "GkStageLoadOverride.hpp"
 #include "GkPageObservation.hpp"
 
@@ -4464,6 +4465,8 @@ void MotionShutdown(void*)
 	}
 	GakuMotion::capture::Shutdown();
 	StageLoadOverride::Shutdown();
+	PhotographyBgm::Release();
+	ExternalStage::Tick(false, 0);
 	SceneOwnerRuntime::Shutdown();
 	ReleasePendingFileDialog();
 	core.gui.browsePendingKind = -1;
@@ -4617,6 +4620,15 @@ void MotionTick(void*, float)
             ExternalStage::Tick(externalStageAdmitted, g_verifiedActiveSceneHandle);
             GakuMotion::externalStageStatus.store(ExternalStage::status.load());
             NativeAudio::Sync();
+            bool mutePhotographyBgm = false;
+            {
+                std::lock_guard<std::mutex> stageLock(core.stageManager.stageMutex);
+                mutePhotographyBgm = core.stageManager.settings.muteNativeBgm;
+            }
+            PhotographyBgm::Tick(mutePhotographyBgm && !core.captureSuspended &&
+                core.injectionPolicy.Read().captureDepth == 0 && g_activeSceneVerified &&
+                GakuMotion::stage_load::receipt.Context(SceneOwnerRuntime::cachedActiveScene,
+                    g_verifiedOwnerSceneName, g_sceneOwner) == GakuMotion::injection::Context::Photography);
         }
 		FixedActorLighting::Tick(core);
 		PollCostumeCapture(core);
