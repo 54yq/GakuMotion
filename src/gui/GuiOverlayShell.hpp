@@ -123,6 +123,7 @@ namespace GakuMotion
 			navItem("动作", GuiPage::Motion, GuiIcons::Icon::Motion);
 			navItem("镜头", GuiPage::Camera, GuiIcons::Icon::Camera);
 			navItem("舞台", GuiPage::Stage, GuiIcons::Icon::Stage);
+			navItem("外部舞台", GuiPage::ExternalStage, GuiIcons::Icon::Stage);
 			navItem("设置", GuiPage::Settings, GuiIcons::Icon::Settings);
 			if (overlay.developerMode) navItem("  [开发]", GuiPage::Developer, GuiIcons::Icon::Developer);
 		};
@@ -175,6 +176,9 @@ namespace GakuMotion
 				break;
 			case GuiPage::Stage:
 				DrawStagePage(overlay, ctx);
+				break;
+			case GuiPage::ExternalStage:
+				DrawExternalStageControl();
 				break;
 			case GuiPage::Settings:
 				DrawSettingsPage(overlay, ctx);

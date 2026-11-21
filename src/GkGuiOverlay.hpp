@@ -295,7 +295,18 @@ namespace GakuMotion
 	void DrawShell(GuiOverlay& overlay, const GuiContext& ctx);
 	void DrawLibraryPage(GuiOverlay& overlay, const GuiContext& ctx);
 	void DrawStagePage(GuiOverlay& overlay, const GuiContext& ctx);
-	void DrawStageLoadReplacementControl(const GuiContext& ctx);
+    inline std::atomic<bool> externalStageEnabled{false};
+    inline std::atomic<int> externalStageStatus{0};
+    inline void DrawExternalStageControl()
+    {
+        bool enabled = externalStageEnabled.load();
+        if (ImGui::Checkbox("启用外部舞台", &enabled)) externalStageEnabled.store(enabled);
+        ImGui::TextWrapped("Meni Shuki Rush｜摄影占位：中庭（日中）。切换摄影背景或重新进入摄影后生效。");
+        const int status = externalStageStatus.load();
+        if (status == 1) ImGui::TextUnformatted("舞台模型已实例化");
+        if (status == -1) ImGui::TextUnformatted("舞台载入失败，请查看 GakuLoader 日志");
+    }
+    void DrawStageLoadReplacementControl(const GuiContext& ctx);
 	void DrawPhysicsDiagnostics(const GuiContext& ctx);
 
 	class GuiOverlay
@@ -594,7 +605,8 @@ namespace GakuMotion
                     if (!livePageOpen) {
 					if (!ctx.stageSettings.loadReplacementKey.empty())
 						ImGui::TextWrapped("已保留实验舞台选择；可在下方开发者选项中修改或恢复原生背景。");
-					if (ImGui::CollapsingHeader("开发者选项"))
+                    if (ImGui::CollapsingHeader("外部舞台")) DrawExternalStageControl();
+                    if (ImGui::CollapsingHeader("开发者选项"))
 					{
 						ImGui::Checkbox("开发者模式", &developerMode);
 						if (developerMode) DrawStageLoadReplacementControl(ctx);

@@ -41,6 +41,8 @@
 				return json + "]";
 			};
 			return "{\"session\":" + JNum(core_.injectionSession) + ",\"owner\":" + JNum(core_.liveOwnerToken) +
+                ",\"externalStageEnabled\":" + JBool(externalStageEnabled.load()) +
+                ",\"externalStageStatus\":" + JNum(externalStageStatus.load()) +
 				",\"epoch\":" + JNum(ctx.actorRosterEpoch) + ",\"revision\":" + JNum(core_.libraryRevision) +
 				",\"observed\":" + JBool(ctx.liveObserved) + ",\"viewing\":" + JBool(ctx.liveViewingConfirmed) +
 				",\"paused\":" + JBool(ctx.livePaused) + ",\"active\":" + JBool(ctx.liveTakeoverActive) +
@@ -101,6 +103,13 @@
 				static_cast<uint64_t>(session) != core_.injectionSession)
 				return CmdResult::Err("stale_revision", "场景已切换，请重新操作");
 			const auto ctx = core_.BuildGuiContext();
+            if (action == "externalStage.enable")
+            {
+                bool enable = false;
+                if (!BoolParam(params, "value", enable)) return CmdResult::Err("invalid_params", "缺少舞台开关状态");
+                externalStageEnabled.store(enable);
+                return CmdResult::Ok();
+            }
 			if (action.rfind("live.", 0) == 0)
 			{
 				int64_t owner = -1;

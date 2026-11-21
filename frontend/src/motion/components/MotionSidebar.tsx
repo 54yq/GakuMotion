@@ -18,6 +18,7 @@ const PRIMARY_NAV: Array<{ page: MotionPage; label: string; icon: RemixiconCompo
   { page: 'motion', label: '动作', icon: RiMusic2Fill },
   { page: 'camera', label: '镜头', icon: RiCameraFill },
   { page: 'stage', label: '舞台', icon: RiSparkling2Fill },
+  { page: 'external-stage', label: '外部舞台', icon: RiSparkling2Fill },
 ]
 
 export function MotionSidebar({ onNavigate }: { onNavigate?: () => void }) {

@@ -537,6 +537,8 @@ export interface ForkFollower {
 }
 
 export interface ForkState {
+  externalStageEnabled?: boolean
+  externalStageStatus?: number
   session: number
   owner: number
   epoch: number

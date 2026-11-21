@@ -11,7 +11,7 @@ GakuMotion 是运行在 GakuLoader 插件宿主之上的游戏原生演出扩展
 
 它利用《学园偶像大师》原生角色、服装、材质、动画与渲染环境，为玩家提供外部动作回放、面部表现、摄像机运镜及舞台控制能力。
 
-当前 Web 看板基于分支 **v4.3.6**。GakuLoader 显示 `v0.2.0+fork.4.3.44-web`。 [分支更新记录](docs/CHANGELOG.md) · [Web 看板说明](docs/WEB_PANEL_BRIDGE.md)
+当前 Web 看板基于分支 **v4.3.6**。GakuLoader 显示 `v0.2.0+fork.4.3.45-web`。 [分支更新记录](docs/CHANGELOG.md) · [Web 看板说明](docs/WEB_PANEL_BRIDGE.md)
 
 [安装指南](docs/INSTALLATION.md) · [使用指南](docs/USAGE.md) · [常见问题排查](docs/TROUBLESHOOTING.md) · [源码构建](BUILD_NOTES.md) · [全部文档索引](docs/README.md) · [学马仕模组索引](https://github.com/Gaku-Mod-Tools/Mod-Directory)
 

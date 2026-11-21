@@ -1081,7 +1081,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.44-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.45-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -1642,6 +1642,7 @@ static void ResetPlacementDynamicBone(void* actor)
 
 #include "GkSceneOwnerRuntime.hpp"
 #include "GkFixedActorLighting.hpp"
+#include "GkExternalStage.hpp"
 #include "GkStageLoadOverride.hpp"
 #include "GkPageObservation.hpp"
 
@@ -3639,7 +3640,14 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
     } else if (!GakuMotion::visual_handoff::Requested() && !StageLoadOverride::attempted) {
         StageLoadOverride::Install();
     }
-	// Fresh typed snapshots remove disabled/destroyed actors even when no actor
+    const bool externalStageAdmitted = GakuMotion::externalStageEnabled.load() &&
+        !GakuMotion::visual_handoff::Requested() && g_activeSceneVerified &&
+        SceneOwnerRuntime::cachedActiveScene == ExternalStage::placeholder &&
+        GakuMotion::stage_load::receipt.Context(SceneOwnerRuntime::cachedActiveScene,
+            g_verifiedOwnerSceneName, g_sceneOwner) == GakuMotion::injection::Context::Photography;
+    ExternalStage::Tick(externalStageAdmitted, g_verifiedActiveSceneHandle);
+    GakuMotion::externalStageStatus.store(ExternalStage::status.load());
+    // Fresh typed snapshots remove disabled/destroyed actors even when no actor
 	// callback remains. Never retain an accumulating list of seen scene actors.
 	RefreshSceneActors(core, sceneChanged);
     if (isNewPhysicalFrame) RecordEnsemblePhysicsHealth(core);
