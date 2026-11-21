@@ -1,6 +1,7 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#include "GkNativeSwingRenderFilter.hpp"
 #include "GkCaptureGuard.hpp"
 #include "GkCaptureSafety.hpp"
 #include "GkGmlClient.hpp"
@@ -159,6 +160,14 @@ namespace
 	int g_costumeCaptureMotion{-1};
     int g_costumeCaptureBackend{-1};
 
+    bool ThreeActorNativePlayback(const GakuMotion::Core& core)
+    {
+        return core.liveTakeoverActive && core.InjectionAllowed() && !core.captureSuspended &&
+            !core.ensembleRestoreUnconfirmed && core.config.secondaryPhysicsBackend == 2 &&
+            core.sceneActorRegistry.Entries().size() >= 3 && core.player.controller.targetActor &&
+            core.player.state == GakuMotion::PlaybackState::Playing && !core.player.scrubbing;
+    }
+
 	void FinishCostumeCapture(GakuMotion::Core& core, const char* reason, bool complete)
 	{
 		using Status = GakuMotion::CostumeCaptureStatus;
@@ -197,7 +206,17 @@ namespace
 			else if (g_costumeCapture.Expired(now)) FinishCostumeCapture(core, "timeout", true);
 			return;
 		}
-		if (core.costumeCaptureStatus != Status::Requested) return;
+        using Playback = std::tuple<uint64_t,uint64_t,int,int>;
+        static Playback lastAutomatic{};
+        static float lastTime{};
+        const Playback playback{core.injectionSession,core.sceneActorRegistry.Epoch(),
+            core.currentMotionIndex,core.player.SeekCount()};
+        const float time = core.player.currentTime;
+        const bool automatic = ThreeActorNativePlayback(core) &&
+            (playback != lastAutomatic || time + .25f < lastTime);
+        if (ThreeActorNativePlayback(core)) lastTime = time;
+        if (automatic) lastAutomatic = playback;
+        if (core.costumeCaptureStatus != Status::Requested && !automatic) return;
 		if (!CostumeCaptureEligible(core))
 		{
 			core.costumeCaptureStatus = Status::Interrupted;
@@ -207,7 +226,8 @@ namespace
 			std::to_string(std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count()) + ".jsonl";
 		const auto path = GakuMotion::MotionPathFromUtf8(core.diagnosticsRoot) / label;
 		const auto* motion = core.CurrentMotion();
-		if (core.diagnosticsRoot.empty() || !g_costumeCapture.Open(path, motion ? motion->name : "", core.injectionSession))
+		if (core.diagnosticsRoot.empty() || !g_costumeCapture.Open(path, motion ? motion->name : "", core.injectionSession,
+            automatic ? std::chrono::seconds(60) : std::chrono::seconds(15)))
 		{
 			core.costumeCaptureStatus = Status::FileError;
 			return;
@@ -215,7 +235,7 @@ namespace
 		g_costumeCaptureMotion = core.currentMotionIndex;
         g_costumeCaptureBackend = core.config.secondaryPhysicsBackend;
 		core.costumeCaptureStatus = Status::Recording;
-		if (g_hostContext.logInfo) g_hostContext.logInfo("[GakuMotion][CostumePhysics] file=%s", label.c_str());
+		if (g_hostContext.logInfo) g_hostContext.logInfo("[GakuMotion][CostumePhysics] file=%s automatic=%d", label.c_str(), int(automatic));
 	}
 
 	void PublishFallbackPhysics(GakuMotion::Core& core, GakuMotion::FallbackPhysics& solver,
@@ -1050,7 +1070,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.34-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.35-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -1591,6 +1611,7 @@ static void ResetPlacementDynamicBone(void* actor)
 #include "GkLiveWindOverride.hpp"
 #include "GkLiveActorProps.hpp"
 #include "GkLiveAspectPreview.hpp"
+#include "GkNativeSwingRenderPreview.hpp"
 #include "GkModelRendererMask.hpp"
 #include "GkLiveTimelineProps.hpp"
 #include "GkActorModelVisibility.hpp"
@@ -4224,6 +4245,10 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	ActorGroundShadow::RefreshAfterPose(activeActor, poseSerialBefore);
 	GroundShadowProbe::AfterPose(activeActor, poseSerialBefore);
     recordMainActorPose("after_plugin_pose", true);
+    NativeSwingRenderPreview::Sample(core,activeActor,unityFrame,
+        g_physicsActor == activeActor && g_physicsFrame == unityFrame && g_physicsActual == 2 &&
+        g_burstBridge.status.actor == activeActor && g_burstBridge.status.injected &&
+        g_burstBridge.status.source_frame == unityFrame-1);
 	const auto* snapshotPlayer=ActorGroundShadow::PlayerForActor(activeActor);
 	if (core.liveTakeoverActive && snapshotPlayer && snapshotPlayer->controller.footPoseWriteStamp.actor==activeActor &&
 		snapshotPlayer->controller.footPoseWriteStamp.serial!=poseSerialBefore) {
@@ -4378,6 +4403,7 @@ void MotionShutdown(void*)
 	if (GakuMotion::host::mainThread.isMainThread &&
 		GakuMotion::host::mainThread.isMainThread(GakuMotion::host::mainThread.context))
 	{
+		NativeSwingRenderPreview::Restore(NativeSwingRenderPreview::activeCamera);
 		LiveAspectPreview::Restore(LiveAspectPreview::lease.owner && g_sceneOwner.Valid() &&
 			LiveAspectPreview::lease.owner == g_sceneOwner.presenterIdentity &&
 			LiveAspectPreview::lease.scene == g_sceneOwner.sceneHandle);

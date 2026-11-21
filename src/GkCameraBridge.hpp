@@ -35,6 +35,7 @@ namespace CameraBridge
 	inline SetBool setOrthographic = nullptr;
 	inline Render render = nullptr, managerRender = nullptr;
 	inline void (*projectionBegin)(void*) = nullptr;
+	inline void (*secondaryPoseBegin)(void*) = nullptr;
 	inline std::vector<void*> installed;
 	inline thread_local bool writing = false;
 	inline bool ready = false;
@@ -1123,6 +1124,7 @@ namespace CameraBridge
 		if (sharedBeginEnabled.load(std::memory_order_acquire) && OnUnityThread()) {
 			Controller().BeforeRender(camera);
 			if (projectionBegin) projectionBegin(camera);
+			if (secondaryPoseBegin) secondaryPoseBegin(camera);
 		}
 	}
 	// selected=false keeps independent leases. A present but invalid provider
@@ -1171,6 +1173,7 @@ namespace CameraBridge
 		if (OnUnityThread()) {
 			Controller().BeforeRender(camera);
 			if (projectionBegin) projectionBegin(camera);
+			if (secondaryPoseBegin) secondaryPoseBegin(camera);
 		}
 	}
 
@@ -1180,6 +1183,7 @@ namespace CameraBridge
 		if (OnUnityThread()) {
 			Controller().BeforeRender(camera);
 			if (projectionBegin) projectionBegin(camera);
+			if (secondaryPoseBegin) secondaryPoseBegin(camera);
 		}
 	}
 
@@ -1345,6 +1349,7 @@ namespace CameraBridge
 	inline void Shutdown()
 	{
 		projectionBegin = nullptr;
+		secondaryPoseBegin = nullptr;
 		independentDofDisabled.store(false, std::memory_order_release);
 		sharedBeginEnabled.store(false, std::memory_order_release);
 		if (sharedBeginSubscribed) sharedBegin.unsubscribe(sharedBegin.context, SharedCameraBegin, nullptr);

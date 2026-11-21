@@ -3,6 +3,7 @@
 #endif
 #include <windows.h>
 #include "GkCostumePhysicsCapture.hpp"
+#include "GkNativeSwingRenderFilter.hpp"
 #include "GkPhysicsMonitor.hpp"
 #include <cassert>
 #include <iostream>
@@ -49,6 +50,21 @@ struct Rig
 
 int main()
 {
+    // SOS 13.143/13.157/13.170: the recorded hair reverses and the
+    // second cloth link continues along its trajectory.
+    const float fraction = 14.f / 27.f;
+    const auto hairA = Quaternion(.467036f,.497338f,.497604f,.535652f).Normalized();
+    const auto hairB = Quaternion(.451445f,.513491f,.509661f,.522274f).Normalized();
+    const auto hairC = Quaternion(.461088f,.503669f,.50312f,.529703f).Normalized();
+    const auto hair = native_swing::FilterMiddle(hairA,hairB,hairC,fraction);
+    assert(native_swing::Angle(hairA,hair) < .75f && native_swing::Angle(hair,hairC) < .75f);
+    assert(native_swing::Angle(hairA,hairB) > 3.2f);
+    const auto clothA = Quaternion(.00636099f,-.0517279f,.134413f,.989554f).Normalized();
+    const auto clothB = Quaternion(.00600326f,-.0443076f,.12226f,.99149f).Normalized();
+    const auto clothC = Quaternion(.00582656f,-.0419683f,.11902f,.991987f).Normalized();
+    const auto cloth = native_swing::FilterMiddle(clothA,clothB,clothC,fraction);
+    assert(cloth.x == clothB.x && cloth.y == clothB.y && cloth.z == clothB.z && cloth.w == clothB.w);
+
 	using Frame = FallbackPhysics::CostumeFrame;
 	Rig sampled, control;
 	Frame first;

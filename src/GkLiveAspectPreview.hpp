@@ -25,6 +25,7 @@ namespace LiveAspectPreview
     using Projection = GakuMotion::live_aspect::Projection;
     inline const void *getProjection{}, *setProjection{}, *resetProjection{}, *getAspect{}, *getStereo{};
     inline CameraBridge::Render managerEnd{};
+    inline void (*secondaryPoseEnd)(void*) = nullptr;
     inline StageLoader::Handle projectedCamera{};
     inline Projection writtenProjection{};
     inline bool projectionObserved{};
@@ -116,6 +117,7 @@ namespace LiveAspectPreview
     inline void AfterCamera(void* context, void* camera, void* method)
     {
         if (managerEnd) managerEnd(context, camera, method);
+        if (secondaryPoseEnd) secondaryPoseEnd(camera);
         ReleaseProjection(camera);
     }
 
@@ -152,13 +154,21 @@ namespace LiveAspectPreview
         }
     }
 
+    inline bool EnsureCameraEnd()
+    {
+        if (managerEnd) return true;
+        void* manager = FindClass("UnityEngine.CoreModule.dll", "UnityEngine.Rendering", "RenderPipelineManager");
+        return manager && CameraBridge::InstallHook("RenderPipelineManager.EndCameraRendering",
+            FindMethodPointer(manager, "EndCameraRendering", 2), reinterpret_cast<void*>(AfterCamera),
+            reinterpret_cast<void**>(&managerEnd));
+    }
+
     inline bool PrepareProjection(const GakuMotion::ExactMethodMetadata& md)
     {
         if (!CameraBridge::ready) return false;
-        if (managerEnd) return true;
+        if (getProjection && setProjection && resetProjection && getAspect && getStereo && managerEnd) return true;
         void* cameraClass = FindClass("UnityEngine.CoreModule.dll", "UnityEngine", "Camera");
         void* matrixClass = FindClass("UnityEngine.CoreModule.dll", "UnityEngine", "Matrix4x4");
-        void* manager = FindClass("UnityEngine.CoreModule.dll", "UnityEngine.Rendering", "RenderPipelineManager");
         if (!cameraClass || !LiveLetterboxProbe::HasValueSize(matrixClass, sizeof(Projection))) return false;
         getProjection = md.Find(cameraClass, "get_projectionMatrix", false, {0x11, matrixClass}, {});
         setProjection = md.Find(cameraClass, "set_projectionMatrix", false, {0x01}, {{0x11, matrixClass}});
@@ -166,9 +176,7 @@ namespace LiveAspectPreview
         getAspect = md.Find(cameraClass, "get_aspect", false, {0x0c}, {});
         getStereo = md.Find(cameraClass, "get_stereoEnabled", false, {0x02}, {});
         return getProjection && setProjection && resetProjection && getAspect && getStereo &&
-            CameraBridge::InstallHook("RenderPipelineManager.EndCameraRendering",
-                FindMethodPointer(manager, "EndCameraRendering", 2), reinterpret_cast<void*>(AfterCamera),
-                reinterpret_cast<void**>(&managerEnd));
+            EnsureCameraEnd();
     }
 
     inline void DropLease()

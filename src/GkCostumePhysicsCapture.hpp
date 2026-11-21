@@ -15,7 +15,8 @@ namespace GakuMotion
 		using Clock = std::chrono::steady_clock;
 		static constexpr unsigned kFrameLimit = 8192;
 
-		bool Open(const std::filesystem::path& path, const std::string& motion, uint64_t session)
+		bool Open(const std::filesystem::path& path, const std::string& motion, uint64_t session,
+                  std::chrono::seconds duration = std::chrono::seconds(15))
 		{
 			std::error_code error;
 			std::filesystem::create_directories(path.parent_path(), error);
@@ -30,6 +31,7 @@ namespace GakuMotion
 			frames_ = 0;
 			session_ = session;
 			started_ = Clock::now();
+            duration_ = duration;
 			nextFlush_ = started_ + std::chrono::seconds(1);
 			out_ << "{\"event\":\"start\",\"schema\":1,\"motion\":";
 			Name(motion);
@@ -39,7 +41,7 @@ namespace GakuMotion
 
 		bool Active() const { return out_.is_open() && out_.good() && frames_ < kFrameLimit; }
 		bool Opened() const { return out_.is_open(); }
-		bool Expired(Clock::time_point now) const { return now - started_ >= std::chrono::seconds(15); }
+		bool Expired(Clock::time_point now) const { return now - started_ >= duration_; }
 		uint64_t Session() const { return session_; }
 		unsigned Frames() const { return frames_; }
 
@@ -202,6 +204,21 @@ namespace GakuMotion
             out_ << "}\n";
         }
 
+        void RecordSwingRender(const char* bone, void* actor, int frame, float time, float sampleTime,
+                               Quaternion raw, Quaternion shown, Quaternion restored, bool success)
+        {
+            if (!Active()) return;
+            out_ << "{\"event\":\"swing_render\",\"bone\":";
+            Name(bone);
+            Identity(1,reinterpret_cast<uintptr_t>(actor),frame,time);
+            out_ << ",\"display_sample_s\":"; Number(sampleTime);
+            out_ << ",\"raw_local\":"; Rotation(raw);
+            out_ << ",\"shown_local\":"; Rotation(shown);
+            out_ << ",\"restored_local\":";
+            if (success) Rotation(restored); else out_ << "null";
+            out_ << ",\"restored\":" << (success ? "true" : "false") << "}\n";
+        }
+
         void RecordActorPose(const char* stage, const IdolBoneBinding& binding, const IdolController& controller,
                              int frame, float time, int requested, int actual, int sourceFrame, float nativeDt,
                              float frameDt = 0.f, const GbbSwingOutputSample* swingOutput = nullptr)
@@ -258,6 +275,7 @@ namespace GakuMotion
 		std::array<Role, 16> state_{};
 		std::ofstream out_;
 		Clock::time_point started_{}, nextFlush_{};
+        std::chrono::seconds duration_{};
 		uint64_t session_{};
 		unsigned frames_{};
 
