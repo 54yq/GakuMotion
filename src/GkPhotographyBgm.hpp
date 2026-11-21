@@ -2,111 +2,85 @@
 
 namespace PhotographyBgm
 {
-    inline StageLoader::Handle mutedSource{};
-    inline const void* getVolume{};
-    inline const void* setVolume{};
-    inline float originalVolume{};
-    inline bool reportedUnavailable{};
+    inline const void *getUnityVolume{}, *setUnityVolume{};
+    inline void (*getCriVolume)(const char*, float*){};
+    inline void (*setCriVolume)(const char*, float){};
+    inline HMODULE criModule{};
+    inline std::optional<float> unityOriginal, criOriginal;
+    inline bool requested = false;
 
-    inline float Volume(void* source)
+    inline float UnityVolume()
     {
-        void* boxed = StageLoader::Invoke(getVolume, source);
+        void* boxed = StageLoader::Invoke(getUnityVolume);
         const auto* value = boxed && g_safeBones.unbox ? static_cast<float*>(g_safeBones.unbox(boxed)) : nullptr;
-        return value && std::isfinite(*value) ? *value : -1.0f;
+        return value ? *value : -1.0f;
     }
 
-    inline void SetVolume(void* source, float value)
+    inline void SetUnityVolume(float volume)
     {
-        void* args[]{&value};
-        StageLoader::Invoke(setVolume, source, args);
+        void* args[]{&volume};
+        StageLoader::Invoke(setUnityVolume, nullptr, args);
+    }
+
+    inline float CriVolume()
+    {
+        if (!getCriVolume || !criModule || GetModuleHandleW(L"cri_ware_unity.dll") != criModule) return -1.0f;
+        float volume = -1.0f;
+        getCriVolume("MasterOut", &volume);
+        return volume;
     }
 
     inline void Release()
     {
-        if (!mutedSource) return;
-        void* source = SceneOwnerRuntime::handleTarget(mutedSource);
-        if (source && Volume(source) == 0.0f) SetVolume(source, originalVolume);
-        StageLoader::freeHandle(mutedSource);
-        mutedSource = {};
-        GakuMotion::host::Info("[GakuMotion][PhotographyBgm] released source volume");
+        if (unityOriginal && UnityVolume() == 0.0f) SetUnityVolume(*unityOriginal);
+        if (criOriginal && CriVolume() == 0.0f) setCriVolume("MasterOut", *criOriginal);
+        if (requested)
+            GakuMotion::host::Info("[GakuMotion][PhotographyAudio] released Unity=%g CRI=%g", UnityVolume(), CriVolume());
+        unityOriginal.reset();
+        criOriginal.reset();
+        requested = false;
     }
 
     inline void Tick(bool enabled)
     {
         if (!enabled)
         {
-            Release();
-            reportedUnavailable = false;
+            if (requested) Release();
             return;
         }
-        if (!StageLoader::newHandle || !StageLoader::freeHandle || !SceneOwnerRuntime::handleTarget) return;
 
-        auto& metadata = StageLoader::metadata;
-        const auto objectClass = reinterpret_cast<void* (*)(void*)>(
-            GetProcAddress(g_gameAssembly, "il2cpp_object_get_class"));
-        const auto parent = reinterpret_cast<void* (*)(void*)>(
-            GetProcAddress(g_gameAssembly, "il2cpp_class_get_parent"));
-        if (!objectClass || !parent) return;
-        static const void* currentBgm = [&]() -> const void* {
-            for (const char* image : {"Assembly-CSharp.dll", "campus-submodule.Runtime.dll"})
-            {
-                void* manager = FindClass(image, "Campus.Common", "CampusSoundManager");
-                const void* method = metadata.Find(manager, "GetCurrentBgmPlayer", true, {0x12, nullptr, false}, {});
-                if (method)
-                    return method;
-            }
-            return nullptr;
-        }();
-        void* player = StageLoader::Invoke(currentBgm);
-        void* source = nullptr;
-        if (player)
+        if (!getUnityVolume || !setUnityVolume)
         {
-            auto method = metadata.Find(objectClass(player), "get_Source", false, {0x12, nullptr, false}, {});
-            source = StageLoader::Invoke(method, player);
+            void* listener = FindClass("UnityEngine.AudioModule.dll", "UnityEngine", "AudioListener");
+            auto& metadata = StageLoader::metadata;
+            getUnityVolume = metadata.Find(listener, "get_volume", true, {0x0c}, {});
+            setUnityVolume = metadata.Find(listener, "set_volume", true, {0x01}, {{0x0c}});
         }
-        if (mutedSource && SceneOwnerRuntime::handleTarget(mutedSource) != source) Release();
-        if (!source)
+        HMODULE module = GetModuleHandleW(L"cri_ware_unity.dll");
+        if (module != criModule)
         {
-            if (!reportedUnavailable)
-                GakuMotion::host::Warn("[GakuMotion][PhotographyBgm] CampusSoundManager current player/source unavailable getter=%d player=%d",
-                    !!currentBgm, !!player);
-            reportedUnavailable = true;
-            return;
+            criOriginal.reset();
+            criModule = module;
+            getCriVolume = module ? reinterpret_cast<decltype(getCriVolume)>(
+                GetProcAddress(module, "criAtomExAsr_GetBusVolumeByName")) : nullptr;
+            setCriVolume = module ? reinterpret_cast<decltype(setCriVolume)>(
+                GetProcAddress(module, "criAtomExAsr_SetBusVolumeByName")) : nullptr;
         }
-        if (!mutedSource)
+        const float unity = UnityVolume();
+        if (setUnityVolume && std::isfinite(unity) && unity > 0.0f)
         {
-            const void* cueMethod = nullptr;
-            getVolume = setVolume = nullptr;
-            for (void* klass = objectClass(source); klass; klass = parent(klass))
-            {
-                if (!cueMethod) cueMethod = metadata.Find(klass, "get_cueName", false, {0x0e}, {});
-                if (!getVolume) getVolume = metadata.Find(klass, "get_volume", false, {0x0c}, {});
-                if (!setVolume) setVolume = metadata.Find(klass, "set_volume", false, {0x01}, {{0x0c}});
-            }
-            float volume = Volume(source);
-            if (!setVolume || volume < 0.0f)
-            {
-                if (!reportedUnavailable)
-                    GakuMotion::host::Warn("[GakuMotion][PhotographyBgm] current source volume unavailable get=%d set=%d",
-                        !!getVolume, !!setVolume);
-                reportedUnavailable = true;
-                return;
-            }
-            mutedSource = StageLoader::newHandle(source, false);
-            if (!mutedSource) return;
-            originalVolume = volume;
-            SetVolume(source, 0.0f);
-            const auto cue = Il2CppStringToUtf8(StageLoader::Invoke(cueMethod, source));
-            GakuMotion::host::Info("[GakuMotion][PhotographyBgm] CampusSoundManager cue=%s before=%.3f after=%.3f",
-                cue.empty() ? "-" : cue.c_str(), volume, Volume(source));
-            reportedUnavailable = false;
-            return;
+            unityOriginal = unity;
+            SetUnityVolume(0.0f);
         }
-        const float volume = Volume(source);
-        if (volume > 0.0f)
+        const float cri = CriVolume();
+        if (setCriVolume && std::isfinite(cri) && cri > 0.0f)
         {
-            originalVolume = volume;
-            SetVolume(source, 0.0f);
+            criOriginal = cri;
+            setCriVolume("MasterOut", 0.0f);
         }
+        if (!requested)
+            GakuMotion::host::Info("[GakuMotion][PhotographyAudio] Unity=%g->%g CRI MasterOut=%g->%g",
+                unity, UnityVolume(), cri, CriVolume());
+        requested = true;
     }
 }
