@@ -65,7 +65,7 @@ import {
   validateStudio,
 } from './validation'
 
-export type MotionPage = 'library' | 'motion' | 'camera' | 'stage' | 'settings' | 'developer'
+export type MotionPage = 'library' | 'motion' | 'camera' | 'stage' | 'external-stage' | 'settings' | 'developer'
 
 export type LibraryFilter = 'all' | 'camera' | 'audio' | 'facial' | 'motionOnly'
 export type LibrarySort = 'default' | 'title' | 'durationDesc' | 'durationAsc'

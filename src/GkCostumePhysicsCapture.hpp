@@ -363,7 +363,7 @@ namespace GakuMotion
         void RecordActorPose(const char* stage, const IdolBoneBinding& binding, const IdolController& controller,
                              int frame, float time, int requested, int actual, int sourceFrame, float nativeDt,
                              float frameDt = 0.f, const GbbSwingOutputSample* swingOutput = nullptr,
-                             const char* swingBone = "LeftFrontHair1_S")
+                             const char* swingBone = "LeftFrontHair1_S", float poseTime = -1.f)
         {
             if (!Active()) return;
             out_ << "{\"event\":\"actor_pose\",\"stage\":";
@@ -374,6 +374,7 @@ namespace GakuMotion
             if (sourceFrame >= 0) Number(nativeDt); else out_ << "null";
             out_ << ",\"frame_dt_s\":";
             Number(frameDt);
+            if (poseTime>=0.f) { out_ << ",\"pose_s\":"; Number(poseTime); }
             out_ << ",\"head_world\":";
             Quaternion head{};
             if (FallbackPhysics::SampleHeadWorld(binding, controller, head)) Rotation(head); else out_ << "null";

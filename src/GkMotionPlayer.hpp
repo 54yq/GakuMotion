@@ -6,6 +6,7 @@
 #include "GkIdolController.hpp"
 #include "GkRuntimeConfig.hpp"   // MotionEntry：曲目库索引与「上一曲/下一曲」
 #include "GkTransportTime.hpp"
+#include "GkLivePhysicsClockPolicy.hpp"
 #include <chrono>
 #include <string>
 #include <memory>
@@ -64,6 +65,7 @@ namespace GakuMotion
 
 	class MotionPlayer
 	{
+        live_physics_clock::PoseClock poseClock_;
 	public:
 		PlaybackState state{PlaybackState::Stopped};
 		MotionClip clip;
@@ -110,6 +112,7 @@ namespace GakuMotion
 		float audioSourceDuration{0.0f};
 		bool audioWaitingForTiming{false};
 
+		float AppliedPoseTime() const { return poseClock_.actor ? poseClock_.pose : currentTime; }
 		float MotionSourceTime() const { return TrackSourceTime(currentTime, timing.motion); }
 		float FacialSourceTime() const { return TrackSourceTime(currentTime, timing.facial); }
 		float CameraSourceTime() const { return TrackSourceTime(currentTime, timing.camera); }
@@ -278,6 +281,7 @@ namespace GakuMotion
 			// that bypass Core::SelectMotionByIndex. Keep the original actor rest
 			// snapshot; recapturing immediately after Rebind samples old animation.
 			if (state != PlaybackState::Stopped) Stop();
+			poseClock_ = {};
 			currentMotionDir = motionDirectory;
 			clip = std::move(nextClip);
 			initializationPending = initializeBeforeMotion;
@@ -367,6 +371,7 @@ namespace GakuMotion
 
 		void Stop()
 		{
+			poseClock_ = {};
 			audioWaitingForTiming = false;
 			navigationFrame = -1;
 			scrubbing = false;
@@ -388,6 +393,7 @@ namespace GakuMotion
 
 		void AbandonScene()
 		{
+			poseClock_ = {};
 			audioWaitingForTiming = false;
 			navigationFrame = -1;
 			state = PlaybackState::Stopped;
@@ -576,7 +582,7 @@ namespace GakuMotion
 		// 注意：只有 Stopped 会直接返回（角色交还给官方待机动画）。
 		// Preview 必须继续走绑定/静音/灌帧，否则选中动作后角色会退回待机造型。
 		void Tick(float deltaTime, void* actor, void* animator = nullptr, void* playableDirector = nullptr,
-		          bool advanceClock = true)
+		          bool advanceClock = true, bool limitPoseAdvance = false)
 		{
 			if (!actor || state == PlaybackState::Stopped ||
 				!controller.CanDriveActor(actor))
@@ -609,6 +615,7 @@ namespace GakuMotion
 					{
 						if (loop)
 						{
+							poseClock_ = {};
 							currentTime = 0.0f;
 							audioSeekOffset = 0.0f;
 							audioSyncSettleFrames = (fnGetAudioTime != nullptr) ? kAudioSettleFrames : 0;
@@ -627,7 +634,13 @@ namespace GakuMotion
 			}
 
 			// Apply pose
-			if (actorBound) controller.ApplyMotion(clip, MotionSourceTime(), actor, FacialSourceTime());
+			if (actorBound) {
+                const float poseTime = poseClock_.Sample(currentTime,actor,seekCount,
+                    limitPoseAdvance && state == PlaybackState::Playing && !scrubbing);
+                controller.ApplyMotion(clip, TrackSourceTime(poseTime,timing.motion), actor,
+                    TrackSourceTime(poseTime,timing.facial), limitPoseAdvance && !scrubbing &&
+                    (state == PlaybackState::Playing || state == PlaybackState::Paused));
+            }
 		}
 
 		// 主时钟推进：音频可用时以音频为基准，并处理跳转后的 settle 校正。

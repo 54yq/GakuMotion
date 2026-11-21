@@ -2151,7 +2151,7 @@ namespace GakuMotion
 		}
 
 		void ApplyMotionToBinding(IdolBoneBinding& b, const MotionClip& clip, float currentTimeSeconds,
-		                          float facialTimeSeconds = -1.0f)
+		                          float facialTimeSeconds = -1.0f, bool smoothSwingHead = false)
 		{
 			if (!b.actor || !b.bindPoseCaptured || b.boneTransforms.empty()) return;
 
@@ -2166,7 +2166,7 @@ namespace GakuMotion
 
 			Vector3 vmdRootPos;
 			std::vector<Quaternion> vmdRotations;
-			clip.Sample(currentTimeSeconds, vmdRootPos, vmdRotations);
+			clip.Sample(currentTimeSeconds, vmdRootPos, vmdRotations, smoothSwingHead);
 			Quaternion wristShare[2]{Quaternion::Identity(), Quaternion::Identity()};
 			bool wristShareActive[2]{false, false};
 			if (clip.IsLocalDeltaStream() && (wristTwistShare != 0.0f || forearmAxisAdjustmentDeg != 0.0f))
@@ -3637,14 +3637,14 @@ namespace GakuMotion
 		}
 
 		void ApplyMotion(const MotionClip& clip, float currentTimeSeconds, void* actor = nullptr,
-		                 float facialTimeSeconds = -1.0f)
+		                 float facialTimeSeconds = -1.0f, bool smoothSwingHead = false)
 		{
 			if (actor)
 			{
 				auto it = bindings.find(actor);
 				if (it != bindings.end())
 				{
-					ApplyMotionToBinding(it->second, clip, currentTimeSeconds, facialTimeSeconds);
+					ApplyMotionToBinding(it->second, clip, currentTimeSeconds, facialTimeSeconds, smoothSwingHead);
 					currentBinding = it->second;
 					return;
 				}
@@ -3658,7 +3658,7 @@ namespace GakuMotion
 			// binding for rather than silently doing nothing.
 			if (currentBinding.actor && currentBinding.bindPoseCaptured)
 			{
-				ApplyMotionToBinding(currentBinding, clip, currentTimeSeconds, facialTimeSeconds);
+				ApplyMotionToBinding(currentBinding, clip, currentTimeSeconds, facialTimeSeconds, smoothSwingHead);
 			}
 		}
 	};

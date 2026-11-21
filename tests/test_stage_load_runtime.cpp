@@ -23,6 +23,7 @@ namespace GakuMotion::host
 
 namespace GakuMotion
 {
+    inline std::atomic<bool> externalStageEnabled{false};
     struct FakeStageManager
     {
         std::string selected;
@@ -146,6 +147,7 @@ namespace StageRuntimeHarness
     inline std::string g_verifiedOwnerSceneName, observedPresenter, observedActive;
     inline int refreshCalls{};
     inline bool forcedRefresh{};
+    namespace ExternalStage { inline constexpr char placeholder[] = "env_3d_live_courtyard-00-00-noon"; }
     namespace SceneOwnerRuntime { inline std::string cachedActiveScene; }
     bool ProtectionOnUnityThread() { return unityThread; }
     void RefreshProtectedContext(bool force)

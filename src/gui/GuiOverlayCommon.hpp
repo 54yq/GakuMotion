@@ -50,7 +50,8 @@ namespace GakuMotion
 		Camera = 2,  // 镜头
 		Stage = 3,   // 舞台
 		Settings = 4,// 设置
-		Developer = 5// 开发（仅开发者模式显示）
+		Developer = 5, // 开发（仅开发者模式显示）
+		ExternalStage = 6
 	};
 
 	// -----------------------------------------------------------------------------

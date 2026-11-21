@@ -171,11 +171,16 @@ namespace
 	int g_costumeCaptureMotion{-1};
     int g_costumeCaptureBackend{-1};
 
-    bool ThreeActorNativePlayback(const GakuMotion::Core& core)
+    bool ThreeActorNativeTakeover(const GakuMotion::Core& core)
     {
         return core.liveTakeoverActive && core.InjectionAllowed() && !core.captureSuspended &&
             !core.ensembleRestoreUnconfirmed && core.config.secondaryPhysicsBackend == 2 &&
-            core.sceneActorRegistry.Entries().size() >= 3 && core.player.controller.targetActor &&
+            core.sceneActorRegistry.Entries().size() >= 3 && core.player.controller.targetActor;
+    }
+
+    bool ThreeActorNativePlayback(const GakuMotion::Core& core)
+    {
+        return ThreeActorNativeTakeover(core) &&
             core.player.state == GakuMotion::PlaybackState::Playing && !core.player.scrubbing;
     }
 
@@ -341,7 +346,7 @@ namespace
 		return clean;
 	}
 
-	void DispatchFollowerPhysics(GakuMotion::Core& core, void* actor, int frame, bool hasUnityFrame)
+	void DispatchFollowerPhysics(GakuMotion::Core& core, void* actor, int frame, bool hasUnityFrame, bool filterSceneForces)
 	{
 		const auto& followers = core.ensemble.Followers();
 		for (size_t i = 0; i < followers.size(); ++i)
@@ -382,7 +387,7 @@ namespace
 			slot.lastTick = now;
 			const bool started = core.player.state == GakuMotion::PlaybackState::Playing || g_followerBridge.State(i).outstanding;
 			const bool native = requested == 2 && started && g_followerBridge.Publish(i, binding->second, ctrl, player.currentTime, frame, slot.quartz, slot.diagnostics,
-                hasUnityFrame && core.liveTakeoverActive && core.player.state == GakuMotion::PlaybackState::Playing);
+                hasUnityFrame && core.liveTakeoverActive && core.player.state == GakuMotion::PlaybackState::Playing, filterSceneForces);
 			const std::string reason = paused ? "transport_paused" : requested == 0 ? "off" : requested == 1 ? "fallback" :
 				!started ? "native_waiting_for_playback" : g_followerBridge.State(i).reason == "not_requested" ? g_followerBridge.reason : g_followerBridge.State(i).reason;
 			const int actual = GakuMotion::SelectSecondaryPhysicsBackend(requested, native, core.liveTakeoverActive, reason);
@@ -1081,7 +1086,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.43-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.51-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -1642,6 +1647,8 @@ static void ResetPlacementDynamicBone(void* actor)
 
 #include "GkSceneOwnerRuntime.hpp"
 #include "GkFixedActorLighting.hpp"
+#include "GkExternalStage.hpp"
+#include "GkPhotographyBgm.hpp"
 #include "GkStageLoadOverride.hpp"
 #include "GkPageObservation.hpp"
 
@@ -3148,8 +3155,18 @@ static bool ReadSceneActors(std::vector<GakuMotion::SceneActorObservation>& obse
 	for (void* actorType : StageLoader::actorTypes)
 	{
 		if (!actorType) continue;
-		void* args[]{actorType, &includeInactive};
-		void* array = StageLoader::Invoke(StageLoader::findAll, nullptr, args);
+		const size_t first = observations.size();
+		void* array = nullptr;
+		if (!includeInactive && StageLoader::findAllUnsorted) {
+			int excludeInactive = 0, noSort = 0;
+			void* args[]{actorType, &excludeInactive, &noSort};
+			array = StageLoader::Invoke(StageLoader::findAllUnsorted, nullptr, args);
+		}
+		const bool unsorted = array != nullptr;
+		if (!array) {
+			void* args[]{actorType, &includeInactive};
+			array = StageLoader::Invoke(StageLoader::findAll, nullptr, args);
+		}
 		if (!array) return false;
 		StageLoader::Handle pin = StageLoader::newHandle(array, false);
 		if (!pin) return false;
@@ -3182,6 +3199,9 @@ static bool ReadSceneActors(std::vector<GakuMotion::SceneActorObservation>& obse
 			if (character.empty()) character = GakuMotion::DetectIdolCharacterCode(presetName.empty()?actorName:actorName.substr(0,actorName.find(" | GakuActors[")));
 			observations.push_back({actor, id, std::move(character), presetName});
 		}
+		// Preserve existing instance-id order for startup and target selection.
+		if (unsorted) std::sort(observations.begin() + first, observations.end(),
+			[](const auto& a, const auto& b) { return a.instanceId < b.instanceId; });
 	}
 	return true;
 }
@@ -3626,7 +3646,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
     } else if (!GakuMotion::visual_handoff::Requested() && !StageLoadOverride::attempted) {
         StageLoadOverride::Install();
     }
-	// Fresh typed snapshots remove disabled/destroyed actors even when no actor
+    // Fresh typed snapshots remove disabled/destroyed actors even when no actor
 	// callback remains. Never retain an accumulating list of seen scene actors.
 	RefreshSceneActors(core, sceneChanged);
     if (isNewPhysicalFrame) RecordEnsemblePhysicsHealth(core);
@@ -4033,13 +4053,16 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
             }
         }
         g_costumeCapture.RecordActorPose(stage, binding->second, controller, unityFrame, player.currentTime,
-            core.config.secondaryPhysicsBackend, actual, currentNative ? native.source_frame : -1, native.delta_time, realDeltaTime, sampledSwing ? &swingOutput : nullptr, swingBone);
+            core.config.secondaryPhysicsBackend, actual, currentNative ? native.source_frame : -1, native.delta_time, realDeltaTime, sampledSwing ? &swingOutput : nullptr, swingBone,
+            after ? player.AppliedPoseTime() : -1.f);
     };
     recordMainActorPose("before_plugin_pose", false);
 	EyeGazeProbe::Before(activeActor);
 	if (player.controller.targetActor)
 		GakuMotion::OnLateUpdate(activeActor, anim, nullptr, dtToPass, isNewPhysicalFrame,
-		                        s_cameraFrameDelta, s_cameraPhysicalFrame);
+		                        s_cameraFrameDelta, s_cameraPhysicalFrame,
+                                ThreeActorNativeTakeover(core) && !core.ensemble.HasActiveFollowers() &&
+                                activeActor == player.controller.targetActor);
 	EyeGazeProbe::After(activeActor);
     // Only observed Motion-owned actors can trigger this. Each role has its own
     // identity, scene epoch and follower generation; never retain managed rigs.
@@ -4068,9 +4091,11 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
                 ResetPlacementDynamicBone(activeActor);
         }
     }
+	const bool filterSceneForces = core.liveTakeoverActive ||
+		g_sceneOwner.AllowedContext() == GakuMotion::injection::Context::Photography;
 	if (player.state != GakuMotion::PlaybackState::Stopped)
-		DispatchFollowerPhysics(core, activeActor, unityFrame >= 0 ? unityFrame : s_fallbackFrame, unityFrame >= 0);
-	NativeAudio::Sync();
+		DispatchFollowerPhysics(core, activeActor, unityFrame >= 0 ? unityFrame : s_fallbackFrame,
+			unityFrame >= 0, filterSceneForces);
 	if (isNewPhysicalFrame && !GakuMotion::visual_handoff::IsReleased())
 	{
 		void* mainCam = HelperCameraGetMain();
@@ -4141,10 +4166,10 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 				core.liveTakeoverActive && !core.liveTakeoverFault && OwnsPrimaryMmdClock(activeActor),
 				player.state == GakuMotion::PlaybackState::Preview && player.clip.total_frames > 0);
 			bool native = requested == 2 && nativeReadyToStart && g_burstBridge.Publish(binding->second, player.controller,
-			                                                      player.currentTime, frame,
+			                                                      player.AppliedPoseTime(), frame,
 			                                                      core.config.beforeQuartzExperiment,
 			                                                      core.config.sleeveMuscleDiagnostics,
-                                                          unityFrame >= 0 && core.liveTakeoverActive && player.state == GakuMotion::PlaybackState::Playing);
+                                                          unityFrame >= 0 && core.liveTakeoverActive && player.state == GakuMotion::PlaybackState::Playing, filterSceneForces);
 			const std::string reason = paused ? "transport_paused" : requested == 2 ? (nativeReadyToStart ? g_burstBridge.reason : "native_waiting_for_playback") : requested == 1 ? "fallback" : "off";
 			const int actual = GakuMotion::SelectSecondaryPhysicsBackend(requested, native, core.liveTakeoverActive, reason);
 			if (requested == 2 && actual != 1 && g_physicsActual == 1)
@@ -4443,6 +4468,8 @@ void MotionShutdown(void*)
 	}
 	GakuMotion::capture::Shutdown();
 	StageLoadOverride::Shutdown();
+	PhotographyBgm::Release();
+	ExternalStage::Tick(false, 0);
 	SceneOwnerRuntime::Shutdown();
 	ReleasePendingFileDialog();
 	core.gui.browsePendingKind = -1;
@@ -4586,6 +4613,26 @@ void MotionTick(void*, float)
 		RefreshProtectedContext();
 		auto& core = GakuMotion::Core::Instance();
 		std::lock_guard<std::recursive_mutex> lock(core.stateMutex);
+        if (ProtectionOnUnityThread())
+        {
+            const bool externalStageAdmitted = GakuMotion::externalStageEnabled.load() &&
+                !GakuMotion::visual_handoff::Requested() && g_activeSceneVerified &&
+                SceneOwnerRuntime::cachedActiveScene == ExternalStage::placeholder &&
+                GakuMotion::stage_load::receipt.Context(SceneOwnerRuntime::cachedActiveScene,
+                    g_verifiedOwnerSceneName, g_sceneOwner) == GakuMotion::injection::Context::Photography;
+            ExternalStage::Tick(externalStageAdmitted, g_verifiedActiveSceneHandle);
+            GakuMotion::externalStageStatus.store(ExternalStage::status.load());
+            NativeAudio::Sync();
+            bool mutePhotographyBgm = false;
+            {
+                std::lock_guard<std::mutex> stageLock(core.stageManager.stageMutex);
+                mutePhotographyBgm = core.stageManager.settings.muteNativeBgm;
+            }
+            PhotographyBgm::Tick(mutePhotographyBgm && !core.captureSuspended &&
+                core.injectionPolicy.Read().captureDepth == 0 && g_activeSceneVerified &&
+                GakuMotion::stage_load::receipt.Context(SceneOwnerRuntime::cachedActiveScene,
+                    g_verifiedOwnerSceneName, g_sceneOwner) == GakuMotion::injection::Context::Photography);
+        }
 		FixedActorLighting::Tick(core);
 		PollCostumeCapture(core);
         const bool frameLog = core.liveFrameMonitor.Update(tickStarted,

@@ -44,7 +44,9 @@ enum GbbFrameFlags { GBB_FRAME_INJECT=1u, GBB_FRAME_WORLD_DIAGNOSTICS=2u,
     GBB_FRAME_BEFORE_QUARTZ=4u,
     /* Bounded read-only capture of actual HumanoidSleeve muscle reader calls.
      * Independent from injection, so OFF and ON use identical diagnostics. */
-    GBB_FRAME_SLEEVE_DIAGNOSTICS=8u };
+    GBB_FRAME_SLEEVE_DIAGNOSTICS=8u,
+    /* Suppress only environment force inputs for this injected Swing job. */
+    GBB_FRAME_NO_SCENE_FORCES=16u };
 enum GbbBoneFlags { GBB_BONE_WORLD_VALID=1u };
 enum GbbClearFlags { GBB_CLEAR_RESET_FAULT=1u };
 
@@ -189,6 +191,7 @@ typedef struct GbbApiV3 {
 } GbbApiV3;
 typedef int32_t (GBB_CALL *GbbGetApiV3Fn)(uint32_t requested_version, GbbApiV3* api);
 GBB_EXPORT int32_t GBB_CALL GakuBurstBridge_GetApi(uint32_t requested_version, void* api);
+GBB_EXPORT uint32_t GBB_CALL GakuBurstBridge_SupportsSceneForceFilter(void);
 /* Optional main-thread diagnostics exports: observe the existing delta-time
  * caller without publishing actor poses. End suspends observation; the v2
  * structure and all existing clients remain unchanged. */

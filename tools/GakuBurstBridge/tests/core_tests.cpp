@@ -162,6 +162,13 @@ struct BridgeTestAccess {
             b.ReadNativePropertyOutput(properties,output,defaults);
             CHECK(defaults.property_mask==0x1ffffu && defaults.properties[16]==0.f);
             CHECK(std::strcmp(defaults.property_reason,"native_property_table_uses_defaults")==0);
+
+            std::array<float,26> isolated{};
+            for (unsigned i=0;i<isolated.size();++i) isolated[i]=float(i+1);
+            CHECK(Bridge::ClearSceneForceFields(isolated.data()));
+            CHECK(!Bridge::ClearSceneForceFields(nullptr));
+            for (unsigned i=0;i<isolated.size();++i)
+                CHECK(isolated[i]==(i>=8 && i<25 ? 0.f : float(i+1)));
             auto partial=layout;
             partial.hits=-1;
             CHECK(Bridge::ReadBoneStates(&b,partial,Handle{2,1,-1},swing,&stream,sample)==1);

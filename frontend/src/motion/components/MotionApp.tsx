@@ -76,6 +76,21 @@ function ActivePage({ fork, command }: { fork: ReturnType<typeof useForkWorkspac
       return <CameraPage fork={fork} forkCommand={command} />
     case 'stage':
       return <StagePage fork={fork} forkCommand={command} />
+    case 'external-stage':
+      return (
+        <section className="space-y-3">
+          <h1 className="text-lg font-semibold">外部舞台</h1>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" disabled={!fork} checked={fork?.externalStageEnabled ?? false}
+              onChange={(event) => void command('externalStage.enable', { value: event.target.checked })} />
+            启用外部舞台
+          </label>
+          <p className="text-sm text-muted-foreground">Meni Shuki Rush · 摄影占位：中庭（日中）</p>
+          <p className="text-sm text-muted-foreground">切换摄影背景或重新进入摄影后生效。</p>
+          {fork?.externalStageStatus === 1 && <p role="status">舞台模型已实例化</p>}
+          {fork?.externalStageStatus === -1 && <p role="alert">舞台载入失败，请查看 GakuLoader 日志。</p>}
+        </section>
+      )
     case 'settings':
       return <SettingsPage />
     case 'developer':

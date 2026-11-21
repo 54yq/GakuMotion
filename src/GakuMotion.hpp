@@ -720,6 +720,11 @@ namespace GakuMotion
 
 		void QueueStageSettings(const StageSettings& settings)
 		{
+            {
+                std::lock_guard<std::mutex> lock(stageManager.stageMutex);
+                stageManager.settings.muteNativeBgm = settings.muteNativeBgm;
+                stageManager.settings.muteNativeSoundEffects = settings.muteNativeSoundEffects;
+            }
 			GuiCommand cmd{GuiAction::StageSettings};
 			cmd.stageSettings = settings;
 			QueueGui(std::move(cmd));
@@ -1156,6 +1161,11 @@ namespace GakuMotion
 						// A stale visual-settings snapshot cannot overwrite the separately
 						// saved load-time selection from the dedicated control.
 						settings.loadReplacementKey = stageManager.GetLoadReplacementKey();
+                        {
+                            std::lock_guard<std::mutex> lock(stageManager.stageMutex);
+                            settings.muteNativeBgm = stageManager.settings.muteNativeBgm;
+                            settings.muteNativeSoundEffects = stageManager.settings.muteNativeSoundEffects;
+                        }
 						stageManager.ApplySettings(settings);
 					}
 					break;
@@ -1399,7 +1409,7 @@ namespace GakuMotion
 		void OnLateUpdate(void* actor, void* animator = nullptr,
 		                  void* playableDirector = nullptr, float deltaTime = 0.0333f,
 		                  bool advanceClock = true, float cameraDeltaTime = -1.0f,
-		                  uint64_t physicalFrame = 0)
+		                  uint64_t physicalFrame = 0, bool limitPoseAdvance = false)
 		{
 			currentActor = actor;
 
@@ -1444,7 +1454,7 @@ namespace GakuMotion
 			player.controller.eyePoseWriteStamp.mask = 0;
 			player.controller.eyePoseWriteStamp.transforms = {};
 			player.controller.rebaseLiveMotionStart = liveTakeoverActive;
-			player.Tick(deltaTime, actor, animator, playableDirector, advanceClock);
+			player.Tick(deltaTime, actor, animator, playableDirector, advanceClock, limitPoseAdvance);
 			if (player.state == PlaybackState::Stopped) RestoreEnsemble();
 			else ensemble.Tick(actor, animator, playableDirector, player, sceneActorRegistry);
 			if (ensemble.RestoreUnconfirmed())
@@ -4412,10 +4422,10 @@ namespace GakuMotion
 
 	inline void OnLateUpdate(void* actor, void* animator = nullptr, void* playableDirector = nullptr,
 	                         float deltaTime = 0.0333f, bool advanceClock = true,
-	                         float cameraDeltaTime = -1.0f, uint64_t physicalFrame = 0)
+	                         float cameraDeltaTime = -1.0f, uint64_t physicalFrame = 0, bool limitPoseAdvance = false)
 	{
 		Core::Instance().OnLateUpdate(actor, animator, playableDirector, deltaTime, advanceClock,
-		                             cameraDeltaTime, physicalFrame);
+		                             cameraDeltaTime, physicalFrame, limitPoseAdvance);
 	}
 
 	inline void OnLookAtUpdate(void* lookAtController, void* cameraTransform)

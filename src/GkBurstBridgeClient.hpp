@@ -11,6 +11,7 @@ namespace GakuMotion
 	class BurstBridgeClient
 	{
 		HMODULE module_{};
+		bool supportsSceneForceFilter_{};
 		GbbApi api_{};
 		std::wstring path_;
 		bool attempted_{};
@@ -225,12 +226,14 @@ namespace GakuMotion
 				return false;
 			}
 			api_ = next;
+			supportsSceneForceFilter_ = GetProcAddress(module_,"GakuBurstBridge_SupportsSceneForceFilter") != nullptr;
 			reason = "discovering";
 			return true;
 		}
 
 		bool Publish(const IdolBoneBinding& b, const IdolController& ctrl, float time, int frame,
-		             bool beforeQuartz = false, bool sleeveDiagnostics = false, bool alignRenderPose = false)
+		             bool beforeQuartz = false, bool sleeveDiagnostics = false, bool alignRenderPose = false,
+                     bool noSceneForces = false)
 		{
 			if (!Ensure()) return false;
 			if (faulted_) return false;
@@ -251,6 +254,8 @@ namespace GakuMotion
 			packet.flags = GBB_FRAME_INJECT;
 			if (beforeQuartz) packet.flags |= GBB_FRAME_BEFORE_QUARTZ;
 			if (sleeveDiagnostics) packet.flags |= GBB_FRAME_SLEEVE_DIAGNOSTICS;
+            if (noSceneForces && supportsSceneForceFilter_)
+                packet.flags |= GBB_FRAME_NO_SCENE_FORCES;
 			packet.actor = b.actor;
 			packet.animator = b.cachedAnimator;
 			packet.clip_time = time;
