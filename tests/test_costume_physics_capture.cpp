@@ -160,6 +160,24 @@ int main()
     capture.RecordSwingState("RigntBackCloth1_S", sampled.binding, 3, 13.157f, swing);
     capture.RecordSwingRender("LeftFrontHair1_S", sampled.binding.actor, 7893, 13.161f,
         13.144f, hairB, hair, hairB, "camera_end", true);
+    GbbSwingInputSample inputs{};
+    inputs.size=sizeof(inputs);
+    inputs.source_frame=7891;
+    inputs.anchor_mask=1;
+    inputs.count=1;
+    inputs.indices[0]=7;
+    inputs.stream_anchor[0]={1.f,2.f,3.f};
+    inputs.properties[0]=.5f;
+    inputs.property_mask=1;
+    swing.source_frame=7891;
+    swing.before_count=swing.after_count=2;
+    swing.before[1].index=swing.after[1].index=7;
+    swing.after[1].hit_checks=1;
+    capture.RecordSwingInputs("RigntBackCloth1_S",sampled.binding,7892,13.144f,1,swing,&inputs);
+    ++inputs.source_frame;
+    ++swing.source_frame;
+    inputs.stream_anchor[0].z=3.5f;
+    capture.RecordSwingInputs("RigntBackCloth1_S",sampled.binding,7893,13.161f,1,swing,&inputs);
     capture.RecordSwingRenderSummary(sampled.binding.actor,7893,13.161f,15,15,15,"camera_end");
 	assert(capture.Close("synthetic") && capture.Frames() == 3);
 	{

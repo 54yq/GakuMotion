@@ -110,6 +110,22 @@ typedef struct GbbSwingStateSample {
 } GbbSwingStateSample;
 typedef int32_t (GBB_CALL *GbbSampleSwingStateFn)(void* actor, void* transform, uint32_t slot, int32_t request_frame, GbbSwingStateSample* output);
 
+/* Optional input record for the same two armed SampleSwingState slots. */
+typedef struct GbbSwingInputSample {
+    uint32_t size;
+    int32_t source_frame;
+    uint32_t property_mask;
+    uint32_t anchor_mask;
+    GbbVector3 stream_anchor[4], cached_parent[4], cached_self[4];
+    int32_t indices[4];
+    uint32_t count;
+    float properties[17];
+    float swing_time;
+    char property_reason[48];
+    char anchor_reason[48];
+} GbbSwingInputSample;
+typedef int32_t (GBB_CALL *GbbReadSwingInputsFn)(void* actor, void* transform, uint32_t slot, int32_t request_frame, GbbSwingInputSample* output);
+
 typedef int32_t (GBB_CALL *GbbSampleSwingOutputFn)(void* actor, void* transform, int32_t request_frame, GbbSwingOutputSample* output);
 typedef struct GbbPerf {
     uint32_t size, version;

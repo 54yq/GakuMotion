@@ -99,6 +99,9 @@ class Bridge {
 #endif
     using SwingFn = void(*)(void*, void*);
     using DeltaFn = float(*)(void*);
+    struct PropertyHandle { uint32_t version; int handle, value, type; };
+    using PropertyResolveFn = void(*)(PropertyHandle*,void*);
+    using PropertyReadFn = float(*)(PropertyHandle*,void*);
     using BindFn = void(*)(void*, void*, Handle*, const void*);
     using ResolveFn = void(*)(Handle*, void*);
     using QuatFn = void(*)(Handle*, void*, GbbQuaternion*);
@@ -110,6 +113,8 @@ class Bridge {
     BindFn bind_{}; GetRigFn getRig_{}; ResolveFn resolve_{};
     QuatFn readRotation_{}, writeRotation_{}, readWorldRotation_{};
     PosFn writePosition_{}, readWorldPosition_{};
+    PropertyResolveFn resolveProperty_{};
+    PropertyReadFn readProperty_{};
     DeltaFn originalDelta_{}; SwingFn originalSwing_{};
     void* deltaTarget_{}; void* swingTarget_{};
     SwingFn originalQuartz_{};
@@ -189,6 +194,65 @@ class Bridge {
             return layout;
         }
     };
+    struct InputLayout {
+        int manage{-1}, valid{-1}, parent{-1}, self{-1};
+        std::array<int,17> properties{};
+        bool managed{};
+    };
+    InputLayout inputLayout_{};
+    std::array<GbbSwingInputSample,2> inputResults_{};
+
+    InputLayout PrepareInputLayout()
+    {
+        InputLayout input{};
+        input.properties.fill(-1);
+        uint32_t align{};
+        const auto actor = [&](const char* name) { return meta_.Class("ActorAnimation.Runtime.dll","ActorAnimation",name); };
+        const auto offset = [&](void* owner,const char* name,int code,size_t size,void* type=nullptr) {
+            if (!owner || !meta_.classFromType) return -1;
+            const auto field = meta_.Field(owner,name,code);
+            if (!field || (type && meta_.classFromType(meta_.fieldType(field)) != type)) return -1;
+            const int at = meta_.fieldOffset(field)-profile::BoxHeader;
+            const int bytes = meta_.valueSize(owner,&align);
+            return at >= 0 && bytes >= at && size <= static_cast<size_t>(bytes-at) ? at : -1;
+        };
+        const auto dynamic = actor("ActorSwingJobDynamicBone");
+        const auto affine = actor("ActorSwingAffineTransform");
+        if (affine) {
+            const int translation = offset(affine,"translation",0x11,sizeof(GbbVector3));
+            const int bytes = meta_.valueSize(affine,&align);
+            const int parent = offset(dynamic,"parentTx",0x11,bytes,affine);
+            const int self = offset(dynamic,"selfTx",0x11,bytes,affine);
+            if (translation >= 0 && parent >= 0) input.parent = parent+translation;
+            if (translation >= 0 && self >= 0) input.self = self+translation;
+        }
+        const auto swing = actor("ActorAnimationSwingJobSkeleton");
+        const auto manage = actor("ActorAnimationManageProperty");
+        const auto handle = meta_.Class("UnityEngine.AnimationModule.dll","UnityEngine.Animations","PropertyStreamHandle");
+        const auto property = meta_.Class("Unity.Animation.Rigging.dll","UnityEngine.Animations.Rigging","FloatProperty");
+        if (!manage || !handle || !property || !resolveProperty_ || !readProperty_ ||
+            meta_.valueSize(handle,&align)!=sizeof(PropertyHandle) ||
+            !meta_.Offset(handle,"m_AnimatorBindingsVersion",0,0x09) ||
+            !meta_.Offset(handle,"handleIndex",4,0x08) || !meta_.Offset(handle,"valueArrayIndex",8,0x08) ||
+            !meta_.Offset(handle,"bindType",12,0x08)) return input;
+        const int value = offset(property,"value",0x11,sizeof(PropertyHandle),handle);
+        const int propertyBytes = meta_.valueSize(property,&align);
+        const int manageBytes = meta_.valueSize(manage,&align);
+        input.manage = offset(swing,"<manageProperty>k__BackingField",0x11,manageBytes,manage);
+        input.valid = offset(manage,"valid",0x02,1);
+        if (value<0 || input.manage<0 || input.valid<0) return input;
+        static constexpr const char* names[]{
+            "globalForceX","globalForceY","globalForceZ","windDirectionX","windDirectionY","windDirectionZ",
+            "windPower","windFluctuation","windWaveAmplitude","windWaveFrequency","windWavePhase",
+            "windRangeMax","windRangeMin","windRangeFrequency","windRangePhase","randomPower","randomFluctuation"};
+        for (size_t i=0;i<std::size(names);++i) {
+            const int member = offset(manage,names[i],0x11,propertyBytes,property);
+            if (member>=0) input.properties[i]=member+value;
+        }
+        input.managed = true;
+        return input;
+    }
+
     BoneStateLayout stateLayout_{};
     bool stateLayoutChecked_{};
 
@@ -265,6 +329,72 @@ class Bridge {
         if (offset < 0) return INT32_MIN;
         __try { return wide ? ReadStateField<int32_t>(row,offset) : ReadStateField<uint8_t>(row,offset); }
         __except(EXCEPTION_EXECUTE_HANDLER) { return INT32_MIN+1; }
+    }
+
+    static bool FiniteVector(const GbbVector3& v) {
+        return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+    }
+    void ReadInputProperties(const InputLayout& layout,void* swing,void* stream,GbbSwingInputSample& out) {
+        const char* reason = "property_layout_or_icall_unavailable";
+        __try {
+            out.swing_time = ReadStateField<float>(static_cast<unsigned char*>(swing),profile::SwingTime);
+            if (layout.managed) {
+                const auto* manage = static_cast<unsigned char*>(swing)+layout.manage;
+                reason = "manage_property_unbound";
+                if (ReadStateField<uint8_t>(manage,layout.valid)) {
+                    const uint32_t version = ReadStateField<uint32_t>(static_cast<unsigned char*>(stream),0);
+                    reason = "property_missing_or_unresolved";
+                    for (unsigned i=0;i<std::size(layout.properties);++i) {
+                        if (layout.properties[i]<0) continue;
+                        auto handle = ReadStateField<PropertyHandle>(manage,layout.properties[i]);
+                        if (handle.handle<0 || handle.type<=0 || !handle.version) continue;
+                        if (handle.version!=version || handle.value<0) resolveProperty_(&handle,stream);
+                        if (handle.version!=version || handle.value<0) continue;
+                        const float value = readProperty_(&handle,stream);
+                        if (!std::isfinite(value)) continue;
+                        out.properties[i]=value;
+                        out.property_mask |= 1u<<i;
+                    }
+                    if (out.property_mask == (1u<<std::size(layout.properties))-1) reason="";
+                }
+            }
+        } __except(EXCEPTION_EXECUTE_HANDLER) { reason="property_read_fault"; }
+        std::snprintf(out.property_reason,sizeof(out.property_reason),"%s",reason);
+    }
+    void ReadInputAnchors(const InputLayout& layout,const BoneStateLayout& boneLayout,void* swing,void* stream,
+                         const GbbSwingBoneState* bones,unsigned count,GbbSwingInputSample& out) {
+        const char* reason = "anchor_list_unavailable";
+        __try {
+            uintptr_t container{};
+            ListHeader header{};
+            if (ReadListHeader(swing,ListOffsets[0],container,header) && ValidListHeader(header,boneLayout.stride) && header.payload) {
+                reason = "anchor_layout_or_handle_unavailable";
+                for (unsigned i=0;i<count && i<4;++i) {
+                    const int index=bones[i].index;
+                    if (index<0 || index>=header.length) break;
+                    out.indices[i]=index;
+                    out.count=i+1;
+                    const auto* row=reinterpret_cast<const unsigned char*>(header.payload)+index*boneLayout.stride;
+                    if (layout.parent>=0) {
+                        out.cached_parent[i]=ReadStateField<GbbVector3>(row,layout.parent);
+                        if (FiniteVector(out.cached_parent[i])) out.anchor_mask |= 1u<<(4+i);
+                    }
+                    if (layout.self>=0) {
+                        out.cached_self[i]=ReadStateField<GbbVector3>(row,layout.self);
+                        if (FiniteVector(out.cached_self[i])) out.anchor_mask |= 1u<<(8+i);
+                    }
+                    auto handle=ReadStateField<Handle>(row,boneLayout.driven);
+                    if (!readWorldPosition_ || handle.index<0) continue;
+                    resolve_(&handle,stream);
+                    if (handle.skeleton<0) continue;
+                    readWorldPosition_(&handle,stream,&out.stream_anchor[i]);
+                    if (FiniteVector(out.stream_anchor[i])) out.anchor_mask |= 1u<<i;
+                }
+                const unsigned full=(1u<<out.count)-1;
+                if (out.count && out.anchor_mask==(full|(full<<4)|(full<<8))) reason="";
+            }
+        } __except(EXCEPTION_EXECUTE_HANDLER) { reason="anchor_read_fault"; }
+        std::snprintf(out.anchor_reason,sizeof(out.anchor_reason),"%s",reason);
     }
 
     // Match the transform handle in the same stream before following child
@@ -344,6 +474,8 @@ class Bridge {
         std::array<GbbSwingStateSample,2> samples{};
         std::array<const char*,2> inputFailures{};
         BoneStateLayout layout{};
+        InputLayout inputLayout{};
+        std::array<GbbSwingInputSample,2> inputs{};
     };
 
     void FinishBoneStates(StateWork& work,void* swing,void* stream) {
@@ -364,8 +496,10 @@ class Bridge {
             sample.delta_time=request.dt;
             std::lock_guard<std::mutex> lock(mutex_);
             if (stateRequests_[i].transform==request.transform && stateRequests_[i].frame==request.frame &&
-                generation_.load(std::memory_order_relaxed)==request.generation)
+                generation_.load(std::memory_order_relaxed)==request.generation) {
                 stateResults_[i]=sample;
+                inputResults_[i]=work.inputs[i];
+            }
         }
     }
 
@@ -519,7 +653,7 @@ class Bridge {
         // Main-thread-only; worker callbacks are installed once by the owner.
         meta_=source.meta_; rigType_=source.rigType_; jobClass_=source.jobClass_;
         bindInfo_=source.bindInfo_; getRigInfo_=source.getRigInfo_; bind_=source.bind_; getRig_=source.getRig_;
-        resolve_=source.resolve_; readRotation_=source.readRotation_; writeRotation_=source.writeRotation_;
+        resolve_=source.resolve_; resolveProperty_=source.resolveProperty_; readProperty_=source.readProperty_; readRotation_=source.readRotation_; writeRotation_=source.writeRotation_;
         readWorldRotation_=source.readWorldRotation_; writePosition_=source.writePosition_; readWorldPosition_=source.readWorldPosition_;
         originalDelta_=source.originalDelta_; burst_=source.burst_; burstSize_=source.burstSize_;
         discoveryStarted_=source.discoveryStarted_;
@@ -648,6 +782,10 @@ class Bridge {
         writePosition_ = reinterpret_cast<PosFn>(meta_.icall("UnityEngine.Animations.TransformStreamHandle::SetLocalPositionInternal_Injected"));
         readWorldRotation_ = reinterpret_cast<QuatFn>(meta_.icall("UnityEngine.Animations.TransformStreamHandle::GetRotationInternal_Injected"));
         readWorldPosition_ = reinterpret_cast<PosFn>(meta_.icall("UnityEngine.Animations.TransformStreamHandle::GetPositionInternal_Injected"));
+        resolveProperty_ = reinterpret_cast<PropertyResolveFn>(meta_.icall("UnityEngine.Animations.PropertyStreamHandle::ResolveInternal"));
+        readProperty_ = reinterpret_cast<PropertyReadFn>(meta_.icall("UnityEngine.Animations.PropertyStreamHandle::GetFloatInternal"));
+        if (!profile::Executable(reinterpret_cast<void*>(resolveProperty_))) resolveProperty_ = nullptr;
+        if (!profile::Executable(reinterpret_cast<void*>(readProperty_))) readProperty_ = nullptr;
         deltaTarget_ = meta_.icall("UnityEngine.Animations.AnimationStream::GetDeltaTime");
         const void* required[] = {reinterpret_cast<void*>(bind_), reinterpret_cast<void*>(getRig_),
             reinterpret_cast<void*>(resolve_), reinterpret_cast<void*>(readRotation_),
@@ -1019,6 +1157,7 @@ class Bridge {
                         }
                         if (stateLayout_.stride) {
                             stateWork.layout = stateLayout_;
+                            stateWork.inputLayout = inputLayout_;
                             for (size_t i=0;i<stateRequests_.size();++i) {
                                 const auto& request=stateRequests_[i];
                                 if (request.generation!=s.generation || request.frame!=s.frame || !request.transform) continue;
@@ -1070,8 +1209,15 @@ class Bridge {
         const bool matched = BeforeSwingGuarded(target,swing, stream, reinterpret_cast<uintptr_t>(_ReturnAddress()),admittedGeneration,outputProbe,stateWork);
         for (size_t i=0;i<stateWork.requests.size();++i) {
             const auto& request=stateWork.requests[i];
-            if (request.transform) stateWork.samples[i].before_count =
-                ReadBoneStates(target,stateWork.layout,request.handle,swing,stream,stateWork.samples[i].before,&stateWork.inputFailures[i]);
+            if (!request.transform) continue;
+            auto& sample = stateWork.samples[i];
+            sample.before_count = ReadBoneStates(target,stateWork.layout,request.handle,swing,stream,sample.before,&stateWork.inputFailures[i]);
+            auto& input = stateWork.inputs[i];
+            input.size=sizeof(input);
+            input.source_frame=request.frame;
+            input.swing_time=std::numeric_limits<float>::quiet_NaN();
+            target->ReadInputProperties(stateWork.inputLayout,swing,stream,input);
+            target->ReadInputAnchors(stateWork.inputLayout,stateWork.layout,swing,stream,sample.before,sample.before_count,input);
         }
         const uint64_t start = matched ? Ticks() : 0;
         // Never manually execute or skip the engine solver. Its own behavior
@@ -1127,8 +1273,10 @@ public:
         if (!stateLayoutChecked_) {
             lock.unlock();
             const auto layout=PrepareBoneStateLayout();
+            const auto inputs=PrepareInputLayout();
             lock.lock();
             stateLayout_=layout;
+            inputLayout_=inputs;
             stateLayoutChecked_=true;
         }
         if (!stateLayout_.stride) {
@@ -1150,9 +1298,23 @@ public:
                 current_.animator!=animator || current_.frame!=frame) return GBB_PENDING;
             request={h,transform,frame,generation,0.f};
             result={};
+            inputResults_[slot]={};
         } else request.frame=frame;
         if (!ready) return fail(GBB_PENDING,same ? "awaiting_matching_solver_frame" : "probe_armed");
         return result.reason[0] ? GBB_E_BINDING : GBB_OK;
+    }
+
+    int ReadSwingInputs(void* actor,void* transform,uint32_t slot,int frame,GbbSwingInputSample* out) {
+        if (!out || out->size!=sizeof(*out) || !transform || slot>=stateRequests_.size() ||
+            !MainThread(false) || frame<=0) return GBB_E_ARGUMENT;
+        std::lock_guard lock(mutex_);
+        const auto& request = stateRequests_[slot];
+        const auto& input = inputResults_[slot];
+        if (current_.actor!=actor || current_.frame!=frame || request.transform!=transform ||
+            request.generation!=generation_.load(std::memory_order_relaxed) ||
+            input.size!=sizeof(*out) || input.source_frame!=frame-1) return GBB_PENDING;
+        *out=input;
+        return GBB_OK;
     }
 
     explicit Bridge(bool detourOwner=true) { if (detourOwner) self_ = this; }
@@ -1820,6 +1982,11 @@ extern "C" GBB_EXPORT int32_t GBB_CALL GakuBurstBridge_ReadActorObservation(void
 extern "C" GBB_EXPORT int32_t GBB_CALL GakuBurstBridge_SampleSwingOutput(void* actor, void* transform, int32_t frame, GbbSwingOutputSample* out) {
     __try { return gbb::CppBoundary([&] { return gbb::instance.SampleSwingOutput(actor,transform,frame,out); }); }
     __except(EXCEPTION_EXECUTE_HANDLER) { return GBB_E_FAULT; }
+}
+
+extern "C" GBB_EXPORT int32_t GBB_CALL GakuBurstBridge_ReadSwingInputs(void* actor, void* transform, uint32_t slot, int32_t frame, GbbSwingInputSample* out) {
+    __try { return gbb::CppBoundary([&] { return gbb::instance.ReadSwingInputs(actor,transform,slot,frame,out); }); }
+    __except(EXCEPTION_EXECUTE_HANDLER) { return GBB_E_UNAVAILABLE; }
 }
 
 extern "C" GBB_EXPORT int32_t GBB_CALL GakuBurstBridge_SampleSwingState(void* actor, void* transform, uint32_t slot, int32_t frame, GbbSwingStateSample* out) {

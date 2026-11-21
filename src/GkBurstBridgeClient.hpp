@@ -322,6 +322,17 @@ namespace GakuMotion
             __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
         }
 
+        bool ReadSwingInputs(void* actor, void* transform, uint32_t slot, int frame, GbbSwingInputSample& result) const
+        {
+            const auto fn=module_ ? reinterpret_cast<GbbReadSwingInputsFn>(
+                GetProcAddress(module_,"GakuBurstBridge_ReadSwingInputs")) : nullptr;
+            if (!fn) return false;
+            result={};
+            result.size=sizeof(result);
+            __try { return fn(actor,transform,slot,frame,&result)==GBB_OK && result.source_frame==frame-1; }
+            __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+        }
+
         int SampleSwingState(void* actor,void* transform,uint32_t slot,int frame,GbbSwingStateSample& result) const
         {
             const auto fn=module_ ? reinterpret_cast<GbbSampleSwingStateFn>(

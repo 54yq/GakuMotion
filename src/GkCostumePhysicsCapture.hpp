@@ -28,6 +28,7 @@ namespace GakuMotion
 			state_ = {};
             poseSampler_.Clear();
             swingStatus_ = {};
+            lastInputs_ = {};
 			frames_ = 0;
 			session_ = session;
 			started_ = Clock::now();
@@ -205,6 +206,64 @@ namespace GakuMotion
             out_ << "}\n";
         }
 
+        void RecordSwingInputs(const char* bone, const IdolBoneBinding& binding, int frame, float time,
+                               uint32_t slot, const GbbSwingStateSample& state, const GbbSwingInputSample* input)
+        {
+            if (!Active() || slot>=lastInputs_.size()) return;
+            out_ << "{\"event\":\"swing_inputs\",\"bone\":";
+            Name(bone);
+            Identity(1,reinterpret_cast<uintptr_t>(binding.actor),frame,time);
+            out_ << ",\"source_frame\":" << state.source_frame << ",\"stream_dt_s\":";
+            Number(state.delta_time);
+            if (!input) {
+                lastInputs_[slot]={};
+                out_ << ",\"error\":\"input_sample_unavailable\"}\n";
+                return;
+            }
+            const auto& sample=*input;
+            auto& prior=lastInputs_[slot];
+            auto vector = [&](const GbbVector3& v) { Vector(Vector3(v.x,v.y,v.z)); };
+            const auto count=(std::min)(sample.count,4u);
+            out_ << ",\"job_time_s\":"; Number(sample.swing_time);
+            out_ << ",\"property_reason\":"; Name(sample.property_reason);
+            out_ << ",\"anchor_reason\":"; Name(sample.anchor_reason);
+            static constexpr const char* properties[]{
+                "global_force_x","global_force_y","global_force_z","wind_dir_x","wind_dir_y","wind_dir_z",
+                "wind_power","wind_fluctuation","wind_wave_amplitude","wind_wave_frequency","wind_wave_phase",
+                "wind_range_max","wind_range_min","wind_range_frequency","wind_range_phase","random_power","random_fluctuation"};
+            for (size_t i=0;i<std::size(properties);++i) {
+                out_ << ','; Name(properties[i]); out_ << ':';
+                if (sample.property_mask & (1u<<i)) Number(sample.properties[i]); else out_ << "null";
+            }
+            out_ << ",\"anchors\":[";
+            for (unsigned i=0;i<count;++i) {
+                if (i) out_ << ',';
+                const bool stream = (sample.anchor_mask & (1u<<i)) != 0;
+                const auto& p=sample.stream_anchor[i];
+                out_ << "{\"index\":" << sample.indices[i] << ",\"stream_world\":";
+                if (stream) vector(p); else out_ << "null";
+                out_ << ",\"stream_delta_m\":";
+                if (stream && prior.actor==binding.actor && prior.sample.source_frame+1==sample.source_frame &&
+                    prior.sample.count>i && prior.sample.indices[i]==sample.indices[i] && (prior.sample.anchor_mask&(1u<<i))) {
+                    const auto& q=prior.sample.stream_anchor[i];
+                    Vector({p.x-q.x,p.y-q.y,p.z-q.z});
+                } else out_ << "null";
+                out_ << ",\"cached_parent_tx\":";
+                if (sample.anchor_mask & (1u<<(4+i))) vector(sample.cached_parent[i]); else out_ << "null";
+                out_ << ",\"cached_self_tx\":";
+                if (sample.anchor_mask & (1u<<(8+i))) vector(sample.cached_self[i]); else out_ << "null";
+                out_ << '}';
+            }
+            out_ << ']';
+            if (slot==1 && state.before_count>1 && state.after_count>1 && state.before[1].index==state.after[1].index) {
+                out_ << ",\"cloth_second_contact\":{\"index\":" << state.after[1].index
+                     << ",\"hit_before\":" << state.before[1].hit_checks << ",\"hit_after\":" << state.after[1].hit_checks
+                     << ",\"collider_id\":null,\"identity_reason\":\"native_hit_record_has_no_collider_id\"}";
+            }
+            out_ << "}\n";
+            prior={binding.actor,sample};
+        }
+
         void RecordSwingRender(const char* bone, void* actor, int frame, float time, float sampleTime,
                                Quaternion raw, Quaternion shown, Quaternion restored, const char* phase, bool success)
         {
@@ -279,6 +338,8 @@ namespace GakuMotion
         }
 
 	private:
+        struct LastInputs { void* actor{}; GbbSwingInputSample sample{}; };
+        std::array<LastInputs,2> lastInputs_{};
         FallbackPhysics poseSampler_;
         std::array<std::string,2> swingStatus_{};
 		struct Role
