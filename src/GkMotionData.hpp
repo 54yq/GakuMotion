@@ -407,12 +407,40 @@ namespace GakuMotion
 				out.clear();
 		}
 
-		void Sample(float timeSeconds, Vector3& outRootPos, std::vector<Quaternion>& outRotations) const
+		void Sample(float timeSeconds, Vector3& outRootPos, std::vector<Quaternion>& outRotations,
+                    bool smoothSwingHead = false) const
 		{
 			const KineTexture::DenseClipView view{fps, total_frames, bone_count, root_positions, bone_rotations};
 			if (!std::isfinite(timeSeconds) || !KineTexture::ValidateDenseClipShape(view)) return;
 			outRotations.resize(bone_count);
 			KineTexture::SampleDensePose(view, timeSeconds, outRootPos, std::span<Quaternion>(outRotations));
+            if (!smoothSwingHead || !IsLocalDeltaStream()) return;
+
+            // Round short head/neck acceleration peaks before retargeting and
+            // Swing publishing. Symmetric taps keep the time of the turn.
+            constexpr float maxRadius = 1.f / 15.f;
+            constexpr float maxHalfCorrection = .034906585f; // 4 degrees / 2
+            const float position = timeSeconds * fps;
+            const float radius = (std::min)({maxRadius*fps, position, float(total_frames-1)-position});
+            if (!(radius>0.f)) return;
+            const auto jointAt = [&](float frame,size_t bone) {
+                frame=std::clamp(frame,0.f,float(total_frames-1));
+                const size_t first=static_cast<size_t>(frame);
+                const size_t next=(std::min)(first+1,size_t(total_frames-1));
+                return Quaternion::Slerp(bone_rotations[first*bone_count+bone],
+                    bone_rotations[next*bone_count+bone],frame-float(first));
+            };
+            for (size_t bone=0;bone<bones.size() && bone<outRotations.size();++bone) {
+                const auto id=bones[bone].humanoid_id;
+                if (id!=9 && id!=10) continue; // Unity humanoid Neck and Head
+                auto& rotation=outRotations[bone];
+                const auto midpoint=Quaternion::Slerp(jointAt(position-radius,bone),
+                    jointAt(position+radius,bone),.5f);
+                const float cosine=std::clamp(std::abs(Quaternion::Dot(rotation,midpoint)),0.f,1.f);
+                const float halfAngle=std::acos(cosine);
+                if (halfAngle>1e-5f)
+                    rotation=Quaternion::Slerp(rotation,midpoint,(std::min)(.5f,maxHalfCorrection/halfAngle));
+            }
 		}
 	};
 } // namespace GakuMotion

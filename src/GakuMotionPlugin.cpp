@@ -171,11 +171,16 @@ namespace
 	int g_costumeCaptureMotion{-1};
     int g_costumeCaptureBackend{-1};
 
-    bool ThreeActorNativePlayback(const GakuMotion::Core& core)
+    bool ThreeActorNativeTakeover(const GakuMotion::Core& core)
     {
         return core.liveTakeoverActive && core.InjectionAllowed() && !core.captureSuspended &&
             !core.ensembleRestoreUnconfirmed && core.config.secondaryPhysicsBackend == 2 &&
-            core.sceneActorRegistry.Entries().size() >= 3 && core.player.controller.targetActor &&
+            core.sceneActorRegistry.Entries().size() >= 3 && core.player.controller.targetActor;
+    }
+
+    bool ThreeActorNativePlayback(const GakuMotion::Core& core)
+    {
+        return ThreeActorNativeTakeover(core) &&
             core.player.state == GakuMotion::PlaybackState::Playing && !core.player.scrubbing;
     }
 
@@ -1081,7 +1086,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.45-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.46-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -4062,7 +4067,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	if (player.controller.targetActor)
 		GakuMotion::OnLateUpdate(activeActor, anim, nullptr, dtToPass, isNewPhysicalFrame,
 		                        s_cameraFrameDelta, s_cameraPhysicalFrame,
-                                ThreeActorNativePlayback(core) && !core.ensemble.HasActiveFollowers() &&
+                                ThreeActorNativeTakeover(core) && !core.ensemble.HasActiveFollowers() &&
                                 activeActor == player.controller.targetActor);
 	EyeGazeProbe::After(activeActor);
     // Only observed Motion-owned actors can trigger this. Each role has its own

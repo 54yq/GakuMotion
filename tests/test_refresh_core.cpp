@@ -918,6 +918,37 @@ static void SetupLongClipPlayer(MotionPlayer& player)
 	WireControllerCallbacks(player.controller);
 }
 
+static void TestNativeSwingHeadSampling()
+{
+    using namespace GakuMotion;
+    MotionClip clip;
+    clip.format=MotionClip::Format::kGkClip;
+    clip.fps=30.f;
+    clip.total_frames=7;
+    clip.bone_count=3;
+    clip.bones={{9,"Neck"},{10,"Head"},{0,"Hips"}};
+    clip.root_positions.resize(clip.total_frames);
+    for (unsigned i=0;i<clip.total_frames;++i) {
+        clip.bone_rotations.push_back(Quaternion::FromEulerDegreesXYZ(0.f,i<3 ? 0.f : 50.f,0.f));
+        clip.bone_rotations.push_back(Quaternion::FromEulerDegreesXYZ(0.f,5.f*i,0.f));
+        clip.bone_rotations.push_back(Quaternion::FromEulerDegreesXYZ(0.f,i<3 ? 0.f : 50.f,0.f));
+    }
+    const auto angle=[](const Quaternion& a,const Quaternion& b) {
+        const float dot=std::clamp(std::abs(Quaternion::Dot(a.Normalized(),b.Normalized())),0.f,1.f);
+        return std::acos(dot)*114.59156f;
+    };
+    Vector3 root;
+    std::vector<Quaternion> raw,smooth;
+    clip.Sample(3.f/clip.fps,root,raw);
+    clip.Sample(3.f/clip.fps,root,smooth,true);
+    Check(angle(raw[0],smooth[0])>3.9f && angle(raw[0],smooth[0])<4.1f,"neck smoothing is bounded");
+    Check(angle(raw[1],smooth[1])<.1f,"head smoothing preserves constant angular speed");
+    Check(angle(raw[2],smooth[2])<.1f,"head support sampling leaves hips untouched");
+    clip.Sample(0.f,root,raw);
+    clip.Sample(0.f,root,smooth,true);
+    Check(angle(raw[0],smooth[0])<.1f,"head smoothing holds the first pose");
+}
+
 static void TestLivePoseClock()
 {
     using GakuMotion::live_physics_clock::PoseClock;
@@ -3139,6 +3170,7 @@ int main(int argc, char** argv)
  TestWristTwistRedistribution();
  TestAuxQuaternionSignInvariance();
  TestPlayerSeekSync();
+ TestNativeSwingHeadSampling();
  TestLivePoseClock();
  TestPlaybackSpeedAndClock();
  TestPlaybackTiming();

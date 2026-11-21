@@ -638,7 +638,8 @@ namespace GakuMotion
                 const float poseTime = poseClock_.Sample(currentTime,actor,seekCount,
                     limitPoseAdvance && state == PlaybackState::Playing && !scrubbing);
                 controller.ApplyMotion(clip, TrackSourceTime(poseTime,timing.motion), actor,
-                    TrackSourceTime(poseTime,timing.facial));
+                    TrackSourceTime(poseTime,timing.facial), limitPoseAdvance && !scrubbing &&
+                    (state == PlaybackState::Playing || state == PlaybackState::Paused));
             }
 		}
 

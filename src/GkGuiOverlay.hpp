@@ -297,6 +297,7 @@ namespace GakuMotion
 	void DrawStagePage(GuiOverlay& overlay, const GuiContext& ctx);
     inline std::atomic<bool> externalStageEnabled{false};
     inline std::atomic<int> externalStageStatus{0};
+#if defined(GKMOTION_ENABLE_IMGUI) || defined(HAS_IMGUI)
     inline void DrawExternalStageControl()
     {
         bool enabled = externalStageEnabled.load();
@@ -306,6 +307,7 @@ namespace GakuMotion
         if (status == 1) ImGui::TextUnformatted("舞台模型已实例化");
         if (status == -1) ImGui::TextUnformatted("舞台载入失败，请查看 GakuLoader 日志");
     }
+#endif
     void DrawStageLoadReplacementControl(const GuiContext& ctx);
 	void DrawPhysicsDiagnostics(const GuiContext& ctx);
 
