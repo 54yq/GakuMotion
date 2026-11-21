@@ -918,6 +918,32 @@ static void SetupLongClipPlayer(MotionPlayer& player)
 	WireControllerCallbacks(player.controller);
 }
 
+static void TestLivePoseClock()
+{
+    using GakuMotion::live_physics_clock::PoseClock;
+    PoseClock clock;
+    int target{}, replacement{};
+    const auto near = [](float a,float b) { return std::abs(a-b)<.00002f; };
+    Check(near(clock.Sample(26.456f,&target,0,true),26.456f), "live pose first sample");
+    const auto longFrame = clock.Sample(26.571f,&target,0,true);
+    Check(near(longFrame,26.571f-PoseClock::MaxLag) && near(clock.transport,26.571f),
+        "live pose limits the logged long frame while keeping the audio clock");
+    Check(near(clock.Sample(26.571f,&target,0,true),longFrame), "same time cannot consume a second catch-up step");
+    const auto recovery = clock.Sample(26.588f,&target,0,true);
+    Check(recovery>longFrame && recovery<26.588f && recovery-longFrame<.055f, "live pose recovers gradually");
+    Check(near(clock.Sample(26.585f,&target,0,true),recovery), "audio quantization holds the pose");
+    for (int i=0;i<100;++i) {
+        const float time=27.f+i*.05f;
+        const float pose=clock.Sample(time,&target,0,true);
+        Check(pose<=time && time-pose<=PoseClock::MaxLag+.00002f, "sustained low FPS has bounded pose lag");
+    }
+    Check(near(clock.Sample(40.f,&target,1,true),40.f), "seek resets the pose cursor");
+    Check(near(clock.Sample(0.f,&target,1,true),0.f), "loop resets the pose cursor");
+    Check(near(clock.Sample(1.f,&replacement,1,true),1.f), "actor change resets the pose cursor");
+    Check(near(clock.Sample(2.f,&replacement,1,false),2.f), "paused pose remains at the requested time");
+    Check(near(clock.Sample(2.1f,&replacement,1,true),2.1f), "resume starts at the actual time");
+}
+
 static void TestPlaybackSpeedAndClock()
 {
 	BeginTest("playback_speed_and_clock");
@@ -3113,6 +3139,7 @@ int main(int argc, char** argv)
  TestWristTwistRedistribution();
  TestAuxQuaternionSignInvariance();
  TestPlayerSeekSync();
+ TestLivePoseClock();
  TestPlaybackSpeedAndClock();
  TestPlaybackTiming();
  TestTrackTimingMetadata();

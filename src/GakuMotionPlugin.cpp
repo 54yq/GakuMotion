@@ -1081,7 +1081,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.43-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.44-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -3148,8 +3148,18 @@ static bool ReadSceneActors(std::vector<GakuMotion::SceneActorObservation>& obse
 	for (void* actorType : StageLoader::actorTypes)
 	{
 		if (!actorType) continue;
-		void* args[]{actorType, &includeInactive};
-		void* array = StageLoader::Invoke(StageLoader::findAll, nullptr, args);
+		const size_t first = observations.size();
+		void* array = nullptr;
+		if (!includeInactive && StageLoader::findAllUnsorted) {
+			int excludeInactive = 0, noSort = 0;
+			void* args[]{actorType, &excludeInactive, &noSort};
+			array = StageLoader::Invoke(StageLoader::findAllUnsorted, nullptr, args);
+		}
+		const bool unsorted = array != nullptr;
+		if (!array) {
+			void* args[]{actorType, &includeInactive};
+			array = StageLoader::Invoke(StageLoader::findAll, nullptr, args);
+		}
 		if (!array) return false;
 		StageLoader::Handle pin = StageLoader::newHandle(array, false);
 		if (!pin) return false;
@@ -3182,6 +3192,9 @@ static bool ReadSceneActors(std::vector<GakuMotion::SceneActorObservation>& obse
 			if (character.empty()) character = GakuMotion::DetectIdolCharacterCode(presetName.empty()?actorName:actorName.substr(0,actorName.find(" | GakuActors[")));
 			observations.push_back({actor, id, std::move(character), presetName});
 		}
+		// Preserve existing instance-id order for startup and target selection.
+		if (unsorted) std::sort(observations.begin() + first, observations.end(),
+			[](const auto& a, const auto& b) { return a.instanceId < b.instanceId; });
 	}
 	return true;
 }
@@ -4033,13 +4046,16 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
             }
         }
         g_costumeCapture.RecordActorPose(stage, binding->second, controller, unityFrame, player.currentTime,
-            core.config.secondaryPhysicsBackend, actual, currentNative ? native.source_frame : -1, native.delta_time, realDeltaTime, sampledSwing ? &swingOutput : nullptr, swingBone);
+            core.config.secondaryPhysicsBackend, actual, currentNative ? native.source_frame : -1, native.delta_time, realDeltaTime, sampledSwing ? &swingOutput : nullptr, swingBone,
+            after ? player.AppliedPoseTime() : -1.f);
     };
     recordMainActorPose("before_plugin_pose", false);
 	EyeGazeProbe::Before(activeActor);
 	if (player.controller.targetActor)
 		GakuMotion::OnLateUpdate(activeActor, anim, nullptr, dtToPass, isNewPhysicalFrame,
-		                        s_cameraFrameDelta, s_cameraPhysicalFrame);
+		                        s_cameraFrameDelta, s_cameraPhysicalFrame,
+                                ThreeActorNativePlayback(core) && !core.ensemble.HasActiveFollowers() &&
+                                activeActor == player.controller.targetActor);
 	EyeGazeProbe::After(activeActor);
     // Only observed Motion-owned actors can trigger this. Each role has its own
     // identity, scene epoch and follower generation; never retain managed rigs.
@@ -4141,7 +4157,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 				core.liveTakeoverActive && !core.liveTakeoverFault && OwnsPrimaryMmdClock(activeActor),
 				player.state == GakuMotion::PlaybackState::Preview && player.clip.total_frames > 0);
 			bool native = requested == 2 && nativeReadyToStart && g_burstBridge.Publish(binding->second, player.controller,
-			                                                      player.currentTime, frame,
+			                                                      player.AppliedPoseTime(), frame,
 			                                                      core.config.beforeQuartzExperiment,
 			                                                      core.config.sleeveMuscleDiagnostics,
                                                           unityFrame >= 0 && core.liveTakeoverActive && player.state == GakuMotion::PlaybackState::Playing);
