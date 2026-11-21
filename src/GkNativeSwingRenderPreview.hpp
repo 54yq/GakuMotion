@@ -21,6 +21,11 @@ namespace NativeSwingRenderPreview
     inline float olderTime{}, latestTime{}, previewTime{};
     inline bool armed{}, hookAttempted{}, logged{};
     inline const char* lastStatus{};
+    inline GakuMotion::native_swing::CameraPair cameraPair{};
+    inline GakuLocalifyCameraRenderService renderService{};
+    inline CameraBridge::Render pipelineEnd{};
+    inline int observerToken{};
+    inline bool pairReported{};
 
     inline void Report(const char* reason)
     {
@@ -42,7 +47,7 @@ namespace NativeSwingRenderPreview
         write(transform,q.x,q.y,q.z,q.w);
     }
 
-    inline void Restore(void* camera)
+    inline void Restore(void* camera, const char* phase)
     {
         if (!activeCamera || camera != activeCamera || !CameraBridge::OnUnityThread()) return;
         auto& core = GakuMotion::Core::Instance();
@@ -58,10 +63,70 @@ namespace NativeSwingRenderPreview
             }
             if (recording)
                 g_costumeCapture.RecordSwingRender(bones[i],actor,frame,latestTime,previewTime,
-                    joint.restore,joint.shown,restored,alive && GakuMotion::native_swing::Angle(joint.restore.Normalized(),restored.Normalized()) < .1f);
+                    joint.restore,joint.shown,restored,phase,alive && GakuMotion::native_swing::Angle(joint.restore.Normalized(),restored.Normalized()) < .1f);
             joint.written = false;
         }
         activeCamera = nullptr;
+    }
+
+    inline void End(void* camera)
+    {
+        if (!CameraBridge::OnUnityThread() || !g_faceUnityFrame || !cameraPair.End(camera,g_faceUnityFrame())) return;
+        Restore(camera,"camera_end");
+        if (!pairReported && g_hostContext.logInfo) {
+            pairReported = true;
+            g_hostContext.logInfo("[GakuMotion][NativeSwingRenderPreview] render_pair_observed frame=%d",frame);
+        }
+    }
+
+    inline void EndDetour(void* context, void* camera, void* method)
+    {
+        pipelineEnd(context,camera,method);
+        End(camera);
+    }
+
+    inline bool ConnectEnd()
+    {
+        void* pipeline = FindClass("UnityEngine.CoreModule.dll","UnityEngine.Rendering","RenderPipeline");
+        void* target = pipeline ? FindMethodPointer(pipeline,"EndCameraRendering",2) : nullptr;
+        if (!target) return false;
+        const auto& api = GakuMotion::host::api;
+        GakuLocalifyCameraRenderService service{};
+        const auto queried = api.queryService ? api.queryService(api.hostContext,
+            GAKULOCALIFY_SERVICE_CAMERA_RENDER,GAKULOCALIFY_CAMERA_RENDER_VERSION,sizeof(service),&service) : GAKU_E_UNAVAILABLE;
+        if (queried == GAKU_OK) {
+            if (service.abiVersion != GAKULOCALIFY_CAMERA_RENDER_VERSION || service.structSize < sizeof(service) ||
+                !service.getTarget || !service.subscribe || !service.unsubscribe) return false;
+            if (void* owned = service.getTarget(service.context,GAKULOCALIFY_CAMERA_RENDER_END)) {
+                if (owned != target) return false;
+                GakuLocalifyCameraRenderCallbacks callbacks{GAKULOCALIFY_CAMERA_RENDER_VERSION,sizeof(callbacks),
+                    &observerToken, [](void*) -> uint32_t {
+                        // The provider has one observer covering three entries.
+                        // Only take its callbacks during a pending main-camera render.
+                        return CameraBridge::OnUnityThread() && cameraPair.pending ? 1u : 0u;
+                    }, [](void*,void**) {}, [](void*,void*,void*) {}, [](void*,void*) {},
+                    [](void*,void* camera) { End(camera); }};
+                if (service.subscribe(service.context,&callbacks) != GAKU_OK) return false;
+                renderService = service;
+                if (g_hostContext.logInfo) g_hostContext.logInfo(
+                    "[GakuMotion][NativeSwingRenderPreview] render_end=RenderPipeline.EndCameraRendering route=localify");
+                return true;
+            }
+        } else if (queried != GAKU_E_UNAVAILABLE) return false;
+        const bool installed = CameraBridge::InstallHook("RenderPipeline.EndCameraRendering",target,
+            reinterpret_cast<void*>(EndDetour),reinterpret_cast<void**>(&pipelineEnd));
+        if (installed && g_hostContext.logInfo) g_hostContext.logInfo(
+            "[GakuMotion][NativeSwingRenderPreview] render_end=RenderPipeline.EndCameraRendering route=direct");
+        return installed;
+    }
+
+    inline void Shutdown()
+    {
+        if (activeCamera) Restore(activeCamera,"shutdown");
+        cameraPair = {};
+        CameraBridge::secondaryPoseBegin = nullptr;
+        if (renderService.unsubscribe) renderService.unsubscribe(renderService.context,&observerToken);
+        renderService = {};
     }
 
     inline void Apply(void* camera)
@@ -71,6 +136,7 @@ namespace NativeSwingRenderPreview
             !g_faceUnityFrame || g_faceUnityFrame() != frame || !core.liveTakeoverActive || core.captureSuspended ||
             core.sceneActorRegistry.Epoch() != epoch || core.player.controller.targetActor != actor ||
             core.player.state != GakuMotion::PlaybackState::Playing) return;
+        if (!cameraPair.Begin(camera,frame)) return;
         for (auto& joint : joints) {
             if (joint.count < 3 || !CameraBridge::IsAlive(joint.transform)) continue;
             joint.restore = Read(joint.transform);
@@ -96,17 +162,19 @@ namespace NativeSwingRenderPreview
         const int seekCount = player.SeekCount();
         const bool eligible = native && ThreeActorNativePlayback(core) && currentFrame > 0 && std::isfinite(time) && binding != controller.bindings.end() &&
             binding->second.bindPoseCaptured && controller.fnGetLocalRotation && controller.fnSetLocalRotation;
-        // An incomplete render pair disables the preview before the next actor
-        // tick. Restore through the last bound transforms while they are alive.
-        if (activeCamera) {
-            Restore(activeCamera);
-            CameraBridge::secondaryPoseBegin = nullptr;
-            if (g_hostContext.logWarn) g_hostContext.logWarn("[GakuMotion][NativeSwingRenderPreview] missing_render_end frame=%d",frame);
+        if (currentFrame == frame && target == actor && currentEpoch == epoch && seekCount == seeks) return;
+        if (cameraPair.pending) {
+            if (activeCamera) {
+                Restore(activeCamera,"next_actor_tick");
+                if (g_hostContext.logWarn) g_hostContext.logWarn("[GakuMotion][NativeSwingRenderPreview] missing_render_end frame=%d",frame);
+            } else Report("awaiting_main_camera_end");
+            cameraPair = {};
         }
         armed = false;
         if (!eligible || actor != target || currentEpoch != epoch || seekCount != seeks ||
             currentFrame != frame+1 || time <= latestTime || time-latestTime > 0.1f) {
             joints = {};
+            cameraPair = {};
             if (actor != target || currentEpoch != epoch) boneLookup.Clear();
         }
         if (!eligible || !CameraBridge::ready) {
@@ -117,8 +185,7 @@ namespace NativeSwingRenderPreview
         }
         if (!hookAttempted) {
             hookAttempted = true;
-            if (LiveAspectPreview::EnsureCameraEnd()) {
-                LiveAspectPreview::secondaryPoseEnd = Restore;
+            if (ConnectEnd()) {
                 CameraBridge::secondaryPoseBegin = Apply;
             } else if (g_hostContext.logWarn) g_hostContext.logWarn("[GakuMotion][NativeSwingRenderPreview] end_hook_unavailable");
         }

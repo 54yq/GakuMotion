@@ -5,6 +5,31 @@
 
 namespace GakuMotion::native_swing {
     using KineTexture::Quaternion;
+
+    // Learn the render route on the same camera before borrowing transforms.
+    struct CameraPair {
+        void* pending{};
+        void* confirmed{};
+        int beginFrame{-1};
+        int endFrame{-1};
+
+        bool Begin(void* camera, int frame)
+        {
+            if (!camera || pending || frame <= endFrame) return false;
+            pending = camera;
+            beginFrame = frame;
+            return confirmed == camera && endFrame == frame - 1;
+        }
+
+        bool End(void* camera, int frame)
+        {
+            if (!pending || pending != camera || frame != beginFrame) return false;
+            confirmed = camera;
+            endFrame = frame;
+            pending = nullptr;
+            return true;
+        }
+    };
     inline float Angle(const Quaternion& a, const Quaternion& b)
     {
         return 114.59156f * std::acos((std::min)(1.f, std::abs(Quaternion::Dot(a,b))));

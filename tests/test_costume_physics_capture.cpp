@@ -50,6 +50,26 @@ struct Rig
 
 int main()
 {
+    native_swing::CameraPair pair;
+    int mainCamera{}, overlayCamera{};
+    // 7435 is the unpaired camera-begin from the existing Live trace.
+    assert(!pair.Begin(&mainCamera,7435));
+    assert(!pair.End(&overlayCamera,7435));
+    assert(!pair.End(&mainCamera,7436));
+    assert(pair.pending == &mainCamera);
+    pair = {};
+    assert(!pair.Begin(&mainCamera,7436));
+    assert(pair.End(&mainCamera,7436));
+    assert(pair.Begin(&mainCamera,7437));
+    assert(!pair.Begin(&mainCamera,7437));
+    assert(!pair.End(&overlayCamera,7437));
+    assert(pair.End(&mainCamera,7437));
+    assert(!pair.End(&mainCamera,7437));
+    assert(!pair.Begin(&overlayCamera,7438));
+    assert(pair.End(&overlayCamera,7438));
+    assert(!pair.Begin(&overlayCamera,7440)); // Missing prior frame
+    assert(pair.End(&overlayCamera,7440));
+
     // SOS 13.143/13.157/13.170: the recorded hair reverses and the
     // second cloth link continues along its trajectory.
     const float fraction = 14.f / 27.f;
@@ -115,6 +135,8 @@ int main()
     swing.before[0].hit_checks = INT32_MIN;
     swing.after[0].use_limit = INT32_MIN+1;
     capture.RecordSwingState("RigntBackCloth1_S", sampled.binding, 3, 13.157f, swing);
+    capture.RecordSwingRender("LeftFrontHair1_S", sampled.binding.actor, 7893, 13.161f,
+        13.144f, hairB, hair, hairB, "camera_end", true);
 	assert(capture.Close("synthetic") && capture.Frames() == 3);
 	{
 		std::ifstream recorded(path);
@@ -123,6 +145,7 @@ int main()
 		assert(contents.find("\"source_frame\":2,\"native_dt_s\":0.02") != std::string::npos);
 		const auto actorPose = contents.substr(contents.find("\"event\":\"actor_pose\""));
 		assert(actorPose.find("Skirt1_S") != std::string::npos && actorPose.find("Hair1_S") != std::string::npos);
+        assert(contents.find("\"restore_phase\":\"camera_end\",\"restored\":true") != std::string::npos);
         const auto hair = contents.find("\"event\":\"swing_state\",\"bone\":\"LeftFrontHair1_S\"");
         const auto cloth = contents.find("\"event\":\"swing_state\",\"bone\":\"RigntBackCloth1_S\"");
         assert(hair < cloth && cloth != std::string::npos);

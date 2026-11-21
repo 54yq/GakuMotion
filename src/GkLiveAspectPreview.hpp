@@ -25,7 +25,6 @@ namespace LiveAspectPreview
     using Projection = GakuMotion::live_aspect::Projection;
     inline const void *getProjection{}, *setProjection{}, *resetProjection{}, *getAspect{}, *getStereo{};
     inline CameraBridge::Render managerEnd{};
-    inline void (*secondaryPoseEnd)(void*) = nullptr;
     inline StageLoader::Handle projectedCamera{};
     inline Projection writtenProjection{};
     inline bool projectionObserved{};
@@ -117,7 +116,6 @@ namespace LiveAspectPreview
     inline void AfterCamera(void* context, void* camera, void* method)
     {
         if (managerEnd) managerEnd(context, camera, method);
-        if (secondaryPoseEnd) secondaryPoseEnd(camera);
         ReleaseProjection(camera);
     }
 

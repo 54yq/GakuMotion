@@ -205,7 +205,7 @@ namespace GakuMotion
         }
 
         void RecordSwingRender(const char* bone, void* actor, int frame, float time, float sampleTime,
-                               Quaternion raw, Quaternion shown, Quaternion restored, bool success)
+                               Quaternion raw, Quaternion shown, Quaternion restored, const char* phase, bool success)
         {
             if (!Active()) return;
             out_ << "{\"event\":\"swing_render\",\"bone\":";
@@ -216,6 +216,7 @@ namespace GakuMotion
             out_ << ",\"shown_local\":"; Rotation(shown);
             out_ << ",\"restored_local\":";
             if (success) Rotation(restored); else out_ << "null";
+            out_ << ",\"restore_phase\":"; Name(phase);
             out_ << ",\"restored\":" << (success ? "true" : "false") << "}\n";
         }
 

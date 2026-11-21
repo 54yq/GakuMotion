@@ -2,6 +2,7 @@
 #define NOMINMAX
 #endif
 #include "GkNativeSwingRenderFilter.hpp"
+#include "GakuLocalifyCameraRender.h"
 #include "GkCaptureGuard.hpp"
 #include "GkCaptureSafety.hpp"
 #include "GkGmlClient.hpp"
@@ -1070,7 +1071,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.35-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.36-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -4403,7 +4404,7 @@ void MotionShutdown(void*)
 	if (GakuMotion::host::mainThread.isMainThread &&
 		GakuMotion::host::mainThread.isMainThread(GakuMotion::host::mainThread.context))
 	{
-		NativeSwingRenderPreview::Restore(NativeSwingRenderPreview::activeCamera);
+		NativeSwingRenderPreview::Shutdown();
 		LiveAspectPreview::Restore(LiveAspectPreview::lease.owner && g_sceneOwner.Valid() &&
 			LiveAspectPreview::lease.owner == g_sceneOwner.presenterIdentity &&
 			LiveAspectPreview::lease.scene == g_sceneOwner.sceneHandle);
