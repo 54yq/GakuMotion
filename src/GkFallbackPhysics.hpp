@@ -93,6 +93,14 @@ namespace GakuMotion
             return nullptr;
         }
 
+        template<class Visit>
+        void VisitBoundSecondary(const IdolBoneBinding& binding, const IdolController& controller, Visit&& visit)
+        {
+            if (!HasApi(controller) || !binding.actorTransform) return;
+            if (!SameBinding(binding)) Bind(binding,controller);
+            for (const auto& bone : bones_) visit(bone.transform,bone.name);
+        }
+
         // Read-only sampling uses a dedicated instance, never the active solver.
         template<class Visit>
         void SampleSecondaryLocal(const IdolBoneBinding& binding, const IdolController& controller, Visit&& visit)

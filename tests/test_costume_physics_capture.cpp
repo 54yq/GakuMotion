@@ -70,20 +70,29 @@ int main()
     assert(!pair.Begin(&overlayCamera,7440)); // Missing prior frame
     assert(pair.End(&overlayCamera,7440));
 
-    // SOS 13.143/13.157/13.170: the recorded hair reverses and the
-    // second cloth link continues along its trajectory.
-    const float fraction = 14.f / 27.f;
-    const auto hairA = Quaternion(.467036f,.497338f,.497604f,.535652f).Normalized();
-    const auto hairB = Quaternion(.451445f,.513491f,.509661f,.522274f).Normalized();
-    const auto hairC = Quaternion(.461088f,.503669f,.50312f,.529703f).Normalized();
-    const auto hair = native_swing::FilterMiddle(hairA,hairB,hairC,fraction);
-    assert(native_swing::Angle(hairA,hair) < .75f && native_swing::Angle(hair,hairC) < .75f);
-    assert(native_swing::Angle(hairA,hairB) > 3.2f);
-    const auto clothA = Quaternion(.00636099f,-.0517279f,.134413f,.989554f).Normalized();
-    const auto clothB = Quaternion(.00600326f,-.0443076f,.12226f,.99149f).Normalized();
-    const auto clothC = Quaternion(.00582656f,-.0419683f,.11902f,.991987f).Normalized();
-    const auto cloth = native_swing::FilterMiddle(clothA,clothB,clothC,fraction);
-    assert(cloth.x == clothB.x && cloth.y == clothB.y && cloth.z == clothB.z && cloth.w == clothB.w);
+    native_swing::RotationSmoother filter;
+    const auto rotation = [](float degrees) {
+        const float half = degrees * .00872664626f;
+        return Quaternion(0,0,std::sin(half),std::cos(half));
+    };
+    Quaternion smoothed{};
+    float center{};
+    assert(!filter.Push(0.f,rotation(1.f),smoothed,center));
+    for (unsigned i=1;i<80;++i) {
+        const float time = float(i)/60.f;
+        const float offset = i%2 ? -1.f : 1.f;
+        assert(filter.Push(time,rotation(time*50.f + offset),smoothed,center));
+        if (i>=6) {
+            assert(std::fabs(center - (time-.05f)) < .00001f);
+            assert(native_swing::Angle(rotation(center*50.f),smoothed) < .14f);
+        }
+    }
+    filter.Reset();
+    assert(!filter.Push(80.f,rotation(16.f),smoothed,center));
+    assert(filter.Push(80.017f,rotation(16.f),smoothed,center));
+    assert(native_swing::Angle(rotation(16.f),smoothed) < .1f);
+    const auto hairB = rotation(16.f);
+    const auto hair = rotation(15.5f);
 
 	using Frame = FallbackPhysics::CostumeFrame;
 	Rig sampled, control;
@@ -137,6 +146,7 @@ int main()
     capture.RecordSwingState("RigntBackCloth1_S", sampled.binding, 3, 13.157f, swing);
     capture.RecordSwingRender("LeftFrontHair1_S", sampled.binding.actor, 7893, 13.161f,
         13.144f, hairB, hair, hairB, "camera_end", true);
+    capture.RecordSwingRenderSummary(sampled.binding.actor,7893,13.161f,15,15,15,"camera_end");
 	assert(capture.Close("synthetic") && capture.Frames() == 3);
 	{
 		std::ifstream recorded(path);

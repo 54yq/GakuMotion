@@ -220,6 +220,18 @@ namespace GakuMotion
             out_ << ",\"restored\":" << (success ? "true" : "false") << "}\n";
         }
 
+        void RecordSwingRenderSummary(void* actor, int frame, float time, size_t bound,
+                                      unsigned written, unsigned restored, const char* phase)
+        {
+            if (!Active()) return;
+            out_ << "{\"event\":\"swing_render_summary\"";
+            Identity(1,reinterpret_cast<uintptr_t>(actor),frame,time);
+            out_ << ",\"bound\":" << bound << ",\"written\":" << written << ",\"restored\":" << restored
+                 << ",\"restore_phase\":";
+            Name(phase);
+            out_ << "}\n";
+        }
+
         void RecordActorPose(const char* stage, const IdolBoneBinding& binding, const IdolController& controller,
                              int frame, float time, int requested, int actual, int sourceFrame, float nativeDt,
                              float frameDt = 0.f, const GbbSwingOutputSample* swingOutput = nullptr)

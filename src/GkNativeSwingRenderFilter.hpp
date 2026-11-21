@@ -1,6 +1,7 @@
 #pragma once
 #include <KineTexture/Math.hpp>
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace GakuMotion::native_swing {
@@ -35,17 +36,51 @@ namespace GakuMotion::native_swing {
         return 114.59156f * std::acos((std::min)(1.f, std::abs(Quaternion::Dot(a,b))));
     }
 
-    // Return the middle sample unless it reverses a substantial part of its
-    // excursion by the next sample. Time is the clip clock, not a fixed FPS.
-    inline Quaternion FilterMiddle(Quaternion a, Quaternion b, Quaternion c, float fraction)
-    {
-        const auto expected = Quaternion::Slerp(a,c,fraction);
-        const float incoming = Angle(a,b);
-        const float outgoing = Angle(b,c);
-        const float travel = Angle(a,c);
-        if ((std::min)(incoming,outgoing) < 0.35f || travel >= (std::min)(incoming,outgoing) ||
-            Angle(b,expected) < 0.45f)
-            return b;
-        return expected;
-    }
+    // A symmetric five-tap low pass on a fixed time grid. Resampling avoids
+    // making the cutoff depend on Unity's uneven render intervals.
+    class RotationSmoother {
+        struct Sample { float time{}; Quaternion rotation{}; };
+        std::array<Sample,64> history_{};
+        size_t first_{}, count_{};
+
+        const Sample& At(size_t i) const { return history_[(first_+i)%history_.size()]; }
+
+        Quaternion AtTime(float time) const
+        {
+            size_t upper = count_-1;
+            while (upper > 0 && At(upper-1).time >= time) --upper;
+            if (upper == 0) return At(0).rotation;
+            const auto& a = At(upper-1);
+            const auto& b = At(upper);
+            return Quaternion::Slerp(a.rotation,b.rotation,(time-a.time)/(b.time-a.time));
+        }
+
+    public:
+        static constexpr float kTapSpacing = .025f;
+        static constexpr float kDelay = 2.f*kTapSpacing;
+
+        void Reset() { first_ = count_ = 0; }
+
+        bool Push(float time, Quaternion rotation, Quaternion& output, float& center)
+        {
+            if (count_ && time <= At(count_-1).time) Reset();
+            if (count_ == history_.size()) { first_ = (first_+1)%history_.size(); --count_; }
+            history_[(first_+count_)%history_.size()] = {time,rotation};
+            ++count_;
+            if (count_ < 2) return false;
+            // Shorten the window near a restart rather than holding an old pose.
+            const float step = (std::min)(kTapSpacing,(time-At(0).time)*.25f);
+            center = time-2.f*step;
+            const auto reference = AtTime(center);
+            constexpr std::array weights{1.f,2.f,2.f,2.f,1.f};
+            Quaternion sum{0.f,0.f,0.f,0.f};
+            for (size_t i=0; i<weights.size(); ++i) {
+                const auto q = AtTime((std::max)(At(0).time,time-float(4-i)*step));
+                const float weight = Quaternion::Dot(q,reference) < 0.f ? -weights[i] : weights[i];
+                sum.x += weight*q.x; sum.y += weight*q.y; sum.z += weight*q.z; sum.w += weight*q.w;
+            }
+            output = sum.Normalized();
+            return true;
+        }
+    };
 }

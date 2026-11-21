@@ -3,14 +3,15 @@
 namespace NativeSwingRenderPreview
 {
     using GakuMotion::Quaternion;
-    constexpr const char* bones[]{"LeftFrontHair1_S", "RigntBackCloth1_S", "RigntBackCloth2_S"};
     struct Joint {
         void* transform{};
-        Quaternion older{}, latest{}, preview{}, restore{}, shown{};
-        unsigned count{};
-        bool written{};
+        std::string name;
+        GakuMotion::native_swing::RotationSmoother filter{};
+        Quaternion preview{}, restore{}, shown{};
+        float previewTime{};
+        bool ready{}, written{}, detailed{};
     };
-    inline std::array<Joint, std::size(bones)> joints{};
+    inline std::vector<Joint> joints;
     inline GakuMotion::FallbackPhysics boneLookup;
     inline GakuMotion::IdolController::GetRotationFn read{};
     inline GakuMotion::IdolController::SetRotationFn write{};
@@ -18,7 +19,7 @@ namespace NativeSwingRenderPreview
     inline void* activeCamera{};
     inline uint64_t epoch{};
     inline int frame{-1}, seeks{};
-    inline float olderTime{}, latestTime{}, previewTime{};
+    inline float latestTime{};
     inline bool armed{}, hookAttempted{}, logged{};
     inline const char* lastStatus{};
     inline GakuMotion::native_swing::CameraPair cameraPair{};
@@ -26,6 +27,7 @@ namespace NativeSwingRenderPreview
     inline CameraBridge::Render pipelineEnd{};
     inline int observerToken{};
     inline bool pairReported{};
+    inline size_t lastBoundCount{};
 
     inline void Report(const char* reason)
     {
@@ -52,8 +54,8 @@ namespace NativeSwingRenderPreview
         if (!activeCamera || camera != activeCamera || !CameraBridge::OnUnityThread()) return;
         auto& core = GakuMotion::Core::Instance();
         const bool recording = g_costumeCapture.Active() && CostumeCaptureMatches(core);
-        for (size_t i=0; i<joints.size(); ++i) {
-            auto& joint = joints[i];
+        unsigned written = 0, restoredCount = 0;
+        for (auto& joint : joints) {
             if (!joint.written) continue;
             const bool alive = CameraBridge::IsAlive(joint.transform);
             Quaternion restored{};
@@ -61,11 +63,17 @@ namespace NativeSwingRenderPreview
                 Write(joint.transform,joint.restore);
                 if (recording) restored = Read(joint.transform);
             }
-            if (recording)
-                g_costumeCapture.RecordSwingRender(bones[i],actor,frame,latestTime,previewTime,
-                    joint.restore,joint.shown,restored,phase,alive && GakuMotion::native_swing::Angle(joint.restore.Normalized(),restored.Normalized()) < .1f);
+            ++written;
+            const bool verified = alive && recording &&
+                GakuMotion::native_swing::Angle(joint.restore.Normalized(),restored.Normalized()) < .1f;
+            if (verified) ++restoredCount;
+            if (recording && (joint.detailed || !verified))
+                g_costumeCapture.RecordSwingRender(joint.name.c_str(),actor,frame,latestTime,joint.previewTime,
+                    joint.restore,joint.shown,restored,phase,verified);
             joint.written = false;
         }
+        if (recording)
+            g_costumeCapture.RecordSwingRenderSummary(actor,frame,latestTime,joints.size(),written,restoredCount,phase);
         activeCamera = nullptr;
     }
 
@@ -137,13 +145,15 @@ namespace NativeSwingRenderPreview
             core.sceneActorRegistry.Epoch() != epoch || core.player.controller.targetActor != actor ||
             core.player.state != GakuMotion::PlaybackState::Playing) return;
         if (!cameraPair.Begin(camera,frame)) return;
+        const bool recording = g_costumeCapture.Active() && CostumeCaptureMatches(core);
         for (auto& joint : joints) {
-            if (joint.count < 3 || !CameraBridge::IsAlive(joint.transform)) continue;
+            if (!joint.ready || !CameraBridge::IsAlive(joint.transform)) continue;
             joint.restore = Read(joint.transform);
             joint.written = true;
+            joint.shown = joint.preview;
             activeCamera = camera;
             Write(joint.transform,joint.preview);
-            if (g_costumeCapture.Active()) joint.shown = Read(joint.transform);
+            if (recording && joint.detailed) joint.shown = Read(joint.transform);
         }
         if (activeCamera && !logged && g_hostContext.logInfo) {
             logged = true;
@@ -173,7 +183,7 @@ namespace NativeSwingRenderPreview
         armed = false;
         if (!eligible || actor != target || currentEpoch != epoch || seekCount != seeks ||
             currentFrame != frame+1 || time <= latestTime || time-latestTime > 0.1f) {
-            joints = {};
+            joints.clear();
             cameraPair = {};
             if (actor != target || currentEpoch != epoch) boneLookup.Clear();
         }
@@ -195,37 +205,40 @@ namespace NativeSwingRenderPreview
         }
         read = controller.fnGetLocalRotation;
         write = controller.fnSetLocalRotation;
-        for (size_t i = 0; i < joints.size(); ++i) {
-            auto& joint = joints[i];
-            void* transform = boneLookup.FindSampledSecondary(binding->second,controller,bones[i]);
-            if (joint.transform != transform) joint = {transform};
-            if (!transform) continue;
+        size_t index = 0;
+        boneLookup.VisitBoundSecondary(binding->second,controller,[&](void* transform,const std::string& name) {
+            if (index == joints.size()) joints.emplace_back();
+            auto& joint = joints[index++];
+            if (joint.transform != transform || joint.name != name) {
+                joint = {};
+                joint.transform = transform;
+                joint.name = name;
+                joint.detailed = name == "LeftFrontHair1_S" || name == "RigntBackCloth1_S" || name == "RigntBackCloth2_S";
+            }
             const auto raw = Read(transform);
             const float norm = Quaternion::Dot(raw,raw);
             if (!std::isfinite(norm) || norm < 0.5f || norm > 1.5f) {
-                joint.count = 0;
-                continue;
+                joint.filter.Reset();
+                joint.ready = false;
+                return;
             }
-            const auto current = raw.Normalized();
-            if (joint.count >= 2) {
-                const float fraction = (latestTime-olderTime)/(time-olderTime);
-                joint.preview = GakuMotion::native_swing::FilterMiddle(joint.older,joint.latest,current,fraction);
-            }
-            joint.older = joint.latest;
-            joint.latest = current;
-            if (joint.count < 3) ++joint.count;
+            joint.ready = joint.filter.Push(time,raw.Normalized(),joint.preview,joint.previewTime);
+        });
+        joints.resize(index);
+        if (index != lastBoundCount) {
+            lastBoundCount = index;
+            if (g_hostContext.logInfo)
+                g_hostContext.logInfo("[GakuMotion][NativeSwingRenderPreview] bound_secondary=%zu",index);
         }
-        previewTime = latestTime;
-        olderTime = latestTime;
         latestTime = time;
         actor = target;
         epoch = currentEpoch;
         frame = currentFrame;
         seeks = seekCount;
         armed = true;
-        if (std::none_of(joints.begin(),joints.end(),[](const Joint& joint) { return joint.transform != nullptr; }))
+        if (joints.empty())
             Report("target_bones_unavailable");
-        else if (std::none_of(joints.begin(),joints.end(),[](const Joint& joint) { return joint.count >= 3; }))
+        else if (std::none_of(joints.begin(),joints.end(),[](const Joint& joint) { return joint.ready; }))
             Report("warming_up");
         else
             Report("queued_for_main_camera");
