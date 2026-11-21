@@ -1086,7 +1086,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.51-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.52-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -4469,7 +4469,7 @@ void MotionShutdown(void*)
 	GakuMotion::capture::Shutdown();
 	StageLoadOverride::Shutdown();
 	PhotographyBgm::Release();
-	ExternalStage::Tick(false, 0);
+	ExternalStage::Tick(false, 0, {});
 	SceneOwnerRuntime::Shutdown();
 	ReleasePendingFileDialog();
 	core.gui.browsePendingKind = -1;
@@ -4617,10 +4617,14 @@ void MotionTick(void*, float)
         {
             const bool externalStageAdmitted = GakuMotion::externalStageEnabled.load() &&
                 !GakuMotion::visual_handoff::Requested() && g_activeSceneVerified &&
-                SceneOwnerRuntime::cachedActiveScene == ExternalStage::placeholder &&
-                GakuMotion::stage_load::receipt.Context(SceneOwnerRuntime::cachedActiveScene,
-                    g_verifiedOwnerSceneName, g_sceneOwner) == GakuMotion::injection::Context::Photography;
-            ExternalStage::Tick(externalStageAdmitted, g_verifiedActiveSceneHandle);
+                g_verifiedOwnerSceneName == "Photography" &&
+                g_sceneOwner.AllowedContext() == GakuMotion::injection::Context::Photography &&
+                (g_verifiedActiveSceneHandle == g_sceneOwner.sceneHandle ||
+                    SceneOwnerRuntime::cachedActiveScene.starts_with("env_3d_"));
+            const int nativeBackground = externalStageAdmitted &&
+                SceneOwnerRuntime::cachedActiveScene.starts_with("env_3d_") &&
+                g_verifiedActiveSceneHandle != g_sceneOwner.sceneHandle ? g_verifiedActiveSceneHandle : 0;
+            ExternalStage::Tick(externalStageAdmitted, nativeBackground, g_sceneOwner);
             GakuMotion::externalStageStatus.store(ExternalStage::status.load());
             NativeAudio::Sync();
             bool mutePhotographyBgm = false;

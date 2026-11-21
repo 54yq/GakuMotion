@@ -81,10 +81,8 @@ namespace StageLoadOverride
                 "[GakuMotion][StageLoad] key entry allowed=%d main=%d runtime=%d original=%s time=%d",
                 allowed, main, runtime, observed.c_str(), timeType);
         }
-        if (!allowed) return result;
-        const bool external = GakuMotion::externalStageEnabled.load();
-        const std::string replacement = external ? ExternalStage::placeholder :
-            GakuMotion::Core::Instance().stageManager.GetLoadReplacementKey();
+        if (!allowed || GakuMotion::externalStageEnabled.load()) return result;
+        const std::string replacement = GakuMotion::Core::Instance().stageManager.GetLoadReplacementKey();
         if (!GakuMotion::stage_load::IsTarget(replacement)) return result;
         std::string key;
         if (!ReadKey(result, key) || !key.starts_with("env_3d_")) return result;

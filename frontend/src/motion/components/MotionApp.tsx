@@ -85,9 +85,9 @@ function ActivePage({ fork, command }: { fork: ReturnType<typeof useForkWorkspac
               onChange={(event) => void command('externalStage.enable', { value: event.target.checked })} />
             启用外部舞台
           </label>
-          <p className="text-sm text-muted-foreground">Meni Shuki Rush · 摄影占位：中庭（日中）</p>
-          <p className="text-sm text-muted-foreground">切换摄影背景或重新进入摄影后生效。</p>
-          {fork?.externalStageStatus === 1 && <p role="status">舞台模型已实例化</p>}
+          <p className="text-sm text-muted-foreground">Meni Shuki Rush · 摄影独立场景</p>
+          <p className="text-sm text-muted-foreground">开启后在摄影中加载，关闭时恢复原背景。</p>
+          {fork?.externalStageStatus === 1 && <p role="status">独立舞台已载入</p>}
           {fork?.externalStageStatus === -1 && <p role="alert">舞台载入失败，请查看 GakuLoader 日志。</p>}
         </section>
       )

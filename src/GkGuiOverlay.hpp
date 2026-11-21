@@ -302,9 +302,9 @@ namespace GakuMotion
     {
         bool enabled = externalStageEnabled.load();
         if (ImGui::Checkbox("启用外部舞台", &enabled)) externalStageEnabled.store(enabled);
-        ImGui::TextWrapped("Meni Shuki Rush｜摄影占位：中庭（日中）。切换摄影背景或重新进入摄影后生效。");
+        ImGui::TextWrapped("Meni Shuki Rush｜摄影独立场景。关闭开关可恢复原背景。");
         const int status = externalStageStatus.load();
-        if (status == 1) ImGui::TextUnformatted("舞台模型已实例化");
+        if (status == 1) ImGui::TextUnformatted("独立舞台已载入");
         if (status == -1) ImGui::TextUnformatted("舞台载入失败，请查看 GakuLoader 日志");
     }
 #endif
