@@ -8,7 +8,7 @@ namespace ExternalStage
     enum class Pending { None, Bundle, Load, Unload };
 
     inline const void *openBundle{}, *getBundle{}, *unloadBundle{}, *isDone{};
-    inline const void *loadScene{}, *unloadScene{}, *sceneCount{}, *sceneAt{}, *getHidden{}, *setHidden{};
+    inline const void *loadScene{}, *unloadScene{}, *sceneCount{}, *sceneAt{}, *getEnabled{}, *setEnabled{};
     inline void* rendererClass{};
     inline Handle operation{}, bundle{};
     inline Pending pending{};
@@ -47,14 +47,19 @@ namespace ExternalStage
         unloadScene = api.Find(manager, "UnloadSceneAsync", true, {0x12, async}, {{0x11, scene}});
         sceneCount = api.Find(manager, "get_sceneCount", true, {0x08}, {});
         sceneAt = api.Find(manager, "GetSceneAt", true, {0x11, scene}, {{0x08}});
-        getHidden = api.Find(rendererClass, "get_forceRenderingOff", false, {0x02}, {});
-        setHidden = api.Find(rendererClass, "set_forceRenderingOff", false, {0x01}, {{0x02}});
-        return openBundle && getBundle && unloadBundle && isDone && loadScene && unloadScene &&
-            sceneCount && sceneAt && getHidden && setHidden && StageLoader::sceneName &&
+        getEnabled = api.Find(rendererClass, "get_enabled", false, {0x02}, {});
+        setEnabled = api.Find(rendererClass, "set_enabled", false, {0x01}, {{0x02}});
+        const bool ready = openBundle && getBundle && unloadBundle && isDone && loadScene && unloadScene &&
+            sceneCount && sceneAt && getEnabled && setEnabled && StageLoader::sceneName &&
             StageLoader::sceneLoaded && StageLoader::componentGo && StageLoader::goScene &&
             StageLoader::findAll && StageLoader::arrayLength && StageLoader::newHandle &&
             StageLoader::freeHandle && StageLoader::stringNew && SceneOwnerRuntime::handleTarget &&
             il2cpp_class_get_type && il2cpp_type_get_object;
+        if (!ready)
+            GakuMotion::host::Warn("[GakuMotion][ExternalStage] metadata unavailable: bundle=%d/%d/%d async=%d scene=%d/%d/%d/%d renderer_enabled=%d/%d",
+                !!openBundle, !!getBundle, !!unloadBundle, !!isDone, !!loadScene, !!unloadScene,
+                !!sceneCount, !!sceneAt, !!getEnabled, !!setEnabled);
+        return ready;
     }
 
     inline int FindStageScene()
@@ -71,29 +76,30 @@ namespace ExternalStage
         return 0;
     }
 
-    inline bool SetHidden(void* renderer, bool hidden)
-    {
-        void* args[]{&hidden};
-        void* exception = nullptr;
-        g_faceRuntime.invoke(setHidden, renderer, args, &exception);
-        return !exception;
-    }
-
     inline void RestoreBackground()
     {
         const int restoredScene = hiddenScene;
-        const size_t restoredCount = hiddenRenderers.size();
+        size_t restoredCount = 0;
+        size_t failed = 0;
         for (Handle handle : hiddenRenderers)
         {
-            if (void* renderer = SceneOwnerRuntime::handleTarget(handle))
-                if (StageLoader::ReadBool(getHidden, renderer, false)) SetHidden(renderer, false);
+            void* renderer = SceneOwnerRuntime::handleTarget(handle);
+            if (renderer && CameraBridge::IsAlive(renderer))
+            {
+                bool enabled = false;
+                if (ModelRendererMask::ReadBool(getEnabled, renderer, enabled) &&
+                    (enabled || ModelRendererMask::WriteBool(setEnabled, getEnabled, renderer, true)))
+                    ++restoredCount;
+                else
+                    ++failed;
+            }
             StageLoader::freeHandle(handle);
         }
         hiddenRenderers.clear();
         hiddenScene = 0;
         if (restoredScene)
-            GakuMotion::host::Info("[GakuMotion][ExternalStage] restored background=%d renderers=%zu",
-                restoredScene, restoredCount);
+            GakuMotion::host::Info("[GakuMotion][ExternalStage] restored background=%d renderers=%zu failed=%zu",
+                restoredScene, restoredCount, failed);
     }
 
     inline bool HideBackground(int background)
@@ -114,15 +120,26 @@ namespace ExternalStage
             void* object = renderer ? StageLoader::Invoke(StageLoader::componentGo, renderer) : nullptr;
             if (!object || StageLoader::SceneOfFreshGo(object) != background) continue;
             ++found;
-            if (StageLoader::ReadBool(getHidden, renderer, true)) continue;
-            Handle saved = StageLoader::newHandle(renderer, false);
-            if (!saved || !SetHidden(renderer, true))
+            bool enabled = false;
+            if (!ModelRendererMask::ReadBool(getEnabled, renderer, enabled))
             {
-                if (saved) StageLoader::freeHandle(saved);
                 complete = false;
                 break;
             }
+            if (!enabled) continue;
+            Handle saved = StageLoader::newHandle(renderer, false);
+            if (!saved)
+            {
+                complete = false;
+                break;
+            }
+            // Only originally enabled renderers enter the restore list.
             hiddenRenderers.push_back(saved);
+            if (!ModelRendererMask::WriteBool(setEnabled, getEnabled, renderer, false))
+            {
+                complete = false;
+                break;
+            }
         }
         StageLoader::freeHandle(pin);
         if (!complete || !found)
