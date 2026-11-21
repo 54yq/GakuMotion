@@ -720,6 +720,11 @@ namespace GakuMotion
 
 		void QueueStageSettings(const StageSettings& settings)
 		{
+            {
+                std::lock_guard<std::mutex> lock(stageManager.stageMutex);
+                stageManager.settings.muteNativeBgm = settings.muteNativeBgm;
+                stageManager.settings.muteNativeSoundEffects = settings.muteNativeSoundEffects;
+            }
 			GuiCommand cmd{GuiAction::StageSettings};
 			cmd.stageSettings = settings;
 			QueueGui(std::move(cmd));
@@ -1156,6 +1161,11 @@ namespace GakuMotion
 						// A stale visual-settings snapshot cannot overwrite the separately
 						// saved load-time selection from the dedicated control.
 						settings.loadReplacementKey = stageManager.GetLoadReplacementKey();
+                        {
+                            std::lock_guard<std::mutex> lock(stageManager.stageMutex);
+                            settings.muteNativeBgm = stageManager.settings.muteNativeBgm;
+                            settings.muteNativeSoundEffects = stageManager.settings.muteNativeSoundEffects;
+                        }
 						stageManager.ApplySettings(settings);
 					}
 					break;

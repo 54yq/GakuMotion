@@ -1086,7 +1086,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.46-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.47-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -3645,13 +3645,6 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
     } else if (!GakuMotion::visual_handoff::Requested() && !StageLoadOverride::attempted) {
         StageLoadOverride::Install();
     }
-    const bool externalStageAdmitted = GakuMotion::externalStageEnabled.load() &&
-        !GakuMotion::visual_handoff::Requested() && g_activeSceneVerified &&
-        SceneOwnerRuntime::cachedActiveScene == ExternalStage::placeholder &&
-        GakuMotion::stage_load::receipt.Context(SceneOwnerRuntime::cachedActiveScene,
-            g_verifiedOwnerSceneName, g_sceneOwner) == GakuMotion::injection::Context::Photography;
-    ExternalStage::Tick(externalStageAdmitted, g_verifiedActiveSceneHandle);
-    GakuMotion::externalStageStatus.store(ExternalStage::status.load());
     // Fresh typed snapshots remove disabled/destroyed actors even when no actor
 	// callback remains. Never retain an accumulating list of seen scene actors.
 	RefreshSceneActors(core, sceneChanged);
@@ -4099,7 +4092,6 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
     }
 	if (player.state != GakuMotion::PlaybackState::Stopped)
 		DispatchFollowerPhysics(core, activeActor, unityFrame >= 0 ? unityFrame : s_fallbackFrame, unityFrame >= 0);
-	NativeAudio::Sync();
 	if (isNewPhysicalFrame && !GakuMotion::visual_handoff::IsReleased())
 	{
 		void* mainCam = HelperCameraGetMain();
@@ -4615,6 +4607,17 @@ void MotionTick(void*, float)
 		RefreshProtectedContext();
 		auto& core = GakuMotion::Core::Instance();
 		std::lock_guard<std::recursive_mutex> lock(core.stateMutex);
+        if (ProtectionOnUnityThread())
+        {
+            const bool externalStageAdmitted = GakuMotion::externalStageEnabled.load() &&
+                !GakuMotion::visual_handoff::Requested() && g_activeSceneVerified &&
+                SceneOwnerRuntime::cachedActiveScene == ExternalStage::placeholder &&
+                GakuMotion::stage_load::receipt.Context(SceneOwnerRuntime::cachedActiveScene,
+                    g_verifiedOwnerSceneName, g_sceneOwner) == GakuMotion::injection::Context::Photography;
+            ExternalStage::Tick(externalStageAdmitted, g_verifiedActiveSceneHandle);
+            GakuMotion::externalStageStatus.store(ExternalStage::status.load());
+            NativeAudio::Sync();
+        }
 		FixedActorLighting::Tick(core);
 		PollCostumeCapture(core);
         const bool frameLog = core.liveFrameMonitor.Update(tickStarted,

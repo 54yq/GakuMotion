@@ -35,19 +35,38 @@ namespace ExternalStage
         Release();
         attemptedScene = activeScene;
         status.store(-1);
+        GakuMotion::host::Info("[GakuMotion][ExternalStage] loading Meni Shuki Rush scene=%d", activeScene);
         auto& metadata = StageLoader::metadata;
         void* bundleClass = FindClass("UnityEngine.AssetBundleModule.dll", "UnityEngine", "AssetBundle");
         void* objectClass = FindClass("UnityEngine.CoreModule.dll", "UnityEngine", "Object");
         if (!bundleClass || !objectClass || !StageLoader::newHandle || !StageLoader::freeHandle ||
-            !StageLoader::stringNew || !SceneOwnerRuntime::handleTarget) return;
+            !StageLoader::stringNew || !SceneOwnerRuntime::handleTarget)
+        {
+            GakuMotion::host::Warn("[GakuMotion][ExternalStage] Unity classes or GC handles unavailable");
+            return;
+        }
         auto load = metadata.Find(bundleClass, "LoadFromFile", true, {0x12, bundleClass}, {{0x0e}});
         auto asset = metadata.Find(bundleClass, "LoadAsset", false, {0x12, objectClass}, {{0x0e}});
         auto unload = metadata.Find(bundleClass, "Unload", false, {0x01}, {{0x02}});
         auto instantiate = metadata.Find(objectClass, "Instantiate", true, {0x12, objectClass}, {{0x12, objectClass}});
         destroy = metadata.Find(objectClass, "Destroy", true, {0x01}, {{0x12, objectClass}});
-        if (!load || !asset || !unload || !instantiate || !destroy) return;
+        if (!load || !asset || !unload || !instantiate || !destroy)
+        {
+            GakuMotion::host::Warn("[GakuMotion][ExternalStage] Unity methods unavailable load=%d asset=%d unload=%d instantiate=%d destroy=%d",
+                !!load, !!asset, !!unload, !!instantiate, !!destroy);
+            return;
+        }
 
-        void* path = StageLoader::stringNew("GakuLoader/plugins/GakuMotion.ExternalStage/meni-shuki-rush.bundle");
+        wchar_t executable[32768];
+        const DWORD length = GetModuleFileNameW(nullptr, executable, static_cast<DWORD>(std::size(executable)));
+        if (!length || length >= std::size(executable))
+        {
+            GakuMotion::host::Warn("[GakuMotion][ExternalStage] game directory unavailable");
+            return;
+        }
+        const auto assetPath = (std::filesystem::path(executable).parent_path() /
+            "GakuLoader/plugins/GakuMotion.ExternalStage/meni-shuki-rush.bundle").u8string();
+        void* path = StageLoader::stringNew(reinterpret_cast<const char*>(assetPath.c_str()));
         if (!path) return;
         void* loadArgs[]{path};
         void* bundle = StageLoader::Invoke(load, nullptr, loadArgs);
@@ -71,7 +90,7 @@ namespace ExternalStage
         }
         StageLoader::Invoke(unload, bundle, unloadArgs);
         if (instance) status.store(1);
-        GakuMotion::host::Info("[GakuMotion][ExternalStage] placeholder=%s scene=%d instantiated=%d",
-            placeholder, activeScene, !!instance);
+        GakuMotion::host::Info("[GakuMotion][ExternalStage] placeholder=%s scene=%d prefab=%d instantiated=%d",
+            placeholder, activeScene, !!prefab, !!instance);
     }
 }

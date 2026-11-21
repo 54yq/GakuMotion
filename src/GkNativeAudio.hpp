@@ -44,7 +44,8 @@ namespace NativeAudio
 
 	inline bool MainThread(void*)
 	{
-		return GetCurrentThreadId() == ActorGroundShadow::unityThreadId.load(std::memory_order_acquire);
+		const auto& thread = GakuMotion::host::mainThread;
+        return thread.isMainThread && thread.isMainThread(thread.context);
 	}
 	inline bool ResolveExports()
 	{
@@ -126,10 +127,10 @@ namespace NativeAudio
 			player.state != GakuMotion::PlaybackState::Stopped;
 		// Ownership follows the performance, including preview, pause, scrub,
 		// muted songs and clips without song.wav. Stop/scene loss releases it.
-		const bool muteBgm = g_motionSceneAllowed && core.InjectionAllowed() &&
+		const bool muteBgm = core.InjectionAllowed() && !core.captureSuspended &&
 			core.stageManager.settings.muteNativeBgm;
-		const Status bgmStatus = g_bgmLease.Sync(BackendFor(bgm), active || muteBgm, 1);
-		const Status voiceStatus = g_voiceLease.Sync(BackendFor(voice), active, 1);
+		const Status bgmStatus = g_bgmLease.Sync(BackendFor(bgm), (active && core.InjectionAllowed()) || muteBgm, 1);
+		const Status voiceStatus = g_voiceLease.Sync(BackendFor(voice), active && core.InjectionAllowed(), 1);
 		const bool muteSe = g_motionSceneAllowed && core.InjectionAllowed() &&
 			core.stageManager.settings.muteNativeSoundEffects;
 		const Status seStatus = g_seLease.Sync(BackendFor(se), muteSe, 1);
@@ -137,9 +138,11 @@ namespace NativeAudio
 		if (previousSe != seStatus) GM_DEBUG("[GakuMotion][NativeAudio] Se=%s switch=%d", StatusName(seStatus), muteSe);
 		previousSe = seStatus;
 		static Status previousBgm = Status::Idle, previousVoice = Status::Idle;
-		if (previousBgm != bgmStatus || previousVoice != voiceStatus)
-			GM_DEBUG("[GakuMotion][NativeAudio] Bgm=%s Voice=%s performance=%d",
-				StatusName(bgmStatus), StatusName(voiceStatus), active);
+        static bool previousSwitch = false;
+        if (previousBgm != bgmStatus || previousVoice != voiceStatus || previousSwitch != muteBgm)
+            GakuMotion::host::Info("[GakuMotion][NativeAudio] Bgm=%s Voice=%s performance=%d bgm_switch=%d",
+                StatusName(bgmStatus), StatusName(voiceStatus), active, muteBgm);
+        previousSwitch = muteBgm;
 		previousBgm = bgmStatus; previousVoice = voiceStatus;
 	}
 }
