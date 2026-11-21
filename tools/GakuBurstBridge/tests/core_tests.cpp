@@ -72,6 +72,21 @@ struct BridgeTestAccess {
             CHECK(Bridge::ReadBoneStates(&b,layout,Handle{2,0,-1},swing,&stream,sample)==2);
             CHECK(sample[1].index==1 && sample[1].child_speed.z==3 && sample[1].hit_checks==2);
             CHECK(sample[1].use_limit==1 && sample[1].use_global_wind==1 && sample[1].wind==0.5f);
+            Bridge::StateWork work{};
+            work.layout=layout;
+            for (unsigned slot=0;slot<2;++slot) {
+                work.requests[slot]={Handle{2,static_cast<int>(slot),-1},records[slot],40,s.generation,Delta(nullptr)};
+                b.stateRequests_[slot]=work.requests[slot];
+                work.samples[slot].before_count=Bridge::ReadBoneStates(&b,layout,work.requests[slot].handle,
+                    swing,&stream,work.samples[slot].before,&work.inputFailures[slot]);
+            }
+            b.FinishBoneStates(work,swing,&stream);
+            for (unsigned slot=0;slot<2;++slot) {
+                const auto& result=b.stateResults_[slot];
+                CHECK(result.size==sizeof(result) && result.source_frame==40 && !result.reason[0]);
+                CHECK(result.before_count==(slot==0 ? 2u : 1u) && result.after_count==result.before_count);
+                CHECK(result.before[0].index==static_cast<int>(slot) && result.after[0].index==static_cast<int>(slot));
+            }
             field(1,0,Handle{2,0,0});
             CHECK(Bridge::ReadBoneStates(&b,layout,Handle{2,0,-1},swing,&stream,sample)==0);
             CHECK(stream.rotations==0 && stream.positions==0);

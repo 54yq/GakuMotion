@@ -1050,7 +1050,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.32-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.33-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -3967,10 +3967,17 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
             static constexpr const char* bones[]{"LeftFrontHair1_S","RigntBackCloth1_S"};
             for (uint32_t slot=0; slot<std::size(bones); ++slot) {
                 GbbSwingStateSample state{};
-                if (g_burstBridge.SampleSwingState(activeActor,
-                        g_costumeCapture.SwingOutputTarget(binding->second,controller,bones[slot]),slot,
-                        unityFrame,state))
-                    g_costumeCapture.RecordSwingState(bones[slot],binding->second,unityFrame,player.currentTime,state);
+                const int result = g_burstBridge.SampleSwingState(activeActor,
+                    g_costumeCapture.SwingOutputTarget(binding->second,controller,bones[slot]),slot,unityFrame,state);
+                const bool valid = result==GBB_OK && state.source_frame==unityFrame-1 &&
+                    state.before_count && state.after_count && state.before_count<=4 && state.after_count<=4 &&
+                    state.before[0].index==state.after[0].index;
+                const char* reason = valid ? "capturing" : state.reason[0] ? state.reason :
+                    result==GBB_OK ? "invalid_frame_or_chain" : "bridge_rejected_sample";
+                if (g_costumeCapture.SwingStatusChanged(slot,reason) && g_hostContext.logInfo)
+                    g_hostContext.logInfo("[GakuMotion][SwingStateCapture] bone=%s result=%d reason=%s frame=%d source_frame=%d before=%u after=%u",
+                        bones[slot],result,reason,unityFrame,state.source_frame,state.before_count,state.after_count);
+                if (valid) g_costumeCapture.RecordSwingState(bones[slot],binding->second,unityFrame,player.currentTime,state);
             }
         }
         g_costumeCapture.RecordActorPose(stage, binding->second, controller, unityFrame, player.currentTime,

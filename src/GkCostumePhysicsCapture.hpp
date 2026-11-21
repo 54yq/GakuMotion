@@ -26,6 +26,7 @@ namespace GakuMotion
 			if (!out_) return false;
 			state_ = {};
             poseSampler_.Clear();
+            swingStatus_ = {};
 			frames_ = 0;
 			session_ = session;
 			started_ = Clock::now();
@@ -119,6 +120,13 @@ namespace GakuMotion
             return poseSampler_.FindSampledSecondary(binding,controller,name);
         }
 
+        bool SwingStatusChanged(unsigned slot, const char* status)
+        {
+            if (swingStatus_[slot] == status) return false;
+            swingStatus_[slot] = status;
+            return true;
+        }
+
         void RecordSwingState(const char* bone, const IdolBoneBinding& binding, int frame, float time,
                               const GbbSwingStateSample& sample)
         {
@@ -203,6 +211,7 @@ namespace GakuMotion
 
 	private:
         FallbackPhysics poseSampler_;
+        std::array<std::string,2> swingStatus_{};
 		struct Role
 		{
 			uintptr_t actor{};

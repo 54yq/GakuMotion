@@ -106,6 +106,7 @@ typedef struct GbbSwingStateSample {
     float delta_time;
     GbbSwingBoneState before[4], after[4];
     uint32_t before_count, after_count;
+    char reason[96];
 } GbbSwingStateSample;
 typedef int32_t (GBB_CALL *GbbSampleSwingStateFn)(void* actor, void* transform, uint32_t slot, int32_t request_frame, GbbSwingStateSample* output);
 
