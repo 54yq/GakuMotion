@@ -281,6 +281,57 @@ namespace GakuMotion
             prior={binding.actor,sample};
         }
 
+        void RecordSwingSteps(const char* bone,const IdolBoneBinding& binding,int frame,float time,
+                              const GbbSwingStateSample& state,const GbbSwingStepSample* sample)
+        {
+            if (!Active()) return;
+            out_ << "{\"event\":\"swing_steps\",\"bone\":";
+            Name(bone);
+            Identity(1,reinterpret_cast<uintptr_t>(binding.actor),frame,time);
+            out_ << ",\"source_frame\":" << state.source_frame << ",\"stream_dt_s\":";
+            Number(state.delta_time);
+            out_ << ",\"reason\":";
+            Name(sample ? sample->reason : "native_step_sample_unavailable");
+            out_ << ",\"dropped\":" << (sample ? sample->dropped : 0) << ",\"steps\":[";
+            const unsigned count = sample ? (std::min)(sample->count,GBB_SWING_STEP_LIMIT) : 0;
+            static constexpr const char* phases[]{
+                "anchor_ready","global_force_gate","velocity_stored","contact_result","translation_stored"};
+            const auto vector = [&](const char* name,const GbbVector3& value) {
+                out_ << ','; Name(name); out_ << ':'; Vector({value.x,value.y,value.z});
+            };
+            const auto integer = [&](const char* name,int value) {
+                out_ << ','; Name(name); out_ << ':';
+                if (value>=0) out_ << value; else out_ << "null";
+            };
+            for (unsigned i=0;i<count;++i) {
+                if (i) out_ << ',';
+                const auto& step=sample->steps[i];
+                out_ << "{\"phase\":";
+                Name(step.phase<std::size(phases) ? phases[step.phase] : "unknown");
+                out_ << ",\"site_rva\":" << step.site_rva << ",\"index\":" << step.index;
+                integer("child_index",step.child_index);
+                vector("self_position",step.self_position);
+                vector("child_position",step.child_position);
+                vector("child_speed",step.child_speed);
+                if (step.phase==GBB_SWING_GLOBAL_FORCE_GATE) {
+                    integer("use_global_force",step.use_global_force);
+                    vector("resolved_global_force",step.force);
+                }
+                if (step.phase==GBB_SWING_VELOCITY_STORED) {
+                    integer("child_type",step.child_type);
+                    vector("predicted_position",step.predicted_position);
+                }
+                if (step.phase==GBB_SWING_CONTACT_RESULT) {
+                    integer("pending_hits",step.pending_hits);
+                    vector("candidate_position",step.predicted_position);
+                    vector("contact_point",step.contact_point);
+                    vector("contact_normal",step.contact_normal);
+                }
+                out_ << '}';
+            }
+            out_ << "]}\n";
+        }
+
         void RecordSwingRender(const char* bone, void* actor, int frame, float time, float sampleTime,
                                Quaternion raw, Quaternion shown, Quaternion restored, const char* phase, bool success)
         {

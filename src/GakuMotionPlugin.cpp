@@ -1081,7 +1081,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.41-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.42-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -4025,6 +4025,10 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
                     const bool sampled = g_burstBridge.ReadSwingInputs(activeActor,transform,slot,unityFrame,input);
                     g_costumeCapture.RecordSwingInputs(bone,binding->second,unityFrame,player.currentTime,
                         slot,state,sampled ? &input : nullptr);
+                    GbbSwingStepSample steps{};
+                    const bool sampledSteps = g_burstBridge.ReadSwingSteps(activeActor,transform,slot,unityFrame,steps);
+                    g_costumeCapture.RecordSwingSteps(bone,binding->second,unityFrame,player.currentTime,
+                        state,sampledSteps ? &steps : nullptr);
                 }
             }
         }

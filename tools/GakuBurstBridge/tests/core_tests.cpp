@@ -1,7 +1,11 @@
 #include "../src/GakuBurstBridge.cpp"
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <thread>
 #define CHECK(expr) do { if (!(expr)) { std::fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#expr); std::exit(1); } } while (0)
+extern "C" int GbbRunSwingStepFixture(void*,const float*,float*,int);
+extern "C" void GbbResumeSwingStepFixture();
 namespace gbb {
 struct TestStream {
     uint32_t version{2}, padding{}; uintptr_t pointers[6]{1,1,1,1,0,1};
@@ -46,6 +50,46 @@ static void* MetadataType(void*) { return reinterpret_cast<void*>(1); }
 static int MetadataTypeCode(void*) { return 8; }
 struct BridgeTestAccess {
     static void Run() {
+        {
+            alignas(16) unsigned char rows[2*956]{};
+            const int childIndex=1, childType=2;
+            const GbbVector3 childSpeed{.1f,.2f,.3f};
+            std::memcpy(rows+136,&childIndex,sizeof(childIndex));
+            std::memcpy(rows+956+8,&childType,sizeof(childType));
+            std::memcpy(rows+284,&childSpeed,sizeof(childSpeed));
+            Bridge::StateWork work{};
+            work.layout.stride=956;
+            work.stepsList={reinterpret_cast<uintptr_t>(rows),2,2,0,0};
+            work.samples[0].before_count=1;
+            work.samples[0].before[0].index=0;
+            work.samples[1].before_count=1;
+            work.samples[1].before[0].index=1;
+            const float xyz[8]{1,2,3,4,5,6,7,8};
+            GbbSwingStepTrampolines[GBB_SWING_VELOCITY_STORED]=reinterpret_cast<void*>(&GbbResumeSwingStepFixture);
+            Bridge::propertyCapture_=&work;
+            int cpu[4]{};
+            __cpuid(cpu,1);
+            const bool avx=(cpu[2]&0x1c000000)==0x1c000000 && (_xgetbv(0)&7)==7;
+            for (unsigned i=0;i<(avx ? 2u : 1u);++i) {
+                GbbSwingStepAvx=i;
+                work.stepsProfile=&profile::SwingStepVariants[i];
+                float after[16]{};
+                CHECK(GbbRunSwingStepFixture(rows,xyz,after,i)==1);
+                CHECK(work.steps[0].count==i);
+                GbbSwingStepActive=1;
+                CHECK(GbbRunSwingStepFixture(rows,xyz,after,i)==1);
+                CHECK(std::memcmp(xyz,after,(i ? 8u : 4u)*sizeof(float))==0);
+                CHECK(std::memcmp(xyz,after+8,(i ? 8u : 4u)*sizeof(float))==0);
+                CHECK(work.steps[0].count==i+1 && work.steps[1].count==0);
+                const auto& step=work.steps[0].steps[i];
+                CHECK(step.site_rva==work.stepsProfile->sites[GBB_SWING_VELOCITY_STORED]);
+                CHECK(step.child_index==1 && step.child_type==2 && step.child_speed.y==.2f && step.predicted_position.z==3.f);
+                GbbSwingStepActive=0;
+            }
+            Bridge::propertyCapture_=nullptr;
+            GbbSwingStepTrampolines[GBB_SWING_VELOCITY_STORED]=nullptr;
+            GbbSwingStepAvx=0;
+        }
         Bridge b; b.Clock(); b.originalDelta_ = &Delta; b.resolve_ = &Resolve;
         b.readRotation_ = &Read; b.writeRotation_ = &Write; b.writePosition_ = &Position;
         Snapshot s; s.count=2; s.generation=b.generation_.load(); s.inject=true; s.ticks=Ticks();
@@ -302,8 +346,60 @@ static void TestProfile() {
     CHECK(!profile::VerifyCaller(reinterpret_cast<uintptr_t>(bytes+profile::Variants[0].returned),reinterpret_cast<HMODULE>(bytes),target));
     CHECK(RtlDeleteFunctionTable(functions)); CHECK(VirtualFree(bytes,0,MEM_RELEASE));
 }
-int main() {
+// This path reads an exact local PE as data. The copied game instructions are
+// inspected and used to build trampolines, but are never executed.
+static void TestSwingStepBytes(const std::filesystem::path& path) {
+    using namespace gbb;
+    std::ifstream input(path,std::ios::binary);
+    const std::vector<unsigned char> file((std::istreambuf_iterator<char>(input)),{});
+    CHECK(file.size()>sizeof(IMAGE_DOS_HEADER));
+    IMAGE_DOS_HEADER dos{};
+    std::memcpy(&dos,file.data(),sizeof(dos));
+    CHECK(dos.e_magic==IMAGE_DOS_SIGNATURE && dos.e_lfanew>=0 &&
+          static_cast<size_t>(dos.e_lfanew)+sizeof(IMAGE_NT_HEADERS64)<=file.size());
+    IMAGE_NT_HEADERS64 nt{};
+    std::memcpy(&nt,file.data()+dos.e_lfanew,sizeof(nt));
+    CHECK(nt.Signature==IMAGE_NT_SIGNATURE && nt.OptionalHeader.Magic==IMAGE_NT_OPTIONAL_HDR64_MAGIC);
+    const auto start=dos.e_lfanew+sizeof(DWORD)+sizeof(IMAGE_FILE_HEADER)+nt.FileHeader.SizeOfOptionalHeader;
+    CHECK(start+nt.FileHeader.NumberOfSections*sizeof(IMAGE_SECTION_HEADER)<=file.size());
+    const auto size=nt.OptionalHeader.SizeOfImage;
+    auto* mapped=static_cast<unsigned char*>(VirtualAlloc(nullptr,size,MEM_RESERVE|MEM_COMMIT,PAGE_EXECUTE_READWRITE));
+    CHECK(mapped && static_cast<unsigned>(dos.e_lfanew)+sizeof(nt)<size);
+    std::memcpy(mapped,file.data(),dos.e_lfanew+sizeof(nt));
+    for (unsigned i=0;i<nt.FileHeader.NumberOfSections;++i) {
+        IMAGE_SECTION_HEADER sec{};
+        std::memcpy(&sec,file.data()+start+i*sizeof(sec),sizeof(sec));
+        if (!sec.SizeOfRawData) continue;
+        CHECK(static_cast<size_t>(sec.PointerToRawData)+sec.SizeOfRawData<=file.size());
+        CHECK(static_cast<size_t>(sec.VirtualAddress)+sec.SizeOfRawData<=size);
+        std::memcpy(mapped+sec.VirtualAddress,file.data()+sec.PointerToRawData,sec.SizeOfRawData);
+    }
+    const auto& exceptions=nt.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
+    CHECK(exceptions.Size && static_cast<size_t>(exceptions.VirtualAddress)+exceptions.Size<=size);
+    auto* entries=reinterpret_cast<RUNTIME_FUNCTION*>(mapped+exceptions.VirtualAddress);
+    CHECK(RtlAddFunctionTable(entries,exceptions.Size/sizeof(RUNTIME_FUNCTION),reinterpret_cast<DWORD64>(mapped)));
+    CHECK(MH_Initialize()==MH_OK);
+    for (const auto& variant:profile::SwingStepVariants) {
+        const auto swing=reinterpret_cast<uintptr_t>(mapped+variant.swing);
+        CHECK(profile::VerifySwingSteps(reinterpret_cast<HMODULE>(mapped),swing)==&variant);
+        for (auto pc:variant.sites) {
+            void* trampoline{};
+            CHECK(MH_CreateHook(mapped+pc,reinterpret_cast<void*>(&GbbSwingVelocityStored),&trampoline)==MH_OK);
+            CHECK(trampoline && MH_RemoveHook(mapped+pc)==MH_OK);
+        }
+        mapped[variant.dynamic]^=1;
+        CHECK(!profile::VerifySwingSteps(reinterpret_cast<HMODULE>(mapped),swing));
+        mapped[variant.dynamic]^=1;
+    }
+    CHECK(MH_Uninitialize()==MH_OK);
+    CHECK(RtlDeleteFunctionTable(entries));
+    CHECK(VirtualFree(mapped,0,MEM_RELEASE));
+    std::puts("Installed Burst bytes: 10 exact SSE/AVX checkpoint addresses accept MinHook trampolines.");
+}
+
+int wmain(int argc,wchar_t* argv[]) {
     gbb::BridgeTestAccess::Run(); TestProfile();
+    if (argc==2) TestSwingStepBytes(argv[1]);
     std::puts("Core tests: stream/write gates, bounded traces, SSE/AVX PE/unwind guards and forwarding-only any-thread shutdown passed.");
     return 0;
 }

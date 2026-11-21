@@ -18,9 +18,20 @@
 #include "Il2CppAccess.hpp"
 #include "QuartzExperiment.hpp"
 #include "QuartzProfile.hpp"
+#include "SwingStepProfile.hpp"
 #include "SleeveMuscleProbe.hpp"
 #include "NativeListObservation.hpp"
 
+extern "C" {
+alignas(4) LONG GbbSwingStepActive{};
+uint32_t GbbSwingStepAvx{};
+void* GbbSwingStepTrampolines[gbb::profile::SwingStepCount]{};
+void GbbSwingAnchorReady();
+void GbbSwingForceGate();
+void GbbSwingVelocityStored();
+void GbbSwingContactResult();
+void GbbSwingTranslationStored();
+}
 namespace gbb {
 static_assert(sizeof(void*) == 8, "Only measured Windows AMD64 is supported");
 struct Handle { uint32_t version{}; int index{-1}, skeleton{-1}; };
@@ -198,6 +209,9 @@ class Bridge {
     };
     InputLayout inputLayout_{};
     std::array<GbbSwingInputSample,2> inputResults_{};
+    std::array<GbbSwingStepSample,2> stepResults_{};
+    const profile::SwingStepVariant* stepVariant_{};
+    std::atomic<const char*> stepStatus_{"native_steps_not_initialized"};
 
     InputLayout PrepareInputLayout()
     {
@@ -446,9 +460,99 @@ class Bridge {
         BoneStateLayout layout{};
         InputLayout inputLayout{};
         std::array<GbbSwingInputSample,2> inputs{};
+        const profile::SwingStepVariant* stepsProfile{};
+        ListHeader stepsList{};
+        std::array<GbbSwingStepSample,2> steps{};
     };
 
     static inline thread_local StateWork* propertyCapture_{};
+
+    static GbbSwingStep ReadSwingStep(const StateWork& work,unsigned phase,int index,
+                                     const unsigned char* row,const void* nativeFrame,
+                                     const unsigned char* xmm,int pendingHits) {
+        const float missing = std::numeric_limits<float>::quiet_NaN();
+        const GbbVector3 absent{missing,missing,missing};
+        GbbSwingStep step{
+            phase,work.stepsProfile->sites[phase],index,ReadStateField<int32_t>(row,136),
+            ReadStateField<GbbVector3>(row,228),absent,ReadStateField<GbbVector3>(row,284),
+            absent,absent,-1,-1,-1,absent,absent};
+        const auto* child = step.child_index>=0 && step.child_index<work.stepsList.length ?
+            reinterpret_cast<const unsigned char*>(work.stepsList.payload) + work.layout.stride*step.child_index : nullptr;
+        if (child) step.child_position = ReadStateField<GbbVector3>(child,228);
+        if (phase==GBB_SWING_GLOBAL_FORCE_GATE) {
+            step.use_global_force = ReadStateField<uint8_t>(row,832);
+            if (step.use_global_force) {
+                const auto* properties = ReadStateField<const unsigned char*>(
+                    static_cast<const unsigned char*>(nativeFrame),work.stepsProfile->forcePointerOffset);
+                if (properties) step.force = ReadStateField<GbbVector3>(properties,profile::SwingPropertyForceOffset);
+            }
+        }
+        if (phase==GBB_SWING_VELOCITY_STORED && child) {
+            step.child_type = ReadStateField<int32_t>(child,8);
+            step.predicted_position = ReadStateField<GbbVector3>(xmm,16*(work.stepsProfile->avx ? 10 : 11));
+        }
+        if (phase==GBB_SWING_CONTACT_RESULT && child) {
+            step.pending_hits = pendingHits;
+            step.contact_point = ReadStateField<GbbVector3>(child,work.layout.point);
+            step.contact_normal = ReadStateField<GbbVector3>(child,work.layout.normal);
+            step.predicted_position = ReadStateField<GbbVector3>(xmm,16*10);
+        }
+        return step;
+    }
+
+    void InstallSwingSteps(const BoneStateLayout& bone,const InputLayout& input) {
+        if (owner_) { owner_->InstallSwingSteps(bone,input); return; }
+        if (!swingTarget_ || stopped_.load(std::memory_order_acquire) ||
+            std::strcmp(stepStatus_.load(std::memory_order_relaxed),"native_steps_not_initialized")) return;
+        const auto fail = [this](const char* reason) { stepStatus_.store(reason,std::memory_order_release); };
+        const auto* variant = profile::VerifySwingSteps(burst_,reinterpret_cast<uintptr_t>(swingTarget_));
+        if (!variant) { fail("native_steps_profile_unverified"); return; }
+        const auto klass = meta_.Class("ActorAnimation.Runtime.dll","ActorAnimation","ActorSwingJobDynamicBone");
+        // Both verified instruction profiles use a 32-bit comparison for DynamicType.
+        if (!klass || !meta_.Offset(klass,"dynamicType",8) || bone.stride!=956 || input.self!=228 ||
+            bone.child!=136 || bone.speed!=284 || bone.globalWind!=832 || bone.point!=112 || bone.normal!=100) {
+            fail("native_steps_bone_layout_unverified"); return;
+        }
+        int cpu[4]{};
+        __cpuid(cpu,1);
+        if (variant->avx && ((cpu[2]&0x1c000000)!=0x1c000000 || (_xgetbv(0)&7)!=7)) {
+            fail("native_steps_avx_state_unavailable"); return;
+        }
+        GbbSwingStepAvx=variant->avx;
+        void* const detours[]{reinterpret_cast<void*>(&GbbSwingAnchorReady),reinterpret_cast<void*>(&GbbSwingForceGate),
+            reinterpret_cast<void*>(&GbbSwingVelocityStored),reinterpret_cast<void*>(&GbbSwingContactResult),
+            reinterpret_cast<void*>(&GbbSwingTranslationStored)};
+        const auto base = reinterpret_cast<uintptr_t>(burst_);
+        unsigned created=0;
+        for (;created<profile::SwingStepCount;++created) {
+            auto* site = reinterpret_cast<void*>(base+variant->sites[created]);
+            if (MH_CreateHook(site,detours[created],&GbbSwingStepTrampolines[created])!=MH_OK) break;
+        }
+        if (created!=profile::SwingStepCount) {
+            for (unsigned i=0;i<created;++i) MH_RemoveHook(reinterpret_cast<void*>(base+variant->sites[i]));
+            fail("native_steps_hook_create_failed");
+            return;
+        }
+        bool queued=true;
+        for (auto site:variant->sites)
+            queued &= MH_QueueEnableHook(reinterpret_cast<void*>(base+site))==MH_OK;
+        if (!queued || MH_ApplyQueued()!=MH_OK) {
+            for (auto site:variant->sites) MH_RemoveHook(reinterpret_cast<void*>(base+site));
+            fail("native_steps_hook_enable_failed");
+            return;
+        }
+        stepVariant_=variant;
+        fail("native_steps_not_reached");
+    }
+
+    static void PrepareSwingSteps(StateWork& work,void* swing,const profile::SwingStepVariant* variant) {
+        __try {
+            uintptr_t container{};
+            if (variant && ReadListHeader(swing,ListOffsets[0],container,work.stepsList) &&
+                ValidListHeader(work.stepsList,work.layout.stride) && work.stepsList.payload)
+                work.stepsProfile=variant;
+        } __except(EXCEPTION_EXECUTE_HANDLER) { work.stepsProfile=nullptr; }
+    }
 
     static void* PropertyReaderDetour(const void* table,void* output,void* stream) {
         auto* self = self_;
@@ -463,8 +567,13 @@ class Bridge {
     void RunSwingWithPropertyCapture(void* swing,void* stream,StateWork* capture) {
         auto* previous = propertyCapture_;
         propertyCapture_ = capture;
+        const bool steps = capture && capture->stepsProfile;
+        if (steps) InterlockedIncrement(&GbbSwingStepActive);
         __try { originalSwing_(swing,stream); }
-        __finally { propertyCapture_ = previous; }
+        __finally {
+            if (steps) InterlockedDecrement(&GbbSwingStepActive);
+            propertyCapture_ = previous;
+        }
     }
 
     void InstallPropertyReader() {
@@ -525,6 +634,9 @@ class Bridge {
                 generation_.load(std::memory_order_relaxed)==request.generation) {
                 stateResults_[i]=sample;
                 inputResults_[i]=work.inputs[i];
+                auto& steps=work.steps[i];
+                if (steps.count) steps.reason[0]=0;
+                stepResults_[i]=steps;
             }
         }
     }
@@ -1230,6 +1342,7 @@ class Bridge {
         StateWork stateWork{};
         const bool matched = BeforeSwingGuarded(target,swing, stream, reinterpret_cast<uintptr_t>(_ReturnAddress()),admittedGeneration,outputProbe,stateWork);
         const char* propertyStatus = self->propertyReaderStatus_.load(std::memory_order_acquire);
+        const char* stepStatus = self->stepStatus_.load(std::memory_order_acquire);
         bool captureProperties = false;
         for (size_t i=0;i<stateWork.requests.size();++i) {
             const auto& request=stateWork.requests[i];
@@ -1241,9 +1354,15 @@ class Bridge {
             input.source_frame=request.frame;
             input.swing_time=ReadSwingInputTime(swing);
             std::snprintf(input.property_reason,sizeof(input.property_reason),"%s",propertyStatus);
+            auto& steps = stateWork.steps[i];
+            steps.size=sizeof(steps);
+            steps.source_frame=request.frame;
+            std::snprintf(steps.reason,sizeof(steps.reason),"%s",stepStatus);
             captureProperties = true;
             target->ReadInputAnchors(stateWork.inputLayout,stateWork.layout,swing,stream,sample.before,sample.before_count,input);
         }
+        if (captureProperties && std::strcmp(stepStatus,"native_steps_not_reached")==0)
+            PrepareSwingSteps(stateWork,swing,self->stepVariant_);
         const uint64_t start = matched ? Ticks() : 0;
         // Never manually execute or skip the engine solver. Its own behavior
         // (including an engine fault) is outside the bridge exception boundary.
@@ -1300,6 +1419,7 @@ public:
             const auto layout=PrepareBoneStateLayout();
             const auto inputs=PrepareInputLayout();
             InstallPropertyReader();
+            InstallSwingSteps(layout,inputs);
             lock.lock();
             stateLayout_=layout;
             inputLayout_=inputs;
@@ -1325,6 +1445,7 @@ public:
             request={h,transform,frame,generation,0.f};
             result={};
             inputResults_[slot]={};
+            stepResults_[slot]={};
         } else request.frame=frame;
         if (!ready) return fail(GBB_PENDING,same ? "awaiting_matching_solver_frame" : "probe_armed");
         return result.reason[0] ? GBB_E_BINDING : GBB_OK;
@@ -1341,6 +1462,46 @@ public:
             input.size!=sizeof(*out) || input.source_frame!=frame-1) return GBB_PENDING;
         *out=input;
         return GBB_OK;
+    }
+
+    int ReadSwingSteps(void* actor,void* transform,uint32_t slot,int frame,GbbSwingStepSample* out) {
+        if (!out || out->size!=sizeof(*out) || !transform || slot>=stateRequests_.size() ||
+            !MainThread(false) || frame<=0) return GBB_E_ARGUMENT;
+        std::lock_guard lock(mutex_);
+        const auto& request=stateRequests_[slot];
+        const auto& result=stepResults_[slot];
+        if (current_.actor!=actor || current_.frame!=frame || request.transform!=transform ||
+            request.generation!=generation_.load(std::memory_order_relaxed) ||
+            result.size!=sizeof(*out) || result.source_frame!=frame-1) return GBB_PENDING;
+        *out=result;
+        return GBB_OK;
+    }
+
+    static void ObserveSwingStep(unsigned phase,const unsigned char* row,const void* nativeFrame,
+                                 const unsigned char* xmm,int pendingHits) noexcept {
+        auto* const work=propertyCapture_;
+        if (!work || !work->stepsProfile || phase>=profile::SwingStepCount) return;
+        const auto base=work->stepsList.payload;
+        const auto addr=reinterpret_cast<uintptr_t>(row);
+        if (!work->layout.stride || addr<base) return;
+        const auto bytes=addr-base;
+        const auto index=bytes/work->layout.stride;
+        if (index>=static_cast<unsigned>(work->stepsList.length) || bytes%work->layout.stride) return;
+        __try {
+            for (unsigned slot=0;slot<work->samples.size();++slot) {
+                const auto& state=work->samples[slot];
+                bool matched=false;
+                for (unsigned i=0;i<state.before_count;++i)
+                    matched |= state.before[i].index==static_cast<int>(index);
+                if (!matched) continue;
+                auto& result=work->steps[slot];
+                if (result.count==GBB_SWING_STEP_LIMIT) { ++result.dropped; continue; }
+                result.steps[result.count]=ReadSwingStep(*work,phase,static_cast<int>(index),row,nativeFrame,xmm,pendingHits);
+                ++result.count;
+            }
+        } __except(EXCEPTION_EXECUTE_HANDLER) {
+            for (auto& result:work->steps) ++result.dropped;
+        }
     }
 
     explicit Bridge(bool detourOwner=true) { if (detourOwner) self_ = this; }
@@ -2007,6 +2168,16 @@ extern "C" GBB_EXPORT int32_t GBB_CALL GakuBurstBridge_ReadActorObservation(void
 
 extern "C" GBB_EXPORT int32_t GBB_CALL GakuBurstBridge_SampleSwingOutput(void* actor, void* transform, int32_t frame, GbbSwingOutputSample* out) {
     __try { return gbb::CppBoundary([&] { return gbb::instance.SampleSwingOutput(actor,transform,frame,out); }); }
+    __except(EXCEPTION_EXECUTE_HANDLER) { return GBB_E_FAULT; }
+}
+
+extern "C" void GbbObserveSwingStep(unsigned phase,const unsigned char* row,const void* nativeFrame,
+                                       const unsigned char* xmm,int pendingHits) {
+    gbb::Bridge::ObserveSwingStep(phase,row,nativeFrame,xmm,pendingHits);
+}
+
+extern "C" GBB_EXPORT int32_t GBB_CALL GakuBurstBridge_ReadSwingSteps(void* actor,void* transform,uint32_t slot,int32_t frame,GbbSwingStepSample* out) {
+    __try { return gbb::CppBoundary([&] { return gbb::instance.ReadSwingSteps(actor,transform,slot,frame,out); }); }
     __except(EXCEPTION_EXECUTE_HANDLER) { return GBB_E_FAULT; }
 }
 

@@ -126,6 +126,28 @@ typedef struct GbbSwingInputSample {
 } GbbSwingInputSample;
 typedef int32_t (GBB_CALL *GbbReadSwingInputsFn)(void* actor, void* transform, uint32_t slot, int32_t request_frame, GbbSwingInputSample* output);
 
+/* Optional, bounded checkpoints inside the current native dynamic solver. */
+#define GBB_SWING_STEP_LIMIT 24u
+enum GbbSwingStepPhase {
+    GBB_SWING_ANCHOR_READY, GBB_SWING_GLOBAL_FORCE_GATE, GBB_SWING_VELOCITY_STORED,
+    GBB_SWING_CONTACT_RESULT, GBB_SWING_TRANSLATION_STORED
+};
+typedef struct GbbSwingStep {
+    uint32_t phase, site_rva;
+    int32_t index, child_index;
+    GbbVector3 self_position, child_position, child_speed, predicted_position, force;
+    int32_t child_type, use_global_force, pending_hits;
+    GbbVector3 contact_point, contact_normal;
+} GbbSwingStep;
+typedef struct GbbSwingStepSample {
+    uint32_t size;
+    int32_t source_frame;
+    uint32_t count, dropped;
+    char reason[48];
+    GbbSwingStep steps[GBB_SWING_STEP_LIMIT];
+} GbbSwingStepSample;
+typedef int32_t (GBB_CALL *GbbReadSwingStepsFn)(void* actor, void* transform, uint32_t slot, int32_t request_frame, GbbSwingStepSample* output);
+
 typedef int32_t (GBB_CALL *GbbSampleSwingOutputFn)(void* actor, void* transform, int32_t request_frame, GbbSwingOutputSample* output);
 typedef struct GbbPerf {
     uint32_t size, version;
