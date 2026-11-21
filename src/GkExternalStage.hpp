@@ -10,6 +10,11 @@ namespace ExternalStage
     inline const void *openBundle{}, *getBundle{}, *unloadBundle{}, *isDone{};
     inline const void *loadScene{}, *unloadScene{}, *sceneCount{}, *sceneAt{}, *getEnabled{}, *setEnabled{};
     inline void* rendererClass{};
+    inline const void *getLayer{}, *setLayer{}, *getCameraMask{}, *getSceneMask{}, *getOverrideMask{}, *setOverrideMask{};
+    inline const void *getObjectSceneMask{}, *getBounds{}, *calculatePlanes{}, *testBounds{}, *getVisible{};
+    inline Handle cameraLease{};
+    inline uint64_t originalCameraMask{}, appliedCameraMask{};
+    inline int visibilitySamples{};
     inline Handle operation{}, bundle{};
     inline Pending pending{};
     inline int mountedScene{}, hiddenScene{};
@@ -49,6 +54,27 @@ namespace ExternalStage
         sceneAt = api.Find(manager, "GetSceneAt", true, {0x11, scene}, {{0x08}});
         getEnabled = api.Find(rendererClass, "get_enabled", false, {0x02}, {});
         setEnabled = api.Find(rendererClass, "set_enabled", false, {0x01}, {{0x02}});
+        void* camera = core("UnityEngine", "Camera");
+        void* bounds = core("UnityEngine", "Bounds");
+        void* utility = core("UnityEngine", "GeometryUtility");
+        void* plane = core("UnityEngine", "Plane");
+        auto arrayClass = reinterpret_cast<void* (*)(void*, uint32_t)>(
+            GetProcAddress(g_gameAssembly, "il2cpp_array_class_get"));
+        void* planes = plane && arrayClass ? arrayClass(plane, 1) : nullptr;
+        getLayer = api.Find(StageLoader::goClass, "get_layer", false, {0x08}, {});
+        setLayer = api.Find(StageLoader::goClass, "set_layer", false, {0x01}, {{0x08}});
+        getCameraMask = api.Find(camera, "get_cullingMask", false, {0x08}, {});
+        getSceneMask = api.Find(camera, "get_sceneCullingMask", false, {0x0b}, {});
+        getOverrideMask = api.Find(camera, "get_overrideSceneCullingMask", false, {0x0b}, {});
+        setOverrideMask = api.Find(camera, "set_overrideSceneCullingMask", false, {0x01}, {{0x0b}});
+        getObjectSceneMask = api.Find(StageLoader::goClass, "get_sceneCullingMask", false, {0x0b}, {});
+        getVisible = api.Find(rendererClass, "get_isVisible", false, {0x02}, {});
+        if (camera && bounds && planes && StageLoader::valueSize(bounds, &align) == 6 * sizeof(float))
+        {
+            getBounds = api.Find(rendererClass, "get_bounds", false, {0x11, bounds}, {});
+            calculatePlanes = api.Find(utility, "CalculateFrustumPlanes", true, {0x1d, planes}, {{0x12, camera}});
+            testBounds = api.Find(utility, "TestPlanesAABB", true, {0x02}, {{0x1d, planes}, {0x11, bounds}});
+        }
         const bool ready = openBundle && getBundle && unloadBundle && isDone && loadScene && unloadScene &&
             sceneCount && sceneAt && getEnabled && setEnabled && StageLoader::sceneName &&
             StageLoader::sceneLoaded && StageLoader::componentGo && StageLoader::goScene &&
@@ -76,8 +102,122 @@ namespace ExternalStage
         return 0;
     }
 
+    inline bool ReadMask(const void* method, void* object, uint64_t& mask)
+    {
+        void* boxed = StageLoader::Invoke(method, object);
+        const auto* value = boxed && g_safeBones.unbox ? static_cast<uint64_t*>(g_safeBones.unbox(boxed)) : nullptr;
+        if (!value) return false;
+        mask = *value;
+        return true;
+    }
+
+    inline bool SetCameraMask(void* camera, uint64_t mask)
+    {
+        if (!setOverrideMask) return false;
+        void* args[]{&mask};
+        void* exception = nullptr;
+        g_faceRuntime.invoke(setOverrideMask, camera, args, &exception);
+        uint64_t current = 0;
+        return !exception && ReadMask(getOverrideMask, camera, current) && current == mask;
+    }
+
+    inline void RestoreCamera()
+    {
+        if (!cameraLease) return;
+        void* camera = SceneOwnerRuntime::handleTarget(cameraLease);
+        uint64_t current = 0;
+        if (camera && CameraBridge::IsAlive(camera) &&
+            ReadMask(getOverrideMask, camera, current) && current == appliedCameraMask)
+            SetCameraMask(camera, originalCameraMask);
+        StageLoader::freeHandle(cameraLease);
+        cameraLease = {};
+    }
+
+    inline bool PrepareVisibility(void** renderers, uintptr_t count, int background)
+    {
+        void* camera = StageLoader::Invoke(StageLoader::cameraMain);
+        if (!camera || !getLayer || !setLayer || !getCameraMask) return false;
+        const uint32_t layers = static_cast<uint32_t>(StageLoader::ReadInt(getCameraMask, camera));
+        std::array<unsigned, 32> nativeLayers{};
+        uint64_t cameraScenes = 0, stageScenes = 0;
+        const bool hasSceneMask = ReadMask(getSceneMask, camera, cameraScenes);
+        unsigned stageCount = 0, visibleLayers = 0, sceneRejected = 0, frustumHits = 0;
+        void* planeArgs[]{camera};
+        void* planes = calculatePlanes ? StageLoader::Invoke(calculatePlanes, nullptr, planeArgs) : nullptr;
+        Handle planeHandle = planes ? StageLoader::newHandle(planes, false) : nullptr;
+        for (uintptr_t i = 0; i < count; ++i)
+        {
+            void* renderer = renderers[i];
+            void* object = renderer ? StageLoader::Invoke(StageLoader::componentGo, renderer) : nullptr;
+            if (!object) continue;
+            const int scene = StageLoader::SceneOfFreshGo(object);
+            if (scene != background && scene != mountedScene) continue;
+            const int layer = StageLoader::ReadInt(getLayer, object, -1);
+            const bool inMask = layer >= 0 && layer < 32 && (layers & (uint32_t{1} << layer));
+            if (scene == background)
+            {
+                if (inMask && StageLoader::ReadBool(getEnabled, renderer, false)) ++nativeLayers[layer];
+                continue;
+            }
+            if (!StageLoader::ReadBool(getEnabled, renderer, false)) continue;
+            ++stageCount;
+            if (inMask) ++visibleLayers;
+            uint64_t objectScenes = 0;
+            if (hasSceneMask && ReadMask(getObjectSceneMask, object, objectScenes) && objectScenes)
+            {
+                stageScenes |= objectScenes;
+                if (!(objectScenes & cameraScenes)) ++sceneRejected;
+            }
+            if (planeHandle && testBounds && getBounds)
+            {
+                void* boxed = StageLoader::Invoke(getBounds, renderer);
+                void* raw = boxed && g_safeBones.unbox ? g_safeBones.unbox(boxed) : nullptr;
+                if (!raw) continue;
+                std::array<float, 6> bounds{};
+                std::memcpy(bounds.data(), raw, sizeof(bounds));
+                void* args[]{SceneOwnerRuntime::handleTarget(planeHandle), bounds.data()};
+                if (args[0] && StageLoader::ReadBool(testBounds, nullptr, false, args)) ++frustumHits;
+            }
+        }
+        if (planeHandle) StageLoader::freeHandle(planeHandle);
+        const auto preferred = std::max_element(nativeLayers.begin(), nativeLayers.end());
+        int layer = *preferred ? static_cast<int>(preferred - nativeLayers.begin()) : -1;
+        unsigned relayered = 0;
+        if (visibleLayers < stageCount && layer >= 0)
+        {
+            for (uintptr_t i = 0; i < count; ++i)
+            {
+                void* renderer = renderers[i];
+                void* object = renderer ? StageLoader::Invoke(StageLoader::componentGo, renderer) : nullptr;
+                if (!object || StageLoader::SceneOfFreshGo(object) != mountedScene) continue;
+                const int previous = StageLoader::ReadInt(getLayer, object, -1);
+                if (previous >= 0 && previous < 32 && (layers & (uint32_t{1} << previous))) continue;
+                void* args[]{&layer};
+                StageLoader::Invoke(setLayer, object, args);
+                if (StageLoader::ReadInt(getLayer, object, -1) == layer) ++relayered;
+            }
+        }
+        bool sceneMaskReady = sceneRejected == 0;
+        if (sceneRejected && stageScenes && ReadMask(getOverrideMask, camera, originalCameraMask))
+        {
+            cameraLease = StageLoader::newHandle(camera, false);
+            appliedCameraMask = cameraScenes | stageScenes;
+            if (cameraLease && SetCameraMask(camera, appliedCameraMask))
+            {
+                uint64_t after = 0;
+                sceneMaskReady = ReadMask(getSceneMask, camera, after) && (after & stageScenes) == stageScenes;
+            }
+        }
+        GakuMotion::host::Info("[GakuMotion][ExternalStage] visibility stage_renderers=%u camera_layers=%08x layers_before=%u relayered=%u native_layer=%d camera_scenes=%llx stage_scenes=%llx scene_rejected=%u scene_mask_ready=%d frustum=%d/%u",
+            stageCount, layers, visibleLayers, relayered, layer, static_cast<unsigned long long>(cameraScenes),
+            static_cast<unsigned long long>(stageScenes), sceneRejected, sceneMaskReady,
+            planeHandle && testBounds && getBounds ? static_cast<int>(frustumHits) : -1, stageCount);
+        return stageCount != 0 && visibleLayers + relayered != 0 && sceneMaskReady;
+    }
+
     inline void RestoreBackground()
     {
+        RestoreCamera();
         const int restoredScene = hiddenScene;
         size_t restoredCount = 0;
         size_t failed = 0;
@@ -112,6 +252,12 @@ namespace ExternalStage
         if (!pin) return false;
         const uintptr_t count = StageLoader::arrayLength(list);
         auto** renderers = reinterpret_cast<void**>(static_cast<char*>(list) + 32);
+        if (!PrepareVisibility(renderers, count, background))
+        {
+            StageLoader::freeHandle(pin);
+            RestoreBackground();
+            return false;
+        }
         size_t found = 0;
         bool complete = true;
         for (uintptr_t i = 0; i < count; ++i)
@@ -148,6 +294,7 @@ namespace ExternalStage
             return false;
         }
         hiddenScene = background;
+        visibilitySamples = 30;
         GakuMotion::host::Info("[GakuMotion][ExternalStage] additive_scene=%d background=%d renderers_hidden=%zu",
             mountedScene, background, hiddenRenderers.size());
         return true;
@@ -260,6 +407,32 @@ namespace ExternalStage
                 void* args[]{&mountedScene};
                 Start(Pending::Unload, StageLoader::Invoke(unloadScene, nullptr, args));
                 return;
+            }
+            if (visibilitySamples > 0 && --visibilitySamples == 0 && getVisible)
+            {
+                void* type = il2cpp_type_get_object(il2cpp_class_get_type(rendererClass));
+                bool inactive = false;
+                void* args[]{type, &inactive};
+                void* list = type ? StageLoader::Invoke(StageLoader::findAll, nullptr, args) : nullptr;
+                Handle pin = list ? StageLoader::newHandle(list, false) : nullptr;
+                if (pin)
+                {
+                    unsigned visible = 0, total = 0;
+                    const auto count = StageLoader::arrayLength(list);
+                    auto** renderers = reinterpret_cast<void**>(static_cast<char*>(list) + 32);
+                    for (uintptr_t i = 0; i < count; ++i)
+                    {
+                        void* renderer = renderers[i];
+                        void* object = renderer ? StageLoader::Invoke(StageLoader::componentGo, renderer) : nullptr;
+                        if (object && StageLoader::SceneOfFreshGo(object) == mountedScene)
+                        {
+                            ++total;
+                            if (StageLoader::ReadBool(getVisible, renderer, false)) ++visible;
+                        }
+                    }
+                    StageLoader::freeHandle(pin);
+                    GakuMotion::host::Info("[GakuMotion][ExternalStage] post-render visible=%u/%u scene=%d", visible, total, mountedScene);
+                }
             }
             status.store(1);
             return;
