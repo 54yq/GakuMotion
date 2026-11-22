@@ -1086,7 +1086,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.59-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.60-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -4478,7 +4478,7 @@ void MotionShutdown(void*)
 	StageLoadOverride::Shutdown();
 	PhotographyBgm::Release();
 	ExternalStage::ResetTimeline();
-	ExternalStage::Tick(false, 0, {});
+	ExternalStage::Tick(false, 0, {}, nullptr);
 	SceneOwnerRuntime::Shutdown();
 	ReleasePendingFileDialog();
 	core.gui.browsePendingKind = -1;
@@ -4633,10 +4633,10 @@ void MotionTick(void*, float)
             const int nativeBackground = externalStageAdmitted &&
                 SceneOwnerRuntime::cachedActiveScene.starts_with("env_3d_") &&
                 g_verifiedActiveSceneHandle != g_sceneOwner.sceneHandle ? g_verifiedActiveSceneHandle : 0;
-            ExternalStage::Tick(externalStageAdmitted, nativeBackground, g_sceneOwner);
-            ExternalStage::TickTimeline(core.player.currentTime, core.player.clip.total_frames != 0);
             void* stageActor = core.player.controller.targetActor;
             if (!stageActor && !core.sceneActorRegistry.Entries().empty()) stageActor = core.sceneActorRegistry.Entries().front().actor;
+            ExternalStage::Tick(externalStageAdmitted, nativeBackground, g_sceneOwner, stageActor);
+            ExternalStage::TickTimeline(core.player.currentTime, core.player.clip.total_frames != 0);
             ExternalStage::UpdateHeldProp(stageActor, core.player.controller);
             ExternalStage::UpdateContactShadows(stageActor, core.player.controller);
             GakuMotion::externalStageStatus.store(ExternalStage::status.load());

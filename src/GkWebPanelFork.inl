@@ -47,6 +47,9 @@
                 ",\"externalStageDuration\":" + JNum(externalStageDuration) +
                 ",\"externalStagePlaying\":" + JBool(externalStagePlaying.load()) +
                 ",\"externalStageFollow\":" + JBool(externalStageFollow.load()) +
+                ",\"externalStageGrade\":" + JBool(externalStageGrade.load()) +
+                ",\"externalStagePropStart\":" + JNum(externalStagePropStart.load()) +
+                ",\"externalStagePropEnd\":" + JNum(externalStagePropEnd.load()) +
                 ",\"externalStageHeldProp\":" + JNum(externalStageHeldProp.load()) +
                 ",\"externalStageLeftHand\":" + JBool(externalStageLeftHand.load()) +
 				",\"epoch\":" + JNum(ctx.actorRosterEpoch) + ",\"revision\":" + JNum(core_.libraryRevision) +
@@ -114,6 +117,23 @@
                 bool enable = false;
                 if (!BoolParam(params, "value", enable)) return CmdResult::Err("invalid_params", "缺少舞台开关状态");
                 externalStageEnabled.store(enable);
+                return CmdResult::Ok();
+            }
+            if (action == "externalStage.grade")
+            {
+                bool value = false;
+                if (!BoolParam(params, "value", value)) return CmdResult::Err("invalid_params", "缺少调色开关状态");
+                externalStageGrade.store(value);
+                return CmdResult::Ok();
+            }
+            if (action == "externalStage.propRange")
+            {
+                double start = 0, end = 0;
+                if (!NumberParam(params, "start", start) || !NumberParam(params, "end", end) ||
+                    !(0 <= start && start < end && end <= externalStageDuration))
+                    return CmdResult::Err("invalid_params", "道具时间区间无效");
+                externalStagePropStart.store(static_cast<float>(start));
+                externalStagePropEnd.store(static_cast<float>(end));
                 return CmdResult::Ok();
             }
             if (action == "externalStage.handProp")

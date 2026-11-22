@@ -301,6 +301,8 @@ namespace GakuMotion
     inline std::atomic<float> externalStageTime{0}, externalStageSeek{-1};
     inline std::atomic<bool> externalStagePlaying{false}, externalStageFollow{false};
     inline std::atomic<int> externalStageHeldProp{0};
+    inline std::atomic<bool> externalStageGrade{true};
+    inline std::atomic<float> externalStagePropStart{0}, externalStagePropEnd{externalStageDuration};
     inline std::atomic<bool> externalStageLeftHand{false};
 #if defined(GKMOTION_ENABLE_IMGUI) || defined(HAS_IMGUI)
     inline void DrawExternalStageControl()
@@ -308,6 +310,8 @@ namespace GakuMotion
         bool enabled = externalStageEnabled.load();
         if (ImGui::Checkbox("启用外部舞台", &enabled)) externalStageEnabled.store(enabled);
         ImGui::TextWrapped("Meni Shuki Rush｜摄影独立场景。关闭开关可恢复原背景。");
+        bool grade = externalStageGrade.load();
+        if (ImGui::Checkbox("粉色调色", &grade)) externalStageGrade.store(grade);
         const int status = externalStageStatus.load();
         if (status == 1)
         {
@@ -324,7 +328,10 @@ namespace GakuMotion
             if (ImGui::Button("回到开头")) externalStageSeek.store(0);
             ImGui::EndDisabled();
             int prop = externalStageHeldProp.load();
-            if (ImGui::SliderInt("手持道具预览（0 为不持有）", &prop, 0, 10)) externalStageHeldProp.store(prop);
+            if (ImGui::SliderInt("时间轴手持道具（0 为不持有）", &prop, 0, 10)) externalStageHeldProp.store(prop);
+            float start = externalStagePropStart.load(), end = externalStagePropEnd.load();
+            if (ImGui::SliderFloat("拿起时间", &start, 0, end, "%.2f 秒")) externalStagePropStart.store(start);
+            if (ImGui::SliderFloat("放下时间", &end, start, externalStageDuration, "%.2f 秒")) externalStagePropEnd.store(end);
             bool left = externalStageLeftHand.load();
             if (ImGui::Checkbox("使用左手", &left)) externalStageLeftHand.store(left);
         }

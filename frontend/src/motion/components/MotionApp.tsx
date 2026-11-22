@@ -87,6 +87,11 @@ function ActivePage({ fork, command }: { fork: ReturnType<typeof useForkWorkspac
           </label>
           <p className="text-sm text-muted-foreground">Meni Shuki Rush · 摄影独立场景</p>
           <p className="text-sm text-muted-foreground">开启后在摄影中加载，关闭时恢复原背景。</p>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={fork?.externalStageGrade ?? true}
+              onChange={(e) => void command('externalStage.grade', { value: e.target.checked })} />
+            粉色调色
+          </label>
           {fork?.externalStageStatus === 1 && (
             <div className="space-y-2">
               <p role="status">独立舞台已载入</p>
@@ -109,7 +114,7 @@ function ActivePage({ fork, command }: { fork: ReturnType<typeof useForkWorkspac
               <button className="ml-4" type="button" disabled={fork.externalStageFollow}
                 onClick={() => void command('externalStage.seek', { value: 0 })}>回到开头</button>
               <label className="flex items-center gap-2">
-                手持道具预览
+                时间轴手持道具
                 <select value={fork.externalStageHeldProp ?? 0}
                   onChange={(e) => void command('externalStage.handProp', {
                     prop: Number(e.target.value), left: fork.externalStageLeftHand ?? false,
@@ -127,6 +132,26 @@ function ActivePage({ fork, command }: { fork: ReturnType<typeof useForkWorkspac
                   <option value="left">左手</option>
                 </select>
               </label>
+              <div className="flex gap-4">
+                <label>拿起时间
+                  <input aria-label="拿起时间" type="range" min={0} max={fork.externalStageDuration}
+                    step="any" value={fork.externalStagePropStart ?? 0}
+                    onChange={(e) => void command('externalStage.propRange', {
+                      start: Math.min(e.target.valueAsNumber, (fork.externalStagePropEnd ?? 0) - 0.001),
+                      end: fork.externalStagePropEnd ?? 0,
+                    })} />
+                  {(fork.externalStagePropStart ?? 0).toFixed(2)} 秒
+                </label>
+                <label>放下时间
+                  <input aria-label="放下时间" type="range" min={0} max={fork.externalStageDuration}
+                    step="any" value={fork.externalStagePropEnd ?? 0}
+                    onChange={(e) => void command('externalStage.propRange', {
+                      start: fork.externalStagePropStart ?? 0,
+                      end: Math.max(e.target.valueAsNumber, (fork.externalStagePropStart ?? 0) + 0.001),
+                    })} />
+                  {(fork.externalStagePropEnd ?? 0).toFixed(2)} 秒
+                </label>
+              </div>
             </div>
           )}
           {fork?.externalStageStatus === -1 && <p role="alert">舞台载入失败，请查看 GakuLoader 日志。</p>}

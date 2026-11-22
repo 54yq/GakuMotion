@@ -543,6 +543,9 @@ export interface ForkState {
   externalStageDuration?: number
   externalStagePlaying?: boolean
   externalStageFollow?: boolean
+  externalStageGrade?: boolean
+  externalStagePropStart?: number
+  externalStagePropEnd?: number
   externalStageHeldProp?: number
   externalStageLeftHand?: boolean
   session: number

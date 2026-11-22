@@ -30,7 +30,7 @@ namespace ExternalStage
     inline float lastDoorTime = -1;
     inline std::chrono::steady_clock::time_point lastTimelineTick{};
 
-    inline void SetStageLightFrame(float frame)
+    inline void SetStageShaderFloat(const char* property, float frame, int& id)
     {
         static const void* setter = StageLoader::metadata.Find(
             FindClass("UnityEngine.CoreModule.dll", "UnityEngine", "Shader"), "SetGlobalFloat",
@@ -43,22 +43,25 @@ namespace ExternalStage
         static const void* setterById = StageLoader::metadata.Find(
             FindClass("UnityEngine.CoreModule.dll", "UnityEngine", "Shader"), "SetGlobalFloat",
             true, {0x01}, {{0x08}, {0x0c}});
-        static int id = [=]() {
-            void* name = StageLoader::stringNew(profile.lightFrameProperty);
+        if (!id) {
+            void* name = StageLoader::stringNew(property);
             void* args[]{name};
-            return name && nameToId ? StageLoader::ReadInt(nameToId, nullptr, 0, args) : 0;
-        }();
+            id = name && nameToId ? StageLoader::ReadInt(nameToId, nullptr, 0, args) : 0;
+        }
         if (setterById && id)
         {
             void* args[]{&id, &frame};
             StageLoader::Invoke(setterById, nullptr, args);
         }
-        else if (void* name = StageLoader::stringNew(profile.lightFrameProperty))
+        else if (void* name = StageLoader::stringNew(property))
         {
             void* args[]{name, &frame};
             StageLoader::Invoke(setter, nullptr, args);
         }
     }
+
+    inline int lightFrameId{}, gradeId{};
+    inline void SetStageLightFrame(float frame) { SetStageShaderFloat(profile.lightFrameProperty, frame, lightFrameId); }
 
     inline void ResetTimeline()
     {
@@ -143,6 +146,7 @@ namespace ExternalStage
         time = std::clamp(time, 0.0f, externalStageDuration);
         externalStageTime.store(time);
         if (time >= externalStageDuration) externalStagePlaying.store(false);
+        SetStageShaderFloat("_GakuExternalStageGradeEnabled", externalStageGrade.load() ? 1.0f : 0.0f, gradeId);
         if (time == lastDoorTime) return;
         lastDoorTime = time;
         SetStageLightFrame(time * 30.0f);
@@ -392,15 +396,22 @@ namespace ExternalStage
                 restoredScene, restoredCount, failed);
     }
 
-    inline bool AlignHeight(int background)
+    inline void ReleaseHeldProp();
+
+    inline bool AlignToActor(int background, void* actor)
     {
         if (alignedBackground == background) return true;
         if (!g_getWorldPosNative || !StageLoader::setPosition || !StageLoader::goType) return false;
 
         // Only use a live actor owned by the current photography presenter.
-        std::optional<float> floor;
+        std::optional<UnityVector3> anchor;
+        void* actorObject = actor ? StageLoader::Invoke(StageLoader::componentGo, actor) : nullptr;
+        if (actorObject && StageLoader::SceneOfFreshGo(actorObject) == owner.sceneHandle)
+            if (void* transform = StageLoader::Invoke(StageLoader::goTransform, actorObject))
+                anchor = g_getWorldPosNative(transform);
         for (void* type : StageLoader::actorTypes)
         {
+            if (anchor) break;
             if (!type) continue;
             bool inactive = false;
             void* args[]{type, &inactive};
@@ -415,13 +426,12 @@ namespace ExternalStage
                 if (!object || StageLoader::SceneOfFreshGo(object) != owner.sceneHandle) continue;
                 void* transform = StageLoader::Invoke(StageLoader::goTransform, object);
                 if (!transform) continue;
-                const float y = g_getWorldPosNative(transform).y;
-                if (std::isfinite(y)) { floor = y; break; }
+                anchor = g_getWorldPosNative(transform);
+                break;
             }
             StageLoader::freeHandle(pin);
-            if (floor) break;
         }
-        if (!floor) return false;
+        if (!anchor || !std::isfinite(anchor->x) || !std::isfinite(anchor->y) || !std::isfinite(anchor->z)) return false;
 
         bool inactive = false;
         void* args[]{StageLoader::goType, &inactive};
@@ -439,19 +449,22 @@ namespace ExternalStage
                 continue;
             void* transform = StageLoader::Invoke(StageLoader::goTransform, object);
             if (!transform) break;
-            auto position = g_getWorldPosNative(transform);
-            const float before = position.y;
-            position.y = *floor;
+            ReleaseHeldProp();
+            auto position = profile.rootOffset;
+            position.x += anchor->x;
+            position.y += anchor->y;
+            position.z += anchor->z;
             void* setArgs[]{&position};
             StageLoader::Invoke(StageLoader::setPosition, transform, setArgs);
             const auto after = g_getWorldPosNative(transform);
-            aligned = std::abs(after.y - *floor) < 0.002f;
-            GakuMotion::host::Info("[GakuMotion][ExternalStage] floor alignment background=%d owner=%d stage_y=%g->%g actor_y=%g aligned=%d",
-                background, owner.sceneHandle, before, after.y, *floor, aligned);
+            aligned = std::abs(after.x - position.x) < 0.002f && std::abs(after.y - position.y) < 0.002f &&
+                std::abs(after.z - position.z) < 0.002f;
+            GakuMotion::host::Info("[GakuMotion][ExternalStage] anchor background=%d actor=(%g,%g,%g) stage=(%g,%g,%g) aligned=%d",
+                background, anchor->x, anchor->y, anchor->z, after.x, after.y, after.z, aligned);
             break;
         }
         StageLoader::freeHandle(pin);
-        if (aligned) { alignedBackground = background; alignedFloor = *floor; }
+        if (aligned) { alignedBackground = background; alignedFloor = anchor->y; }
         return aligned;
     }
 
@@ -547,9 +560,7 @@ namespace ExternalStage
         return path && Start(Pending::Bundle, StageLoader::Invoke(openBundle, nullptr, args));
     }
 
-    inline void ReleaseHeldProp();
-
-    inline void Tick(bool admitted, int background, const GakuMotion::injection::OwnerSnapshot& current)
+    inline void Tick(bool admitted, int background, const GakuMotion::injection::OwnerSnapshot& current, void* actor)
     {
         const bool wanted = admitted && (!owner.Valid() || owner.SameOwner(current));
         if (!wanted) ReleaseHeldProp();
@@ -624,7 +635,7 @@ namespace ExternalStage
                 const auto now = std::chrono::steady_clock::now();
                 if (now < nextAlignment) return;
                 nextAlignment = now + std::chrono::milliseconds(150);
-                if (!AlignHeight(background)) return;
+                if (!AlignToActor(background, actor)) return;
             }
             if (!hiddenScene && !HideBackground(background))
             {

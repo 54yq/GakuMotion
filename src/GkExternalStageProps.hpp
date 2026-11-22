@@ -57,7 +57,9 @@ namespace ExternalStage
     inline void UpdateHeldProp(void* actor, GakuMotion::IdolController& controller)
     {
         const int selection = GakuMotion::externalStageHeldProp.load();
+        const float time = GakuMotion::externalStageTime.load();
         if (status.load() != 1 || !mountedScene || selection <= 0 ||
+            time < GakuMotion::externalStagePropStart.load() || time >= GakuMotion::externalStagePropEnd.load() ||
             selection > static_cast<int>(profile.propNames.size()))
         {
             if (heldTransform || attemptedProp) ReleaseHeldProp();
