@@ -53,6 +53,7 @@ namespace ExternalStageProfiles
         const char* lightFrameProperty;
         UnityVector3 rootOffset;
         float travelStart, travelEnd, travelZ;
+        float visibilityRadius;
         const AmbientKey* ambientBegin;
         const AmbientKey* ambientEnd;
         std::array<std::string_view, 2> doorNames;
@@ -146,6 +147,7 @@ namespace ExternalStageProfiles
         "Meni Shuki Rush Stage", "_GakuExternalStageLightFrame",
         {-31.2703667f * 0.07795f, 0.0f, 87.4059677f * 0.07795f},
         3024.0f, 3367.0f, -116.1299973f * 0.07795f,
+        116.0f, // 106 m from Place01 to the outer mesh, plus 9.1 m of stage travel.
         std::begin(meniAmbient), std::end(meniAmbient),
         {"StageDoor_iron_grate_l", "StageDoor_iron_grate_r"},
         {"pfb_chr_prop1205_00", "pfb_chr_prop1205_01", "pfb_chr_prop1205_02", "pfb_chr_prop1205_03",

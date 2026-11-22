@@ -11,7 +11,10 @@ namespace ExternalStage
     inline void* rendererClass{};
     inline const void *getLayer{}, *setLayer{}, *getCameraMask{}, *getSceneMask{}, *getOverrideMask{}, *setOverrideMask{};
     inline const void *getObjectSceneMask{}, *getBounds{}, *calculatePlanes{}, *testBounds{}, *getVisible{};
-    inline Handle cameraLease{};
+    inline Handle cameraLease{}, rangeCameraLease{};
+    inline const void *getFarClip{}, *setFarClip{}, *getOcclusion{}, *setOcclusion{};
+    inline float originalFarClip{}, appliedFarClip{};
+    inline bool originalOcclusion{}, changedOcclusion{};
     inline uint64_t originalCameraMask{}, appliedCameraMask{};
     inline int visibilitySamples{};
     inline int alignedBackground{};
@@ -249,6 +252,10 @@ namespace ExternalStage
         void* planes = plane && arrayClass ? arrayClass(plane, 1) : nullptr;
         getLayer = api.Find(StageLoader::goClass, "get_layer", false, {0x08}, {});
         setLayer = api.Find(StageLoader::goClass, "set_layer", false, {0x01}, {{0x08}});
+        getFarClip = api.Find(camera, "get_farClipPlane", false, {0x0c}, {});
+        setFarClip = api.Find(camera, "set_farClipPlane", false, {0x01}, {{0x0c}});
+        getOcclusion = api.Find(camera, "get_useOcclusionCulling", false, {0x02}, {});
+        setOcclusion = api.Find(camera, "set_useOcclusionCulling", false, {0x01}, {{0x02}});
         getCameraMask = api.Find(camera, "get_cullingMask", false, {0x08}, {});
         getSceneMask = api.Find(camera, "get_sceneCullingMask", false, {0x0b}, {});
         getOverrideMask = api.Find(camera, "get_overrideSceneCullingMask", false, {0x0b}, {});
@@ -344,8 +351,82 @@ namespace ExternalStage
         return !exception && ReadMask(getOverrideMask, camera, current) && current == mask;
     }
 
+    inline float ReadFarClip(void* camera)
+    {
+        void* boxed = StageLoader::Invoke(getFarClip, camera);
+        const auto* value = boxed && g_safeBones.unbox ? static_cast<float*>(g_safeBones.unbox(boxed)) : nullptr;
+        return value && std::isfinite(*value) ? *value : 0;
+    }
+
+    inline void RestoreCameraRange()
+    {
+        if (!rangeCameraLease) return;
+        void* camera = SceneOwnerRuntime::handleTarget(rangeCameraLease);
+        if (camera && CameraBridge::IsAlive(camera))
+        {
+            if (appliedFarClip > 0 && std::abs(ReadFarClip(camera) - appliedFarClip) < 0.01f)
+            {
+                void* args[]{&originalFarClip};
+                StageLoader::Invoke(setFarClip, camera, args);
+            }
+            bool current = true;
+            if (changedOcclusion && ModelRendererMask::ReadBool(getOcclusion, camera, current) && !current)
+                ModelRendererMask::WriteBool(setOcclusion, getOcclusion, camera, originalOcclusion);
+        }
+        StageLoader::freeHandle(rangeCameraLease);
+        rangeCameraLease = {};
+        appliedFarClip = 0;
+        changedOcclusion = false;
+    }
+
+    inline void UpdateCameraRange(void* camera)
+    {
+        if (!camera || !CameraBridge::IsAlive(camera)) return;
+        const bool newCamera = !rangeCameraLease || SceneOwnerRuntime::handleTarget(rangeCameraLease) != camera;
+        if (newCamera)
+        {
+            RestoreCameraRange();
+            rangeCameraLease = StageLoader::newHandle(camera, false);
+            if (!rangeCameraLease) return;
+            originalFarClip = getFarClip && setFarClip ? ReadFarClip(camera) : 0;
+            originalOcclusion = false;
+            if (getOcclusion && setOcclusion)
+                ModelRendererMask::ReadBool(getOcclusion, camera, originalOcclusion);
+        }
+        float cameraDistance = 0;
+        void* go = StageLoader::Invoke(StageLoader::componentGo, camera);
+        if (void* transform = go ? StageLoader::Invoke(StageLoader::goTransform, go) : nullptr)
+        {
+            const auto p = g_getWorldPosNative(transform);
+            cameraDistance = std::hypot(p.x - stageAnchor.x, p.y - stageAnchor.y, p.z - stageAnchor.z);
+        }
+        const float target = profile.visibilityRadius + (std::isfinite(cameraDistance) ? cameraDistance : 0) + 10.0f;
+        const float currentFar = originalFarClip > 0 ? ReadFarClip(camera) : 0;
+        if (currentFar > 0 && currentFar < target)
+        {
+            if (!appliedFarClip || std::abs(currentFar - appliedFarClip) > 0.01f) originalFarClip = currentFar;
+            float expanded = std::ceil((target + 10) / 10) * 10;
+            void* args[]{&expanded};
+            StageLoader::Invoke(setFarClip, camera, args);
+            if (std::abs(ReadFarClip(camera) - expanded) < 0.01f) appliedFarClip = expanded;
+        }
+        bool occlusion = false;
+        if (getOcclusion && setOcclusion && ModelRendererMask::ReadBool(getOcclusion, camera, occlusion) && occlusion)
+        {
+            if (ModelRendererMask::WriteBool(setOcclusion, getOcclusion, camera, false))
+            {
+                originalOcclusion = true;
+                changedOcclusion = true;
+            }
+        }
+        if (newCamera)
+            GakuMotion::host::Info("[GakuMotion][ExternalStage] camera range original=%g actual=%g occlusion_override=%d",
+                originalFarClip, ReadFarClip(camera), changedOcclusion);
+    }
+
     inline void RestoreCamera()
     {
+        RestoreCameraRange();
         if (!cameraLease) return;
         void* camera = SceneOwnerRuntime::handleTarget(cameraLease);
         uint64_t current = 0;
@@ -360,6 +441,7 @@ namespace ExternalStage
     {
         void* camera = StageLoader::Invoke(StageLoader::cameraMain);
         if (!camera || !getLayer || !setLayer || !getCameraMask) return false;
+        UpdateCameraRange(camera);
         const uint32_t layers = static_cast<uint32_t>(StageLoader::ReadInt(getCameraMask, camera));
         std::array<unsigned, 32> nativeLayers{};
         uint64_t cameraScenes = 0, stageScenes = 0;
@@ -774,6 +856,7 @@ namespace ExternalStage
                 Start(Pending::Unload, StageLoader::Invoke(unloadScene, nullptr, args));
                 return;
             }
+            if (hiddenScene) UpdateCameraRange(StageLoader::Invoke(StageLoader::cameraMain));
             if (visibilitySamples > 0 && --visibilitySamples == 0 && getVisible)
             {
                 void* type = il2cpp_type_get_object(il2cpp_class_get_type(rendererClass));
