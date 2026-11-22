@@ -75,7 +75,22 @@ namespace ExternalStage
         return place >= 1 && place <= 10 ? place : 0;
     }
 
-    inline void PlaceHeldProp(HeldProp& prop, int selection, GakuMotion::MotionPlayer& player, bool left, float weight)
+    inline UnityVector3 SampleThrow(float frame)
+    {
+        const auto& keys = ExternalStageProfiles::meniDogThrow;
+        const auto* end = std::end(keys);
+        const auto* next = std::upper_bound(std::begin(keys), end, frame,
+            [](float f, const auto& key) { return f < key.frame; });
+        if (next == std::begin(keys)) return {};
+        if (next == end) return (end - 1)->offset;
+        const auto* previous = next - 1;
+        const float t = (frame - previous->frame) / (next->frame - previous->frame);
+        return {std::lerp(previous->offset.x, next->offset.x, t),
+            std::lerp(previous->offset.y, next->offset.y, t),
+            std::lerp(previous->offset.z, next->offset.z, t)};
+    }
+
+    inline void PlaceHeldProp(HeldProp& prop, int selection, GakuMotion::MotionPlayer& player, bool left, float weight, float throwFrame)
     {
         auto& controller = player.controller;
         void* actor = controller.targetActor;
@@ -88,15 +103,41 @@ namespace ExternalStage
         void* transform = SceneOwnerRuntime::handleTarget(prop.transform);
         if (!transform) return;
         auto position = g_getWorldPosNative(hand);
+        UnityVector3 gripDirection{};
         if (void* finger = controller.fnGetBoneTransform(actor, left ? 27 : 42))
         {
             const auto grip = g_getWorldPosNative(finger);
+            gripDirection = {grip.x - position.x, grip.y - position.y, grip.z - position.z};
             position = {(position.x + grip.x) * 0.5f, (position.y + grip.y) * 0.5f, (position.z + grip.z) * 0.5f};
+        }
+        auto grip = g_getWorldRotNative(hand);
+        if (throwFrame >= 0)
+        {
+            const auto delta = SampleThrow(throwFrame);
+            const auto world = GakuMotion::Quaternion{grip.x, grip.y, grip.z, grip.w}.Rotate({delta.x, delta.y, delta.z});
+            position.x += world.x;
+            position.y += world.y;
+            position.z += world.z;
+        }
+        if (selection == 10 || selection == extraCrepe)
+        {
+            // The crepe's long axis is model +Z. Keep it upright on both palms.
+            const float horizontal = std::hypot(gripDirection.x, gripDirection.z);
+            const float yaw = horizontal > 0.01f ? std::atan2(gripDirection.x, gripDirection.z) : stageYaw;
+            if (horizontal > 0.01f)
+            {
+                position.x += gripDirection.x * (0.045f / horizontal);
+                position.z += gripDirection.z * (0.045f / horizontal);
+            }
+            position.y += 0.02f;
+            constexpr float halfRoot = 0.70710678118f;
+            const float s = std::sin(yaw * 0.5f) * halfRoot;
+            const float c = std::cos(yaw * 0.5f) * halfRoot;
+            grip = {-c, s, s, c};
         }
         const auto display = DisplayPosition(prop);
         g_setWorldPosNative(transform, {std::lerp(display.x, position.x, weight),
             std::lerp(display.y, position.y, weight), std::lerp(display.z, position.z, weight)});
-        auto grip = g_getWorldRotNative(hand);
         const auto& r = prop.rotation;
         if (r.x * grip.x + r.y * grip.y + r.z * grip.z + r.w * grip.w < 0)
             grip = {-grip.x, -grip.y, -grip.z, -grip.w};
@@ -155,13 +196,16 @@ namespace ExternalStage
             const float frame = time * 30.0f;
             for (const auto& cue : ExternalStageProfiles::meniPropCues)
                 if (frame >= cue.first && frame < cue.last && players[cue.place])
-                    grips[cue.prop-1] = {players[cue.place], cue.left, 1.0f};
+                {
+                    const float t = cue.prop == 1 ? std::clamp((frame - cue.first) / 9.0f, 0.0f, 1.0f) : 1.0f;
+                    grips[cue.prop-1] = {players[cue.place], cue.left, t*t*(3-2*t)};
+                }
         }
         for (size_t i = 0; i < grips.size(); ++i)
         {
             const auto& grip = grips[i];
             if (grip.player && (!onlyActor || grip.player->controller.targetActor == onlyActor))
-                PlaceHeldProp(heldProps[i], static_cast<int>(i)+1, *grip.player, grip.left, grip.weight);
+                PlaceHeldProp(heldProps[i], static_cast<int>(i)+1, *grip.player, grip.left, grip.weight, !manual && i == 0 ? time * 30.0f : -1.0f);
             else if (!onlyActor) ReleaseHeldProp(heldProps[i]);
         }
     }
