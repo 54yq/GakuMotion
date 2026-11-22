@@ -15,6 +15,8 @@ namespace ExternalStage
     inline Handle cameraLease{};
     inline uint64_t originalCameraMask{}, appliedCameraMask{};
     inline int visibilitySamples{};
+    inline int alignedBackground{};
+    inline std::chrono::steady_clock::time_point nextAlignment{};
     inline Handle operation{}, bundle{};
     inline Pending pending{};
     inline int mountedScene{}, hiddenScene{};
@@ -390,6 +392,69 @@ namespace ExternalStage
                 restoredScene, restoredCount, failed);
     }
 
+    inline bool AlignHeight(int background)
+    {
+        if (alignedBackground == background) return true;
+        if (!g_getWorldPosNative || !StageLoader::setPosition || !StageLoader::goType) return false;
+
+        // Only use a live actor owned by the current photography presenter.
+        std::optional<float> floor;
+        for (void* type : StageLoader::actorTypes)
+        {
+            if (!type) continue;
+            bool inactive = false;
+            void* args[]{type, &inactive};
+            void* list = StageLoader::Invoke(StageLoader::findAll, nullptr, args);
+            Handle pin = list ? StageLoader::newHandle(list, false) : nullptr;
+            if (!pin) continue;
+            auto** actors = reinterpret_cast<void**>(static_cast<char*>(list) + 32);
+            const auto count = StageLoader::arrayLength(list);
+            for (uintptr_t i = 0; i < count; ++i)
+            {
+                void* object = actors[i] ? StageLoader::Invoke(StageLoader::componentGo, actors[i]) : nullptr;
+                if (!object || StageLoader::SceneOfFreshGo(object) != owner.sceneHandle) continue;
+                void* transform = StageLoader::Invoke(StageLoader::goTransform, object);
+                if (!transform) continue;
+                const float y = g_getWorldPosNative(transform).y;
+                if (std::isfinite(y)) { floor = y; break; }
+            }
+            StageLoader::freeHandle(pin);
+            if (floor) break;
+        }
+        if (!floor) return false;
+
+        bool inactive = false;
+        void* args[]{StageLoader::goType, &inactive};
+        void* list = StageLoader::Invoke(StageLoader::findAll, nullptr, args);
+        Handle pin = list ? StageLoader::newHandle(list, false) : nullptr;
+        if (!pin) return false;
+        auto** objects = reinterpret_cast<void**>(static_cast<char*>(list) + 32);
+        const auto count = StageLoader::arrayLength(list);
+        bool aligned = false;
+        for (uintptr_t i = 0; i < count; ++i)
+        {
+            void* object = objects[i];
+            if (!object || StageLoader::SceneOfFreshGo(object) != mountedScene ||
+                Il2CppStringToUtf8(StageLoader::Invoke(StageLoader::objectName, object)) != "Meni Shuki Rush Stage")
+                continue;
+            void* transform = StageLoader::Invoke(StageLoader::goTransform, object);
+            if (!transform) break;
+            auto position = g_getWorldPosNative(transform);
+            const float before = position.y;
+            position.y = *floor;
+            void* setArgs[]{&position};
+            StageLoader::Invoke(StageLoader::setPosition, transform, setArgs);
+            const auto after = g_getWorldPosNative(transform);
+            aligned = std::abs(after.y - *floor) < 0.002f;
+            GakuMotion::host::Info("[GakuMotion][ExternalStage] floor alignment background=%d owner=%d stage_y=%g->%g actor_y=%g aligned=%d",
+                background, owner.sceneHandle, before, after.y, *floor, aligned);
+            break;
+        }
+        StageLoader::freeHandle(pin);
+        if (aligned) alignedBackground = background;
+        return aligned;
+    }
+
     inline bool HideBackground(int background)
     {
         void* type = il2cpp_type_get_object(il2cpp_class_get_type(rendererClass));
@@ -540,6 +605,8 @@ namespace ExternalStage
             }
             ReleaseBundle();
             owner = {};
+            alignedBackground = 0;
+            nextAlignment = {};
             attempted = false;
             status.store(0);
             return;
@@ -548,6 +615,14 @@ namespace ExternalStage
         if (mountedScene)
         {
             if (!background) { status.store(0); return; }
+            if (alignedBackground != background)
+            {
+                status.store(2);
+                const auto now = std::chrono::steady_clock::now();
+                if (now < nextAlignment) return;
+                nextAlignment = now + std::chrono::milliseconds(150);
+                if (!AlignHeight(background)) return;
+            }
             if (!hiddenScene && !HideBackground(background))
             {
                 status.store(-1);
