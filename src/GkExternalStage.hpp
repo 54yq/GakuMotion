@@ -15,6 +15,7 @@ namespace ExternalStage
     inline const void *getFarClip{}, *setFarClip{}, *getOcclusion{}, *setOcclusion{};
     inline float originalFarClip{}, appliedFarClip{};
     inline bool originalOcclusion{}, changedOcclusion{};
+    inline int originalClearFlags{};
     inline uint64_t originalCameraMask{}, appliedCameraMask{};
     inline int visibilitySamples{};
     inline int alignedBackground{};
@@ -369,6 +370,8 @@ namespace ExternalStage
                 void* args[]{&originalFarClip};
                 StageLoader::Invoke(setFarClip, camera, args);
             }
+            if (originalClearFlags && HelperCameraGetClearFlags(camera) == 2)
+                HelperCameraSetClearFlags(camera, originalClearFlags);
             bool current = true;
             if (changedOcclusion && ModelRendererMask::ReadBool(getOcclusion, camera, current) && !current)
                 ModelRendererMask::WriteBool(setOcclusion, getOcclusion, camera, originalOcclusion);
@@ -377,6 +380,7 @@ namespace ExternalStage
         rangeCameraLease = {};
         appliedFarClip = 0;
         changedOcclusion = false;
+        originalClearFlags = 0;
     }
 
     inline void UpdateCameraRange(void* camera)
@@ -392,6 +396,17 @@ namespace ExternalStage
             originalOcclusion = false;
             if (getOcclusion && setOcclusion)
                 ModelRendererMask::ReadBool(getOcclusion, camera, originalOcclusion);
+        }
+        // Replace only the host skybox while this external stage owns photography.
+        const int flags = status.load() == 1 ? HelperCameraGetClearFlags(camera) : 0;
+        if (flags == 1)
+        {
+            HelperCameraSetClearFlags(camera, 2);
+            if (HelperCameraGetClearFlags(camera) == 2 && !originalClearFlags)
+            {
+                originalClearFlags = flags;
+                GakuMotion::host::Info("[GakuMotion][ExternalStage] native skybox suppressed");
+            }
         }
         float cameraDistance = 0;
         void* go = StageLoader::Invoke(StageLoader::componentGo, camera);
