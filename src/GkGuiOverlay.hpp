@@ -299,7 +299,7 @@ namespace GakuMotion
     inline std::atomic<int> externalStageStatus{0};
     inline constexpr float externalStageDuration = 4805.0f / 30.0f;
     inline std::atomic<float> externalStageTime{0}, externalStageSeek{-1};
-    inline std::atomic<bool> externalStagePlaying{false}, externalStageFollow{false};
+    inline std::atomic<bool> externalStagePlaying{false}, externalStageFollow{true};
     inline std::atomic<int> externalStageHeldProp{0};
     inline std::atomic<bool> externalStageGrade{true};
     inline std::atomic<bool> externalStageActorAmbient{true};

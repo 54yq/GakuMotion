@@ -119,6 +119,21 @@ namespace ExternalStage
         std::array<Grip, extraCrepe> grips{};
         const float time = externalStageTime.load();
         const int manual = externalStageHeldProp.load();
+        const int primaryPlace = MotionPlace(core.player.currentMotionDir);
+        const bool follows = externalStageFollow.load();
+        if (!onlyActor)
+        {
+            static int lastScene{}, lastPlace{}, lastManual{};
+            static bool lastFollow{};
+            if (lastScene != mountedScene || lastPlace != primaryPlace ||
+                lastManual != manual || lastFollow != follows)
+            {
+                GakuMotion::host::Info("[GakuMotion][ExternalStage] prop cue mode scene=%d place=%d follow=%d manual=%d stage_time=%.3f motion_time=%.3f",
+                    mountedScene, primaryPlace, follows, manual, time, core.player.currentTime);
+                lastScene = mountedScene; lastPlace = primaryPlace;
+                lastManual = manual; lastFollow = follows;
+            }
+        }
         if (manual > 0 && manual <= static_cast<int>(profile.propNames.size()))
         {
             const float start = externalStagePropStart.load(), end = externalStagePropEnd.load();
@@ -129,10 +144,10 @@ namespace ExternalStage
                 grips[manual-1] = {&core.player, externalStageLeftHand.load(), t*t*(3-2*t)};
             }
         }
-        else if (externalStageFollow.load() && MotionPlace(core.player.currentMotionDir))
+        else if (follows && primaryPlace)
         {
             std::array<MotionPlayer*, 11> players{};
-            players[MotionPlace(core.player.currentMotionDir)] = &core.player;
+            players[primaryPlace] = &core.player;
             for (const auto& follower : core.ensemble.Followers())
                 if (follower.active && follower.player)
                     if (int place = MotionPlace(follower.player->currentMotionDir); place && !players[place])
