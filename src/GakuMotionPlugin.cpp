@@ -370,7 +370,8 @@ namespace
             const bool diagnostics = !photography && core.config.sleeveMuscleDiagnostics;
 			if (slot.actor != actor || slot.bindingGeneration != follower.bindingGeneration || slot.backend != requested ||
 			    slot.quartz != quartz || slot.diagnostics != diagnostics ||
-			    (!paused && (slot.seeks != core.player.SeekCount() || core.player.scrubbing || player.currentTime + .001f < slot.time)))
+			    (!paused && (!photography || !core.player.scrubbing) &&
+                    (slot.seeks != core.player.SeekCount() || core.player.scrubbing || player.currentTime + .001f < slot.time)))
 			{
 				if (!ClearFollowerPhysics(i, &player))
 				{
@@ -1089,7 +1090,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.76-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.77-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -4066,6 +4067,8 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
     recordMainActorPose("before_plugin_pose", false);
 	EyeGazeProbe::Before(activeActor);
 	if (player.controller.targetActor)
+		core.externalStageCameraAvoidance = ExternalStage::status.load() == 1 &&
+			g_sceneOwner.AllowedContext() == GakuMotion::injection::Context::Photography;
 		GakuMotion::OnLateUpdate(activeActor, anim, nullptr, dtToPass, isNewPhysicalFrame,
 		                        s_cameraFrameDelta, s_cameraPhysicalFrame,
                                 ThreeActorNativeTakeover(core) && !core.ensemble.HasActiveFollowers() &&
@@ -4141,7 +4144,8 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 			if (requested != g_physicsBackend || quartz != g_physicsBeforeQuartz ||
 				diagnostics != g_physicsSleeveDiagnostics ||
 				activeActor != g_physicsActor || core.loadedMotionGeneration != g_physicsMotionGeneration ||
-				(!paused && (player.SeekCount() != g_physicsSeeks || player.scrubbing || player.currentTime + .001f < g_physicsTime)))
+				(!paused && (!photography || !player.scrubbing) &&
+                    (player.SeekCount() != g_physicsSeeks || player.scrubbing || player.currentTime + .001f < g_physicsTime)))
 			{
 				if (g_physicsActor == activeActor)
 				{

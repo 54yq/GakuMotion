@@ -4,6 +4,7 @@
 #include "GkRestoreChecks.hpp"
 #include <array>
 #include <mutex>
+#include <vector>
 
 namespace GakuMotion
 {
@@ -463,7 +464,8 @@ namespace GakuMotion
 		}
 
 		void Tick(bool active, float time, float dt, void* targetActor, uint64_t physicalFrame = 0,
-		          float placementYawDegrees = 0.0f, Vector3 trackAnchorLocal = {})
+		          float placementYawDegrees = 0.0f, Vector3 trackAnchorLocal = {},
+                  const std::vector<void*>* avoidActors = nullptr)
 		{
 			if (!active || !settings.enabled || !settings.IsValid() || !targetActor)
 			{
@@ -613,6 +615,34 @@ namespace GakuMotion
 					const Quaternion qRot = Quaternion::FromEulerDegreesXYZ(tf.rotation.x, tf.rotation.y, tf.rotation.z);
 					frame.rotation = (CameraLookRotation(followLookTarget - frame.position) * qRot).Normalized();
 				}
+			}
+			if (hasTrack && avoidActors && fnFollowTarget)
+			{
+				// Keep authored aim and FOV. Only retreat if the lens is inside a head.
+				const Vector3 back = frame.rotation.Rotate({0.0f, 0.0f, -1.0f});
+				constexpr float radius = 0.24f;
+				const Vector3 authoredPosition = frame.position;
+				float retreat = 0.0f;
+				for (size_t pass = 0; pass < avoidActors->size(); ++pass)
+				{
+					const float previous = retreat;
+					for (void* candidate : *avoidActors)
+					{
+						Vector3 head;
+						if (!candidate || !fnAlive(candidate) ||
+							!fnFollowTarget(candidate, CameraFollowTarget::Head, head) || !CameraFinite(head)) continue;
+						const Vector3 delta = authoredPosition - head;
+						const float along = delta.x * back.x + delta.y * back.y + delta.z * back.z;
+						const Vector3 lateral = delta - Vector3{back.x * along, back.y * along, back.z * along};
+						const float distanceSq = lateral.x * lateral.x + lateral.y * lateral.y + lateral.z * lateral.z;
+						if (distanceSq >= radius * radius) continue;
+						const float halfChord = std::sqrt(radius * radius - distanceSq);
+						if (std::abs(along + retreat) < halfChord)
+							retreat = -along + halfChord + 0.005f;
+					}
+					if (retreat == previous) break;
+				}
+				frame.position = authoredPosition + Vector3{back.x * retreat, back.y * retreat, back.z * retreat};
 			}
 			desired = frame;
 			fnWrite(camera, transform, desired);

@@ -396,6 +396,7 @@ namespace GakuMotion
 		int (*fnPollCameraImport)(std::string&){nullptr};
 		// Fresh active actors in the admitted owner scene; managed reads stay on Unity thread.
 		std::vector<void*> sceneActors;
+		bool externalStageCameraAvoidance{false};
 		SceneActorRegistry sceneActorRegistry;
 		std::unordered_set<std::string> actorPropHidden;
 		bool CanControlActorProps() const
@@ -1515,7 +1516,8 @@ namespace GakuMotion
 				const Vector3 liveTrackAnchor = LiveCameraTrackAnchor(actor);
 				camera.Tick(player.state == PlaybackState::Playing || player.state == PlaybackState::Paused || player.state == PlaybackState::Preview,
 				            player.CameraSourceTime(), cameraDeltaTime >= 0.0f ? cameraDeltaTime : deltaTime,
-				            actor, physicalFrame, player.controller.initialYawDegrees, liveTrackAnchor);
+				            actor, physicalFrame, player.controller.initialYawDegrees, liveTrackAnchor,
+			            externalStageCameraAvoidance ? &sceneActors : nullptr);
 				// One local diagnostic per session/clip/actor. These values let us
 				// distinguish a bad baseline from a mismatched imported camera.
 				if (liveTakeoverActive && player.controller.currentBinding.actor == actor &&
