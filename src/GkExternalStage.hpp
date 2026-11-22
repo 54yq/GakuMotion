@@ -28,6 +28,36 @@ namespace ExternalStage
     inline float lastDoorTime = -1;
     inline std::chrono::steady_clock::time_point lastTimelineTick{};
 
+    inline void SetStageLightFrame(float frame)
+    {
+        static const void* setter = StageLoader::metadata.Find(
+            FindClass("UnityEngine.CoreModule.dll", "UnityEngine", "Shader"), "SetGlobalFloat",
+            true, {0x01}, {{0x0e}, {0x0c}});
+        if (!setter) return;
+        // Reuse the property ID to avoid an allocation every stage frame.
+        static const void* nameToId = StageLoader::metadata.Find(
+            FindClass("UnityEngine.CoreModule.dll", "UnityEngine", "Shader"), "PropertyToID",
+            true, {0x08}, {{0x0e}});
+        static const void* setterById = StageLoader::metadata.Find(
+            FindClass("UnityEngine.CoreModule.dll", "UnityEngine", "Shader"), "SetGlobalFloat",
+            true, {0x01}, {{0x08}, {0x0c}});
+        static int id = [=]() {
+            void* name = StageLoader::stringNew("_GakuExternalStageLightFrame");
+            void* args[]{name};
+            return name && nameToId ? StageLoader::ReadInt(nameToId, nullptr, 0, args) : 0;
+        }();
+        if (setterById && id)
+        {
+            void* args[]{&id, &frame};
+            StageLoader::Invoke(setterById, nullptr, args);
+        }
+        else if (void* name = StageLoader::stringNew("_GakuExternalStageLightFrame"))
+        {
+            void* args[]{name, &frame};
+            StageLoader::Invoke(setter, nullptr, args);
+        }
+    }
+
     inline void ResetTimeline()
     {
         if (!doorScene) return;
@@ -37,6 +67,7 @@ namespace ExternalStage
             handle = {};
         }
         doorScene = 0;
+        SetStageLightFrame(0);
         lastDoorTime = -1;
         lastTimelineTick = {};
         GakuMotion::externalStagePlaying.store(false);
@@ -110,8 +141,10 @@ namespace ExternalStage
         time = std::clamp(time, 0.0f, externalStageDuration);
         externalStageTime.store(time);
         if (time >= externalStageDuration) externalStagePlaying.store(false);
-        if (!setDoorRotation || time == lastDoorTime) return;
+        if (time == lastDoorTime) return;
         lastDoorTime = time;
+        SetStageLightFrame(time * 30.0f);
+        if (!setDoorRotation) return;
 
         const float fraction = std::clamp((time * 30.0f - 2933.0f) / 61.0f, 0.0f, 1.0f);
         // VMD rotation interpolation uses the ending key's control points.
