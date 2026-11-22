@@ -172,13 +172,17 @@ namespace ExternalStage
         if (status.load() != 1 || !mountedScene || !StageLoader::goType ||
             !g_getWorldPosNative || !g_getWorldRotNative || !g_setWorldPosNative || !g_setWorldRotNative)
         {
-            if (!onlyActor) ReleaseHeldProp();
+            if (!onlyActor)
+            {
+                core.stagePropPreview.reset();
+                ReleaseHeldProp();
+            }
             return;
         }
         struct Grip { MotionPlayer* player{}; bool left{}; float weight{}; const stage_prop_timeline::Cue* cue{}; };
         std::array<Grip, extraCrepe> grips{};
         const float time = externalStageTime.load();
-        const int manual = externalStageHeldProp.load();
+        const int manual = core.stagePropPreview ? 0 : externalStageHeldProp.load();
         const int primaryPlace = MotionPlace(core.player.currentMotionDir);
         const bool follows = externalStageFollow.load();
         if (!onlyActor)
@@ -204,7 +208,7 @@ namespace ExternalStage
                 grips[manual-1] = {&core.player, externalStageLeftHand.load(), t*t*(3-2*t)};
             }
         }
-        else if (follows && primaryPlace)
+        else if ((follows || core.stagePropPreview) && primaryPlace)
         {
             std::array<MotionPlayer*, 11> players{};
             players[primaryPlace] = &core.player;
@@ -213,7 +217,8 @@ namespace ExternalStage
                     if (int place = MotionPlace(follower.player->currentMotionDir); place && !players[place])
                         players[place] = follower.player.get();
             const float frame = time * 30.0f;
-            for (const auto& cue : core.stagePropCues)
+            const auto& cues = core.stagePropPreview ? *core.stagePropPreview : core.stagePropCues;
+            for (const auto& cue : cues)
                 if (frame >= cue.first && frame < cue.last && players[cue.place])
                 {
                     const float t = cue.prop == 1 ? std::clamp((frame - cue.first) / 9.0f, 0.0f, 1.0f) : 1.0f;

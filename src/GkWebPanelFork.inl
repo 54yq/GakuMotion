@@ -132,6 +132,7 @@
                 bool enable = false;
                 if (!BoolParam(params, "value", enable)) return CmdResult::Err("invalid_params", "缺少舞台开关状态");
                 externalStageEnabled.store(enable);
+                if (!enable) core_.stagePropPreview.reset();
                 return CmdResult::Ok();
             }
             if (action == "externalStage.locate" || action == "externalStage.measure")
@@ -183,8 +184,16 @@
                 }
                 return CmdResult::Ok();
             }
-            if (action == "externalStage.cueSave" || action == "externalStage.cueDelete" || action == "externalStage.cueReset")
+            if (action == "externalStage.cuePreviewClear")
             {
+                core_.stagePropPreview.reset();
+                return CmdResult::Ok();
+            }
+            if (action == "externalStage.cuePreview" || action == "externalStage.cueSave" ||
+                action == "externalStage.cueDelete" || action == "externalStage.cueReset")
+            {
+                if (action == "externalStage.cuePreview" && externalStageStatus.load() != 1)
+                    return CmdResult::Err("stage_unavailable", "独立舞台尚未就绪");
                 auto cues = core_.stagePropCues;
                 if (action == "externalStage.cueReset") cues = stage_prop_timeline::meniDefaults;
                 else
@@ -223,10 +232,16 @@
                         else return CmdResult::Err("invalid_params", "道具片段数量已到上限");
                     }
                 }
+                if (action == "externalStage.cuePreview")
+                {
+                    core_.stagePropPreview = std::move(cues);
+                    return CmdResult::Ok();
+                }
                 if (core_.configRoot.empty() || !stage_prop_timeline::Save(
                     MotionPathFromUtf8(core_.configRoot + "/meni_stage_props.txt"), cues))
                     return CmdResult::Err("write_failed", "无法保存道具编排");
                 core_.stagePropCues = std::move(cues);
+                core_.stagePropPreview.reset();
                 externalStageHeldProp.store(0);
                 return CmdResult::Ok();
             }

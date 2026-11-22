@@ -469,6 +469,7 @@ namespace GakuMotion
 		std::string motionsRoot;
 		std::string configRoot;
 		std::vector<stage_prop_timeline::Cue> stagePropCues = stage_prop_timeline::meniDefaults;
+		std::optional<std::vector<stage_prop_timeline::Cue>> stagePropPreview;
 		std::string logsRoot, diagnosticsRoot, transactionRoot;
 		DataLayout dataLayout;
 		std::string globalOverridePath;
