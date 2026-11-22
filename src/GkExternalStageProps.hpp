@@ -8,7 +8,6 @@ namespace ExternalStage
         Handle transform{};
         UnityVector3 position{}, travel{};
         UnityQuaternion rotation{};
-        bool hidden{}, storedActive{};
     };
     inline std::array<HeldProp, extraCrepe> heldProps{};
 
@@ -25,8 +24,6 @@ namespace ExternalStage
         {
             g_setWorldPosNative(transform, DisplayPosition(prop));
             g_setWorldRotNative(transform, prop.rotation);
-            if (prop.hidden == prop.storedActive)
-                HelperGameObjectSetActive(StageLoader::Invoke(StageLoader::componentGo, transform), prop.storedActive);
         }
         StageLoader::freeHandle(prop.transform);
         prop = {};
@@ -39,7 +36,7 @@ namespace ExternalStage
 
     inline bool BindHeldProp(HeldProp& prop, int selection)
     {
-        bool includeInactive = true;
+        bool includeInactive = false;
         void* args[]{StageLoader::goType, &includeInactive};
         void* list = StageLoader::Invoke(StageLoader::findAll, nullptr, args);
         Handle pin = list ? StageLoader::newHandle(list, false) : nullptr;
@@ -58,8 +55,6 @@ namespace ExternalStage
                 prop.position = g_getWorldPosNative(transform);
                 prop.travel = stageTravel;
                 prop.rotation = g_getWorldRotNative(transform);
-                prop.storedActive = StageLoader::ReadBool(StageLoader::activeSelf, object, true);
-                prop.hidden = !prop.storedActive;
             }
             break;
         }
@@ -223,8 +218,9 @@ namespace ExternalStage
             stageFrame >= ExternalStageProfiles::meniRightCrepeHold.exitEnd;
         if (consumed)
         {
-            if (!prop.hidden)
-                prop.hidden = HelperGameObjectSetActive(StageLoader::Invoke(StageLoader::componentGo, transform), false);
+            auto parked = DisplayPosition(prop);
+            parked.y = std::min(parked.y, stageAnchor.y - 4.f);
+            g_setWorldPosNative(transform, parked);
             return;
         }
 
@@ -251,8 +247,6 @@ namespace ExternalStage
             std::lerp(r.z, grip.z, weight), std::lerp(r.w, grip.w, weight)};
         const float norm = std::sqrt(q.x*q.x + q.y*q.y + q.z*q.z + q.w*q.w);
         if (norm > 0) g_setWorldRotNative(transform, {q.x/norm, q.y/norm, q.z/norm, q.w/norm});
-        if (prop.hidden && HelperGameObjectSetActive(StageLoader::Invoke(StageLoader::componentGo, transform), true))
-            prop.hidden = false;
     }
 
     inline void UpdateHeldProps(GakuMotion::Core& core, void* onlyActor = nullptr)
