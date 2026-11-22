@@ -1086,7 +1086,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.63-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.64-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -4649,12 +4649,19 @@ void MotionTick(void*, float)
                         auto offset = core.player.controller.initialPositionOffset;
                         offset.x += anchor.x - start.world.x;
                         offset.z += anchor.z - start.world.z;
+                        // The stage keeps the MMD X/Z basis, while GKClip negates both axes.
+                        // Rotate the character travel into the stage basis around its first frame.
+                        constexpr float radiansToDegrees = 57.2957795131f;
+                        const float yaw = std::remainder(
+                            ExternalStage::stageYaw * radiansToDegrees + 180.0f - start.heading, 360.0f);
                         core.QueueInitialPosition(offset);
+                        core.QueueInitialYaw(yaw);
                         core.QueuePause();
                         core.QueueSeek(0);
                         GakuMotion::externalStageSeek.store(0);
-                        GakuMotion::host::Info("[GakuMotion][ExternalStage] Place01 anchor=(%g,%g,%g) offset=(%g,%g,%g)",
-                            anchor.x, anchor.y, anchor.z, offset.x, offset.y, offset.z);
+                        GakuMotion::host::Info("[GakuMotion][ExternalStage] Place01 anchor=(%g,%g,%g) actor_start=(%g,%g,%g) offset=(%g,%g,%g) yaw=%g",
+                            anchor.x, anchor.y, anchor.z, start.world.x, start.world.y, start.world.z,
+                            offset.x, offset.y, offset.z, yaw);
                     }
                     GakuMotion::externalStageLocateResult.store(ready ? 1 : -1);
                 }
