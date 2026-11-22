@@ -87,7 +87,29 @@ function ActivePage({ fork, command }: { fork: ReturnType<typeof useForkWorkspac
           </label>
           <p className="text-sm text-muted-foreground">Meni Shuki Rush · 摄影独立场景</p>
           <p className="text-sm text-muted-foreground">开启后在摄影中加载，关闭时恢复原背景。</p>
-          {fork?.externalStageStatus === 1 && <p role="status">独立舞台已载入</p>}
+          {fork?.externalStageStatus === 1 && (
+            <div className="space-y-2">
+              <p role="status">独立舞台已载入</p>
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={fork.externalStageFollow ?? false}
+                  onChange={(e) => void command('externalStage.follow', { value: e.target.checked })} />
+                跟随曲目
+              </label>
+              <label className="block">
+                舞台进度 {(fork.externalStageTime ?? 0).toFixed(1)} / {(fork.externalStageDuration ?? 0).toFixed(1)} 秒
+                <input aria-label="舞台进度" className="block w-full" type="range" min={0}
+                  max={fork.externalStageDuration ?? 0} step={0.033333}
+                  disabled={fork.externalStageFollow} value={fork.externalStageTime ?? 0}
+                  onChange={(e) => void command('externalStage.seek', { value: e.target.valueAsNumber })} />
+              </label>
+              <button type="button" disabled={fork.externalStageFollow}
+                onClick={() => void command('externalStage.play', { value: !fork.externalStagePlaying })}>
+                {fork.externalStagePlaying ? '暂停舞台' : '播放舞台'}
+              </button>
+              <button className="ml-4" type="button" disabled={fork.externalStageFollow}
+                onClick={() => void command('externalStage.seek', { value: 0 })}>回到开头</button>
+            </div>
+          )}
           {fork?.externalStageStatus === -1 && <p role="alert">舞台载入失败，请查看 GakuLoader 日志。</p>}
         </section>
       )

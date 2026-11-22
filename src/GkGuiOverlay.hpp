@@ -297,6 +297,9 @@ namespace GakuMotion
 	void DrawStagePage(GuiOverlay& overlay, const GuiContext& ctx);
     inline std::atomic<bool> externalStageEnabled{false};
     inline std::atomic<int> externalStageStatus{0};
+    inline constexpr float externalStageDuration = 4805.0f / 30.0f;
+    inline std::atomic<float> externalStageTime{0}, externalStageSeek{-1};
+    inline std::atomic<bool> externalStagePlaying{false}, externalStageFollow{false};
 #if defined(GKMOTION_ENABLE_IMGUI) || defined(HAS_IMGUI)
     inline void DrawExternalStageControl()
     {
@@ -304,7 +307,21 @@ namespace GakuMotion
         if (ImGui::Checkbox("启用外部舞台", &enabled)) externalStageEnabled.store(enabled);
         ImGui::TextWrapped("Meni Shuki Rush｜摄影独立场景。关闭开关可恢复原背景。");
         const int status = externalStageStatus.load();
-        if (status == 1) ImGui::TextUnformatted("独立舞台已载入");
+        if (status == 1)
+        {
+            ImGui::TextUnformatted("独立舞台已载入");
+            bool follow = externalStageFollow.load();
+            if (ImGui::Checkbox("跟随曲目", &follow)) externalStageFollow.store(follow);
+            ImGui::BeginDisabled(follow);
+            float time = externalStageTime.load();
+            if (ImGui::SliderFloat("舞台进度", &time, 0, externalStageDuration, "%.1f 秒"))
+                externalStageSeek.store(time);
+            const bool playing = externalStagePlaying.load();
+            if (ImGui::Button(playing ? "暂停舞台" : "播放舞台")) externalStagePlaying.store(!playing);
+            ImGui::SameLine();
+            if (ImGui::Button("回到开头")) externalStageSeek.store(0);
+            ImGui::EndDisabled();
+        }
         if (status == -1) ImGui::TextUnformatted("舞台载入失败，请查看 GakuLoader 日志");
     }
 #endif

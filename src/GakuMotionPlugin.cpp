@@ -1086,7 +1086,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.55-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.56-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -4469,6 +4469,7 @@ void MotionShutdown(void*)
 	GakuMotion::capture::Shutdown();
 	StageLoadOverride::Shutdown();
 	PhotographyBgm::Release();
+	ExternalStage::ResetTimeline();
 	ExternalStage::Tick(false, 0, {});
 	SceneOwnerRuntime::Shutdown();
 	ReleasePendingFileDialog();
@@ -4625,6 +4626,7 @@ void MotionTick(void*, float)
                 SceneOwnerRuntime::cachedActiveScene.starts_with("env_3d_") &&
                 g_verifiedActiveSceneHandle != g_sceneOwner.sceneHandle ? g_verifiedActiveSceneHandle : 0;
             ExternalStage::Tick(externalStageAdmitted, nativeBackground, g_sceneOwner);
+            ExternalStage::TickTimeline(core.player.currentTime, core.player.clip.total_frames != 0);
             GakuMotion::externalStageStatus.store(ExternalStage::status.load());
             NativeAudio::Sync();
             bool mutePhotographyBgm = false;

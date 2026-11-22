@@ -43,6 +43,10 @@
 			return "{\"session\":" + JNum(core_.injectionSession) + ",\"owner\":" + JNum(core_.liveOwnerToken) +
                 ",\"externalStageEnabled\":" + JBool(externalStageEnabled.load()) +
                 ",\"externalStageStatus\":" + JNum(externalStageStatus.load()) +
+                ",\"externalStageTime\":" + JNum(externalStageTime.load()) +
+                ",\"externalStageDuration\":" + JNum(externalStageDuration) +
+                ",\"externalStagePlaying\":" + JBool(externalStagePlaying.load()) +
+                ",\"externalStageFollow\":" + JBool(externalStageFollow.load()) +
 				",\"epoch\":" + JNum(ctx.actorRosterEpoch) + ",\"revision\":" + JNum(core_.libraryRevision) +
 				",\"observed\":" + JBool(ctx.liveObserved) + ",\"viewing\":" + JBool(ctx.liveViewingConfirmed) +
 				",\"paused\":" + JBool(ctx.livePaused) + ",\"active\":" + JBool(ctx.liveTakeoverActive) +
@@ -108,6 +112,28 @@
                 bool enable = false;
                 if (!BoolParam(params, "value", enable)) return CmdResult::Err("invalid_params", "缺少舞台开关状态");
                 externalStageEnabled.store(enable);
+                return CmdResult::Ok();
+            }
+            if (action == "externalStage.follow" || action == "externalStage.play" || action == "externalStage.seek")
+            {
+                if (externalStageStatus.load() != 1)
+                    return CmdResult::Err("stage_unavailable", "独立舞台尚未就绪");
+                if (action == "externalStage.follow" || action == "externalStage.play")
+                {
+                    bool value = false;
+                    if (!BoolParam(params, "value", value) ||
+                        (action == "externalStage.play" && externalStageFollow.load()))
+                        return CmdResult::Err("invalid_params", "舞台播放状态无效");
+                    if (action == "externalStage.follow") externalStageFollow.store(value);
+                    else externalStagePlaying.store(value);
+                }
+                else
+                {
+                    double seconds = 0;
+                    if (externalStageFollow.load() || !NumberParam(params, "value", seconds) || !std::isfinite(seconds))
+                        return CmdResult::Err("invalid_params", "舞台时间无效");
+                    externalStageSeek.store(static_cast<float>(std::clamp(seconds, 0.0, double(externalStageDuration))));
+                }
                 return CmdResult::Ok();
             }
 			if (action.rfind("live.", 0) == 0)
