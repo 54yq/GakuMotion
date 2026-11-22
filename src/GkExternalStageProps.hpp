@@ -8,6 +8,7 @@ namespace ExternalStage
         Handle transform{};
         UnityVector3 position{}, travel{};
         UnityQuaternion rotation{};
+        bool hidden{};
     };
     inline std::array<HeldProp, extraCrepe> heldProps{};
 
@@ -24,6 +25,7 @@ namespace ExternalStage
         {
             g_setWorldPosNative(transform, DisplayPosition(prop));
             g_setWorldRotNative(transform, prop.rotation);
+            if (prop.hidden) HelperGameObjectSetActive(StageLoader::Invoke(StageLoader::componentGo, transform), true);
         }
         StageLoader::freeHandle(prop.transform);
         prop = {};
@@ -142,6 +144,19 @@ namespace ExternalStage
             const float horizontal = std::hypot(gripDirection.x, gripDirection.z);
             const float yaw = horizontal > 0.01f ? std::atan2(gripDirection.x, gripDirection.z) : stageYaw;
             grip = {0, std::sin(yaw * .5f), 0, std::cos(yaw * .5f)};
+            if (selection != 1) grip = {0, grip.w, 0, -grip.y};
+            if (selection == 1 && throwFrame < launch)
+            {
+                if (void* other = controller.fnGetBoneTransform(actor, left ? 18 : 17))
+                {
+                    const auto support = g_getWorldPosNative(other);
+                    if (std::hypot(support.x-position.x, support.y-position.y, support.z-position.z) < 0.42f)
+                    {
+                        position.x = std::lerp(position.x, support.x, 0.35f);
+                        position.z = std::lerp(position.z, support.z, 0.35f);
+                    }
+                }
+            }
             if (throwFrame < launch) position.y -= selection >= 5 && selection <= 7 ? 0.11f : 0.09f;
         }
         if (cue)
@@ -161,15 +176,18 @@ namespace ExternalStage
     {
         const auto& hold = ExternalStageProfiles::meniRightCrepeHold;
         if (!camera.owned || camera.settings.mode != GakuMotion::CameraMode::Track ||
-            frame < hold.releaseStart || frame >= hold.retrieveEnd) return;
+            frame < hold.releaseStart || frame >= hold.exitEnd) return;
 
-        const float amount = std::clamp(std::min(
-            (frame - hold.releaseStart) / (hold.releaseEnd - hold.releaseStart),
-            (hold.retrieveEnd - frame) / (hold.retrieveEnd - hold.retrieveStart)), 0.f, 1.f);
+        const float amount = std::clamp((frame - hold.releaseStart) / (hold.releaseEnd - hold.releaseStart), 0.f, 1.f);
         const float blend = amount * amount * (3.f - 2.f * amount);
         const auto& view = camera.desired;
+        const float exit = std::clamp((frame - hold.exitStart) / (hold.exitEnd - hold.exitStart), 0.f, 1.f);
+        const float verticalRadius = (view.flags & 1u) ? view.orthographicSize :
+            hold.cameraOffset.z * std::tan(view.fov * 0.00872664626f);
+        const float exitBlend = exit * exit * (3.f - 2.f * exit);
         const auto anchor = view.position + view.rotation.Rotate(
-            {hold.cameraOffset.x, hold.cameraOffset.y, hold.cameraOffset.z});
+            {(hold.cameraOffset.x - 5.f * exitBlend) * verticalRadius,
+             hold.cameraOffset.y * verticalRadius, hold.cameraOffset.z});
         pose.position = {std::lerp(pose.position.x, anchor.x, blend),
             std::lerp(pose.position.y, anchor.y, blend), std::lerp(pose.position.z, anchor.z, blend)};
 
@@ -190,12 +208,20 @@ namespace ExternalStage
     {
         auto target = ReadGripPose(selection, player, left, throwFrame, cue);
         if (!target) { ReleaseHeldProp(prop); return; }
-        if (cue && !left && cue->place == ExternalStageProfiles::meniRightCrepeHold.place &&
-            (selection == 10 || selection == extraCrepe))
-            ApplyCameraPropHold(*target, camera, stageFrame);
+        const bool rightCrepe = cue && !left && cue->place == ExternalStageProfiles::meniRightCrepeHold.place &&
+            (selection == 10 || selection == extraCrepe);
+        if (rightCrepe) ApplyCameraPropHold(*target, camera, stageFrame);
         if (!prop.transform && !BindHeldProp(prop, selection)) return;
         void* transform = SceneOwnerRuntime::handleTarget(prop.transform);
         if (!transform) return;
+
+        const bool legacyReturn = cue && selection == extraCrepe && cue->place == 4 && cue->first == 1690 && cue->last == 1710;
+        const bool consumed = (rightCrepe || legacyReturn) &&
+            stageFrame >= ExternalStageProfiles::meniRightCrepeHold.exitEnd;
+        if (consumed != prop.hidden)
+            if (HelperGameObjectSetActive(StageLoader::Invoke(StageLoader::componentGo, transform), !consumed))
+                prop.hidden = consumed;
+        if (consumed && prop.hidden) return;
 
         auto display = DisplayPosition(prop);
         auto r = prop.rotation;
@@ -275,7 +301,7 @@ namespace ExternalStage
             const float frame = time * 30.0f;
             const auto& cues = core.stagePropPreview ? *core.stagePropPreview : core.stagePropCues;
             constexpr int handoffGap = 2;
-            constexpr float handoffBlend = 6.f;
+            constexpr float handoffBlend = 10.f;
             for (const auto& cue : cues)
             {
                 if (!players[cue.place] || frame < cue.first || frame >= cue.last) continue;

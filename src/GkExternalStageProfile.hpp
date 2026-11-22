@@ -116,14 +116,14 @@ namespace ExternalStageProfiles
     struct CameraPropHold
     {
         int place;
-        float releaseStart, releaseEnd, retrieveStart, retrieveEnd;
+        float releaseStart, releaseEnd, exitStart, exitEnd;
         UnityVector3 cameraOffset;
     };
 
     // Place01 right dummy departs from its hand offset after frame 1484 and
-    // converges again around 1575. The framing offset is fitted to the video.
+    // The original video shows the prop leaving the shot after the bite.
     inline constexpr CameraPropHold meniRightCrepeHold{
-        1, 1484.f, 1496.f, 1567.f, 1580.f, {-0.30f, -0.42f, 0.86f}
+        1, 1484.f, 1496.f, 1567.f, 1580.f, {-0.42f, -0.45f, 0.86f}
     };
 
     inline constexpr Profile meniShukiRush{

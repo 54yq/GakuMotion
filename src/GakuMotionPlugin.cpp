@@ -1090,7 +1090,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.85-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.86-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -3637,10 +3637,13 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
     if(GakuMotion::camera_handoff::Requested()&&!GakuMotion::camera_handoff::IsReleased()&&visualHandoffNow>=nextCameraHandoffAttempt) {
         nextCameraHandoffAttempt=visualHandoffNow+std::chrono::milliseconds(500);
         const bool wasOwned=core.camera.owned;
-        const auto restored=core.camera.ReleaseForCapture();
-        const bool ready=restored.confirmed&&!core.camera.owned&&!core.camera.captureRestorePending;
+        // A new camera owner inherits the live pose. Restore the borrowed
+        // virtual-camera settings, then stop all Motion pose and lens writes.
+        const auto lensRestore=CameraBridge::ReleaseVirtualCamerasForCapture();
+        core.camera.Release(false);
+        const bool ready=!core.camera.owned&&!core.camera.captureRestorePending;
         if(ready)GakuMotion::camera_handoff::released.store(true,std::memory_order_release);
-        if(g_hostContext.logInfo)g_hostContext.logInfo("[GakuMotion][CameraHandoff] requested=1 owned_before=%d modified=%d confirmed=%d released=%d",int(wasOwned),int(restored.modified),int(restored.confirmed),int(ready));
+        if(g_hostContext.logInfo)g_hostContext.logInfo("[GakuMotion][CameraHandoff] requested=1 owned_before=%d lens_restored=%d released=%d",int(wasOwned),int(lensRestore.confirmed),int(ready));
     }
     if (GakuMotion::visual_handoff::Requested() && !GakuMotion::visual_handoff::IsReleased() && visualHandoffNow>=nextVisualHandoffAttempt) {
         nextVisualHandoffAttempt=visualHandoffNow+std::chrono::milliseconds(500);

@@ -400,6 +400,7 @@ namespace GakuMotion
 		bool traceExternalStageCamera{false};
 		uint64_t cameraTraceMotion{0};
 		int cameraTraceSeek{-1};
+		bool cameraTracePaused{};
 		SceneActorRegistry sceneActorRegistry;
 		std::unordered_set<std::string> actorPropHidden;
 		bool CanControlActorProps() const
@@ -1523,9 +1524,12 @@ namespace GakuMotion
 				camera.Tick(player.state == PlaybackState::Playing || player.state == PlaybackState::Paused || player.state == PlaybackState::Preview,
 				            player.CameraSourceTime(), cameraDeltaTime >= 0.0f ? cameraDeltaTime : deltaTime,
 				            actor, physicalFrame, player.controller.initialYawDegrees, liveTrackAnchor);
+				const bool paused = player.state == PlaybackState::Paused;
+				const bool justPaused = paused && !cameraTracePaused;
+				cameraTracePaused = paused;
 				if (traceExternalStageCamera && camera.owned && camera.settings.mode == CameraMode::Track &&
 					camera.fnFollowTarget &&
-					(cameraTraceMotion != loadedMotionGeneration || cameraTraceSeek != player.SeekCount()))
+					(cameraTraceMotion != loadedMotionGeneration || cameraTraceSeek != player.SeekCount() || justPaused))
 				{
 					CameraFrame trackFrame;
 					if (camera.track.Sample(player.CameraSourceTime(), trackFrame))
@@ -1533,9 +1537,9 @@ namespace GakuMotion
 						cameraTraceMotion = loadedMotionGeneration;
 						cameraTraceSeek = player.SeekCount();
 						const auto& pos = camera.desired.position;
-						LogInfo(detail::FormatMsg("[GakuMotion][ExternalStageCamera] t=%.3f track=(%.3f,%.3f,%.3f) world=(%.3f,%.3f,%.3f) placement_yaw=%.2f",
+						LogInfo(detail::FormatMsg("[GakuMotion][ExternalStageCamera] t=%.3f track=(%.3f,%.3f,%.3f) world=(%.3f,%.3f,%.3f) placement_yaw=%.2f scale=%.3f fov=%.2f",
 							player.CameraSourceTime(), trackFrame.position.x, trackFrame.position.y, trackFrame.position.z,
-							pos.x, pos.y, pos.z, player.controller.initialYawDegrees));
+							pos.x, pos.y, pos.z, player.controller.initialYawDegrees, camera.settings.vmdRangeScale, camera.desired.fov));
 						for (void* candidate : sceneActors)
 						{
 							Vector3 head;
