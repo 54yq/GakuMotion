@@ -300,6 +300,8 @@ namespace GakuMotion
     inline constexpr float externalStageDuration = 4805.0f / 30.0f;
     inline std::atomic<float> externalStageTime{0}, externalStageSeek{-1};
     inline std::atomic<bool> externalStagePlaying{false}, externalStageFollow{false};
+    inline std::atomic<int> externalStageHeldProp{0};
+    inline std::atomic<bool> externalStageLeftHand{false};
 #if defined(GKMOTION_ENABLE_IMGUI) || defined(HAS_IMGUI)
     inline void DrawExternalStageControl()
     {
@@ -321,6 +323,10 @@ namespace GakuMotion
             ImGui::SameLine();
             if (ImGui::Button("回到开头")) externalStageSeek.store(0);
             ImGui::EndDisabled();
+            int prop = externalStageHeldProp.load();
+            if (ImGui::SliderInt("手持道具预览（0 为不持有）", &prop, 0, 10)) externalStageHeldProp.store(prop);
+            bool left = externalStageLeftHand.load();
+            if (ImGui::Checkbox("使用左手", &left)) externalStageLeftHand.store(left);
         }
         if (status == -1) ImGui::TextUnformatted("舞台载入失败，请查看 GakuLoader 日志");
     }

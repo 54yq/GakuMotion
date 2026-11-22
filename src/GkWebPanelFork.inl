@@ -47,6 +47,8 @@
                 ",\"externalStageDuration\":" + JNum(externalStageDuration) +
                 ",\"externalStagePlaying\":" + JBool(externalStagePlaying.load()) +
                 ",\"externalStageFollow\":" + JBool(externalStageFollow.load()) +
+                ",\"externalStageHeldProp\":" + JNum(externalStageHeldProp.load()) +
+                ",\"externalStageLeftHand\":" + JBool(externalStageLeftHand.load()) +
 				",\"epoch\":" + JNum(ctx.actorRosterEpoch) + ",\"revision\":" + JNum(core_.libraryRevision) +
 				",\"observed\":" + JBool(ctx.liveObserved) + ",\"viewing\":" + JBool(ctx.liveViewingConfirmed) +
 				",\"paused\":" + JBool(ctx.livePaused) + ",\"active\":" + JBool(ctx.liveTakeoverActive) +
@@ -112,6 +114,17 @@
                 bool enable = false;
                 if (!BoolParam(params, "value", enable)) return CmdResult::Err("invalid_params", "缺少舞台开关状态");
                 externalStageEnabled.store(enable);
+                return CmdResult::Ok();
+            }
+            if (action == "externalStage.handProp")
+            {
+                int64_t prop = 0;
+                bool left = false;
+                if (externalStageStatus.load() != 1 || !IntParam(params, "prop", prop) ||
+                    prop < 0 || prop > 10 || !BoolParam(params, "left", left))
+                    return CmdResult::Err("invalid_params", "手持道具选择无效");
+                externalStageLeftHand.store(left);
+                externalStageHeldProp.store(static_cast<int>(prop));
                 return CmdResult::Ok();
             }
             if (action == "externalStage.follow" || action == "externalStage.play" || action == "externalStage.seek")

@@ -108,6 +108,25 @@ function ActivePage({ fork, command }: { fork: ReturnType<typeof useForkWorkspac
               </button>
               <button className="ml-4" type="button" disabled={fork.externalStageFollow}
                 onClick={() => void command('externalStage.seek', { value: 0 })}>回到开头</button>
+              <label className="flex items-center gap-2">
+                手持道具预览
+                <select value={fork.externalStageHeldProp ?? 0}
+                  onChange={(e) => void command('externalStage.handProp', {
+                    prop: Number(e.target.value), left: fork.externalStageLeftHand ?? false,
+                  })}>
+                  {['不持有', '1205-00', '1205-01', '1205-02', '1205-03', '1500-00',
+                    '1500-01', '1500-02', '1548-00', '1548-01', '1108-00'].map((name, index) => (
+                    <option key={name} value={index}>{name}</option>
+                  ))}
+                </select>
+                <select aria-label="持物手" value={fork.externalStageLeftHand ? 'left' : 'right'}
+                  onChange={(e) => void command('externalStage.handProp', {
+                    prop: fork.externalStageHeldProp ?? 0, left: e.target.value === 'left',
+                  })}>
+                  <option value="right">右手</option>
+                  <option value="left">左手</option>
+                </select>
+              </label>
             </div>
           )}
           {fork?.externalStageStatus === -1 && <p role="alert">舞台载入失败，请查看 GakuLoader 日志。</p>}

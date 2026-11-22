@@ -1086,7 +1086,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.58-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.59-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -1647,7 +1647,10 @@ static void ResetPlacementDynamicBone(void* actor)
 
 #include "GkSceneOwnerRuntime.hpp"
 #include "GkFixedActorLighting.hpp"
+#include "GkExternalStageProfile.hpp"
 #include "GkExternalStage.hpp"
+#include "GkExternalStageProps.hpp"
+#include "GkExternalStageShadows.hpp"
 #include "GkPhotographyBgm.hpp"
 #include "GkStageLoadOverride.hpp"
 #include "GkPageObservation.hpp"
@@ -4298,6 +4301,11 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	}
 	// Native foot AO may have been derived before the post-actor callback.
 	// Consume the completed body + secondary pose in the same tick.
+    if (activeActor == core.player.controller.targetActor)
+    {
+        ExternalStage::UpdateHeldProp(activeActor, core.player.controller);
+        ExternalStage::UpdateContactShadows(activeActor, core.player.controller);
+    }
 	ActorGroundShadow::RefreshAfterPose(activeActor, poseSerialBefore);
 	GroundShadowProbe::AfterPose(activeActor, poseSerialBefore);
     recordMainActorPose("after_plugin_pose", true);
@@ -4627,6 +4635,10 @@ void MotionTick(void*, float)
                 g_verifiedActiveSceneHandle != g_sceneOwner.sceneHandle ? g_verifiedActiveSceneHandle : 0;
             ExternalStage::Tick(externalStageAdmitted, nativeBackground, g_sceneOwner);
             ExternalStage::TickTimeline(core.player.currentTime, core.player.clip.total_frames != 0);
+            void* stageActor = core.player.controller.targetActor;
+            if (!stageActor && !core.sceneActorRegistry.Entries().empty()) stageActor = core.sceneActorRegistry.Entries().front().actor;
+            ExternalStage::UpdateHeldProp(stageActor, core.player.controller);
+            ExternalStage::UpdateContactShadows(stageActor, core.player.controller);
             GakuMotion::externalStageStatus.store(ExternalStage::status.load());
             NativeAudio::Sync();
             bool mutePhotographyBgm = false;

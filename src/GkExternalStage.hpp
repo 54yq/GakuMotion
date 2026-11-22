@@ -3,8 +3,7 @@
 namespace ExternalStage
 {
     using Handle = StageLoader::Handle;
-    constexpr char scenePath[] = "Assets/MeniShukiRushStage.unity";
-    constexpr char sceneName[] = "MeniShukiRushStage";
+    constexpr auto& profile = ExternalStageProfiles::meniShukiRush;
     enum class Pending { None, Bundle, Load, Unload };
 
     inline const void *openBundle{}, *getBundle{}, *unloadBundle{}, *isDone{};
@@ -16,6 +15,7 @@ namespace ExternalStage
     inline uint64_t originalCameraMask{}, appliedCameraMask{};
     inline int visibilitySamples{};
     inline int alignedBackground{};
+    inline float alignedFloor{};
     inline std::chrono::steady_clock::time_point nextAlignment{};
     inline Handle operation{}, bundle{};
     inline Pending pending{};
@@ -44,7 +44,7 @@ namespace ExternalStage
             FindClass("UnityEngine.CoreModule.dll", "UnityEngine", "Shader"), "SetGlobalFloat",
             true, {0x01}, {{0x08}, {0x0c}});
         static int id = [=]() {
-            void* name = StageLoader::stringNew("_GakuExternalStageLightFrame");
+            void* name = StageLoader::stringNew(profile.lightFrameProperty);
             void* args[]{name};
             return name && nameToId ? StageLoader::ReadInt(nameToId, nullptr, 0, args) : 0;
         }();
@@ -53,7 +53,7 @@ namespace ExternalStage
             void* args[]{&id, &frame};
             StageLoader::Invoke(setterById, nullptr, args);
         }
-        else if (void* name = StageLoader::stringNew("_GakuExternalStageLightFrame"))
+        else if (void* name = StageLoader::stringNew(profile.lightFrameProperty))
         {
             void* args[]{name, &frame};
             StageLoader::Invoke(setter, nullptr, args);
@@ -92,7 +92,7 @@ namespace ExternalStage
         void* array = StageLoader::Invoke(StageLoader::findAll, nullptr, args);
         Handle pin = array ? StageLoader::newHandle(array, false) : nullptr;
         if (!pin) return;
-        constexpr std::array<std::string_view, 2> names{"StageDoor_iron_grate_l", "StageDoor_iron_grate_r"};
+        const auto& names = profile.doorNames;
         const auto count = StageLoader::arrayLength(array);
         auto** objects = reinterpret_cast<void**>(static_cast<char*>(array) + 32);
         for (uintptr_t i = 0; i < count; ++i)
@@ -244,7 +244,7 @@ namespace ExternalStage
             void* args[]{&i};
             int handle = StageLoader::ReadInt(sceneAt, nullptr, 0, args);
             void* sceneArgs[]{&handle};
-            if (handle && Il2CppStringToUtf8(StageLoader::Invoke(StageLoader::sceneName, nullptr, sceneArgs)) == sceneName)
+            if (handle && Il2CppStringToUtf8(StageLoader::Invoke(StageLoader::sceneName, nullptr, sceneArgs)) == profile.sceneName)
                 return handle;
         }
         return 0;
@@ -435,7 +435,7 @@ namespace ExternalStage
         {
             void* object = objects[i];
             if (!object || StageLoader::SceneOfFreshGo(object) != mountedScene ||
-                Il2CppStringToUtf8(StageLoader::Invoke(StageLoader::objectName, object)) != "Meni Shuki Rush Stage")
+                Il2CppStringToUtf8(StageLoader::Invoke(StageLoader::objectName, object)) != profile.rootName)
                 continue;
             void* transform = StageLoader::Invoke(StageLoader::goTransform, object);
             if (!transform) break;
@@ -451,7 +451,7 @@ namespace ExternalStage
             break;
         }
         StageLoader::freeHandle(pin);
-        if (aligned) alignedBackground = background;
+        if (aligned) { alignedBackground = background; alignedFloor = *floor; }
         return aligned;
     }
 
@@ -541,15 +541,18 @@ namespace ExternalStage
         const DWORD length = GetModuleFileNameW(nullptr, executable, static_cast<DWORD>(std::size(executable)));
         if (!length || length >= std::size(executable)) return false;
         const auto assetPath = (std::filesystem::path(executable).parent_path() /
-            "GakuLoader/plugins/GakuMotion.ExternalStage/meni-shuki-rush-scene.bundle").u8string();
+            "GakuLoader/plugins/GakuMotion.ExternalStage" / profile.bundleFile).u8string();
         void* path = StageLoader::stringNew(reinterpret_cast<const char*>(assetPath.c_str()));
         void* args[]{path};
         return path && Start(Pending::Bundle, StageLoader::Invoke(openBundle, nullptr, args));
     }
 
+    inline void ReleaseHeldProp();
+
     inline void Tick(bool admitted, int background, const GakuMotion::injection::OwnerSnapshot& current)
     {
         const bool wanted = admitted && (!owner.Valid() || owner.SameOwner(current));
+        if (!wanted) ReleaseHeldProp();
         if (!wanted || hiddenScene != background)
             RestoreBackground();
         if (operation)
@@ -575,7 +578,7 @@ namespace ExternalStage
 
             if (finished == Pending::Bundle && wanted && bundle)
             {
-                void* path = StageLoader::stringNew(scenePath);
+                void* path = StageLoader::stringNew(profile.scenePath);
                 int additive = 1;
                 void* args[]{path, &additive};
                 if (path && Start(Pending::Load, StageLoader::Invoke(loadScene, nullptr, args)))
