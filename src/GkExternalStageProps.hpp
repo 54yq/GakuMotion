@@ -157,12 +157,42 @@ namespace ExternalStage
         return GripPose{position, grip};
     }
 
+    inline void ApplyCameraPropHold(GripPose& pose, const GakuMotion::CameraController& camera, float frame)
+    {
+        const auto& hold = ExternalStageProfiles::meniRightCrepeHold;
+        if (!camera.owned || camera.settings.mode != GakuMotion::CameraMode::Track ||
+            frame < hold.releaseStart || frame >= hold.retrieveEnd) return;
+
+        const float amount = std::clamp(std::min(
+            (frame - hold.releaseStart) / (hold.releaseEnd - hold.releaseStart),
+            (hold.retrieveEnd - frame) / (hold.retrieveEnd - hold.retrieveStart)), 0.f, 1.f);
+        const float blend = amount * amount * (3.f - 2.f * amount);
+        const auto& view = camera.desired;
+        const auto anchor = view.position + view.rotation.Rotate(
+            {hold.cameraOffset.x, hold.cameraOffset.y, hold.cameraOffset.z});
+        pose.position = {std::lerp(pose.position.x, anchor.x, blend),
+            std::lerp(pose.position.y, anchor.y, blend), std::lerp(pose.position.z, anchor.z, blend)};
+
+        const auto facing = view.rotation.Rotate({0.f, 0.f, 1.f});
+        const float yaw = std::atan2(facing.x, facing.z) * 57.2957795131f;
+        using GakuMotion::Quaternion;
+        const auto parked = Quaternion::FromEulerDegreesXYZ(0.f, yaw, 0.f) *
+            Quaternion::FromEulerDegreesXYZ(-90.f, 0.f, 0.f);
+        const auto& r = pose.rotation;
+        const auto q = Quaternion::Slerp({r.x, r.y, r.z, r.w}, parked, blend);
+        pose.rotation = {q.x, q.y, q.z, q.w};
+    }
+
     inline void PlaceHeldProp(HeldProp& prop, int selection, GakuMotion::MotionPlayer& player,
         bool left, float weight, float throwFrame, const GakuMotion::stage_prop_timeline::Cue* cue,
-        GakuMotion::MotionPlayer* outgoing, const GakuMotion::stage_prop_timeline::Cue* outgoingCue)
+        GakuMotion::MotionPlayer* outgoing, const GakuMotion::stage_prop_timeline::Cue* outgoingCue,
+        const GakuMotion::CameraController& camera, float stageFrame)
     {
-        const auto target = ReadGripPose(selection, player, left, throwFrame, cue);
+        auto target = ReadGripPose(selection, player, left, throwFrame, cue);
         if (!target) { ReleaseHeldProp(prop); return; }
+        if (cue && !left && cue->place == ExternalStageProfiles::meniRightCrepeHold.place &&
+            (selection == 10 || selection == extraCrepe))
+            ApplyCameraPropHold(*target, camera, stageFrame);
         if (!prop.transform && !BindHeldProp(prop, selection)) return;
         void* transform = SceneOwnerRuntime::handleTarget(prop.transform);
         if (!transform) return;
@@ -283,7 +313,7 @@ namespace ExternalStage
         {
             const auto& grip = grips[i];
             if (grip.player && onlyActor && grip.player->controller.targetActor == onlyActor)
-                PlaceHeldProp(heldProps[i], static_cast<int>(i)+1, *grip.player, grip.left, grip.weight, grip.cue && i == 0 && grip.cue->place == 1 ? time * 30.0f : -1.0f, grip.cue, grip.outgoing, grip.outgoingCue);
+                PlaceHeldProp(heldProps[i], static_cast<int>(i)+1, *grip.player, grip.left, grip.weight, grip.cue && i == 0 && grip.cue->place == 1 ? time * 30.0f : -1.0f, grip.cue, grip.outgoing, grip.outgoingCue, core.camera, time * 30.0f);
             else if (!onlyActor && (!grip.player || !grip.player->controller.targetActor)) ReleaseHeldProp(heldProps[i]);
         }
     }

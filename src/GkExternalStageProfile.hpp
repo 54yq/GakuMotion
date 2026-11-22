@@ -113,6 +113,19 @@ namespace ExternalStageProfiles
         {1352, {-1.6134977f, 5.4937742f, 2.8224329f}},
     };
 
+    struct CameraPropHold
+    {
+        int place;
+        float releaseStart, releaseEnd, retrieveStart, retrieveEnd;
+        UnityVector3 cameraOffset;
+    };
+
+    // Place01 right dummy departs from its hand offset after frame 1484 and
+    // converges again around 1575. The framing offset is fitted to the video.
+    inline constexpr CameraPropHold meniRightCrepeHold{
+        1, 1484.f, 1496.f, 1567.f, 1580.f, {-0.30f, -0.42f, 0.86f}
+    };
+
     inline constexpr Profile meniShukiRush{
         "Assets/MeniShukiRushStage.unity", "MeniShukiRushStage", "meni-shuki-rush-scene.bundle",
         "Meni Shuki Rush Stage", "_GakuExternalStageLightFrame",
