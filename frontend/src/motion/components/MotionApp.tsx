@@ -100,6 +100,12 @@ function ActivePage({ fork, command }: { fork: ReturnType<typeof useForkWorkspac
           {fork?.externalStageStatus === 1 && (
             <div className="space-y-2">
               <p role="status">独立舞台已载入</p>
+              <label className="block">
+                接触阴影大小 {(fork.externalStageShadowSize ?? 1).toFixed(2)} 倍
+                <input aria-label="接触阴影大小" type="range" min={0.25} max={3} step={0.05}
+                  value={fork.externalStageShadowSize ?? 1}
+                  onChange={(e) => void command('externalStage.shadowSize', { value: e.target.valueAsNumber })} />
+              </label>
               <div className="flex flex-wrap gap-4">
                 <button type="button" onClick={() => void command('externalStage.locate', {})}>定位到 1 号起始站位</button>
                 <button type="button" onClick={() => void command('externalStage.measure', {})}>测量当前角色高度</button>

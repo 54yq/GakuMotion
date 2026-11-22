@@ -302,6 +302,7 @@ namespace GakuMotion
     inline std::atomic<bool> externalStagePlaying{false}, externalStageFollow{true};
     inline std::atomic<int> externalStageHeldProp{0};
     inline std::atomic<bool> externalStageGrade{true};
+    inline std::atomic<float> externalStageShadowSize{1.0f};
     inline std::atomic<bool> externalStageActorAmbient{true};
     inline std::atomic<bool> externalStageLocate{}, externalStageMeasure{};
     inline std::atomic<float> externalStageActorHeight{0};
@@ -318,6 +319,8 @@ namespace GakuMotion
         if (ImGui::Checkbox("粉色调色", &grade)) externalStageGrade.store(grade);
         bool ambient = externalStageActorAmbient.load();
         if (ImGui::Checkbox("角色跟随舞台调光", &ambient)) externalStageActorAmbient.store(ambient);
+        float shadowSize = externalStageShadowSize.load();
+        if (ImGui::SliderFloat("接触阴影大小", &shadowSize, 0.25f, 3.0f, "%.2f 倍")) externalStageShadowSize.store(shadowSize);
         const int status = externalStageStatus.load();
         if (status == 1)
         {

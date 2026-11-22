@@ -50,6 +50,7 @@
                 ",\"externalStageActorHeight\":" + JNum(externalStageActorHeight.load()) +
                 ",\"externalStageLocateResult\":" + JNum(externalStageLocateResult.load()) +
                 ",\"externalStageActorAmbient\":" + JBool(externalStageActorAmbient.load()) +
+                ",\"externalStageShadowSize\":" + JNum(externalStageShadowSize.load()) +
                 ",\"externalStageGrade\":" + JBool(externalStageGrade.load()) +
                 ",\"externalStagePropStart\":" + JNum(externalStagePropStart.load()) +
                 ",\"externalStagePropEnd\":" + JNum(externalStagePropEnd.load()) +
@@ -135,6 +136,14 @@
                 bool value = false;
                 if (!BoolParam(params, "value", value)) return CmdResult::Err("invalid_params", "缺少角色调光状态");
                 externalStageActorAmbient.store(value);
+                return CmdResult::Ok();
+            }
+            if (action == "externalStage.shadowSize")
+            {
+                double size = 0;
+                if (!NumberParam(params, "value", size) || !(size >= 0.25 && size <= 3))
+                    return CmdResult::Err("invalid_params", "阴影大小超出范围");
+                externalStageShadowSize.store(static_cast<float>(size));
                 return CmdResult::Ok();
             }
             if (action == "externalStage.grade")

@@ -2,49 +2,85 @@
 
 namespace ExternalStage
 {
-    // Stage materials consume the two scene-local projected foot contacts.
-    inline void UpdateContactShadows(void* actor, GakuMotion::IdolController& controller)
+    inline constexpr size_t maxShadowContacts = 40;
+
+    inline void UpdateContactShadows(GakuMotion::Core& core)
     {
-        static bool applied = false;
-        const bool eligible = actor && status.load() == 1 && alignedBackground && controller.fnGetBoneTransform &&
+        auto& controller = core.player.controller;
+        static int countId{}, sizeId{};
+        static Handle contacts{};
+        const bool eligible = status.load() == 1 && alignedBackground && controller.fnGetBoneTransform &&
             g_getWorldPosNative;
-        if (!eligible && !applied) return;
-        auto& api = StageLoader::metadata;
+        if (!eligible)
+        {
+            if (contacts)
+            {
+                SetStageShaderFloat("_GakuExternalStageContactCount", 0, countId);
+                StageLoader::freeHandle(contacts);
+                contacts = {};
+            }
+            return;
+        }
         static void* shader = FindClass("UnityEngine.CoreModule.dll", "UnityEngine", "Shader");
-        static void* vec = FindClass("UnityEngine.CoreModule.dll", "UnityEngine", "Vector4");
-        static const void* setter = api.Find(shader, "SetGlobalVector", true, {0x01}, {{0x08}, {0x11, vec}});
+        static void* vector = FindClass("UnityEngine.CoreModule.dll", "UnityEngine", "Vector4");
+        if (!shader || !vector) return;
+        static const auto arrayClass = reinterpret_cast<void* (*)(void*, uint32_t)>(
+            GetProcAddress(g_gameAssembly, "il2cpp_array_class_get"));
+        static const auto arrayNew = reinterpret_cast<void* (*)(void*, uintptr_t)>(
+            GetProcAddress(g_gameAssembly, "il2cpp_array_new"));
+        static void* vectors = arrayClass ? arrayClass(vector, 1) : nullptr;
+        if (!vectors || !arrayNew) return;
+        auto& api = StageLoader::metadata;
+        static const void* setter = api.Find(shader, "SetGlobalVectorArray", true, {0x01}, {{0x08}, {0x1d, vectors}});
         static const void* propertyId = api.Find(shader, "PropertyToID", true, {0x08}, {{0x0e}});
         uint32_t alignment = 0;
-        if (!setter || !propertyId || !vec || !StageLoader::valueSize ||
-            StageLoader::valueSize(vec, &alignment) != 4 * sizeof(float)) return;
-        static auto ids = [&]() {
-            std::array<int, 2> result{};
-            const char* names[]{"_GakuExternalStageFootL", "_GakuExternalStageFootR"};
-            for (size_t i = 0; i < result.size(); ++i)
-            {
-                void* name = StageLoader::stringNew(names[i]);
-                void* args[]{name};
-                if (name) result[i] = StageLoader::ReadInt(propertyId, nullptr, 0, args);
-            }
-            return result;
+        if (!setter || !propertyId || !StageLoader::valueSize ||
+            StageLoader::valueSize(vector, &alignment) != 4 * sizeof(float)) return;
+        static int id = [&]() {
+            void* name = StageLoader::stringNew("_GakuExternalStageContacts");
+            void* args[]{name};
+            return name ? StageLoader::ReadInt(propertyId, nullptr, 0, args) : 0;
         }();
-        void* object = eligible ? StageLoader::Invoke(StageLoader::componentGo, actor) : nullptr;
-        const bool owned = object && StageLoader::SceneOfFreshGo(object) == owner.sceneHandle;
-        for (size_t i = 0; i < ids.size(); ++i)
+        if (!id) return;
+        if (!contacts)
         {
-            std::array<float, 4> shadow{0, alignedFloor, 0, 0};
-            void* foot = owned ? controller.fnGetBoneTransform(actor, i == 0 ? 5 : 6) : nullptr;
-            if (foot)
-            {
-                auto p = g_getWorldPosNative(foot);
-                shadow = {p.x, alignedFloor, p.z, std::clamp(1.0f - (p.y - alignedFloor) / 0.55f, 0.0f, 1.0f)};
-            }
-            if (ids[i])
-            {
-                void* args[]{&ids[i], shadow.data()};
-                StageLoader::Invoke(setter, nullptr, args);
-            }
+            if (void* array = arrayNew(vector, maxShadowContacts))
+                contacts = StageLoader::newHandle(array, false);
         }
-        applied = owned;
+        if (!contacts) return;
+        std::array<std::array<float, 4>, maxShadowContacts> measurements{};
+        size_t count = 0;
+        const auto add = [&](void* actor) {
+            if (!actor || count + 2 > measurements.size()) return;
+            void* object = StageLoader::Invoke(StageLoader::componentGo, actor);
+            if (!object || StageLoader::SceneOfFreshGo(object) != owner.sceneHandle) return;
+            for (const int bone : {5, 6})
+                if (void* foot = controller.fnGetBoneTransform(actor, bone))
+                {
+                    const auto p = g_getWorldPosNative(foot);
+                    if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) continue;
+                    const float strength = std::clamp(1.f - (p.y - alignedFloor) / 0.55f, 0.f, 1.f);
+                    if (strength > 0) measurements[count++] = {p.x, alignedFloor, p.z, strength};
+                }
+        };
+        add(controller.targetActor);
+        for (const auto& entry : core.sceneActorRegistry.Entries())
+            if (entry.actor != controller.targetActor) add(entry.actor);
+        void* array = SceneOwnerRuntime::handleTarget(contacts);
+        if (!array) return;
+        std::memcpy(static_cast<char*>(array) + 32, measurements.data(), sizeof(measurements));
+        void* args[]{&id, array};
+        StageLoader::Invoke(setter, nullptr, args);
+        SetStageShaderFloat("_GakuExternalStageContactCount", static_cast<float>(count), countId);
+        SetStageShaderFloat("_GakuExternalStageContactSize", GakuMotion::externalStageShadowSize.load(), sizeId);
+        static int lastScene{};
+        static size_t lastCount{};
+        if (lastScene != mountedScene || lastCount != count)
+        {
+            GakuMotion::host::Info("[GakuMotion][ExternalStage] contact shadows scene=%d feet=%zu",
+                mountedScene, count);
+            lastScene = mountedScene;
+            lastCount = count;
+        }
     }
 }
