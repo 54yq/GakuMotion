@@ -3466,12 +3466,12 @@ namespace GakuMotion
 				if (!ReadActorStart(*follower.player, start)) { ensembleNotice = "对齐失败：请先播放或预览，等待所有角色骨架就绪"; return; }
 				if (!fnReadFormationOrigin(follower.player->currentMotionDir, origin))
 				{ ensembleNotice = "对齐失败：副角色曲目缺少可验证的原始 VMD"; return; }
-				const Vector3 relative = basis.Rotate({origin.x - mainOrigin.x, 0, origin.z - mainOrigin.z});
+				const Vector3 relative = basis.Rotate(origin - mainOrigin);
 				const Vector3 target = main.world + relative;
 				const auto& old = follower.player->controller.initialPositionOffset;
-				updates[i] = {true, {old.x + target.x - start.world.x, old.y, old.z + target.z - start.world.z},
+				updates[i] = {true, {old.x + target.x - start.world.x, old.y + target.y - start.world.y, old.z + target.z - start.world.z},
 				              std::remainder(main.heading + player.controller.initialYawDegrees - start.heading, 360.0f)};
-				if (!std::isfinite(updates[i].position.x) || !std::isfinite(updates[i].position.z) || !std::isfinite(updates[i].yaw))
+				if (!std::isfinite(updates[i].position.x) || !std::isfinite(updates[i].position.y) || !std::isfinite(updates[i].position.z) || !std::isfinite(updates[i].yaw))
 				{ ensembleNotice = "对齐失败：站位计算结果无效"; return; }
 				++count;
 			}

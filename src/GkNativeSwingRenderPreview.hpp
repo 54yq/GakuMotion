@@ -20,7 +20,7 @@ namespace NativeSwingRenderPreview
     inline uint64_t epoch{};
     inline int frame{-1}, seeks{};
     inline float latestTime{};
-    inline bool armed{}, hookAttempted{}, logged{}, photoHold{};
+    inline bool armed{}, hookAttempted{}, logged{};
     inline const char* lastStatus{};
     inline GakuMotion::native_swing::CameraPair cameraPair{};
     inline GakuLocalifyCameraRenderService renderService{};
@@ -138,29 +138,13 @@ namespace NativeSwingRenderPreview
         renderService = {};
     }
 
-    inline bool PhotoHoldEligible(const GakuMotion::Core& core)
-    {
-        return g_sceneOwner.AllowedContext() == GakuMotion::injection::Context::Photography &&
-            core.InjectionAllowed() && !core.captureSuspended && !core.ensembleRestoreUnconfirmed &&
-            !GakuMotion::visual_handoff::Requested() && core.player.controller.targetActor &&
-            core.player.state != GakuMotion::PlaybackState::Stopped;
-    }
-
-    inline bool EligiblePlayback(const GakuMotion::Core& core)
-    {
-        return ThreeActorNativePlayback(core) || (PhotoHoldEligible(core) &&
-            core.config.secondaryPhysicsBackend == 2 &&
-            core.player.state == GakuMotion::PlaybackState::Playing && !core.player.scrubbing);
-    }
-
     inline void Apply(void* camera)
     {
         auto& core = GakuMotion::Core::Instance();
         if (!armed || activeCamera || !camera || !CameraBridge::getMain || camera != CameraBridge::getMain(nullptr) ||
-            !g_faceUnityFrame || g_faceUnityFrame() != frame ||
-            !(photoHold ? PhotoHoldEligible(core) : ThreeActorNativePlayback(core)) ||
+            !g_faceUnityFrame || g_faceUnityFrame() != frame || !core.liveTakeoverActive || core.captureSuspended ||
             core.sceneActorRegistry.Epoch() != epoch || core.player.controller.targetActor != actor ||
-            (!photoHold && core.player.state != GakuMotion::PlaybackState::Playing)) return;
+            core.player.state != GakuMotion::PlaybackState::Playing) return;
         if (!cameraPair.Begin(camera,frame)) return;
         const LivePhaseTimer timer{g_livePerf.renderApply};
         const bool recording = g_costumeCapture.Active() && CostumeCaptureMatches(core);
@@ -175,7 +159,7 @@ namespace NativeSwingRenderPreview
         }
         if (activeCamera && !logged && g_hostContext.logInfo) {
             logged = true;
-            g_hostContext.logInfo("[GakuMotion][NativeSwingRenderPreview] enabled frame=%d photo_garment_hold=%d",frame,photoHold);
+            g_hostContext.logInfo("[GakuMotion][NativeSwingRenderPreview] enabled frame=%d",frame);
         }
     }
 
@@ -188,8 +172,7 @@ namespace NativeSwingRenderPreview
         const auto currentEpoch = core.sceneActorRegistry.Epoch();
         const float time = player.currentTime;
         const int seekCount = player.SeekCount();
-        const bool photo = PhotoHoldEligible(core);
-        const bool eligible = (photo || (native && ThreeActorNativePlayback(core))) && currentFrame > 0 && std::isfinite(time) && binding != controller.bindings.end() &&
+        const bool eligible = native && ThreeActorNativePlayback(core) && currentFrame > 0 && std::isfinite(time) && binding != controller.bindings.end() &&
             binding->second.bindPoseCaptured && controller.fnGetLocalRotation && controller.fnSetLocalRotation;
         if (currentFrame == frame && target == actor && currentEpoch == epoch && seekCount == seeks) return;
         if (cameraPair.pending) {
@@ -200,15 +183,14 @@ namespace NativeSwingRenderPreview
             cameraPair = {};
         }
         armed = false;
-        if (!eligible || actor != target || currentEpoch != epoch || photo != photoHold ||
-            (!photo && (seekCount != seeks || currentFrame != frame+1 || time <= latestTime ||
-                time-latestTime > 0.1f))) {
+        if (!eligible || actor != target || currentEpoch != epoch || seekCount != seeks ||
+            currentFrame != frame+1 || time <= latestTime || time-latestTime > 0.1f) {
             joints.clear();
             cameraPair = {};
             if (actor != target || currentEpoch != epoch) boneLookup.Clear();
         }
         if (!eligible || !CameraBridge::ready) {
-            if (EligiblePlayback(core))
+            if (ThreeActorNativePlayback(core))
                 Report(!native ? "awaiting_native_source_frame" : !eligible ? "binding_unavailable" : "camera_bridge_unavailable");
             frame = -1;
             return;
@@ -223,13 +205,11 @@ namespace NativeSwingRenderPreview
             Report("camera_render_pair_unavailable");
             return;
         }
-        photoHold = photo;
         read = controller.fnGetLocalRotation;
         write = controller.fnSetLocalRotation;
         const LivePhaseTimer timer{g_livePerf.smooth};
         size_t index = 0;
         boneLookup.VisitBoundSecondary(binding->second,controller,[&](void* transform,const std::string& name) {
-            if (photo && !GakuMotion::FallbackPhysics::IsGarmentBone(name)) return;
             if (index == joints.size()) joints.emplace_back();
             auto& joint = joints[index++];
             if (joint.transform != transform || joint.name != name) {
@@ -238,7 +218,6 @@ namespace NativeSwingRenderPreview
                 joint.name = name;
                 joint.detailed = GakuMotion::CostumePhysicsCapture::DetailedSwingBone(name);
             }
-            if (photo && joint.ready) return;
             const auto raw = Read(transform);
             const float norm = Quaternion::Dot(raw,raw);
             if (!std::isfinite(norm) || norm < 0.5f || norm > 1.5f) {
@@ -246,12 +225,7 @@ namespace NativeSwingRenderPreview
                 joint.ready = false;
                 return;
             }
-            if (photo)
-            {
-                joint.preview = raw.Normalized();
-                joint.ready = true;
-            }
-            else joint.ready = joint.filter.Push(time,raw.Normalized(),joint.preview,joint.previewTime);
+            joint.ready = joint.filter.Push(time,raw.Normalized(),joint.preview,joint.previewTime);
         });
         joints.resize(index);
         if (index != lastBoundCount) {
