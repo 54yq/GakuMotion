@@ -8,7 +8,7 @@ namespace ExternalStage
         Handle transform{};
         UnityVector3 position{}, travel{};
         UnityQuaternion rotation{};
-        bool hidden{};
+        bool hidden{}, storedActive{};
     };
     inline std::array<HeldProp, extraCrepe> heldProps{};
 
@@ -25,7 +25,8 @@ namespace ExternalStage
         {
             g_setWorldPosNative(transform, DisplayPosition(prop));
             g_setWorldRotNative(transform, prop.rotation);
-            if (prop.hidden) HelperGameObjectSetActive(StageLoader::Invoke(StageLoader::componentGo, transform), true);
+            if (prop.hidden == prop.storedActive)
+                HelperGameObjectSetActive(StageLoader::Invoke(StageLoader::componentGo, transform), prop.storedActive);
         }
         StageLoader::freeHandle(prop.transform);
         prop = {};
@@ -38,8 +39,8 @@ namespace ExternalStage
 
     inline bool BindHeldProp(HeldProp& prop, int selection)
     {
-        bool inactive = false;
-        void* args[]{StageLoader::goType, &inactive};
+        bool includeInactive = true;
+        void* args[]{StageLoader::goType, &includeInactive};
         void* list = StageLoader::Invoke(StageLoader::findAll, nullptr, args);
         Handle pin = list ? StageLoader::newHandle(list, false) : nullptr;
         if (!pin) return false;
@@ -57,6 +58,8 @@ namespace ExternalStage
                 prop.position = g_getWorldPosNative(transform);
                 prop.travel = stageTravel;
                 prop.rotation = g_getWorldRotNative(transform);
+                prop.storedActive = StageLoader::ReadBool(StageLoader::activeSelf, object, true);
+                prop.hidden = !prop.storedActive;
             }
             break;
         }
@@ -218,13 +221,15 @@ namespace ExternalStage
         const bool legacyReturn = cue && selection == extraCrepe && cue->place == 4 && cue->first == 1690 && cue->last == 1710;
         const bool consumed = (rightCrepe || legacyReturn) &&
             stageFrame >= ExternalStageProfiles::meniRightCrepeHold.exitEnd;
-        if (consumed != prop.hidden)
-            if (HelperGameObjectSetActive(StageLoader::Invoke(StageLoader::componentGo, transform), !consumed))
-                prop.hidden = consumed;
-        if (consumed && prop.hidden) return;
+        if (consumed)
+        {
+            if (!prop.hidden)
+                prop.hidden = HelperGameObjectSetActive(StageLoader::Invoke(StageLoader::componentGo, transform), false);
+            return;
+        }
 
-        auto display = DisplayPosition(prop);
-        auto r = prop.rotation;
+        auto display = target->position;
+        auto r = target->rotation;
         if (outgoingCue)
         {
             const auto source = outgoing ? ReadGripPose(selection, *outgoing, outgoingCue->left, -1.f, outgoingCue)
@@ -246,6 +251,8 @@ namespace ExternalStage
             std::lerp(r.z, grip.z, weight), std::lerp(r.w, grip.w, weight)};
         const float norm = std::sqrt(q.x*q.x + q.y*q.y + q.z*q.z + q.w*q.w);
         if (norm > 0) g_setWorldRotNative(transform, {q.x/norm, q.y/norm, q.z/norm, q.w/norm});
+        if (prop.hidden && HelperGameObjectSetActive(StageLoader::Invoke(StageLoader::componentGo, transform), true))
+            prop.hidden = false;
     }
 
     inline void UpdateHeldProps(GakuMotion::Core& core, void* onlyActor = nullptr)
@@ -283,12 +290,8 @@ namespace ExternalStage
         if (manual > 0 && manual <= static_cast<int>(profile.propNames.size()))
         {
             const float start = externalStagePropStart.load(), end = externalStagePropEnd.load();
-            const float transition = std::min(0.20f, (end-start) * 0.5f);
-            if (transition > 0 && time >= start && time < end)
-            {
-                const float t = std::min({1.0f, (time-start)/transition, (end-time)/transition});
-                grips[manual-1] = {&core.player, externalStageLeftHand.load(), t*t*(3-2*t)};
-            }
+            if (time >= start && time < end)
+                grips[manual-1] = {&core.player, externalStageLeftHand.load(), 1.f};
         }
         else if ((follows || core.stagePropPreview) && primaryPlace)
         {
@@ -317,11 +320,6 @@ namespace ExternalStage
                     grip.weight = t*t*(3-2*t);
                     grip.outgoing = players[prior->place];
                     grip.outgoingCue = &*prior;
-                }
-                else if (prior == cues.end() && cue.prop == 1)
-                {
-                    const float t = std::clamp(elapsed / 9.f, 0.f, 1.f);
-                    grip.weight = t*t*(3-2*t);
                 }
             }
             for (const auto& cue : cues)
