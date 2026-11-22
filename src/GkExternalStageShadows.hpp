@@ -2,7 +2,7 @@
 
 namespace ExternalStage
 {
-    inline constexpr size_t maxShadowContacts = 40;
+    inline constexpr size_t maxShadowContacts = 60;
 
     inline void UpdateContactShadows(GakuMotion::Core& core)
     {
@@ -51,16 +51,22 @@ namespace ExternalStage
         std::array<std::array<float, 4>, maxShadowContacts> measurements{};
         size_t count = 0;
         const auto add = [&](void* actor) {
-            if (!actor || count + 2 > measurements.size()) return;
+            if (!actor || count + 3 > measurements.size()) return;
             void* object = StageLoader::Invoke(StageLoader::componentGo, actor);
             if (!object || StageLoader::SceneOfFreshGo(object) != owner.sceneHandle) return;
+            if (void* hips = controller.fnGetBoneTransform(actor, 0))
+            {
+                const auto p = g_getWorldPosNative(hips);
+                if (std::isfinite(p.x) && std::isfinite(p.z))
+                    measurements[count++] = {p.x, alignedFloor, p.z, -0.58f};
+            }
             for (const int bone : {5, 6})
                 if (void* foot = controller.fnGetBoneTransform(actor, bone))
                 {
                     const auto p = g_getWorldPosNative(foot);
                     if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) continue;
                     const float strength = std::clamp(1.f - (p.y - alignedFloor) / 0.55f, 0.f, 1.f);
-                    if (strength > 0) measurements[count++] = {p.x, alignedFloor, p.z, strength};
+                    measurements[count++] = {p.x, alignedFloor, p.z, strength * 0.18f};
                 }
         };
         add(controller.targetActor);
@@ -77,7 +83,7 @@ namespace ExternalStage
         static size_t lastCount{};
         if (lastScene != mountedScene || lastCount != count)
         {
-            GakuMotion::host::Info("[GakuMotion][ExternalStage] contact shadows scene=%d feet=%zu",
+            GakuMotion::host::Info("[GakuMotion][ExternalStage] contact shadows scene=%d samples=%zu",
                 mountedScene, count);
             lastScene = mountedScene;
             lastCount = count;
