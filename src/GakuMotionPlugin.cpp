@@ -388,7 +388,7 @@ namespace
 			const auto now = std::chrono::steady_clock::now();
 			const float dt = slot.lastTick.time_since_epoch().count() ? std::chrono::duration<float>(now - slot.lastTick).count() : 0.f;
 			slot.lastTick = now;
-			const bool started = core.player.state == GakuMotion::PlaybackState::Playing || g_followerBridge.State(i).outstanding;
+			const bool started = photography || core.player.state == GakuMotion::PlaybackState::Playing || g_followerBridge.State(i).outstanding;
 			const bool native = requested == 2 && started && g_followerBridge.Publish(i, binding->second, ctrl, player.currentTime, frame, slot.quartz, slot.diagnostics,
                 hasUnityFrame && core.liveTakeoverActive && core.player.state == GakuMotion::PlaybackState::Playing, filterSceneForces);
 			const std::string reason = paused ? "transport_paused" : requested == 0 ? "off" : requested == 1 ? "fallback" :
@@ -1090,7 +1090,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.78-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.79-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -4175,7 +4175,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 			g_physicsLastTick = dispatchBegin;
 			// A seek or track change invalidates the packet. The same role clock
 			// can receive the replacement pose in track preview.
-			const bool nativeReadyToStart = GakuMotion::live_physics_clock::CanPublish(
+			const bool nativeReadyToStart = photography || GakuMotion::live_physics_clock::CanPublish(
 				player.state == GakuMotion::PlaybackState::Playing,
 				player.state == GakuMotion::PlaybackState::Paused, g_burstBridge.HasCaptureInput(),
 				core.liveTakeoverActive && !core.liveTakeoverFault && OwnsPrimaryMmdClock(activeActor),
