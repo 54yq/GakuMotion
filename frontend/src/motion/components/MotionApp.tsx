@@ -134,7 +134,7 @@ function ActivePage({ fork, command }: { fork: ReturnType<typeof useForkWorkspac
                   onChange={(e) => void command('externalStage.handProp', {
                     prop: Number(e.target.value), left: fork.externalStageLeftHand ?? false,
                   })}>
-                  {['不持有', '1205-00', '1205-01', '1205-02', '1205-03', '1500-00',
+                  {['跟随曲目时使用舞台预设', '1205-00', '1205-01', '1205-02', '1205-03', '1500-00',
                     '1500-01', '1500-02', '1548-00', '1548-01', '1108-00'].map((name, index) => (
                     <option key={name} value={index}>{name}</option>
                   ))}

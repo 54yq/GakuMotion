@@ -59,6 +59,22 @@ namespace ExternalStageProfiles
         std::array<std::string_view, 10> propNames;
     };
 
+    struct PropCue { int prop, place; bool left; int first, last; };
+
+    // Video + camera-key alignment. Occluded brown rabbit uses a provisional Place08 left assignment.
+    // Prop 11 is a second instance of prop 10, the carrot crepe.
+    inline constexpr PropCue meniPropCues[]{
+        {1, 1, false, 968, 1353},  // Yellow-white dog.
+        {2, 8, false, 1095, 1353}, // Black-white dog.
+        {5, 3, false, 1060, 1353}, // White rabbit.
+        {6, 8, true, 1095, 1353},  // Brown rabbit.
+        {7, 2, true, 1038, 1353},  // Pink rabbit.
+        {8, 7, true, 1100, 1353},  // Spotted dog.
+        {10, 4, false, 1353, 1400}, {11, 4, true, 1353, 1400},
+        {10, 1, true, 1400, 1690},  {11, 1, false, 1400, 1690},
+        {10, 4, false, 1690, 1710}, {11, 4, true, 1690, 1710},
+    };
+
     inline constexpr Profile meniShukiRush{
         "Assets/MeniShukiRushStage.unity", "MeniShukiRushStage", "meni-shuki-rush-scene.bundle",
         "Meni Shuki Rush Stage", "_GakuExternalStageLightFrame",

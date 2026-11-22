@@ -343,7 +343,7 @@ namespace GakuMotion
             if (ImGui::Button("回到开头")) externalStageSeek.store(0);
             ImGui::EndDisabled();
             int prop = externalStageHeldProp.load();
-            if (ImGui::SliderInt("时间轴手持道具（0 为不持有）", &prop, 0, 10)) externalStageHeldProp.store(prop);
+            if (ImGui::SliderInt("时间轴手持道具（0 为随曲目使用预设）", &prop, 0, 10)) externalStageHeldProp.store(prop);
             float start = externalStagePropStart.load(), end = externalStagePropEnd.load();
             if (ImGui::SliderFloat("拿起时间", &start, 0, end, "%.2f 秒")) externalStagePropStart.store(start);
             if (ImGui::SliderFloat("放下时间", &end, start, externalStageDuration, "%.2f 秒")) externalStagePropEnd.store(end);

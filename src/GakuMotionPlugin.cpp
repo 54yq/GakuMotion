@@ -1086,7 +1086,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.66-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.67-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -4302,9 +4302,9 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	}
 	// Native foot AO may have been derived before the post-actor callback.
 	// Consume the completed body + secondary pose in the same tick.
+    ExternalStage::UpdateHeldProps(core, activeActor);
     if (activeActor == core.player.controller.targetActor)
     {
-        ExternalStage::UpdateHeldProp(activeActor, core.player.controller);
         ExternalStage::UpdateContactShadows(activeActor, core.player.controller);
     }
 	ActorGroundShadow::RefreshAfterPose(activeActor, poseSerialBefore);
@@ -4681,7 +4681,7 @@ void MotionTick(void*, float)
                 GakuMotion::externalStageActorHeight.store(0);
             }
             ExternalStage::TickTimeline(core.player.currentTime, core.player.clip.total_frames != 0);
-            ExternalStage::UpdateHeldProp(stageActor, core.player.controller);
+            ExternalStage::UpdateHeldProps(core);
             ExternalStage::UpdateContactShadows(stageActor, core.player.controller);
             GakuMotion::externalStageStatus.store(ExternalStage::status.load());
             NativeAudio::Sync();
