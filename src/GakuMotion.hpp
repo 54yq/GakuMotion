@@ -396,7 +396,9 @@ namespace GakuMotion
 		int (*fnPollCameraImport)(std::string&){nullptr};
 		// Fresh active actors in the admitted owner scene; managed reads stay on Unity thread.
 		std::vector<void*> sceneActors;
-		bool externalStageCameraAvoidance{false};
+		bool traceExternalStageCamera{false};
+		uint64_t cameraTraceMotion{0};
+		int cameraTraceSeek{-1};
 		SceneActorRegistry sceneActorRegistry;
 		std::unordered_set<std::string> actorPropHidden;
 		bool CanControlActorProps() const
@@ -1516,8 +1518,29 @@ namespace GakuMotion
 				const Vector3 liveTrackAnchor = LiveCameraTrackAnchor(actor);
 				camera.Tick(player.state == PlaybackState::Playing || player.state == PlaybackState::Paused || player.state == PlaybackState::Preview,
 				            player.CameraSourceTime(), cameraDeltaTime >= 0.0f ? cameraDeltaTime : deltaTime,
-				            actor, physicalFrame, player.controller.initialYawDegrees, liveTrackAnchor,
-			            externalStageCameraAvoidance ? &sceneActors : nullptr);
+				            actor, physicalFrame, player.controller.initialYawDegrees, liveTrackAnchor);
+				if (traceExternalStageCamera && camera.owned && camera.settings.mode == CameraMode::Track &&
+					camera.fnFollowTarget &&
+					(cameraTraceMotion != loadedMotionGeneration || cameraTraceSeek != player.SeekCount()))
+				{
+					CameraFrame trackFrame;
+					if (camera.track.Sample(player.CameraSourceTime(), trackFrame))
+					{
+						cameraTraceMotion = loadedMotionGeneration;
+						cameraTraceSeek = player.SeekCount();
+						const auto& pos = camera.desired.position;
+						LogInfo(detail::FormatMsg("[GakuMotion][ExternalStageCamera] t=%.3f track=(%.3f,%.3f,%.3f) world=(%.3f,%.3f,%.3f) placement_yaw=%.2f",
+							player.CameraSourceTime(), trackFrame.position.x, trackFrame.position.y, trackFrame.position.z,
+							pos.x, pos.y, pos.z, player.controller.initialYawDegrees));
+						for (void* candidate : sceneActors)
+						{
+							Vector3 head;
+							if (camera.fnFollowTarget(candidate, CameraFollowTarget::Head, head))
+								LogInfo(detail::FormatMsg("[GakuMotion][ExternalStageCamera] actor=%p head=(%.3f,%.3f,%.3f) camera_distance=%.3f",
+									candidate, head.x, head.y, head.z, std::hypot(head.x - pos.x, head.y - pos.y, head.z - pos.z)));
+						}
+					}
+				}
 				// One local diagnostic per session/clip/actor. These values let us
 				// distinguish a bad baseline from a mismatched imported camera.
 				if (liveTakeoverActive && player.controller.currentBinding.actor == actor &&
