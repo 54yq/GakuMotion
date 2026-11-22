@@ -222,6 +222,22 @@ namespace GakuMotion
 			return confirmed;
 		}
 
+        bool HoldGarments(const IdolBoneBinding& binding, const IdolController& controller)
+        {
+            if (!binding.bindPoseCaptured || !binding.actorTransform ||
+                !controller.CanDriveActor(binding.actor) || !HasApi(controller)) return false;
+            if (!SameBinding(binding)) Bind(binding, controller);
+            bool held = false;
+            for (auto& bone : bones_)
+            {
+                if (!bone.garment || !CaptureWrite(controller, bone.transform, bone.rest)) continue;
+                bone.lastWritten = bone.rest;
+                bone.written = true;
+                held = true;
+            }
+            return held;
+        }
+
 		bool Publish(const IdolBoneBinding& binding, const IdolController& controller,
 		             float dt, int frame, CostumeFrame* costume = nullptr)
 		{

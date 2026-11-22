@@ -346,7 +346,7 @@ namespace
 		return clean;
 	}
 
-	void DispatchFollowerPhysics(GakuMotion::Core& core, void* actor, int frame, bool hasUnityFrame, bool filterSceneForces)
+	void DispatchFollowerPhysics(GakuMotion::Core& core, void* actor, int frame, bool hasUnityFrame, bool filterSceneForces, bool photography)
 	{
 		const auto& followers = core.ensemble.Followers();
 		for (size_t i = 0; i < followers.size(); ++i)
@@ -363,7 +363,9 @@ namespace
 			if (core.followerPhysicsStatus.size() <= i) core.followerPhysicsStatus.resize(i + 1);
 			auto& slot = g_followerPhysics[i];
 			if (slot.frame == frame && slot.actor == actor) return;
-			const bool paused = GakuMotion::live_physics_clock::IsTransportPaused(
+            const bool holdPhotoGarments = photography &&
+                (core.player.state == GakuMotion::PlaybackState::Paused || core.player.state == GakuMotion::PlaybackState::Preview);
+			const bool paused = holdPhotoGarments || GakuMotion::live_physics_clock::IsTransportPaused(
                 core.liveTakeoverActive, core.player.state == GakuMotion::PlaybackState::Paused);
             const int requested = paused ? 0 : core.config.secondaryPhysicsBackend;
 			if (slot.actor != actor || slot.bindingGeneration != follower.bindingGeneration || slot.backend != requested ||
@@ -394,7 +396,8 @@ namespace
 			if (requested == 2 && actual != 1 && slot.actual == 1)
 				ReleaseFallbackToNative(slot.fallback, binding->second, ctrl, static_cast<unsigned>(i + 2));
 			slot.actual = actual;
-			if (slot.actual == 1) PublishFallbackPhysics(core, slot.fallback, binding->second, player, static_cast<unsigned>(i + 2), dt, frame);
+			if (holdPhotoGarments) slot.fallback.HoldGarments(binding->second, ctrl);
+			else if (slot.actual == 1) PublishFallbackPhysics(core, slot.fallback, binding->second, player, static_cast<unsigned>(i + 2), dt, frame);
 			core.followerPhysicsStatus[i] = paused ? "动作已暂停" : slot.actual == 2 ? "原生运行中" :
 				slot.actual == 0 ? (requested == 2 ? "等待原生任务" : "已关闭") :
 				reason == "native_pending_stale" ? "内建（等待原生任务）" :
@@ -1086,7 +1089,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.69-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.70-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -4099,7 +4102,8 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 		g_sceneOwner.AllowedContext() == GakuMotion::injection::Context::Photography;
 	if (player.state != GakuMotion::PlaybackState::Stopped)
 		DispatchFollowerPhysics(core, activeActor, unityFrame >= 0 ? unityFrame : s_fallbackFrame,
-			unityFrame >= 0, filterSceneForces);
+			unityFrame >= 0, filterSceneForces,
+            g_sceneOwner.AllowedContext() == GakuMotion::injection::Context::Photography);
 	if (isNewPhysicalFrame && !GakuMotion::visual_handoff::IsReleased())
 	{
 		void* mainCam = HelperCameraGetMain();
@@ -4128,7 +4132,9 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 		}
 		else if (frame != g_physicsFrame || g_physicsActor != activeActor)
 		{
-			const bool paused = GakuMotion::live_physics_clock::IsTransportPaused(
+            const bool holdPhotoGarments = g_sceneOwner.AllowedContext() == GakuMotion::injection::Context::Photography &&
+                (core.player.state == GakuMotion::PlaybackState::Paused || core.player.state == GakuMotion::PlaybackState::Preview);
+			const bool paused = holdPhotoGarments || GakuMotion::live_physics_clock::IsTransportPaused(
                 core.liveTakeoverActive, player.state == GakuMotion::PlaybackState::Paused);
             const int requested = paused ? 0 : core.config.secondaryPhysicsBackend;
 			if (requested != g_physicsBackend || core.config.beforeQuartzExperiment != g_physicsBeforeQuartz ||
@@ -4181,7 +4187,8 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 				ReleaseFallbackToNative(g_fallbackPhysics, binding->second, player.controller, 1);
 			}
 			g_physicsActual = actual;
-			if (g_physicsActual == 1)
+			if (holdPhotoGarments) g_fallbackPhysics.HoldGarments(binding->second, player.controller);
+			else if (g_physicsActual == 1)
 			{
 				// Original engine jobs have completed at this LateUpdate callback.
 				// Override only secondary local rotations after MMD body writes.
@@ -4273,6 +4280,8 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 			if (reason != g_physicsReason)
 			{
 				g_physicsReason = reason;
+                if (holdPhotoGarments)
+                    GakuMotion::host::Info("[GakuMotion][Photography] transport paused: holding garment pose for actor=%p", activeActor);
 				// Transient by design: native_pending resolves to native within a
 				// frame or two, so this is a trace, not a warning.
 				GM_DEBUG("[GakuMotion][Physics] requested=%d actual=%d reason=%s", requested, g_physicsActual,
