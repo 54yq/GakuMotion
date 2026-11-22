@@ -1086,7 +1086,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.62-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.63-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -4637,6 +4637,41 @@ void MotionTick(void*, float)
             if (!stageActor && !core.sceneActorRegistry.Entries().empty()) stageActor = core.sceneActorRegistry.Entries().front().actor;
             ExternalStage::Tick(externalStageAdmitted, nativeBackground, g_sceneOwner, stageActor,
                 core.player.state == GakuMotion::PlaybackState::Stopped ? &core.player.controller : nullptr);
+            if (ExternalStage::status.load() == 1)
+            {
+                if (GakuMotion::externalStageLocate.exchange(false))
+                {
+                    GakuMotion::Core::ActorStart start{};
+                    const bool ready = GakuMotion::Core::ReadActorStart(core.player, start);
+                    if (ready)
+                    {
+                        const auto& anchor = ExternalStage::stageAnchor;
+                        auto offset = core.player.controller.initialPositionOffset;
+                        offset.x += anchor.x - start.world.x;
+                        offset.z += anchor.z - start.world.z;
+                        core.QueueInitialPosition(offset);
+                        core.QueuePause();
+                        core.QueueSeek(0);
+                        GakuMotion::externalStageSeek.store(0);
+                        GakuMotion::host::Info("[GakuMotion][ExternalStage] Place01 anchor=(%g,%g,%g) offset=(%g,%g,%g)",
+                            anchor.x, anchor.y, anchor.z, offset.x, offset.y, offset.z);
+                    }
+                    GakuMotion::externalStageLocateResult.store(ready ? 1 : -1);
+                }
+                if (GakuMotion::externalStageMeasure.exchange(false))
+                {
+                    const auto height = ExternalStage::MeasureActorHeight(stageActor);
+                    GakuMotion::externalStageActorHeight.store(height);
+                    GakuMotion::host::Info("[GakuMotion][ExternalStage] actor bounds height=%g door=2.52 bench=0.885", height);
+                }
+            }
+            else
+            {
+                GakuMotion::externalStageLocate.store(false);
+                GakuMotion::externalStageMeasure.store(false);
+                GakuMotion::externalStageLocateResult.store(0);
+                GakuMotion::externalStageActorHeight.store(0);
+            }
             ExternalStage::TickTimeline(core.player.currentTime, core.player.clip.total_frames != 0);
             ExternalStage::UpdateHeldProp(stageActor, core.player.controller);
             ExternalStage::UpdateContactShadows(stageActor, core.player.controller);

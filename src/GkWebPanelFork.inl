@@ -47,6 +47,8 @@
                 ",\"externalStageDuration\":" + JNum(externalStageDuration) +
                 ",\"externalStagePlaying\":" + JBool(externalStagePlaying.load()) +
                 ",\"externalStageFollow\":" + JBool(externalStageFollow.load()) +
+                ",\"externalStageActorHeight\":" + JNum(externalStageActorHeight.load()) +
+                ",\"externalStageLocateResult\":" + JNum(externalStageLocateResult.load()) +
                 ",\"externalStageGrade\":" + JBool(externalStageGrade.load()) +
                 ",\"externalStagePropStart\":" + JNum(externalStagePropStart.load()) +
                 ",\"externalStagePropEnd\":" + JNum(externalStagePropEnd.load()) +
@@ -117,6 +119,14 @@
                 bool enable = false;
                 if (!BoolParam(params, "value", enable)) return CmdResult::Err("invalid_params", "缺少舞台开关状态");
                 externalStageEnabled.store(enable);
+                return CmdResult::Ok();
+            }
+            if (action == "externalStage.locate" || action == "externalStage.measure")
+            {
+                if (externalStageStatus.load() != 1)
+                    return CmdResult::Err("stage_unavailable", "独立舞台尚未就绪");
+                if (action == "externalStage.locate") externalStageLocate.store(true);
+                else externalStageMeasure.store(true);
                 return CmdResult::Ok();
             }
             if (action == "externalStage.grade")

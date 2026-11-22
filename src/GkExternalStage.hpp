@@ -288,6 +288,43 @@ namespace ExternalStage
         return 0;
     }
 
+    inline float MeasureActorHeight(void* actor)
+    {
+        if (!actor || !getBounds || !g_getParentNative || !g_safeBones.unbox) return -1;
+        void* object = StageLoader::Invoke(StageLoader::componentGo, actor);
+        if (!object || StageLoader::SceneOfFreshGo(object) != owner.sceneHandle) return -1;
+        void* root = StageLoader::Invoke(StageLoader::goTransform, object);
+        if (!root) return -1;
+        void* klass = FindClass("UnityEngine.CoreModule.dll", "UnityEngine", "SkinnedMeshRenderer");
+        void* type = klass ? il2cpp_type_get_object(il2cpp_class_get_type(klass)) : nullptr;
+        if (!type) return -1;
+        bool inactive = false;
+        void* args[]{type, &inactive};
+        void* list = StageLoader::Invoke(StageLoader::findAll, nullptr, args);
+        Handle pin = list ? StageLoader::newHandle(list, false) : nullptr;
+        if (!pin) return -1;
+        float bottom = INFINITY, top = -INFINITY;
+        const auto count = StageLoader::arrayLength(list);
+        for (uintptr_t i = 0; i < count; ++i)
+        {
+            auto** items = reinterpret_cast<void**>(static_cast<char*>(SceneOwnerRuntime::handleTarget(pin)) + 32);
+            void* renderer = items[i];
+            if (!renderer || !StageLoader::ReadBool(getEnabled, renderer, false)) continue;
+            void* go = StageLoader::Invoke(StageLoader::componentGo, renderer);
+            void* transform = go ? StageLoader::Invoke(StageLoader::goTransform, go) : nullptr;
+            for (unsigned depth = 0; transform && transform != root && depth < 128; ++depth)
+                transform = g_getParentNative(transform);
+            if (transform != root) continue;
+            void* boxed = StageLoader::Invoke(getBounds, renderer);
+            const auto* bounds = boxed ? static_cast<const float*>(g_safeBones.unbox(boxed)) : nullptr;
+            if (!bounds || !std::isfinite(bounds[1]) || !(bounds[4] > 0 && bounds[4] < 3)) continue;
+            bottom = std::min(bottom, bounds[1] - bounds[4]);
+            top = std::max(top, bounds[1] + bounds[4]);
+        }
+        StageLoader::freeHandle(pin);
+        return top > bottom ? top - bottom : -1;
+    }
+
     inline bool ReadMask(const void* method, void* object, uint64_t& mask)
     {
         void* boxed = StageLoader::Invoke(method, object);

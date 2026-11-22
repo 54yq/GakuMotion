@@ -95,6 +95,16 @@ function ActivePage({ fork, command }: { fork: ReturnType<typeof useForkWorkspac
           {fork?.externalStageStatus === 1 && (
             <div className="space-y-2">
               <p role="status">独立舞台已载入</p>
+              <div className="flex flex-wrap gap-4">
+                <button type="button" onClick={() => void command('externalStage.locate', {})}>定位到 1 号起始站位</button>
+                <button type="button" onClick={() => void command('externalStage.measure', {})}>测量当前角色高度</button>
+              </div>
+              {fork.externalStageLocateResult === 1 && <p role="status">已定位到 1 号位</p>}
+              {fork.externalStageLocateResult === -1 && <p role="status">请先载入并预览主角色动作</p>}
+              {(fork.externalStageActorHeight ?? 0) > 0 && (
+                <p role="status">角色 {fork.externalStageActorHeight?.toFixed(2)} m · 铁门 2.52 m · 长椅 0.89 m</p>
+              )}
+              {fork.externalStageActorHeight === -1 && <p role="status">当前角色尺寸不可读</p>}
               <label className="flex items-center gap-2">
                 <input type="checkbox" checked={fork.externalStageFollow ?? false}
                   onChange={(e) => void command('externalStage.follow', { value: e.target.checked })} />

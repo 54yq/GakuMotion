@@ -302,6 +302,9 @@ namespace GakuMotion
     inline std::atomic<bool> externalStagePlaying{false}, externalStageFollow{false};
     inline std::atomic<int> externalStageHeldProp{0};
     inline std::atomic<bool> externalStageGrade{true};
+    inline std::atomic<bool> externalStageLocate{}, externalStageMeasure{};
+    inline std::atomic<float> externalStageActorHeight{0};
+    inline std::atomic<int> externalStageLocateResult{0};
     inline std::atomic<float> externalStagePropStart{0}, externalStagePropEnd{externalStageDuration};
     inline std::atomic<bool> externalStageLeftHand{false};
 #if defined(GKMOTION_ENABLE_IMGUI) || defined(HAS_IMGUI)
@@ -316,6 +319,15 @@ namespace GakuMotion
         if (status == 1)
         {
             ImGui::TextUnformatted("独立舞台已载入");
+            if (ImGui::Button("定位到 1 号起始站位")) externalStageLocate.store(true);
+            ImGui::SameLine();
+            if (ImGui::Button("测量当前角色高度")) externalStageMeasure.store(true);
+            const auto result = externalStageLocateResult.load();
+            if (result > 0) ImGui::TextUnformatted("已定位到 1 号位");
+            if (result < 0) ImGui::TextUnformatted("请先载入并预览主角色动作");
+            const float height = externalStageActorHeight.load();
+            if (height > 0) ImGui::Text("角色 %.2f m | 铁门 2.52 m | 长椅 0.89 m", height);
+            if (height < 0) ImGui::TextUnformatted("当前角色尺寸不可读");
             bool follow = externalStageFollow.load();
             if (ImGui::Checkbox("跟随曲目", &follow)) externalStageFollow.store(follow);
             ImGui::BeginDisabled(follow);
