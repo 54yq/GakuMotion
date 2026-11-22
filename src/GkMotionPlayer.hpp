@@ -282,6 +282,18 @@ namespace GakuMotion
 			// snapshot; recapturing immediately after Rebind samples old animation.
 			if (state != PlaybackState::Stopped) Stop();
 			poseClock_ = {};
+            const std::string_view directory = motionDirectory;
+            const auto slash = directory.find_last_of("/\\");
+            const auto name = slash == std::string_view::npos ? directory : directory.substr(slash + 1);
+            constexpr std::string_view meniPlace = "cutt_son1156_Place";
+            if (name.starts_with(meniPlace) && name.size() == meniPlace.size() + 2 &&
+                name.substr(meniPlace.size()) >= "01" && name.substr(meniPlace.size()) <= "10")
+            {
+                // The current Gakumas eyelid channel pair closes the opposite eye for these source takes.
+                for (auto& channel : nextClip.blendshape_names)
+                    if (channel == "b_eye.eye_011") channel = "b_eye.eye_012";
+                    else if (channel == "b_eye.eye_012") channel = "b_eye.eye_011";
+            }
 			currentMotionDir = motionDirectory;
 			clip = std::move(nextClip);
 			initializationPending = initializeBeforeMotion;
