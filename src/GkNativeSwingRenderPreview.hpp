@@ -138,11 +138,20 @@ namespace NativeSwingRenderPreview
         renderService = {};
     }
 
+    inline bool EligiblePlayback(const GakuMotion::Core& core)
+    {
+        return ThreeActorNativePlayback(core) ||
+            (g_sceneOwner.AllowedContext() == GakuMotion::injection::Context::Photography &&
+             core.InjectionAllowed() && !core.captureSuspended && !core.ensembleRestoreUnconfirmed &&
+             core.config.secondaryPhysicsBackend == 2 && core.player.controller.targetActor &&
+             core.player.state == GakuMotion::PlaybackState::Playing && !core.player.scrubbing);
+    }
+
     inline void Apply(void* camera)
     {
         auto& core = GakuMotion::Core::Instance();
         if (!armed || activeCamera || !camera || !CameraBridge::getMain || camera != CameraBridge::getMain(nullptr) ||
-            !g_faceUnityFrame || g_faceUnityFrame() != frame || !core.liveTakeoverActive || core.captureSuspended ||
+            !g_faceUnityFrame || g_faceUnityFrame() != frame || !EligiblePlayback(core) ||
             core.sceneActorRegistry.Epoch() != epoch || core.player.controller.targetActor != actor ||
             core.player.state != GakuMotion::PlaybackState::Playing) return;
         if (!cameraPair.Begin(camera,frame)) return;
@@ -172,7 +181,7 @@ namespace NativeSwingRenderPreview
         const auto currentEpoch = core.sceneActorRegistry.Epoch();
         const float time = player.currentTime;
         const int seekCount = player.SeekCount();
-        const bool eligible = native && ThreeActorNativePlayback(core) && currentFrame > 0 && std::isfinite(time) && binding != controller.bindings.end() &&
+        const bool eligible = native && EligiblePlayback(core) && currentFrame > 0 && std::isfinite(time) && binding != controller.bindings.end() &&
             binding->second.bindPoseCaptured && controller.fnGetLocalRotation && controller.fnSetLocalRotation;
         if (currentFrame == frame && target == actor && currentEpoch == epoch && seekCount == seeks) return;
         if (cameraPair.pending) {
@@ -190,7 +199,7 @@ namespace NativeSwingRenderPreview
             if (actor != target || currentEpoch != epoch) boneLookup.Clear();
         }
         if (!eligible || !CameraBridge::ready) {
-            if (ThreeActorNativePlayback(core))
+            if (EligiblePlayback(core))
                 Report(!native ? "awaiting_native_source_frame" : !eligible ? "binding_unavailable" : "camera_bridge_unavailable");
             frame = -1;
             return;

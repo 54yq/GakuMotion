@@ -389,7 +389,7 @@ namespace
 			slot.lastTick = now;
 			const bool started = core.player.state == GakuMotion::PlaybackState::Playing || g_followerBridge.State(i).outstanding;
 			const bool native = requested == 2 && started && g_followerBridge.Publish(i, binding->second, ctrl, player.currentTime, frame, slot.quartz, slot.diagnostics,
-                hasUnityFrame && core.liveTakeoverActive && core.player.state == GakuMotion::PlaybackState::Playing, filterSceneForces);
+                hasUnityFrame && (core.liveTakeoverActive || photography) && core.player.state == GakuMotion::PlaybackState::Playing, filterSceneForces);
 			const std::string reason = paused ? "transport_paused" : requested == 0 ? "off" : requested == 1 ? "fallback" :
 				!started ? "native_waiting_for_playback" : g_followerBridge.State(i).reason == "not_requested" ? g_followerBridge.reason : g_followerBridge.State(i).reason;
 			const int actual = GakuMotion::SelectSecondaryPhysicsBackend(requested, native, core.liveTakeoverActive, reason);
@@ -1089,7 +1089,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.70-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.71-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -4179,7 +4179,8 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 			                                                      player.AppliedPoseTime(), frame,
 			                                                      core.config.beforeQuartzExperiment,
 			                                                      core.config.sleeveMuscleDiagnostics,
-                                                          unityFrame >= 0 && core.liveTakeoverActive && player.state == GakuMotion::PlaybackState::Playing, filterSceneForces);
+                                                          unityFrame >= 0 && (core.liveTakeoverActive || NativeSwingRenderPreview::EligiblePlayback(core)) &&
+                                                          player.state == GakuMotion::PlaybackState::Playing, filterSceneForces);
 			const std::string reason = paused ? "transport_paused" : requested == 2 ? (nativeReadyToStart ? g_burstBridge.reason : "native_waiting_for_playback") : requested == 1 ? "fallback" : "off";
 			const int actual = GakuMotion::SelectSecondaryPhysicsBackend(requested, native, core.liveTakeoverActive, reason);
 			if (requested == 2 && actual != 1 && g_physicsActual == 1)
