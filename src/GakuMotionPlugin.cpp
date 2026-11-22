@@ -1086,7 +1086,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.61-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.62-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -4635,7 +4635,8 @@ void MotionTick(void*, float)
                 g_verifiedActiveSceneHandle != g_sceneOwner.sceneHandle ? g_verifiedActiveSceneHandle : 0;
             void* stageActor = core.player.controller.targetActor;
             if (!stageActor && !core.sceneActorRegistry.Entries().empty()) stageActor = core.sceneActorRegistry.Entries().front().actor;
-            ExternalStage::Tick(externalStageAdmitted, nativeBackground, g_sceneOwner, stageActor);
+            ExternalStage::Tick(externalStageAdmitted, nativeBackground, g_sceneOwner, stageActor,
+                core.player.state == GakuMotion::PlaybackState::Stopped ? &core.player.controller : nullptr);
             ExternalStage::TickTimeline(core.player.currentTime, core.player.clip.total_frames != 0);
             ExternalStage::UpdateHeldProp(stageActor, core.player.controller);
             ExternalStage::UpdateContactShadows(stageActor, core.player.controller);

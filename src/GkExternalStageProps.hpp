@@ -5,7 +5,7 @@ namespace ExternalStage
     // The object's transform remains owned by the additive scene during hand following.
     inline Handle heldTransform{};
     inline UnityVector3 propPosition{};
-    inline float propTravelZ{};
+    inline UnityVector3 propTravel{};
     inline UnityQuaternion propRotation{};
     inline int heldSelection{};
     inline int attemptedProp{};
@@ -17,7 +17,8 @@ namespace ExternalStage
             if (void* transform = SceneOwnerRuntime::handleTarget(heldTransform))
             {
                 auto position = propPosition;
-                position.z += stageTravelZ - propTravelZ;
+                position.x += stageTravel.x - propTravel.x;
+                position.z += stageTravel.z - propTravel.z;
                 g_setWorldPosNative(transform, position);
                 g_setWorldRotNative(transform, propRotation);
             }
@@ -47,7 +48,7 @@ namespace ExternalStage
             {
                 heldTransform = StageLoader::newHandle(transform, false);
                 propPosition = g_getWorldPosNative(transform);
-                propTravelZ = stageTravelZ;
+                propTravel = stageTravel;
                 propRotation = g_getWorldRotNative(transform);
             }
             break;

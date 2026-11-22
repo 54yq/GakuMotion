@@ -63,7 +63,23 @@ namespace ExternalStage
     inline int lightFrameId{}, gradeId{};
     inline Handle stageRoot{};
     inline UnityVector3 stageOrigin{};
-    inline float stageTravelZ{};
+    inline UnityVector3 stageAnchor{}, stageTravel{};
+    inline float stageYaw{};
+
+    inline UnityVector3 RotateStageOffset(UnityVector3 value)
+    {
+        const float c = std::cos(stageYaw), s = std::sin(stageYaw);
+        return {c * value.x + s * value.z, value.y, -s * value.x + c * value.z};
+    }
+
+    inline void SetStagePlacement(void* transform, float yaw)
+    {
+        stageYaw = yaw;
+        const auto offset = RotateStageOffset(profile.rootOffset);
+        stageOrigin = {stageAnchor.x + offset.x, stageAnchor.y + offset.y, stageAnchor.z + offset.z};
+        g_setWorldRotNative(transform, {0, std::sin(yaw * 0.5f), 0, std::cos(yaw * 0.5f)});
+        g_setWorldPosNative(transform, stageOrigin);
+    }
 
     inline void ApplyStageTravel(float frame)
     {
@@ -72,9 +88,10 @@ namespace ExternalStage
         if (!transform) return;
         const float fraction = std::clamp((frame - profile.travelStart) / (profile.travelEnd - profile.travelStart), 0.0f, 1.0f);
         // Stage VMD root Z uses the destination key’s Bezier (0, 0, 0, 0).
-        stageTravelZ = profile.travelZ * fraction;
+        stageTravel = RotateStageOffset({0, 0, profile.travelZ * fraction});
         auto position = stageOrigin;
-        position.z += stageTravelZ;
+        position.x += stageTravel.x;
+        position.z += stageTravel.z;
         g_setWorldPosNative(transform, position);
     }
     inline void SetStageLightFrame(float frame) { SetStageShaderFloat(profile.lightFrameProperty, frame, lightFrameId); }
@@ -316,6 +333,7 @@ namespace ExternalStage
         void* planeArgs[]{camera};
         void* planes = calculatePlanes ? StageLoader::Invoke(calculatePlanes, nullptr, planeArgs) : nullptr;
         Handle planeHandle = planes ? StageLoader::newHandle(planes, false) : nullptr;
+        std::vector<uintptr_t> stageRenderers;
         for (uintptr_t i = 0; i < count; ++i)
         {
             void* renderer = renderers[i];
@@ -332,6 +350,7 @@ namespace ExternalStage
             }
             if (!StageLoader::ReadBool(getEnabled, renderer, false)) continue;
             ++stageCount;
+            stageRenderers.push_back(i);
             if (inMask) ++visibleLayers;
             uint64_t objectScenes = 0;
             if (hasSceneMask && ReadMask(getObjectSceneMask, object, objectScenes) && objectScenes)
@@ -339,16 +358,41 @@ namespace ExternalStage
                 stageScenes |= objectScenes;
                 if (!(objectScenes & cameraScenes)) ++sceneRejected;
             }
-            if (planeHandle && testBounds && getBounds)
+        }
+        const auto countFrustumHits = [&]() {
+            unsigned hits = 0;
+            for (const auto index : stageRenderers)
             {
-                void* boxed = StageLoader::Invoke(getBounds, renderer);
+                void* boxed = StageLoader::Invoke(getBounds, renderers[index]);
                 void* raw = boxed && g_safeBones.unbox ? g_safeBones.unbox(boxed) : nullptr;
                 if (!raw) continue;
                 std::array<float, 6> bounds{};
                 std::memcpy(bounds.data(), raw, sizeof(bounds));
                 void* args[]{SceneOwnerRuntime::handleTarget(planeHandle), bounds.data()};
-                if (args[0] && StageLoader::ReadBool(testBounds, nullptr, false, args)) ++frustumHits;
+                if (args[0] && StageLoader::ReadBool(testBounds, nullptr, false, args)) ++hits;
             }
+            return hits;
+        };
+        bool framingReady = true;
+        if (planeHandle && testBounds && getBounds)
+        {
+            frustumHits = countFrustumHits();
+            void* transform = stageRoot ? SceneOwnerRuntime::handleTarget(stageRoot) : nullptr;
+            if (!frustumHits && transform && g_setWorldRotNative && g_setWorldPosNative)
+            {
+                constexpr float halfPi = 1.570796327f;
+                float bestYaw = 0;
+                for (const float yaw : {halfPi, -halfPi, 2 * halfPi})
+                {
+                    SetStagePlacement(transform, yaw);
+                    const auto hits = countFrustumHits();
+                    if (hits > frustumHits) { frustumHits = hits; bestYaw = yaw; }
+                }
+                SetStagePlacement(transform, bestYaw);
+                GakuMotion::host::Info("[GakuMotion][ExternalStage] camera framing yaw=%g frustum=%u/%u",
+                    stageYaw, frustumHits, stageCount);
+            }
+            framingReady = frustumHits != 0;
         }
         if (planeHandle) StageLoader::freeHandle(planeHandle);
         const auto preferred = std::max_element(nativeLayers.begin(), nativeLayers.end());
@@ -383,7 +427,7 @@ namespace ExternalStage
             stageCount, layers, visibleLayers, relayered, layer, static_cast<unsigned long long>(cameraScenes),
             static_cast<unsigned long long>(stageScenes), hasSceneMask, sceneRejected, sceneMaskReady,
             planeHandle && testBounds && getBounds ? static_cast<int>(frustumHits) : -1, stageCount);
-        return stageCount != 0 && visibleLayers + relayered != 0 && sceneMaskReady;
+        return stageCount != 0 && visibleLayers + relayered != 0 && sceneMaskReady && framingReady;
     }
 
     inline void RestoreBackground()
@@ -415,7 +459,7 @@ namespace ExternalStage
 
     inline void ReleaseHeldProp();
 
-    inline bool AlignToActor(int background, void* actor)
+    inline bool AlignToActor(int background, void* actor, GakuMotion::IdolController* controller)
     {
         if (alignedBackground == background) return true;
         if (!g_getWorldPosNative || !StageLoader::setPosition || !StageLoader::goType) return false;
@@ -448,6 +492,24 @@ namespace ExternalStage
             }
             StageLoader::freeHandle(pin);
         }
+        if (anchor && actorObject && controller && controller->fnGetBoneTransform &&
+            StageLoader::SceneOfFreshGo(actorObject) == owner.sceneHandle)
+        {
+            void* left = controller->fnGetBoneTransform(actor, 5);
+            void* right = controller->fnGetBoneTransform(actor, 6);
+            if (left && right)
+            {
+                const auto l = g_getWorldPosNative(left), r = g_getWorldPosNative(right);
+                if (std::isfinite(l.x + r.x) && std::isfinite(l.z + r.z))
+                {
+                    GakuMotion::host::Info("[GakuMotion][ExternalStage] actor pivot=(%g,%g,%g) feet=(%g,%g,%g)/(%g,%g,%g)",
+                        anchor->x, anchor->y, anchor->z, l.x, l.y, l.z, r.x, r.y, r.z);
+                    anchor->x = (l.x + r.x) * 0.5f;
+                    anchor->y = std::min(l.y, r.y);
+                    anchor->z = (l.z + r.z) * 0.5f;
+                }
+            }
+        }
         if (!anchor || !std::isfinite(anchor->x) || !std::isfinite(anchor->y) || !std::isfinite(anchor->z)) return false;
 
         bool inactive = false;
@@ -467,6 +529,9 @@ namespace ExternalStage
             void* transform = StageLoader::Invoke(StageLoader::goTransform, object);
             if (!transform) break;
             ReleaseHeldProp();
+            stageAnchor = *anchor;
+            stageYaw = 0;
+            if (g_setWorldRotNative) g_setWorldRotNative(transform, {0, 0, 0, 1});
             auto position = profile.rootOffset;
             position.x += anchor->x;
             position.y += anchor->y;
@@ -477,7 +542,7 @@ namespace ExternalStage
             if (stageRoot) StageLoader::freeHandle(stageRoot);
             stageRoot = StageLoader::newHandle(transform, false);
             stageOrigin = position;
-            stageTravelZ = 0;
+            stageTravel = {};
             lastDoorTime = -1;
             aligned = stageRoot && std::abs(after.x - position.x) < 0.002f && std::abs(after.y - position.y) < 0.002f &&
                 std::abs(after.z - position.z) < 0.002f;
@@ -582,7 +647,7 @@ namespace ExternalStage
         return path && Start(Pending::Bundle, StageLoader::Invoke(openBundle, nullptr, args));
     }
 
-    inline void Tick(bool admitted, int background, const GakuMotion::injection::OwnerSnapshot& current, void* actor)
+    inline void Tick(bool admitted, int background, const GakuMotion::injection::OwnerSnapshot& current, void* actor, GakuMotion::IdolController* controller = nullptr)
     {
         const bool wanted = admitted && (!owner.Valid() || owner.SameOwner(current));
         if (!wanted)
@@ -662,7 +727,7 @@ namespace ExternalStage
                 const auto now = std::chrono::steady_clock::now();
                 if (now < nextAlignment) return;
                 nextAlignment = now + std::chrono::milliseconds(150);
-                if (!AlignToActor(background, actor)) return;
+                if (!AlignToActor(background, actor, controller)) return;
             }
             if (!hiddenScene && !HideBackground(background))
             {
