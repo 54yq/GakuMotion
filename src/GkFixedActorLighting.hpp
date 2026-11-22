@@ -53,7 +53,7 @@ namespace FixedActorLighting
 	}
 	inline bool Resolve()
 	{
-		if (ready) return true;
+		if (ready) return cameraDataClass && getComponent && getVolumeMask;
 		if (!StageLoader::metadata.byRef || !StageLoader::metadata.typeCode || !StageLoader::newHandle || !StageLoader::freeHandle ||
 			!SceneOwnerRuntime::handleTarget || !StageLoader::stringNew || !StageLoader::setActive ||
 			!g_safeBones.unbox || !g_faceRuntime.readField || !g_faceRuntime.writeField) return false;
@@ -92,14 +92,16 @@ namespace FixedActorLighting
 		setGlobal = find(volumeClass, "set_isGlobal", false, {0x01}, {{0x02}});
 		getVolumeMask = find(cameraDataClass, "get_volumeLayerMask", false, {0x11, maskClass}, {});
 		objectNew = reinterpret_cast<decltype(objectNew)>(GetProcAddress(g_gameAssembly, "il2cpp_object_new"));
-		ready = actorClass && ctor && alive && destroy && addComponent && getComponent && setLayer &&
+		ready = cameraDataClass && actorClass && volumeClass && profileClass && ctor && alive && destroy && addComponent && getComponent && setLayer &&
 			createProfile && addParameter && setProfile && setGlobal && getVolumeMask && objectNew &&
 			StageLoader::cameraMain && StageLoader::componentGo && il2cpp_type_get_object && il2cpp_class_get_type;
 		return ready;
 	}
 	inline void* ManagedType(void* klass)
 	{
-		return il2cpp_type_get_object(il2cpp_class_get_type(klass));
+		if (!klass || !il2cpp_class_get_type || !il2cpp_type_get_object) return nullptr;
+		const auto type = il2cpp_class_get_type(klass);
+		return type ? il2cpp_type_get_object(type) : nullptr;
 	}
 	inline bool Destroy(Root& root, bool deactivate = false)
 	{
@@ -130,6 +132,8 @@ namespace FixedActorLighting
 	}
 	inline int CameraLayer()
 	{
+		if (!cameraDataClass || !getComponent || !getVolumeMask || !StageLoader::cameraMain ||
+			!StageLoader::componentGo || !g_safeBones.unbox) return -1;
 		void* camera = StageLoader::Invoke(StageLoader::cameraMain);
 		void* go = camera ? StageLoader::Invoke(StageLoader::componentGo, camera) : nullptr;
 		Root type;

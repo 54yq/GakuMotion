@@ -49,7 +49,7 @@ namespace ExternalStage
             {
                 failedScene = mountedScene;
                 Release();
-                GakuMotion::host::Warn("[GakuMotion][ExternalStage] photography actor lighting unavailable");
+                GakuMotion::host::Warn("[GakuMotion][ExternalStage] photography camera volume unavailable; keeping native actor lighting");
                 return;
             }
             appliedScene = mountedScene;
