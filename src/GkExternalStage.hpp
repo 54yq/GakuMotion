@@ -61,6 +61,22 @@ namespace ExternalStage
     }
 
     inline int lightFrameId{}, gradeId{};
+    inline Handle stageRoot{};
+    inline UnityVector3 stageOrigin{};
+    inline float stageTravelZ{};
+
+    inline void ApplyStageTravel(float frame)
+    {
+        if (!stageRoot || !g_setWorldPosNative) return;
+        void* transform = SceneOwnerRuntime::handleTarget(stageRoot);
+        if (!transform) return;
+        const float fraction = std::clamp((frame - profile.travelStart) / (profile.travelEnd - profile.travelStart), 0.0f, 1.0f);
+        // Stage VMD root Z uses the destination key’s Bezier (0, 0, 0, 0).
+        stageTravelZ = profile.travelZ * fraction;
+        auto position = stageOrigin;
+        position.z += stageTravelZ;
+        g_setWorldPosNative(transform, position);
+    }
     inline void SetStageLightFrame(float frame) { SetStageShaderFloat(profile.lightFrameProperty, frame, lightFrameId); }
 
     inline void ResetTimeline()
@@ -150,6 +166,7 @@ namespace ExternalStage
         if (time == lastDoorTime) return;
         lastDoorTime = time;
         SetStageLightFrame(time * 30.0f);
+        ApplyStageTravel(time * 30.0f);
         if (!setDoorRotation) return;
 
         const float fraction = std::clamp((time * 30.0f - 2933.0f) / 61.0f, 0.0f, 1.0f);
@@ -457,7 +474,12 @@ namespace ExternalStage
             void* setArgs[]{&position};
             StageLoader::Invoke(StageLoader::setPosition, transform, setArgs);
             const auto after = g_getWorldPosNative(transform);
-            aligned = std::abs(after.x - position.x) < 0.002f && std::abs(after.y - position.y) < 0.002f &&
+            if (stageRoot) StageLoader::freeHandle(stageRoot);
+            stageRoot = StageLoader::newHandle(transform, false);
+            stageOrigin = position;
+            stageTravelZ = 0;
+            lastDoorTime = -1;
+            aligned = stageRoot && std::abs(after.x - position.x) < 0.002f && std::abs(after.y - position.y) < 0.002f &&
                 std::abs(after.z - position.z) < 0.002f;
             GakuMotion::host::Info("[GakuMotion][ExternalStage] anchor background=%d actor=(%g,%g,%g) stage=(%g,%g,%g) aligned=%d",
                 background, anchor->x, anchor->y, anchor->z, after.x, after.y, after.z, aligned);
@@ -563,7 +585,12 @@ namespace ExternalStage
     inline void Tick(bool admitted, int background, const GakuMotion::injection::OwnerSnapshot& current, void* actor)
     {
         const bool wanted = admitted && (!owner.Valid() || owner.SameOwner(current));
-        if (!wanted) ReleaseHeldProp();
+        if (!wanted)
+        {
+            ReleaseHeldProp();
+            if (stageRoot) StageLoader::freeHandle(stageRoot);
+            stageRoot = {};
+        }
         if (!wanted || hiddenScene != background)
             RestoreBackground();
         if (operation)
