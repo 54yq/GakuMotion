@@ -140,7 +140,9 @@ namespace ExternalStage
         const uint32_t layers = static_cast<uint32_t>(StageLoader::ReadInt(getCameraMask, camera));
         std::array<unsigned, 32> nativeLayers{};
         uint64_t cameraScenes = 0, stageScenes = 0;
-        const bool hasSceneMask = ReadMask(getSceneMask, camera, cameraScenes);
+        // The game renders the native background even when this getter reports zero.
+        // Only a nonzero effective mask can establish a scene-bit exclusion.
+        const bool hasSceneMask = ReadMask(getSceneMask, camera, cameraScenes) && cameraScenes != 0;
         unsigned stageCount = 0, visibleLayers = 0, sceneRejected = 0, frustumHits = 0;
         void* planeArgs[]{camera};
         void* planes = calculatePlanes ? StageLoader::Invoke(calculatePlanes, nullptr, planeArgs) : nullptr;
@@ -208,9 +210,9 @@ namespace ExternalStage
                 sceneMaskReady = ReadMask(getSceneMask, camera, after) && (after & stageScenes) == stageScenes;
             }
         }
-        GakuMotion::host::Info("[GakuMotion][ExternalStage] visibility stage_renderers=%u camera_layers=%08x layers_before=%u relayered=%u native_layer=%d camera_scenes=%llx stage_scenes=%llx scene_rejected=%u scene_mask_ready=%d frustum=%d/%u",
+        GakuMotion::host::Info("[GakuMotion][ExternalStage] visibility stage_renderers=%u camera_layers=%08x layers_before=%u relayered=%u native_layer=%d camera_scenes=%llx stage_scenes=%llx scene_mask_known=%d scene_rejected=%u scene_mask_ready=%d frustum=%d/%u",
             stageCount, layers, visibleLayers, relayered, layer, static_cast<unsigned long long>(cameraScenes),
-            static_cast<unsigned long long>(stageScenes), sceneRejected, sceneMaskReady,
+            static_cast<unsigned long long>(stageScenes), hasSceneMask, sceneRejected, sceneMaskReady,
             planeHandle && testBounds && getBounds ? static_cast<int>(frustumHits) : -1, stageCount);
         return stageCount != 0 && visibleLayers + relayered != 0 && sceneMaskReady;
     }
