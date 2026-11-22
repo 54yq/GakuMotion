@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { StagePropTimeline } from './StagePropTimeline'
 import {
   RiFlaskFill,
   RiLoader4Fill,
@@ -134,8 +135,9 @@ function ActivePage({ fork, command }: { fork: ReturnType<typeof useForkWorkspac
               </button>
               <button className="ml-4" type="button" disabled={fork.externalStageFollow}
                 onClick={() => void command('externalStage.seek', { value: 0 })}>回到开头</button>
+              {fork.externalStageCues && <StagePropTimeline cues={fork.externalStageCues} time={fork.externalStageTime ?? 0} command={command} />}
               <label className="flex items-center gap-2">
-                时间轴手持道具
+                单道具临时预览
                 <select value={fork.externalStageHeldProp ?? 0}
                   onChange={(e) => void command('externalStage.handProp', {
                     prop: Number(e.target.value), left: fork.externalStageLeftHand ?? false,

@@ -18,6 +18,7 @@
 #include "GkLiveObservation.hpp"
 #include "GkCaptureSafety.hpp"
 #include "GkStageLoadSettings.hpp"
+#include "GkStagePropTimeline.hpp"
 #include "GkDataLayout.hpp"
 #include "GkVisualHandoff.hpp"
 #include "GkCameraHandoff.hpp"
@@ -467,6 +468,7 @@ namespace GakuMotion
 		std::string localRoot;
 		std::string motionsRoot;
 		std::string configRoot;
+		std::vector<stage_prop_timeline::Cue> stagePropCues = stage_prop_timeline::meniDefaults;
 		std::string logsRoot, diagnosticsRoot, transactionRoot;
 		DataLayout dataLayout;
 		std::string globalOverridePath;
@@ -1290,6 +1292,7 @@ namespace GakuMotion
 			gui.motionsRoot = motionsRoot;
 
 			// 1. 控制文件：首次运行生成模板，随后立即读取一次
+			stagePropCues = stage_prop_timeline::Load(MotionPathFromUtf8(configRoot + "/meni_stage_props.txt"));
 			config.rootDir = configRoot;
 			config.path = configRoot + "/control.json";
 			const bool createdConfig = config.EnsureFileExists();

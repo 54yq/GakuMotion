@@ -40,7 +40,18 @@
 				for (const auto& value : values) { if (json.size() > 1) json += ","; json += JString(value); }
 				return json + "]";
 			};
+            std::string stageCues = "[";
+            for (const auto& cue : core_.stagePropCues)
+            {
+                if (stageCues.size() > 1) stageCues += ",";
+                stageCues += "{\"prop\":" + JNum(cue.prop) + ",\"place\":" + JNum(cue.place) +
+                    ",\"left\":" + JBool(cue.left) + ",\"first\":" + JNum(cue.first) +
+                    ",\"last\":" + JNum(cue.last) + ",\"position\":" + JVec(cue.position) +
+                    ",\"rotation\":" + JVec(cue.rotation) + "}";
+            }
+            stageCues += "]";
 			return "{\"session\":" + JNum(core_.injectionSession) + ",\"owner\":" + JNum(core_.liveOwnerToken) +
+                ",\"externalStageCues\":" + stageCues +
                 ",\"externalStageEnabled\":" + JBool(externalStageEnabled.load()) +
                 ",\"externalStageStatus\":" + JNum(externalStageStatus.load()) +
                 ",\"externalStageTime\":" + JNum(externalStageTime.load()) +
@@ -151,6 +162,72 @@
                 bool value = false;
                 if (!BoolParam(params, "value", value)) return CmdResult::Err("invalid_params", "缺少调色开关状态");
                 externalStageGrade.store(value);
+                return CmdResult::Ok();
+            }
+            if (action == "externalStage.cueSeek")
+            {
+                int64_t frame{};
+                if (externalStageStatus.load() != 1 || !IntParam(params, "frame", frame) ||
+                    frame < 0 || frame > stage_prop_timeline::lastFrame)
+                    return CmdResult::Err("invalid_params", "预览时间无效");
+                const float time = static_cast<float>(frame) / 30.f;
+                if (externalStageFollow.load())
+                {
+                    core_.QueuePause();
+                    core_.QueueSeek(time);
+                }
+                else
+                {
+                    externalStagePlaying.store(false);
+                    externalStageSeek.store(time);
+                }
+                return CmdResult::Ok();
+            }
+            if (action == "externalStage.cueSave" || action == "externalStage.cueDelete" || action == "externalStage.cueReset")
+            {
+                auto cues = core_.stagePropCues;
+                if (action == "externalStage.cueReset") cues = stage_prop_timeline::meniDefaults;
+                else
+                {
+                    int64_t index{};
+                    if (!IntParam(params, "index", index) || index < 0 || index > static_cast<int64_t>(cues.size()))
+                        return CmdResult::Err("invalid_params", "道具片段已改变");
+                    if (action == "externalStage.cueDelete")
+                    {
+                        if (index == static_cast<int64_t>(cues.size()))
+                            return CmdResult::Err("invalid_params", "道具片段不存在");
+                        cues.erase(cues.begin() + index);
+                    }
+                    else
+                    {
+                        int64_t prop{}, place{}, first{}, last{};
+                        stage_prop_timeline::Cue cue;
+                        if (!IntParam(params, "prop", prop) || prop < 1 || prop > 11 ||
+                            !IntParam(params, "place", place) || place < 1 || place > 10 ||
+                            !IntParam(params, "first", first) || first < 0 ||
+                            !IntParam(params, "last", last) || last > stage_prop_timeline::lastFrame || last <= first ||
+                            !BoolParam(params, "left", cue.left) || !VecParam(params, "position", cue.position) ||
+                            !VecParam(params, "rotation", cue.rotation))
+                            return CmdResult::Err("invalid_params", "检查道具、站位、拿放帧和握持参数");
+                        cue.prop = static_cast<int>(prop);
+                        cue.place = static_cast<int>(place);
+                        cue.first = static_cast<int>(first);
+                        cue.last = static_cast<int>(last);
+                        if (!stage_prop_timeline::Valid(cue))
+                            return CmdResult::Err("invalid_params", "握持位移上限 2 米，旋转上限 360 度");
+                        for (size_t i = 0; i < cues.size(); ++i)
+                            if (i != static_cast<size_t>(index) && stage_prop_timeline::Overlap(cue, cues[i]))
+                                return CmdResult::Err("invalid_params", "同一道具的两个片段不能重叠");
+                        if (index < static_cast<int64_t>(cues.size())) cues[index] = cue;
+                        else if (cues.size() < stage_prop_timeline::maxCues) cues.push_back(cue);
+                        else return CmdResult::Err("invalid_params", "道具片段数量已到上限");
+                    }
+                }
+                if (core_.configRoot.empty() || !stage_prop_timeline::Save(
+                    MotionPathFromUtf8(core_.configRoot + "/meni_stage_props.txt"), cues))
+                    return CmdResult::Err("write_failed", "无法保存道具编排");
+                core_.stagePropCues = std::move(cues);
+                externalStageHeldProp.store(0);
                 return CmdResult::Ok();
             }
             if (action == "externalStage.propRange")

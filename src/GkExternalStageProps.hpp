@@ -90,7 +90,7 @@ namespace ExternalStage
             std::lerp(previous->offset.z, next->offset.z, t)};
     }
 
-    inline void PlaceHeldProp(HeldProp& prop, int selection, GakuMotion::MotionPlayer& player, bool left, float weight, float throwFrame)
+    inline void PlaceHeldProp(HeldProp& prop, int selection, GakuMotion::MotionPlayer& player, bool left, float weight, float throwFrame, const GakuMotion::stage_prop_timeline::Cue* cue)
     {
         auto& controller = player.controller;
         void* actor = controller.targetActor;
@@ -144,6 +144,16 @@ namespace ExternalStage
             grip = {0, std::sin(yaw * .5f), 0, std::cos(yaw * .5f)};
             if (throwFrame < launch) position.y -= selection >= 5 && selection <= 7 ? 0.11f : 0.09f;
         }
+        if (cue)
+        {
+            using GakuMotion::Quaternion;
+            const Quaternion basis{grip.x, grip.y, grip.z, grip.w};
+            const auto offset = basis.Rotate(cue->position);
+            position = {position.x + offset.x, position.y + offset.y, position.z + offset.z};
+            const auto adjusted = (basis * Quaternion::FromEulerDegreesXYZ(
+                cue->rotation.x, cue->rotation.y, cue->rotation.z)).Normalized();
+            grip = {adjusted.x, adjusted.y, adjusted.z, adjusted.w};
+        }
         const auto display = DisplayPosition(prop);
         g_setWorldPosNative(transform, {std::lerp(display.x, position.x, weight),
             std::lerp(display.y, position.y, weight), std::lerp(display.z, position.z, weight)});
@@ -165,7 +175,7 @@ namespace ExternalStage
             if (!onlyActor) ReleaseHeldProp();
             return;
         }
-        struct Grip { MotionPlayer* player{}; bool left{}; float weight{}; };
+        struct Grip { MotionPlayer* player{}; bool left{}; float weight{}; const stage_prop_timeline::Cue* cue{}; };
         std::array<Grip, extraCrepe> grips{};
         const float time = externalStageTime.load();
         const int manual = externalStageHeldProp.load();
@@ -203,18 +213,18 @@ namespace ExternalStage
                     if (int place = MotionPlace(follower.player->currentMotionDir); place && !players[place])
                         players[place] = follower.player.get();
             const float frame = time * 30.0f;
-            for (const auto& cue : ExternalStageProfiles::meniPropCues)
+            for (const auto& cue : core.stagePropCues)
                 if (frame >= cue.first && frame < cue.last && players[cue.place])
                 {
                     const float t = cue.prop == 1 ? std::clamp((frame - cue.first) / 9.0f, 0.0f, 1.0f) : 1.0f;
-                    grips[cue.prop-1] = {players[cue.place], cue.left, t*t*(3-2*t)};
+                    grips[cue.prop-1] = {players[cue.place], cue.left, t*t*(3-2*t), &cue};
                 }
         }
         for (size_t i = 0; i < grips.size(); ++i)
         {
             const auto& grip = grips[i];
             if (grip.player && onlyActor && grip.player->controller.targetActor == onlyActor)
-                PlaceHeldProp(heldProps[i], static_cast<int>(i)+1, *grip.player, grip.left, grip.weight, !manual && i == 0 ? time * 30.0f : -1.0f);
+                PlaceHeldProp(heldProps[i], static_cast<int>(i)+1, *grip.player, grip.left, grip.weight, grip.cue && i == 0 && grip.cue->place == 1 ? time * 30.0f : -1.0f, grip.cue);
             else if (!onlyActor && (!grip.player || !grip.player->controller.targetActor)) ReleaseHeldProp(heldProps[i]);
         }
     }
