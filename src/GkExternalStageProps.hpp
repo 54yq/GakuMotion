@@ -90,18 +90,18 @@ namespace ExternalStage
             std::lerp(previous->offset.z, next->offset.z, t)};
     }
 
-    inline void PlaceHeldProp(HeldProp& prop, int selection, GakuMotion::MotionPlayer& player, bool left, float weight, float throwFrame, const GakuMotion::stage_prop_timeline::Cue* cue)
+    struct GripPose { UnityVector3 position; UnityQuaternion rotation; };
+
+    inline std::optional<GripPose> ReadGripPose(int selection, GakuMotion::MotionPlayer& player, bool left,
+        float throwFrame, const GakuMotion::stage_prop_timeline::Cue* cue)
     {
         auto& controller = player.controller;
         void* actor = controller.targetActor;
-        if (!actor || !controller.fnGetBoneTransform) { ReleaseHeldProp(prop); return; }
+        if (!actor || !controller.fnGetBoneTransform) return std::nullopt;
         void* object = StageLoader::Invoke(StageLoader::componentGo, actor);
-        if (!object || StageLoader::SceneOfFreshGo(object) != owner.sceneHandle) { ReleaseHeldProp(prop); return; }
+        if (!object || StageLoader::SceneOfFreshGo(object) != owner.sceneHandle) return std::nullopt;
         void* hand = controller.fnGetBoneTransform(actor, left ? 17 : 18);
-        if (!hand) { ReleaseHeldProp(prop); return; }
-        if (!prop.transform && !BindHeldProp(prop, selection)) return;
-        void* transform = SceneOwnerRuntime::handleTarget(prop.transform);
-        if (!transform) return;
+        if (!hand) return std::nullopt;
         auto position = g_getWorldPosNative(hand);
         UnityVector3 gripDirection{};
         if (void* finger = controller.fnGetBoneTransform(actor, left ? 27 : 42))
@@ -154,10 +154,36 @@ namespace ExternalStage
                 cue->rotation.x, cue->rotation.y, cue->rotation.z)).Normalized();
             grip = {adjusted.x, adjusted.y, adjusted.z, adjusted.w};
         }
-        const auto display = DisplayPosition(prop);
+        return GripPose{position, grip};
+    }
+
+    inline void PlaceHeldProp(HeldProp& prop, int selection, GakuMotion::MotionPlayer& player,
+        bool left, float weight, float throwFrame, const GakuMotion::stage_prop_timeline::Cue* cue,
+        GakuMotion::MotionPlayer* outgoing, const GakuMotion::stage_prop_timeline::Cue* outgoingCue)
+    {
+        const auto target = ReadGripPose(selection, player, left, throwFrame, cue);
+        if (!target) { ReleaseHeldProp(prop); return; }
+        if (!prop.transform && !BindHeldProp(prop, selection)) return;
+        void* transform = SceneOwnerRuntime::handleTarget(prop.transform);
+        if (!transform) return;
+
+        auto display = DisplayPosition(prop);
+        auto r = prop.rotation;
+        if (outgoingCue)
+        {
+            const auto source = outgoing ? ReadGripPose(selection, *outgoing, outgoingCue->left, -1.f, outgoingCue)
+                : std::nullopt;
+            if (source)
+            {
+                display = source->position;
+                r = source->rotation;
+            }
+            else weight = 1.f;
+        }
+        const auto& position = target->position;
+        auto grip = target->rotation;
         g_setWorldPosNative(transform, {std::lerp(display.x, position.x, weight),
             std::lerp(display.y, position.y, weight), std::lerp(display.z, position.z, weight)});
-        const auto& r = prop.rotation;
         if (r.x * grip.x + r.y * grip.y + r.z * grip.z + r.w * grip.w < 0)
             grip = {-grip.x, -grip.y, -grip.z, -grip.w};
         UnityQuaternion q{std::lerp(r.x, grip.x, weight), std::lerp(r.y, grip.y, weight),
@@ -179,7 +205,7 @@ namespace ExternalStage
             }
             return;
         }
-        struct Grip { MotionPlayer* player{}; bool left{}; float weight{}; const stage_prop_timeline::Cue* cue{}; };
+        struct Grip { MotionPlayer* player{}; bool left{}; float weight{}; const stage_prop_timeline::Cue* cue{}; MotionPlayer* outgoing{}; const stage_prop_timeline::Cue* outgoingCue{}; };
         std::array<Grip, extraCrepe> grips{};
         const float time = externalStageTime.load();
         const int manual = core.stagePropPreview ? 0 : externalStageHeldProp.load();
@@ -218,18 +244,46 @@ namespace ExternalStage
                         players[place] = follower.player.get();
             const float frame = time * 30.0f;
             const auto& cues = core.stagePropPreview ? *core.stagePropPreview : core.stagePropCues;
+            constexpr int handoffGap = 2;
+            constexpr float handoffBlend = 6.f;
             for (const auto& cue : cues)
-                if (frame >= cue.first && frame < cue.last && players[cue.place])
+            {
+                if (!players[cue.place] || frame < cue.first || frame >= cue.last) continue;
+                auto& grip = grips[cue.prop-1];
+                grip = {players[cue.place], cue.left, 1.f, &cue};
+                const auto prior = std::find_if(cues.begin(), cues.end(), [&](const auto& other) {
+                    return other.prop == cue.prop && other.last <= cue.first && cue.first - other.last <= handoffGap;
+                });
+                const float elapsed = frame - cue.first;
+                if (prior != cues.end() && elapsed < handoffBlend)
                 {
-                    const float t = cue.prop == 1 ? std::clamp((frame - cue.first) / 9.0f, 0.0f, 1.0f) : 1.0f;
-                    grips[cue.prop-1] = {players[cue.place], cue.left, t*t*(3-2*t), &cue};
+                    const float t = elapsed / handoffBlend;
+                    grip.weight = t*t*(3-2*t);
+                    grip.outgoing = players[prior->place];
+                    grip.outgoingCue = &*prior;
                 }
+                else if (prior == cues.end() && cue.prop == 1)
+                {
+                    const float t = std::clamp(elapsed / 9.f, 0.f, 1.f);
+                    grip.weight = t*t*(3-2*t);
+                }
+            }
+            for (const auto& cue : cues)
+            {
+                auto& grip = grips[cue.prop-1];
+                if (grip.player || !players[cue.place] || frame < cue.last || frame >= cue.last + handoffGap) continue;
+                const auto next = std::find_if(cues.begin(), cues.end(), [&](const auto& other) {
+                    return other.prop == cue.prop && other.first >= cue.last && other.first - cue.last <= handoffGap &&
+                        frame < other.first && players[other.place];
+                });
+                if (next != cues.end()) grip = {players[cue.place], cue.left, 1.f, &cue};
+            }
         }
         for (size_t i = 0; i < grips.size(); ++i)
         {
             const auto& grip = grips[i];
             if (grip.player && onlyActor && grip.player->controller.targetActor == onlyActor)
-                PlaceHeldProp(heldProps[i], static_cast<int>(i)+1, *grip.player, grip.left, grip.weight, grip.cue && i == 0 && grip.cue->place == 1 ? time * 30.0f : -1.0f, grip.cue);
+                PlaceHeldProp(heldProps[i], static_cast<int>(i)+1, *grip.player, grip.left, grip.weight, grip.cue && i == 0 && grip.cue->place == 1 ? time * 30.0f : -1.0f, grip.cue, grip.outgoing, grip.outgoingCue);
             else if (!onlyActor && (!grip.player || !grip.player->controller.targetActor)) ReleaseHeldProp(heldProps[i]);
         }
     }

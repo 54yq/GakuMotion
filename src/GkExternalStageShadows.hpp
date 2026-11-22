@@ -93,7 +93,7 @@ namespace ExternalStage
                     const auto p = g_getWorldPosNative(foot);
                     if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) continue;
                     const float strength = std::clamp(1.f - (p.y - alignedFloor) / 0.55f, 0.f, 1.f);
-                    measurements[count++] = {p.x, alignedFloor, p.z, strength * 0.18f};
+                    measurements[count++] = {p.x, alignedFloor, p.z, strength * strength * 0.10f};
                 }
         };
         add(controller.targetActor);
