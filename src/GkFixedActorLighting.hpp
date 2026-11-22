@@ -273,7 +273,7 @@ namespace FixedActorLighting
 		appliedSampled = sampled;
 		return true;
 	}
-	inline bool Create(int targetLayer, const GakuMotion::Core& core)
+	inline bool Create(int targetLayer, const GakuMotion::Core& core, bool ambientOnly = false)
 	{
 		Root name, profileType, parameterType, volumeType;
 		if (!name.Keep(StageLoader::stringNew("GakuMotion Fixed Actor Lighting")) ||
@@ -293,12 +293,12 @@ namespace FixedActorLighting
 		void* parameter = nullptr;
 		if (!Call(addParameter, profileObject.Get(), addArgs, &parameter) || !parameterObject.Keep(parameter)) return false;
 		const float noStageAdditive = 0.f;
-		if (!ApplyStrengths(core) ||
-			!Parameter("additiveLightScale", {0x0c}, &noStageAdditive)) return false;
+		if (!ambientOnly && (!ApplyStrengths(core) ||
+			!Parameter("additiveLightScale", {0x0c}, &noStageAdditive))) return false;
 		void* volumeArgs[]{volumeType.Get()};
 		if (!volumeComponent.Keep(StageLoader::Invoke(addComponent, volumeObject.Get(), volumeArgs))) return false;
 		bool global = true;
-		float weight = core.actorLightingStyle.weight, priority = 10000.f;
+		float weight = ambientOnly ? 1.f : core.actorLightingStyle.weight, priority = 10000.f;
 		void* globalArgs[]{&global};
 		void* sharedArgs[]{profileObject.Get()};
 		if (!Call(setGlobal, volumeComponent.Get(), globalArgs) || !Call(setProfile, volumeComponent.Get(), sharedArgs) ||

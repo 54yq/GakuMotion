@@ -92,6 +92,11 @@ function ActivePage({ fork, command }: { fork: ReturnType<typeof useForkWorkspac
               onChange={(e) => void command('externalStage.grade', { value: e.target.checked })} />
             粉色调色
           </label>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={fork?.externalStageActorAmbient ?? true}
+              onChange={(e) => void command('externalStage.actorAmbient', { value: e.target.checked })} />
+            角色跟随舞台调光
+          </label>
           {fork?.externalStageStatus === 1 && (
             <div className="space-y-2">
               <p role="status">独立舞台已载入</p>
@@ -142,6 +147,14 @@ function ActivePage({ fork, command }: { fork: ReturnType<typeof useForkWorkspac
                   <option value="left">左手</option>
                 </select>
               </label>
+              <div className="flex gap-4">
+                <button type="button" onClick={() => void command('externalStage.propRange', {
+                  start: fork.externalStageTime ?? 0, end: fork.externalStagePropEnd ?? 0,
+                })} disabled={(fork.externalStageTime ?? 0) >= (fork.externalStagePropEnd ?? 0)}>在当前进度拿起</button>
+                <button type="button" onClick={() => void command('externalStage.propRange', {
+                  start: fork.externalStagePropStart ?? 0, end: fork.externalStageTime ?? 0,
+                })} disabled={(fork.externalStageTime ?? 0) <= (fork.externalStagePropStart ?? 0)}>在当前进度放下</button>
+              </div>
               <div className="flex gap-4">
                 <label>拿起时间
                   <input aria-label="拿起时间" type="range" min={0} max={fork.externalStageDuration}

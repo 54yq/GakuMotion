@@ -49,6 +49,7 @@
                 ",\"externalStageFollow\":" + JBool(externalStageFollow.load()) +
                 ",\"externalStageActorHeight\":" + JNum(externalStageActorHeight.load()) +
                 ",\"externalStageLocateResult\":" + JNum(externalStageLocateResult.load()) +
+                ",\"externalStageActorAmbient\":" + JBool(externalStageActorAmbient.load()) +
                 ",\"externalStageGrade\":" + JBool(externalStageGrade.load()) +
                 ",\"externalStagePropStart\":" + JNum(externalStagePropStart.load()) +
                 ",\"externalStagePropEnd\":" + JNum(externalStagePropEnd.load()) +
@@ -127,6 +128,13 @@
                     return CmdResult::Err("stage_unavailable", "独立舞台尚未就绪");
                 if (action == "externalStage.locate") externalStageLocate.store(true);
                 else externalStageMeasure.store(true);
+                return CmdResult::Ok();
+            }
+            if (action == "externalStage.actorAmbient")
+            {
+                bool value = false;
+                if (!BoolParam(params, "value", value)) return CmdResult::Err("invalid_params", "缺少角色调光状态");
+                externalStageActorAmbient.store(value);
                 return CmdResult::Ok();
             }
             if (action == "externalStage.grade")

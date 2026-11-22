@@ -302,6 +302,7 @@ namespace GakuMotion
     inline std::atomic<bool> externalStagePlaying{false}, externalStageFollow{false};
     inline std::atomic<int> externalStageHeldProp{0};
     inline std::atomic<bool> externalStageGrade{true};
+    inline std::atomic<bool> externalStageActorAmbient{true};
     inline std::atomic<bool> externalStageLocate{}, externalStageMeasure{};
     inline std::atomic<float> externalStageActorHeight{0};
     inline std::atomic<int> externalStageLocateResult{0};
@@ -315,6 +316,8 @@ namespace GakuMotion
         ImGui::TextWrapped("Meni Shuki Rush｜摄影独立场景。关闭开关可恢复原背景。");
         bool grade = externalStageGrade.load();
         if (ImGui::Checkbox("粉色调色", &grade)) externalStageGrade.store(grade);
+        bool ambient = externalStageActorAmbient.load();
+        if (ImGui::Checkbox("角色跟随舞台调光", &ambient)) externalStageActorAmbient.store(ambient);
         const int status = externalStageStatus.load();
         if (status == 1)
         {

@@ -1086,7 +1086,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.64-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.65-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -1649,6 +1649,7 @@ static void ResetPlacementDynamicBone(void* actor)
 #include "GkFixedActorLighting.hpp"
 #include "GkExternalStageProfile.hpp"
 #include "GkExternalStage.hpp"
+#include "GkExternalStageLighting.hpp"
 #include "GkExternalStageProps.hpp"
 #include "GkExternalStageShadows.hpp"
 #include "GkPhotographyBgm.hpp"
@@ -4694,7 +4695,7 @@ void MotionTick(void*, float)
                 GakuMotion::stage_load::receipt.Context(SceneOwnerRuntime::cachedActiveScene,
                     g_verifiedOwnerSceneName, g_sceneOwner) == GakuMotion::injection::Context::Photography);
         }
-		FixedActorLighting::Tick(core);
+		ExternalStage::TickActorAmbient(core);
 		PollCostumeCapture(core);
         const bool frameLog = core.liveFrameMonitor.Update(tickStarted,
             core.liveViewingConfirmed && core.liveObservation.confirmed, core.liveOwnerToken, core.liveOwnerScene);

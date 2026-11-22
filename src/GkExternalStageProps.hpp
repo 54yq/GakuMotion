@@ -63,8 +63,11 @@ namespace ExternalStage
     {
         const int selection = GakuMotion::externalStageHeldProp.load();
         const float time = GakuMotion::externalStageTime.load();
+        const float start = GakuMotion::externalStagePropStart.load();
+        const float end = GakuMotion::externalStagePropEnd.load();
+        const float transition = std::min(0.20f, (end - start) * 0.5f);
         if (status.load() != 1 || !mountedScene || selection <= 0 ||
-            time < GakuMotion::externalStagePropStart.load() || time >= GakuMotion::externalStagePropEnd.load() ||
+            transition <= 0 || time < start || time >= end ||
             selection > static_cast<int>(profile.propNames.size()))
         {
             if (heldTransform || attemptedProp) ReleaseHeldProp();
@@ -94,7 +97,22 @@ namespace ExternalStage
             position.y = (position.y + grip.y) * 0.5f;
             position.z = (position.z + grip.z) * 0.5f;
         }
-        g_setWorldPosNative(transform, position);
-        g_setWorldRotNative(transform, g_getWorldRotNative(hand));
+        // Evaluate from the playhead so scrubbing reconstructs exactly the same handoff.
+        const float ramp = std::min({1.0f, (time - start) / transition, (end - time) / transition});
+        const float weight = ramp * ramp * (3 - 2 * ramp);
+        const UnityVector3 display{propPosition.x + stageTravel.x - propTravel.x, propPosition.y,
+            propPosition.z + stageTravel.z - propTravel.z};
+        g_setWorldPosNative(transform, {std::lerp(display.x, position.x, weight),
+            std::lerp(display.y, position.y, weight), std::lerp(display.z, position.z, weight)});
+        auto gripRotation = g_getWorldRotNative(hand);
+        const float dot = propRotation.x * gripRotation.x + propRotation.y * gripRotation.y +
+            propRotation.z * gripRotation.z + propRotation.w * gripRotation.w;
+        if (dot < 0) gripRotation = {-gripRotation.x, -gripRotation.y, -gripRotation.z, -gripRotation.w};
+        UnityQuaternion rotation{std::lerp(propRotation.x, gripRotation.x, weight),
+            std::lerp(propRotation.y, gripRotation.y, weight), std::lerp(propRotation.z, gripRotation.z, weight),
+            std::lerp(propRotation.w, gripRotation.w, weight)};
+        const float norm = std::sqrt(rotation.x * rotation.x + rotation.y * rotation.y +
+            rotation.z * rotation.z + rotation.w * rotation.w);
+        if (norm > 0) g_setWorldRotNative(transform, {rotation.x / norm, rotation.y / norm, rotation.z / norm, rotation.w / norm});
     }
 }

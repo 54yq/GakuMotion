@@ -545,6 +545,7 @@ export interface ForkState {
   externalStageFollow?: boolean
   externalStageActorHeight?: number
   externalStageLocateResult?: number
+  externalStageActorAmbient?: boolean
   externalStageGrade?: boolean
   externalStagePropStart?: number
   externalStagePropEnd?: number
