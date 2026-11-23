@@ -1090,7 +1090,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.2+fork.4.3.92-web";
+	constexpr char kPluginVersion[] = "0.2.2+fork.4.3.93-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -4697,6 +4697,7 @@ void MotionTick(void*, float)
             ExternalStage::TickTimeline(core.player.currentTime, core.player.clip.total_frames != 0);
             ExternalStage::UpdateHeldProps(core);
             ExternalStage::UpdateContactShadows(core);
+            ExternalStage::UpdateForegroundMask(core.camera);
             GakuMotion::externalStageStatus.store(ExternalStage::status.load());
             NativeAudio::Sync();
             bool mutePhotographyBgm = false;

@@ -64,7 +64,8 @@ namespace ExternalStage
         }
     }
 
-    inline int lightFrameId{}, gradeId{};
+    inline int lightFrameId{}, gradeId{}, foregroundMaskId{};
+    inline bool foregroundMaskActive{};
     inline Handle stageRoot{};
     inline UnityVector3 stageOrigin{};
     inline UnityVector3 stageAnchor{}, stageTravel{};
@@ -100,8 +101,25 @@ namespace ExternalStage
     }
     inline void SetStageLightFrame(float frame) { SetStageShaderFloat(profile.lightFrameProperty, frame, lightFrameId); }
 
+    inline void UpdateForegroundMask(const GakuMotion::CameraController& camera)
+    {
+        const float f = GakuMotion::externalStageTime.load() * 30.f;
+        const bool crossing = (f >= 1775.f && f < 1830.f) || (f >= 1960.f && f < 2055.f) ||
+            (f >= 2330.f && f < 2445.f);
+        const bool active = status.load() == 1 && mountedScene && GakuMotion::externalStageFollow.load() &&
+            camera.owned && camera.settings.mode == GakuMotion::CameraMode::Track && crossing;
+        if (active == foregroundMaskActive) return;
+        foregroundMaskActive = active;
+        SetStageShaderFloat("_GakuExternalStageForegroundMask", active ? 1.f : 0.f, foregroundMaskId);
+    }
+
     inline void ResetTimeline()
     {
+        if (foregroundMaskActive)
+        {
+            SetStageShaderFloat("_GakuExternalStageForegroundMask", 0.f, foregroundMaskId);
+            foregroundMaskActive = false;
+        }
         if (!doorScene) return;
         for (auto& handle : doorTransforms)
         {

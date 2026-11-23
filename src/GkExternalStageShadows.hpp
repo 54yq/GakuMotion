@@ -84,7 +84,7 @@ namespace ExternalStage
                             center = {std::lerp(prior.x, p.x, blend), std::lerp(prior.z, p.z, blend)};
                     }
                     centers.emplace(actor, center);
-                    measurements[count++] = {center.x, alignedFloor, center.z, -0.58f};
+                    measurements[count++] = {center.x, alignedFloor, center.z, -0.72f};
                 }
             }
             for (const int bone : {5, 6})
@@ -93,12 +93,12 @@ namespace ExternalStage
                     const auto p = g_getWorldPosNative(foot);
                     if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) continue;
                     const float strength = std::clamp(1.f - (p.y - alignedFloor) / 0.55f, 0.f, 1.f);
-                    measurements[count++] = {p.x, alignedFloor, p.z, strength * strength * 0.10f};
+                    measurements[count++] = {p.x, alignedFloor, p.z, strength * strength * 0.30f};
                 }
         };
         add(controller.targetActor);
         for (const auto& entry : core.sceneActorRegistry.Entries())
-            if (entry.actor != controller.targetActor) add(entry.actor);
+            if (entry.actor != controller.targetActor && !core.actorModelHidden.contains(entry.token)) add(entry.actor);
         void* array = SceneOwnerRuntime::handleTarget(contacts);
         if (!array) return;
         std::memcpy(static_cast<char*>(array) + 32, measurements.data(), sizeof(measurements));
