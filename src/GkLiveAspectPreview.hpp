@@ -19,6 +19,9 @@ namespace LiveAspectPreview
         const void* getRatio{};
         float originalRatio{}, originalCameraAspect{};
         bool restoring{};
+        float nativeHorizontalScale{};
+        float originalLiveTime{};
+        GakuMotion::live_aspect::Projection originalProjection{};
     };
 
     inline Lease lease;
@@ -26,7 +29,8 @@ namespace LiveAspectPreview
     inline const void *getProjection{}, *setProjection{}, *resetProjection{}, *getAspect{}, *getStereo{};
     inline CameraBridge::Render managerEnd{};
     inline StageLoader::Handle projectedCamera{};
-    inline Projection writtenProjection{};
+    inline Projection writtenProjection{}, displacedProjection{};
+    inline bool displacedWideProjection{}, projectionWritten{};
     inline bool projectionObserved{};
     using SetupParaffin = void (*)(void*, void*, float, void*, const void*);
     using ValidParaffinAspect = bool (*)(void*, float, const void*);
@@ -98,18 +102,21 @@ namespace LiveAspectPreview
         if (!target || !CameraBridge::OnUnityThread()) return false;
         void* camera = target(projectedCamera);
         if (renderedCamera && renderedCamera != camera) return true;
-        if (CameraBridge::IsAlive(camera)) {
+        if (projectionWritten && CameraBridge::IsAlive(camera)) {
             Projection actual{};
             if (!LiveLetterboxProbe::Read(getProjection, camera, actual)) return false;
             // Another writer owns a different matrix. Leave its write intact.
             if (actual == writtenProjection) {
-                // Restore Unity's automatic projection. Reassigning the previous
-                // matrix here freezes subsequent native lens updates.
-                if (!Invoke(resetProjection, camera, nullptr)) return false;
+                // A wide matrix on a 16:9 camera is an explicit native projection.
+                // Automatic 16:9 inputs must go back to Unity's automatic lens.
+                if (displacedWideProjection) {
+                    if (!Invoke(setProjection, camera, displacedProjection.data())) return false;
+                } else if (!Invoke(resetProjection, camera, nullptr)) return false;
             }
         }
         StageLoader::freeHandle(projectedCamera);
         projectedCamera = {};
+        projectionWritten = false;
         return true;
     }
 
@@ -133,12 +140,26 @@ namespace LiveAspectPreview
             !LiveLetterboxProbe::Read(getAspect, camera, aspect) || !Matches(aspect, previewRatio) ||
             !LiveLetterboxProbe::Read(getProjection, camera, native)) return;
 
+        using namespace GakuMotion::live_aspect;
+        const auto leaseCamera = LiveActorProps::Target();
+        const bool initialCamera = leaseCamera && camera == leaseCamera(lease.camera);
+        const bool motionLens = CameraBridge::Controller().BlocksCamera(camera);
+        if (initialCamera && !motionLens && lease.nativeHorizontalScale == 0.f &&
+            !projectionObserved && ProjectionMatchesAspect(native, aspect) &&
+            std::abs(GakuMotion::Core::Instance().liveObservation.time - lease.originalLiveTime) < 0.02f)
+            lease.nativeHorizontalScale = HorizontalScaleAfterSwitch(
+                lease.originalProjection, native, lease.originalCameraAspect, aspect);
+        const float lensScale = initialCamera && !motionLens ? lease.nativeHorizontalScale : 0.f;
         auto widened = native;
-        if (!GakuMotion::live_aspect::PreserveHorizontalFraming(widened, lease.originalCameraAspect, aspect)) return;
+        if (!PreserveHorizontalFraming(widened, lease.originalCameraAspect, aspect, lensScale)) return;
+        const bool wideProjection = ProjectionMatchesAspect(native, lease.originalCameraAspect);
         projectedCamera = StageLoader::newHandle(camera, false);
         if (!projectedCamera) return;
         writtenProjection = widened;
-        if (!Invoke(setProjection, camera, widened.data())) {
+        displacedProjection = native;
+        displacedWideProjection = wideProjection;
+        projectionWritten = widened != native;
+        if (projectionWritten && !Invoke(setProjection, camera, widened.data())) {
             ReleaseProjection(camera);
             return;
         }
@@ -146,8 +167,9 @@ namespace LiveAspectPreview
             Projection actual{};
             projectionObserved = LiveLetterboxProbe::Read(getProjection, camera, actual) && actual == widened;
             if (projectionObserved && g_hostContext.logInfo)
-                g_hostContext.logInfo("[GakuMotion][LiveAspectPreview] horizontal framing scale_x=%.5f scale_y=%.5f",
-                    actual[0], actual[5]);
+                g_hostContext.logInfo("[GakuMotion][LiveAspectPreview] horizontal framing original_x=%.5f input_x=%.5f input_y=%.5f output_x=%.5f output_y=%.5f lens_scale=%.5f wide_input=%d motion_lens=%d",
+                    lease.originalProjection[0], native[0], native[5], actual[0], actual[5],
+                    lensScale, int(wideProjection), int(motionLens));
         }
     }
 
@@ -225,10 +247,12 @@ namespace LiveAspectPreview
         if (!PrepareProjection(md)) return false;
         PrepareParaffin(md);
         float originalCameraAspect{};
+        Projection originalProjection{};
         void* camera = CameraBridge::getMain ? CameraBridge::getMain(nullptr) : nullptr;
         if (!CameraBridge::IsAlive(camera) ||
             !LiveLetterboxProbe::Read(getAspect, camera, originalCameraAspect) ||
             !Matches(originalCameraAspect, normalRatio)) return false;
+        LiveLetterboxProbe::Read(getProjection, camera, originalProjection);
         void* helperClass = FindClass("Assembly-CSharp.dll", "Campus.Live", "LiveSceneCameraHelper");
         void* presenterClass = FindClass("Assembly-CSharp.dll", "Campus.Live", "LiveScenePresenter");
         void* presenter = reinterpret_cast<void*>(owner);
@@ -258,6 +282,15 @@ namespace LiveAspectPreview
             Restore(true);
             return false;
         }
+        lease.originalProjection = originalProjection;
+        lease.originalLiveTime = GakuMotion::Core::Instance().liveObservation.time;
+        float switchedAspect{};
+        Projection switchedProjection{};
+        if (camera == CameraBridge::getMain(nullptr) &&
+            LiveLetterboxProbe::Read(getAspect, camera, switchedAspect) && Matches(switchedAspect, previewRatio) &&
+            LiveLetterboxProbe::Read(getProjection, camera, switchedProjection))
+            lease.nativeHorizontalScale = GakuMotion::live_aspect::HorizontalScaleAfterSwitch(
+                originalProjection, switchedProjection, originalCameraAspect, switchedAspect);
         projectionObserved = false;
         flareAspectObserved = false;
         CameraBridge::projectionBegin = BeforeCamera;
