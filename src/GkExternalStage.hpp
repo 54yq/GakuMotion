@@ -707,10 +707,12 @@ namespace ExternalStage
         return aligned;
     }
 
+    inline std::vector<Handle> nativeGroundMaterials;
+    inline const void* destroyGroundMaterial = nullptr;
+
     inline void BindNativeShadowReceiver(int background, void** renderers, uintptr_t count)
     {
-        constexpr std::string_view receiverName = "MeniNativeShadowReceiver";
-        void* receiver = nullptr;
+        std::vector<void*> receivers;
         void* road = nullptr;
         for (uintptr_t i = 0; i < count; ++i)
         {
@@ -720,51 +722,90 @@ namespace ExternalStage
             const int scene = StageLoader::SceneOfFreshGo(object);
             if (scene != mountedScene && scene != background) continue;
             const auto name = Il2CppStringToUtf8(StageLoader::Invoke(StageLoader::objectName, object));
-            if (scene == mountedScene && name == receiverName) receiver = renderer;
-            if (scene == background && !road && (name == "Geo_road0" || name == "Geo_road1")) road = renderer;
-            if (receiver && road) break;
+            if (scene == mountedScene && name.starts_with("MeniNativeGround_"))
+                receivers.push_back(renderer);
+            if (scene == mountedScene && name == "MeniNativeShadowReceiver")
+                ModelRendererMask::WriteBool(setEnabled, getEnabled, renderer, false);
+            if (scene == background && (name == "Geo_road0" || name == "Geo_road1"))
+                road = road ? road : renderer;
         }
-        if (!receiver) return;
+        if (receivers.empty() || !nativeGroundMaterials.empty()) return;
+
         const auto unityClass = [](const char* name) { return FindClass("UnityEngine.CoreModule.dll", "UnityEngine", name); };
         auto& api = StageLoader::metadata;
         void* materialClass = unityClass("Material");
         void* shaderClass = unityClass("Shader");
+        void* textureClass = unityClass("Texture");
+        void* vectorClass = unityClass("Vector2");
+        void* objectClass = unityClass("Object");
         const void* getMaterial = api.Find(rendererClass, "get_sharedMaterial", false, {0x12, materialClass}, {});
         const void* setMaterial = api.Find(rendererClass, "set_sharedMaterial", false, {0x01}, {{0x12, materialClass}});
         const void* getShader = api.Find(materialClass, "get_shader", false, {0x12, shaderClass}, {});
-        const void* setReceiveShadows = api.Find(rendererClass, "set_receiveShadows", false, {0x01}, {{0x02}});
-        void* material = road && getMaterial ? StageLoader::Invoke(getMaterial, road) : nullptr;
+        const void* getTexture = api.Find(materialClass, "get_mainTexture", false, {0x12, textureClass}, {});
+        const void* setTexture = api.Find(materialClass, "set_mainTexture", false, {0x01}, {{0x12, textureClass}});
+        const void* getScale = api.Find(materialClass, "get_mainTextureScale", false, {0x11, vectorClass}, {});
+        const void* setScale = api.Find(materialClass, "set_mainTextureScale", false, {0x01}, {{0x11, vectorClass}});
+        const void* getOffset = api.Find(materialClass, "get_mainTextureOffset", false, {0x11, vectorClass}, {});
+        const void* setOffset = api.Find(materialClass, "set_mainTextureOffset", false, {0x01}, {{0x11, vectorClass}});
+        const void* cloneMaterial = api.Find(objectClass, "Instantiate", true, {0x12, objectClass}, {{0x12, objectClass}});
+        destroyGroundMaterial = api.Find(objectClass, "Destroy", true, {0x01}, {{0x12, objectClass}});
+        const void* receiveShadows = api.Find(rendererClass, "set_receiveShadows", false, {0x01}, {{0x02}});
+        const void* getMask = api.Find(rendererClass, "get_renderingLayerMask", false, {0x09}, {});
+        const void* setMask = api.Find(rendererClass, "set_renderingLayerMask", false, {0x01}, {{0x09}});
+        void* material = road ? StageLoader::Invoke(getMaterial, road) : nullptr;
         const auto materialName = material ? Il2CppStringToUtf8(StageLoader::Invoke(StageLoader::objectName, material)) : "";
-        void* shader = material && getShader ? StageLoader::Invoke(getShader, material) : nullptr;
+        void* shader = material ? StageLoader::Invoke(getShader, material) : nullptr;
         const auto shaderName = shader ? Il2CppStringToUtf8(StageLoader::Invoke(StageLoader::objectName, shader)) : "";
-        bool enabled = false;
-        int renderingMask = -1;
-        if (setMaterial && setReceiveShadows && g_faceRuntime.invoke &&
-            materialName == "m_shared_ground_00_std11" && shaderName == "Environment/Default")
+        const int mask = road ? StageLoader::ReadInt(getMask, road, -1) : -1;
+        const auto write = [](const void* method, void* target, void* value)
         {
-            // Borrow the material without editing it or touching the official road renderer.
-            void* args[]{material};
-            StageLoader::Invoke(setMaterial, receiver, args);
-            const void* getMask = api.Find(rendererClass, "get_renderingLayerMask", false, {0x09}, {});
-            const void* setMask = api.Find(rendererClass, "set_renderingLayerMask", false, {0x01}, {{0x09}});
-            if (getMask && setMask)
+            if (!method || !g_faceRuntime.invoke) return false;
+            void* args[]{value};
+            void* exception = nullptr;
+            g_faceRuntime.invoke(method, target, args, &exception);
+            return !exception;
+        };
+        const auto readUv = [](const void* method, void* target, std::array<float, 2>& value)
+        {
+            void* boxed = StageLoader::Invoke(method, target);
+            const void* data = boxed && g_safeBones.unbox ? g_safeBones.unbox(boxed) : nullptr;
+            if (!data) return false;
+            std::memcpy(value.data(), data, sizeof(float) * value.size());
+            return true;
+        };
+        if (materialName == "m_shared_ground_00_std11" && shaderName == "Environment/Default" &&
+            mask > 0 && destroyGroundMaterial && StageLoader::Invoke(getTexture, material))
+        {
+            for (void* receiver : receivers)
             {
-                uint32_t mask = static_cast<uint32_t>(StageLoader::ReadInt(getMask, road, 1));
-                void* maskArgs[]{&mask};
-                StageLoader::Invoke(setMask, receiver, maskArgs);
-                renderingMask = StageLoader::ReadInt(getMask, receiver, -1);
+                void* original = StageLoader::Invoke(getMaterial, receiver);
+                void* texture = original ? StageLoader::Invoke(getTexture, original) : nullptr;
+                std::array<float, 2> scale{}, offset{};
+                if (!texture || !readUv(getScale, original, scale) || !readUv(getOffset, original, offset))
+                    continue;
+                void* args[]{material};
+                void* copy = StageLoader::Invoke(cloneMaterial, nullptr, args);
+                if (!copy) continue;
+                Handle pin = StageLoader::newHandle(copy, false);
+                bool enabled = true;
+                uint32_t renderingMask = static_cast<uint32_t>(mask);
+                if (pin && write(setTexture, copy, texture) &&
+                    StageLoader::Invoke(getTexture, copy) == texture &&
+                    write(setScale, copy, scale.data()) && write(setOffset, copy, offset.data()) &&
+                    write(setMask, receiver, &renderingMask) && write(receiveShadows, receiver, &enabled) &&
+                    write(setMaterial, receiver, copy))
+                {
+                    nativeGroundMaterials.push_back(pin);
+                }
+                else
+                {
+                    write(destroyGroundMaterial, nullptr, copy);
+                    if (pin) StageLoader::freeHandle(pin);
+                }
             }
-            // This game ships the setter but strips the receiveShadows getter.
-            bool acceptsShadows = true;
-            void* shadowArgs[]{&acceptsShadows};
-            void* shadowException = nullptr;
-            g_faceRuntime.invoke(setReceiveShadows, receiver, shadowArgs, &shadowException);
-            enabled = !shadowException && StageLoader::Invoke(getMaterial, receiver) == material &&
-                ModelRendererMask::WriteBool(setEnabled, getEnabled, receiver, true);
         }
-        if (!enabled) ModelRendererMask::WriteBool(setEnabled, getEnabled, receiver, false);
-        GakuMotion::host::Info("[GakuMotion][NativeShadowReceiver] enabled=%d road=%d material=%s shader=%s rendering_mask=%d",
-            enabled, !!road, materialName.c_str(), shaderName.c_str(), renderingMask);
+        GakuMotion::host::Info("[GakuMotion][NativeStageGround] bound=%zu/%zu material=%s shader=%s rendering_mask=%d",
+            nativeGroundMaterials.size(), receivers.size(), materialName.c_str(), shaderName.c_str(), mask);
     }
 
     inline bool HideBackground(int background)
@@ -837,6 +878,16 @@ namespace ExternalStage
 
     inline void ReleaseBundle()
     {
+        for (Handle pin : nativeGroundMaterials)
+        {
+            if (void* material = SceneOwnerRuntime::handleTarget(pin))
+            {
+                void* args[]{material};
+                StageLoader::Invoke(destroyGroundMaterial, nullptr, args);
+            }
+            StageLoader::freeHandle(pin);
+        }
+        nativeGroundMaterials.clear();
         if (!bundle) return;
         if (void* object = SceneOwnerRuntime::handleTarget(bundle))
         {
