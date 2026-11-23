@@ -707,6 +707,66 @@ namespace ExternalStage
         return aligned;
     }
 
+    inline void BindNativeShadowReceiver(int background, void** renderers, uintptr_t count)
+    {
+        constexpr std::string_view receiverName = "MeniNativeShadowReceiver";
+        void* receiver = nullptr;
+        void* road = nullptr;
+        for (uintptr_t i = 0; i < count; ++i)
+        {
+            void* renderer = renderers[i];
+            void* object = renderer ? StageLoader::Invoke(StageLoader::componentGo, renderer) : nullptr;
+            if (!object) continue;
+            const int scene = StageLoader::SceneOfFreshGo(object);
+            if (scene != mountedScene && scene != background) continue;
+            const auto name = Il2CppStringToUtf8(StageLoader::Invoke(StageLoader::objectName, object));
+            if (scene == mountedScene && name == receiverName) receiver = renderer;
+            if (scene == background && !road && (name == "Geo_road0" || name == "Geo_road1")) road = renderer;
+            if (receiver && road) break;
+        }
+        if (!receiver) return;
+        const auto unityClass = [](const char* name) { return FindClass("UnityEngine.CoreModule.dll", "UnityEngine", name); };
+        auto& api = StageLoader::metadata;
+        void* materialClass = unityClass("Material");
+        void* shaderClass = unityClass("Shader");
+        const void* getMaterial = api.Find(rendererClass, "get_sharedMaterial", false, {0x12, materialClass}, {});
+        const void* setMaterial = api.Find(rendererClass, "set_sharedMaterial", false, {0x01}, {{0x12, materialClass}});
+        const void* getShader = api.Find(materialClass, "get_shader", false, {0x12, shaderClass}, {});
+        const void* setReceiveShadows = api.Find(rendererClass, "set_receiveShadows", false, {0x01}, {{0x02}});
+        void* material = road && getMaterial ? StageLoader::Invoke(getMaterial, road) : nullptr;
+        const auto materialName = material ? Il2CppStringToUtf8(StageLoader::Invoke(StageLoader::objectName, material)) : "";
+        void* shader = material && getShader ? StageLoader::Invoke(getShader, material) : nullptr;
+        const auto shaderName = shader ? Il2CppStringToUtf8(StageLoader::Invoke(StageLoader::objectName, shader)) : "";
+        bool enabled = false;
+        int renderingMask = -1;
+        if (setMaterial && setReceiveShadows && g_faceRuntime.invoke &&
+            materialName == "m_shared_ground_00_std11" && shaderName == "Environment/Default")
+        {
+            // Borrow the material without editing it or touching the official road renderer.
+            void* args[]{material};
+            StageLoader::Invoke(setMaterial, receiver, args);
+            const void* getMask = api.Find(rendererClass, "get_renderingLayerMask", false, {0x09}, {});
+            const void* setMask = api.Find(rendererClass, "set_renderingLayerMask", false, {0x01}, {{0x09}});
+            if (getMask && setMask)
+            {
+                uint32_t mask = static_cast<uint32_t>(StageLoader::ReadInt(getMask, road, 1));
+                void* maskArgs[]{&mask};
+                StageLoader::Invoke(setMask, receiver, maskArgs);
+                renderingMask = StageLoader::ReadInt(getMask, receiver, -1);
+            }
+            // This game ships the setter but strips the receiveShadows getter.
+            bool acceptsShadows = true;
+            void* shadowArgs[]{&acceptsShadows};
+            void* shadowException = nullptr;
+            g_faceRuntime.invoke(setReceiveShadows, receiver, shadowArgs, &shadowException);
+            enabled = !shadowException && StageLoader::Invoke(getMaterial, receiver) == material &&
+                ModelRendererMask::WriteBool(setEnabled, getEnabled, receiver, true);
+        }
+        if (!enabled) ModelRendererMask::WriteBool(setEnabled, getEnabled, receiver, false);
+        GakuMotion::host::Info("[GakuMotion][NativeShadowReceiver] enabled=%d road=%d material=%s shader=%s rendering_mask=%d",
+            enabled, !!road, materialName.c_str(), shaderName.c_str(), renderingMask);
+    }
+
     inline bool HideBackground(int background)
     {
         void* type = il2cpp_type_get_object(il2cpp_class_get_type(rendererClass));
@@ -717,6 +777,7 @@ namespace ExternalStage
         if (!pin) return false;
         const uintptr_t count = StageLoader::arrayLength(list);
         auto** renderers = reinterpret_cast<void**>(static_cast<char*>(list) + 32);
+        BindNativeShadowReceiver(background, renderers, count);
         if (!PrepareVisibility(renderers, count, background))
         {
             StageLoader::freeHandle(pin);
