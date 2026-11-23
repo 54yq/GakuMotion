@@ -94,6 +94,14 @@ namespace StageLoader
 		void* result = g_faceRuntime.invoke(method, target, args, &exception);
 		return exception ? nullptr : result;
 	}
+	// Successful managed void calls also return null.
+	inline bool TryInvokeStaticVoid(const void* method, void** args)
+	{
+		if (!method || !g_faceRuntime.invoke) return false;
+		void* exception = nullptr;
+		g_faceRuntime.invoke(method, nullptr, args, &exception);
+		return !exception;
+	}
 	inline int ReadInt(const void* method, void* target, int fallback = 0, void** args = nullptr)
 	{
 		void* boxed = Invoke(method, target, args);

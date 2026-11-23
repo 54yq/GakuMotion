@@ -34,12 +34,12 @@ namespace ExternalStage
     inline float lastDoorTime = -1;
     inline std::chrono::steady_clock::time_point lastTimelineTick{};
 
-    inline void SetStageShaderFloat(const char* property, float frame, int& id)
+    inline bool SetStageShaderFloat(const char* property, float frame, int& id)
     {
         static const void* setter = StageLoader::metadata.Find(
             FindClass("UnityEngine.CoreModule.dll", "UnityEngine", "Shader"), "SetGlobalFloat",
             true, {0x01}, {{0x0e}, {0x0c}});
-        if (!setter) return;
+        if (!setter || !StageLoader::stringNew) return false;
         // Reuse the property ID to avoid an allocation every stage frame.
         static const void* nameToId = StageLoader::metadata.Find(
             FindClass("UnityEngine.CoreModule.dll", "UnityEngine", "Shader"), "PropertyToID",
@@ -55,13 +55,14 @@ namespace ExternalStage
         if (setterById && id)
         {
             void* args[]{&id, &frame};
-            StageLoader::Invoke(setterById, nullptr, args);
+            return StageLoader::TryInvokeStaticVoid(setterById, args);
         }
         else if (void* name = StageLoader::stringNew(property))
         {
             void* args[]{name, &frame};
-            StageLoader::Invoke(setter, nullptr, args);
+            return StageLoader::TryInvokeStaticVoid(setter, args);
         }
+        return false;
     }
 
     inline int lightFrameId{}, gradeId{}, foregroundMaskId{};
