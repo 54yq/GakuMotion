@@ -2,6 +2,10 @@
 
 插件显示 `v<基础版本>+fork.<分支版本>`，Git 标签使用 `fork-v<分支版本>`。分支版本按自己的节奏递增。
 
+## 分支 v4.3.99-web
+
+- 恢复 Meni 外部舞台地板的原始材质、纹理与接触阴影，撤回导致地板发白的原生道路材质替换。
+
 ## 分支 v4.3.98-web
 
 - 接入 VideoExporter 逐帧录制时钟、ScreenshotManager 绿幕状态和 GakuAudio 音效服务。
