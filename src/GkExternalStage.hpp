@@ -87,14 +87,19 @@ namespace ExternalStage
         g_setWorldPosNative(transform, stageOrigin);
     }
 
+    inline UnityVector3 StageTravelAtFrame(float frame)
+    {
+        const float fraction = std::clamp((frame - profile.travelStart) / (profile.travelEnd - profile.travelStart), 0.0f, 1.0f);
+        // Stage VMD root Z uses the destination key’s Bezier (0, 0, 0, 0).
+        return RotateStageOffset({0, 0, profile.travelZ * fraction});
+    }
+
     inline void ApplyStageTravel(float frame)
     {
         if (!stageRoot || !g_setWorldPosNative) return;
         void* transform = SceneOwnerRuntime::handleTarget(stageRoot);
         if (!transform) return;
-        const float fraction = std::clamp((frame - profile.travelStart) / (profile.travelEnd - profile.travelStart), 0.0f, 1.0f);
-        // Stage VMD root Z uses the destination key’s Bezier (0, 0, 0, 0).
-        stageTravel = RotateStageOffset({0, 0, profile.travelZ * fraction});
+        stageTravel = StageTravelAtFrame(frame);
         auto position = stageOrigin;
         position.x += stageTravel.x;
         position.z += stageTravel.z;

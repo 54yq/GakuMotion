@@ -528,29 +528,10 @@ namespace GakuMotion
 				// translation must move the VMD path as well. Full hips following
 				// already includes that translation, so use the captured anchor
 				// in that mode to avoid applying placement twice.
-				const CameraModeTransform tf = settings.EffectiveTrackTransform();
-				const Quaternion qRot = Quaternion::FromEulerDegreesXYZ(tf.rotation.x, tf.rotation.y, tf.rotation.z);
-				if (settings.vmdScaleAroundActor)
-				{
-					const Vector3 pivot{0.0f, 1.0f, 0.0f};
-					const Vector3 delta = frame.position - pivot;
-					const float scale = settings.vmdRangeScale;
-					frame.position = pivot + Vector3{delta.x * scale, delta.y * scale, delta.z * scale};
-					frame.orthographicSize *= scale;
-				}
-				else if (settings.vmdRangeScale != 1.0f)
-				{
-					// Optical zoom preserves the authored center ray and camera position.
-					constexpr float halfRadians = 0.00872664626f;
-					frame.fov = std::max(1.f, std::atan(std::tan(frame.fov * halfRadians) *
-						settings.vmdRangeScale) / halfRadians);
-					frame.orthographicSize = std::max(0.001f, frame.orthographicSize * settings.vmdRangeScale);
-				}
-				// The Live baseline follows the actor transform, while the authored
-				// track follows the optional placement yaw around that baseline.
 				const Vector3 anchor = CameraFinite(trackAnchorLocal) ? actorRotation.Rotate(trackAnchorLocal) : Vector3{};
-				frame.position = (settings.followActor ? origin : actorOrigin) + anchor + viewBasis.Rotate(frame.position + tf.position);
-				frame.rotation = (viewBasis * frame.rotation * qRot).Normalized();
+				trackWorldOrigin_ = (settings.followActor ? origin : actorOrigin) + anchor;
+				trackWorldBasis_ = viewBasis;
+				TransformTrackFrame(frame, trackWorldOrigin_, trackWorldBasis_);
 			}
 			else if (settings.mode == CameraMode::Track)
 			{
@@ -629,6 +610,21 @@ namespace GakuMotion
 			Publish();
 		}
 
+		// Resolve an authored camera frame without changing the live camera or its clock.
+		bool SampleStaticTrack(float time, CameraFrame& frame) const
+		{
+			if (!owned || settings.mode != CameraMode::Track || settings.followActor ||
+				!track.Sample(time, frame)) return false;
+			TransformTrackFrame(frame, trackWorldOrigin_, trackWorldBasis_);
+			if (settings.limitToScene)
+			{
+				frame.position.x = std::clamp(frame.position.x, settings.boundsMin.x, settings.boundsMax.x);
+				frame.position.y = std::clamp(frame.position.y, settings.boundsMin.y, settings.boundsMax.y);
+				frame.position.z = std::clamp(frame.position.z, settings.boundsMin.z, settings.boundsMax.z);
+			}
+			return true;
+		}
+
 		// Compatibility for callers that pass a Live track anchor without yaw.
 		void Tick(bool active, float time, float dt, void* targetActor, uint64_t physicalFrame, Vector3 trackAnchorLocal)
 		{
@@ -657,6 +653,33 @@ namespace GakuMotion
 		bool BlocksCamera(void* c) const { return owned && c == camera; }
 
 	private:
+		Vector3 trackWorldOrigin_{};
+		Quaternion trackWorldBasis_{};
+
+		void TransformTrackFrame(CameraFrame& frame, Vector3 trackOrigin, Quaternion viewBasis) const
+		{
+			const CameraModeTransform tf = settings.EffectiveTrackTransform();
+			const Quaternion qRot = Quaternion::FromEulerDegreesXYZ(tf.rotation.x, tf.rotation.y, tf.rotation.z);
+			if (settings.vmdScaleAroundActor)
+			{
+				const Vector3 pivot{0.0f, 1.0f, 0.0f};
+				const Vector3 delta = frame.position - pivot;
+				const float scale = settings.vmdRangeScale;
+				frame.position = pivot + Vector3{delta.x * scale, delta.y * scale, delta.z * scale};
+				frame.orthographicSize *= scale;
+			}
+			else if (settings.vmdRangeScale != 1.0f)
+			{
+				// Optical zoom preserves the authored center ray and camera position.
+				constexpr float halfRadians = 0.00872664626f;
+				frame.fov = std::max(1.f, std::atan(std::tan(frame.fov * halfRadians) *
+					settings.vmdRangeScale) / halfRadians);
+				frame.orthographicSize = std::max(0.001f, frame.orthographicSize * settings.vmdRangeScale);
+			}
+			frame.position = trackOrigin + viewBasis.Rotate(frame.position + tf.position);
+			frame.rotation = (viewBasis * frame.rotation * qRot).Normalized();
+		}
+
 		Vector3 followLocal_{}; // filtered displacement in the captured camera basis
 		uint64_t lastFollowFrame_{0};
 		std::string followTargetError_;

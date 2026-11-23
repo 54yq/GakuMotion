@@ -180,7 +180,7 @@ namespace ExternalStage
 
     inline std::optional<GripPose> ResolveCuePose(int selection, GakuMotion::MotionPlayer* player,
         bool left, const GakuMotion::stage_prop_timeline::Cue* cue,
-        const GakuMotion::CameraController& camera, float frame)
+        const GakuMotion::CameraController& camera, const GakuMotion::TrackTiming& cameraTiming, float frame)
     {
         using namespace GakuMotion;
         using namespace stage_prop_timeline;
@@ -201,10 +201,13 @@ namespace ExternalStage
         Quaternion basis{0,0,0,1};
         Vector3 origin{stageAnchor.x, stageAnchor.y, stageAnchor.z};
         auto offset = sample.position;
-        if (cue->anchor == Anchor::Camera)
+        if (cue->anchor == Anchor::Camera || cue->anchor == Anchor::CameraToStage)
         {
             if (!camera.owned) return std::nullopt;
-            const auto& view = camera.desired;
+            CameraFrame view = camera.desired;
+            if (cue->anchor == Anchor::CameraToStage &&
+                !camera.SampleStaticTrack(TrackSourceTime(cue->first / 30.f, cameraTiming), view))
+                return std::nullopt;
             origin = view.position;
             basis = view.rotation;
             const float verticalRadius = (view.flags & 1u) ? view.orthographicSize :
@@ -212,7 +215,13 @@ namespace ExternalStage
             offset.x *= verticalRadius;
             offset.y *= verticalRadius;
         }
-        const auto p = origin + basis.Rotate(offset);
+        auto p = origin + basis.Rotate(offset);
+        if (cue->anchor == Anchor::CameraToStage)
+        {
+            const auto released = StageTravelAtFrame(static_cast<float>(cue->first));
+            const auto current = StageTravelAtFrame(frame);
+            p = p + Vector3{current.x - released.x, current.y - released.y, current.z - released.z};
+        }
         const auto r = (basis * Quaternion::FromEulerDegreesXYZ(
             sample.rotation.x, sample.rotation.y, sample.rotation.z)).Normalized();
         return GripPose{{p.x,p.y,p.z}, {r.x,r.y,r.z,r.w}};
@@ -228,9 +237,9 @@ namespace ExternalStage
     inline void PlaceHeldProp(HeldProp& prop, int selection, GakuMotion::MotionPlayer* player,
         bool left, float weight, const GakuMotion::stage_prop_timeline::Cue* cue,
         GakuMotion::MotionPlayer* outgoing, const GakuMotion::stage_prop_timeline::Cue* outgoingCue,
-        const GakuMotion::CameraController& camera, float stageFrame, bool hidden)
+        const GakuMotion::CameraController& camera, const GakuMotion::TrackTiming& cameraTiming, float stageFrame, bool hidden)
     {
-        const auto target = hidden ? std::nullopt : ResolveCuePose(selection, player, left, cue, camera, stageFrame);
+        const auto target = hidden ? std::nullopt : ResolveCuePose(selection, player, left, cue, camera, cameraTiming, stageFrame);
         // A missing anchor must not make a visible prop jump back to the display stand.
         if (!prop.transform && !BindHeldProp(prop, selection)) return;
         void* transform = SceneOwnerRuntime::handleTarget(prop.transform);
@@ -344,13 +353,14 @@ namespace ExternalStage
             void* poseActor = grip.player ? grip.player->controller.targetActor : nullptr;
             // A camera-relative prop is evaluated after the main actor updates the
             // camera track, so the prop and camera use the same frame.
-            if (grip.cue && grip.cue->anchor == stage_prop_timeline::Anchor::Camera)
+            if (grip.cue && (grip.cue->anchor == stage_prop_timeline::Anchor::Camera ||
+                grip.cue->anchor == stage_prop_timeline::Anchor::CameraToStage))
                 poseActor = core.player.controller.targetActor;
             auto& prop = heldProps[i];
             if (selected && poseActor == onlyActor)
             {
                 PlaceHeldProp(prop, static_cast<int>(i)+1, grip.player, grip.left, grip.weight,
-                    grip.cue, grip.outgoing, grip.outgoingCue, core.camera, frame, grip.hidden);
+                    grip.cue, grip.outgoing, grip.outgoingCue, core.camera, core.player.timing.camera, frame, grip.hidden);
                 core.stagePropSamples[i].reset();
                 if (void* transform = prop.transform && !prop.hidden ? SceneOwnerRuntime::handleTarget(prop.transform) : nullptr)
                 {

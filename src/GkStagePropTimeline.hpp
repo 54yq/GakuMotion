@@ -6,7 +6,7 @@
 
 namespace GakuMotion::stage_prop_timeline
 {
-    enum class Anchor { Grip, Camera, Stage, Hidden };
+    enum class Anchor { Grip, Camera, Stage, Hidden, CameraToStage };
     enum class Movement { Hold, Linear, Smooth, Throw, Handoff };
 
     struct Cue
@@ -89,6 +89,20 @@ namespace GakuMotion::stage_prop_timeline
     inline const std::vector<Cue> meniDefaults = [] {
         auto cues = legacyDefaults;
         UpgradeLegacy(cues);
+        // The authored camera advances through the gate after frame 1828.
+        // Release before that move, and hide after the prop is behind the camera.
+        for (auto& cue : cues)
+        {
+            if (cue.prop != 11 || cue.anchor != Anchor::Camera) continue;
+            if (cue.movement == Movement::Hold) cue.last = 1800;
+            else
+            {
+                cue.first = 1800;
+                cue.last = 1840;
+                cue.anchor = Anchor::CameraToStage;
+                cue.movement = Movement::Hold;
+            }
+        }
         return cues;
     }();
 
@@ -119,7 +133,8 @@ namespace GakuMotion::stage_prop_timeline
         };
         return cue.prop >= 1 && cue.prop <= 11 && cue.place >= 1 && cue.place <= 10 &&
             cue.first >= 0 && cue.first < cue.last && cue.last <= lastFrame &&
-            cue.anchor >= Anchor::Grip && cue.anchor <= Anchor::Hidden &&
+            cue.anchor >= Anchor::Grip && cue.anchor <= Anchor::CameraToStage &&
+            (cue.anchor != Anchor::CameraToStage || cue.movement == Movement::Hold) &&
             cue.movement >= Movement::Hold && cue.movement <= Movement::Handoff &&
             (cue.movement != Movement::Handoff || cue.anchor == Anchor::Grip) &&
             cue.bone >= -1 && cue.bone <= 54 && cue.blendFrames >= 1 && cue.blendFrames <= lastFrame &&
@@ -140,7 +155,7 @@ namespace GakuMotion::stage_prop_timeline
         file.imbue(std::locale::classic());
         std::string version;
         size_t count{};
-        if (!(file >> version >> count) || (version != "MeniPropTimeline1" && version != "MeniPropTimeline2") || count > maxCues) return meniDefaults;
+        if (!(file >> version >> count) || (version != "MeniPropTimeline1" && version != "MeniPropTimeline2" && version != "MeniPropTimeline3") || count > maxCues) return meniDefaults;
         std::vector<Cue> cues;
         for (size_t index = 0; index < count; ++index)
         {
@@ -148,7 +163,7 @@ namespace GakuMotion::stage_prop_timeline
             if (!(file >> cue.prop >> cue.place >> cue.left >> cue.first >> cue.last
                 >> cue.position.x >> cue.position.y >> cue.position.z >> cue.rotation.x >> cue.rotation.y >> cue.rotation.z))
                 return meniDefaults;
-            if (version == "MeniPropTimeline2")
+            if (version != "MeniPropTimeline1")
             {
                 int anchor{}, movement{};
                 if (!(file >> anchor >> movement >> cue.bone >> cue.blendFrames
@@ -172,7 +187,7 @@ namespace GakuMotion::stage_prop_timeline
         temp += ".tmp";
         std::ofstream file(temp, std::ios::trunc);
         file.imbue(std::locale::classic());
-        file << "MeniPropTimeline2 " << cues.size() << '\n';
+        file << "MeniPropTimeline3 " << cues.size() << '\n';
         for (const auto& c : cues)
             file << c.prop << ' ' << c.place << ' ' << c.left << ' ' << c.first << ' ' << c.last << ' '
                 << c.position.x << ' ' << c.position.y << ' ' << c.position.z << ' '

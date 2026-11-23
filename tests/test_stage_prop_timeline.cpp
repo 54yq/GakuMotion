@@ -17,14 +17,18 @@ int main(int argc, char** argv)
             assert(!Overlap(meniDefaults[i], meniDefaults[j]));
     }
     const auto hold = std::find_if(meniDefaults.begin(), meniDefaults.end(), [](const Cue& cue) {
-        return cue.prop == 11 && cue.first == 1484 && cue.last == 1690;
+        return cue.prop == 11 && cue.first == 1484 && cue.last == 1800;
     });
     assert(hold != meniDefaults.end() && hold->anchor == Anchor::Camera && hold->movement == Movement::Hold);
     const auto exit = std::find_if(meniDefaults.begin(), meniDefaults.end(), [](const Cue& cue) {
-        return cue.prop == 11 && cue.first == 1690 && cue.last == 1710;
+        return cue.prop == 11 && cue.first == 1800 && cue.last == 1840;
     });
-    assert(exit != meniDefaults.end() && exit->anchor == Anchor::Camera && exit->movement == Movement::Smooth);
-    assert(exit->hideAfter && Progress(*exit, 1690) == 0 && Progress(*exit, 1700) == 0.5f);
+    assert(exit != meniDefaults.end() && exit->anchor == Anchor::CameraToStage && exit->movement == Movement::Hold);
+    assert(exit->hideAfter && exit->position.x == hold->position.x && exit->rotation.x == hold->rotation.x);
+    assert(Save(path, meniDefaults));
+    const auto savedDefault = Load(path);
+    assert(savedDefault.size() == meniDefaults.size() &&
+        savedDefault[exit - meniDefaults.begin()].anchor == Anchor::CameraToStage);
     for (int frame = 0; frame <= lastFrame; ++frame)
         assert(FrameAtTime(static_cast<float>(frame) / 30.f) == frame);
 

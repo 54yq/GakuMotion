@@ -221,7 +221,8 @@
                 return CmdResult::Ok();
             }
             if (action == "externalStage.cuePreview" || action == "externalStage.cueSave" ||
-                action == "externalStage.cueDelete" || action == "externalStage.cueSplit" || action == "externalStage.cueReset")
+                action == "externalStage.cueDelete" || action == "externalStage.cueSplit" || action == "externalStage.cueLeaveOnStage" ||
+                action == "externalStage.cueReset")
             {
                 if (action == "externalStage.cuePreview" && externalStageStatus.load() != 1)
                     return CmdResult::Err("stage_unavailable", "独立舞台尚未就绪");
@@ -232,18 +233,37 @@
                     int64_t index{};
                     if (!IntParam(params, "index", index) || index < 0 || index > static_cast<int64_t>(cues.size()))
                         return CmdResult::Err("invalid_params", "道具片段已改变");
-                    if (action == "externalStage.cueSplit")
+                    if (action == "externalStage.cueSplit" || action == "externalStage.cueLeaveOnStage")
                     {
                         int64_t frame{};
                         if (index == static_cast<int64_t>(cues.size()) || cues.size() >= stage_prop_timeline::maxCues ||
                             !IntParam(params, "frame", frame))
                             return CmdResult::Err("invalid_params", "无法分割此片段");
                         auto& source = cues[static_cast<size_t>(index)];
-                        if (frame <= source.first || frame >= source.last ||
+                        const bool leaveOnStage = action == "externalStage.cueLeaveOnStage";
+                        if (frame <= source.first || frame > source.last || (!leaveOnStage && frame == source.last) ||
                             source.movement != stage_prop_timeline::Movement::Hold)
                             return CmdResult::Err("invalid_params", "只能在固定片段内部的帧分割");
+                        if (leaveOnStage && source.anchor != stage_prop_timeline::Anchor::Camera)
+                            return CmdResult::Err("invalid_params", "请选择镜头固定片段");
+                        if (!leaveOnStage && source.anchor == stage_prop_timeline::Anchor::CameraToStage)
+                            return CmdResult::Err("invalid_params", "留在舞台片段的开始帧决定交接位置");
                         auto next = source;
                         next.first = static_cast<int>(frame);
+                        if (leaveOnStage)
+                        {
+                            next.anchor = stage_prop_timeline::Anchor::CameraToStage;
+                            next.hideAfter = true;
+                            if (next.first == next.last)
+                            {
+                                next.last = std::min(next.first + 30, stage_prop_timeline::lastFrame);
+                                for (const auto& other : cues)
+                                    if (other.prop == next.prop && other.first >= next.first)
+                                        next.last = std::min(next.last, other.first);
+                                if (next.first >= next.last)
+                                    return CmdResult::Err("invalid_params", "当前帧之后没有空间放置舞台片段");
+                            }
+                        }
                         source.last = next.first;
                         cues.push_back(next);
                     }
@@ -272,7 +292,7 @@
                         {
                             int64_t anchor{}, movement{}, bone{}, blend{};
                             double arc{};
-                            if (!IntParam(params, "anchor", anchor) || anchor < 0 || anchor > 3 ||
+                            if (!IntParam(params, "anchor", anchor) || anchor < 0 || anchor > 4 ||
                                 !IntParam(params, "movement", movement) || movement < 0 || movement > 4 ||
                                 !IntParam(params, "bone", bone) || bone < -1 || bone > 54 ||
                                 !IntParam(params, "blendFrames", blend) || blend < 1 || blend > stage_prop_timeline::lastFrame ||

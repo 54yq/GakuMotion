@@ -4,7 +4,7 @@ import type { ForkCommand } from './ForkWorkspace'
 import { Vector3Field } from './NumberField'
 
 const props = ['黄白狗', '黑白狗', '1205-02', '1205-03', '白兔', '棕兔', '粉兔', '斑点狗', '1548-01', '可莉饼 A', '可莉饼 B']
-const anchors = ['角色骨骼', '镜头前', '舞台坐标', '隐藏']
+const anchors = ['角色骨骼', '镜头前', '舞台坐标', '隐藏', '镜头交接 → 舞台固定']
 const movements = ['固定 / 瞬切', '直线移动', '缓入缓出', '抛物线', '角色交接']
 const bones = [[-1, '自动握持'], [17, '左手'], [18, '右手'], [0, '髋部'], [7, '脊柱'], [8, '胸部'], [10, '头部'], [27, '左手手指'], [42, '右手手指']] as const
 const duration = 4806
@@ -148,6 +148,13 @@ export function StagePropTimeline({ cues, time, samples, command }: {
   const clips = cues.map((item, index) => ({ index, cue: draft?.index === index ? draft.cue : item }))
   if (draft && draft.index >= cues.length) clips.push(draft)
   const clockStep = zoom >= 8 ? 150 : zoom >= 4 ? 300 : 600
+  const savedCue = draft && cues[draft.index] && normalize(cues[draft.index])
+  const canSplit = savedCue && savedCue.movement === 0 && savedCue.anchor !== 4 &&
+    frame > savedCue.first && frame < savedCue.last
+  const canLeaveOnStage = savedCue && savedCue.anchor === 1 && savedCue.movement === 0 && cue &&
+    frame > savedCue.first && frame <= savedCue.last && frame < duration &&
+    JSON.stringify(cue) === JSON.stringify(savedCue) &&
+    !cues.some((other) => other.prop === savedCue.prop && other.first === frame)
   const moving = cue && cue.movement >= 1 && cue.movement <= 3
 
   return (
@@ -247,11 +254,15 @@ export function StagePropTimeline({ cues, time, samples, command }: {
             <label className="grid gap-1">固定位置
               <select className={field} value={cue.anchor} onChange={(event) => {
                 const anchor = Number(event.target.value)
-                const position = anchor === 1 ? { x: -0.4, y: -0.45, z: 0.86 } : zero
-                update({ anchor, movement: 0, position, endPosition: position, rotation: zero, endRotation: zero })
+                const position = anchor === 1 || anchor === 4 ? { x: -0.4, y: -0.45, z: 0.86 } : zero
+                if ((cue.anchor === 1 || cue.anchor === 4) && (anchor === 1 || anchor === 4)) {
+                  update({ anchor, movement: 0 })
+                } else {
+                  update({ anchor, movement: 0, position, endPosition: position, rotation: zero, endRotation: zero })
+                }
               }}>{anchors.map((label, index) => <option key={label} value={index}>{label}</option>)}</select>
             </label>
-            {cue.anchor !== 3 && <label className="grid gap-1">移动方式
+            {cue.anchor !== 3 && cue.anchor !== 4 && <label className="grid gap-1">移动方式
               <select className={field} value={cue.movement} onChange={(event) => {
                 const movement = Number(event.target.value)
                 const start = sampleReady ? sample.position : zero
@@ -299,13 +310,16 @@ export function StagePropTimeline({ cues, time, samples, command }: {
           </div>
           {cue.movement === 4 && !cues.some((prior) => prior.prop === cue.prop && prior.last === cue.first && (prior.anchor ?? 0) === 0) &&
             <p className="text-xs text-muted-foreground">交接需要紧接同一道具的角色绑定片段。</p>}
+          {cue.anchor === 4 && <p className="text-xs text-muted-foreground">
+            按开始帧的曲目镜头计算落位，后续留在舞台原处。使用曲目镜头并关闭角色追随。
+          </p>}
           {cue.anchor !== 3 && <>
             <div className="grid gap-2 lg:grid-cols-2">
               {(['position', 'rotation', ...(moving ? ['endPosition', 'endRotation'] as const : [])] as const).map((key) => {
                 const position = key === 'position' || key === 'endPosition'
                 const label = (key.startsWith('end') ? '终点' : '起点') + (position ? '位置' : '旋转')
                 return <fieldset key={key} className="rounded border border-border p-2">
-                  <legend className="px-1 text-xs">{label}{position ? cue.anchor === 1 ? '（画面 X/Y、距离 Z）' : '（米）' : '（度）'}</legend>
+                  <legend className="px-1 text-xs">{label}{position ? cue.anchor === 4 ? '（交接时的画面 X/Y、距离 Z）' : cue.anchor === 1 ? '（画面 X/Y、距离 Z）' : '（米）' : '（度）'}</legend>
                   <Vector3Field value={cue[key]} labelPrefix={label} min={position ? -positionLimit : -360} max={position ? positionLimit : 360}
                     step={position ? 0.01 : 1} dragSpeed={position ? 0.005 : 0.5} decimals={position ? 2 : 0}
                     onChange={(next) => update({ [key]: next })} onCommit={(next) => update({ [key]: next })} />
@@ -324,8 +338,11 @@ export function StagePropTimeline({ cues, time, samples, command }: {
           <div className="flex flex-wrap gap-2">
             <button type="button" className={button + ' border-primary bg-primary text-primary-foreground'} disabled={!valid || saving}
               onClick={() => void apply('externalStage.cueSave', { index: draft.index, ...cue })}>保存片段</button>
-            <button type="button" className={button} disabled={saving || draft.index >= cues.length || (cues[draft.index]?.movement ?? 0) !== 0 || frame <= (cues[draft.index]?.first ?? 0) || frame >= (cues[draft.index]?.last ?? 0)}
+            <button type="button" className={button} disabled={saving || !canSplit}
               onClick={() => void apply('externalStage.cueSplit', { index: draft.index, frame })}>在当前帧分割已保存片段</button>
+            {savedCue && savedCue.anchor === 1 && <button type="button" className={button} disabled={saving || !canLeaveOnStage}
+              title="保存镜头固定片段后，选择片段内或片段结束的交接帧。舞台片段结束时隐藏。"
+              onClick={() => void apply('externalStage.cueLeaveOnStage', { index: draft.index, frame })}>在当前帧留在舞台</button>}
             <button type="button" className={button} disabled={saving || draft.index >= cues.length}
               onClick={() => void apply('externalStage.cueDelete', { index: draft.index })}>删除片段</button>
             <button type="button" className={button} disabled={saving} onClick={close}>取消预览</button>

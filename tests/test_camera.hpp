@@ -1092,6 +1092,33 @@ static void TestCameraController(const std::string& repoRoot)
 			return true;
 		};
 
+		cam.settings.mode = CameraMode::Track;
+		cam.settings.vmdRangeScale = 0.8f;
+		cam.settings.vmdOffset = {0.25f, 0.f, 0.f};
+		cam.track.fps = 1;
+		cam.track.frames = {
+			{{1.f, 2.f, 3.f}, Quaternion::Identity(), 49.f},
+			{{4.f, 5.f, 6.f}, Quaternion::FromEulerDegreesXYZ(0, 45, 0), 60.f},
+		};
+		auto* cameraActor = reinterpret_cast<void*>(0x70);
+		cam.Tick(true, 0.f, 0.f, cameraActor);
+		const CameraFrame releaseFrame = cam.desired;
+		cam.Tick(true, 1.f, 0.f, cameraActor);
+		CameraFrame sampled;
+		Check(cam.SampleStaticTrack(0.f, sampled) &&
+		      std::abs(sampled.position.x - releaseFrame.position.x) < 1e-5f &&
+		      std::abs(sampled.fov - releaseFrame.fov) < 1e-5f &&
+		      std::abs(Quaternion::Dot(sampled.rotation, releaseFrame.rotation)) > 0.9999f &&
+		      std::abs(mockActual.position.x - cam.desired.position.x) < 1e-5f &&
+		      std::abs(sampled.position.x - cam.desired.position.x) > 1.f,
+		      "historical track pose matches the release frame without changing the current camera");
+		cam.settings.followActor = true;
+		Check(!cam.SampleStaticTrack(0.f, sampled), "historical track pose rejects stateful actor pursuit");
+		cam.Release();
+		cam.settings.followActor = false;
+		cam.settings.vmdRangeScale = 1.f;
+		cam.settings.vmdOffset = {};
+
 		cam.settings.mode = CameraMode::Follow;
 		cam.settings.followBehavior = FollowBehavior::FollowMove;
 		cam.settings.followRate = {1, 1, 1}; // test mode transforms independently of temporal response
