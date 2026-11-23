@@ -5,8 +5,7 @@ namespace ExternalStage
     constexpr int extraCrepe = 11;
     struct HeldProp
     {
-        Handle transform{}, object{};
-        bool originalActive{}, visible{};
+        Handle transform{};
         UnityVector3 position{}, travel{};
         UnityQuaternion rotation{};
     };
@@ -21,15 +20,11 @@ namespace ExternalStage
     inline void ReleaseHeldProp(HeldProp& prop)
     {
         if (!prop.transform) return;
-        void* object = prop.object ? SceneOwnerRuntime::handleTarget(prop.object) : nullptr;
-        if (object && prop.visible) HelperGameObjectSetActive(object, false);
         if (void* transform = SceneOwnerRuntime::handleTarget(prop.transform))
         {
             g_setWorldPosNative(transform, DisplayPosition(prop));
             g_setWorldRotNative(transform, prop.rotation);
         }
-        if (object && prop.originalActive) HelperGameObjectSetActive(object, true);
-        if (prop.object) StageLoader::freeHandle(prop.object);
         StageLoader::freeHandle(prop.transform);
         prop = {};
     }
@@ -41,7 +36,7 @@ namespace ExternalStage
 
     inline bool BindHeldProp(HeldProp& prop, int selection)
     {
-        bool includeInactive = true;
+        bool includeInactive = false;
         void* args[]{StageLoader::goType, &includeInactive};
         void* list = StageLoader::Invoke(StageLoader::findAll, nullptr, args);
         Handle pin = list ? StageLoader::newHandle(list, false) : nullptr;
@@ -57,15 +52,6 @@ namespace ExternalStage
             if (void* transform = StageLoader::Invoke(StageLoader::goTransform, object))
             {
                 prop.transform = StageLoader::newHandle(transform, false);
-                prop.object = StageLoader::newHandle(object, false);
-                if (!prop.transform || !prop.object || !HelperTryGetActiveSelf(object, prop.originalActive) ||
-                    !HelperGameObjectSetActive(object, false))
-                {
-                    if (prop.transform) StageLoader::freeHandle(prop.transform);
-                    if (prop.object) StageLoader::freeHandle(prop.object);
-                    prop = {};
-                    break;
-                }
                 prop.position = g_getWorldPosNative(transform);
                 prop.travel = stageTravel;
                 prop.rotation = g_getWorldRotNative(transform);
@@ -231,8 +217,6 @@ namespace ExternalStage
             std::lerp(r.z, grip.z, weight), std::lerp(r.w, grip.w, weight)};
         const float norm = std::sqrt(q.x*q.x + q.y*q.y + q.z*q.z + q.w*q.w);
         if (norm > 0) g_setWorldRotNative(transform, {q.x/norm, q.y/norm, q.z/norm, q.w/norm});
-        if (!prop.visible)
-            prop.visible = HelperGameObjectSetActive(SceneOwnerRuntime::handleTarget(prop.object), true);
     }
 
     inline void UpdateHeldProps(GakuMotion::Core& core, void* onlyActor = nullptr)
