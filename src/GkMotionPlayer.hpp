@@ -275,7 +275,10 @@ namespace GakuMotion
 		// Core uses this when atomically reloading body and camera from one version.
 		void AdoptLoadedMotion(const std::string& motionDirectory, const std::string& motionFile, MotionClip nextClip)
 		{
-			mouthSourceStatus = mouth_source::Restore(nextClip, motionDirectory);
+			jsonlite::Value metadata;
+			std::string metadataError;
+			const bool hasMetadata = jsonlite::ParseFile(motionDirectory + "/info.json", metadata, metadataError);
+			mouthSourceStatus = mouth_source::Restore(nextClip, motionDirectory, hasMetadata ? &metadata : nullptr);
 			if (mouth_source::report) mouth_source::report(motionDirectory.c_str(), mouthSourceStatus.c_str());
 			// Release the old pose before replacing its clip, including callers
 			// that bypass Core::SelectMotionByIndex. Keep the original actor rest
@@ -302,10 +305,7 @@ namespace GakuMotion
 			controller.LoadRootHeightCalibration(motionDirectory + "/root_height_calibration.json", clip);
 			audioStarted = false;
 			audioWaitingForTiming = false;
-			jsonlite::Value metadata;
-			std::string metadataError;
-			timing = jsonlite::ParseFile(motionDirectory + "/info.json", metadata, metadataError)
-				? ReadPerformanceTiming(metadata) : PerformanceTiming{};
+			timing = hasMetadata ? ReadPerformanceTiming(metadata) : PerformanceTiming{};
 			cameraSourceDuration = 0.0f;
 			audioSourceDuration = audio::PcmWavDuration(MotionPathFromUtf8(AudioPath()));
 			scrubbing = false;
