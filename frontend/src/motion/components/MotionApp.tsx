@@ -135,7 +135,7 @@ function ActivePage({ fork, command }: { fork: ReturnType<typeof useForkWorkspac
               </button>
               <button className="ml-4" type="button" disabled={fork.externalStageFollow}
                 onClick={() => void command('externalStage.seek', { value: 0 })}>回到开头</button>
-              {fork.externalStageCues && <StagePropTimeline cues={fork.externalStageCues} time={fork.externalStageTime ?? 0} command={command} />}
+              {fork.externalStageCues && <StagePropTimeline cues={fork.externalStageCues} time={fork.externalStageTime ?? 0} samples={fork.externalStagePropSamples} command={command} />}
               <label className="flex items-center gap-2">
                 单道具临时预览
                 <select value={fork.externalStageHeldProp ?? 0}

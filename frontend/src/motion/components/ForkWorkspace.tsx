@@ -41,7 +41,7 @@ const mockState: ForkState = {
   ],
 }
 
-export type ForkCommand = (action: string, fields?: Record<string, unknown>, live?: boolean) => Promise<void>
+export type ForkCommand = (action: string, fields?: Record<string, unknown>, live?: boolean) => Promise<boolean | void>
 
 export function useForkWorkspace(preview = false) {
   const supported = useMotionStore(state => state.capabilities.includes('fork.get'))
@@ -142,10 +142,14 @@ export function useForkWorkspace(preview = false) {
     }
     try {
       const bridge = getMotionBridge()
-      if (!bridge) return
+      if (!bridge) return false
       await bridge.request('fork.command', { ...fields, action, session: current.session, owner: current.owner, epoch: current.epoch, revision: current.revision })
       if (!live) setState(await bridge.request('fork.get'))
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
+      return true
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+      return false
+    }
   }
   return { state: current, command, error }
 }

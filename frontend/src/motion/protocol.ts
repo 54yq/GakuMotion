@@ -552,6 +552,7 @@ export interface ForkState {
   externalStageShadowSize?: number
   externalStageGrade?: boolean
   externalStageCues?: StagePropCue[]
+  externalStagePropSamples?: ({ frame: number; position: Vector3 } | null)[]
   externalStagePropStart?: number
   externalStagePropEnd?: number
   externalStageHeldProp?: number
@@ -1106,5 +1107,13 @@ export type StagePropCue = {
   first: number
   last: number
   position: { x: number; y: number; z: number }
-  rotation: { x: number; y: number; z: number }
+  rotation: Vector3
+  anchor?: number
+  movement?: number
+  bone?: number
+  blendFrames?: number
+  endPosition?: Vector3
+  endRotation?: Vector3
+  arcHeight?: number
+  hideAfter?: boolean
 }

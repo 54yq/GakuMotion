@@ -60,19 +60,6 @@ namespace ExternalStageProfiles
         std::array<std::string_view, 10> propNames;
     };
 
-    struct CameraPropHold
-    {
-        int place;
-        float releaseStart, exitStart, exitEnd;
-        UnityVector3 cameraOffset;
-    };
-
-    // The foreground serving stays in the shot through the bite and exits with
-    // the other serving's handoff, before the transition to the dance.
-    inline constexpr CameraPropHold meniRightCrepeHold{
-        1, 1484.f, 1690.f, 1710.f, {-0.42f, -0.45f, 0.86f}
-    };
-
     inline constexpr Profile meniShukiRush{
         "Assets/MeniShukiRushStage.unity", "MeniShukiRushStage", "meni-shuki-rush-scene.bundle",
         "Meni Shuki Rush Stage", "_GakuExternalStageLightFrame",

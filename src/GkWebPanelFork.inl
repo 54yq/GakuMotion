@@ -47,11 +47,24 @@
                 stageCues += "{\"prop\":" + JNum(cue.prop) + ",\"place\":" + JNum(cue.place) +
                     ",\"left\":" + JBool(cue.left) + ",\"first\":" + JNum(cue.first) +
                     ",\"last\":" + JNum(cue.last) + ",\"position\":" + JVec(cue.position) +
-                    ",\"rotation\":" + JVec(cue.rotation) + "}";
+                    ",\"rotation\":" + JVec(cue.rotation) + ",\"anchor\":" + JNum(static_cast<int>(cue.anchor)) +
+                    ",\"movement\":" + JNum(static_cast<int>(cue.movement)) + ",\"bone\":" + JNum(cue.bone) +
+                    ",\"blendFrames\":" + JNum(cue.blendFrames) + ",\"endPosition\":" + JVec(cue.endPosition) +
+                    ",\"endRotation\":" + JVec(cue.endRotation) + ",\"arcHeight\":" + JNum(cue.arcHeight) +
+                    ",\"hideAfter\":" + JBool(cue.hideAfter) + "}";
             }
             stageCues += "]";
+            std::string propSamples = "[";
+            for (const auto& sample : core_.stagePropSamples)
+            {
+                if (propSamples.size() > 1) propSamples += ",";
+                propSamples += sample ? "{\"frame\":" + JNum(sample->frame) +
+                    ",\"position\":" + JVec(sample->position) + "}" : "null";
+            }
+            propSamples += "]";
 			return "{\"session\":" + JNum(core_.injectionSession) + ",\"owner\":" + JNum(core_.liveOwnerToken) +
                 ",\"externalStageCues\":" + stageCues +
+                ",\"externalStagePropSamples\":" + propSamples +
                 ",\"externalStageEnabled\":" + JBool(externalStageEnabled.load()) +
                 ",\"externalStageStatus\":" + JNum(externalStageStatus.load()) +
                 ",\"externalStageTime\":" + JNum(externalStageTime.load()) +
@@ -190,7 +203,7 @@
                 return CmdResult::Ok();
             }
             if (action == "externalStage.cuePreview" || action == "externalStage.cueSave" ||
-                action == "externalStage.cueDelete" || action == "externalStage.cueReset")
+                action == "externalStage.cueDelete" || action == "externalStage.cueSplit" || action == "externalStage.cueReset")
             {
                 if (action == "externalStage.cuePreview" && externalStageStatus.load() != 1)
                     return CmdResult::Err("stage_unavailable", "独立舞台尚未就绪");
@@ -201,7 +214,22 @@
                     int64_t index{};
                     if (!IntParam(params, "index", index) || index < 0 || index > static_cast<int64_t>(cues.size()))
                         return CmdResult::Err("invalid_params", "道具片段已改变");
-                    if (action == "externalStage.cueDelete")
+                    if (action == "externalStage.cueSplit")
+                    {
+                        int64_t frame{};
+                        if (index == static_cast<int64_t>(cues.size()) || cues.size() >= stage_prop_timeline::maxCues ||
+                            !IntParam(params, "frame", frame))
+                            return CmdResult::Err("invalid_params", "无法分割此片段");
+                        auto& source = cues[static_cast<size_t>(index)];
+                        if (frame <= source.first || frame >= source.last ||
+                            source.movement != stage_prop_timeline::Movement::Hold)
+                            return CmdResult::Err("invalid_params", "只能在固定片段内部的帧分割");
+                        auto next = source;
+                        next.first = static_cast<int>(frame);
+                        source.last = next.first;
+                        cues.push_back(next);
+                    }
+                    else if (action == "externalStage.cueDelete")
                     {
                         if (index == static_cast<int64_t>(cues.size()))
                             return CmdResult::Err("invalid_params", "道具片段不存在");
@@ -222,6 +250,32 @@
                         cue.place = static_cast<int>(place);
                         cue.first = static_cast<int>(first);
                         cue.last = static_cast<int>(last);
+                        if (params.Find("anchor"))
+                        {
+                            int64_t anchor{}, movement{}, bone{}, blend{};
+                            double arc{};
+                            if (!IntParam(params, "anchor", anchor) || anchor < 0 || anchor > 3 ||
+                                !IntParam(params, "movement", movement) || movement < 0 || movement > 4 ||
+                                !IntParam(params, "bone", bone) || bone < -1 || bone > 54 ||
+                                !IntParam(params, "blendFrames", blend) || blend < 1 || blend > stage_prop_timeline::lastFrame ||
+                                !NumberParam(params, "arcHeight", arc) || arc < 0 || arc > 20 ||
+                                !BoolParam(params, "hideAfter", cue.hideAfter) ||
+                                !VecParam(params, "endPosition", cue.endPosition) || !VecParam(params, "endRotation", cue.endRotation))
+                                return CmdResult::Err("invalid_params", "检查固定坐标、移动方式、骨骼和轨迹参数");
+                            cue.anchor = static_cast<stage_prop_timeline::Anchor>(anchor);
+                            cue.movement = static_cast<stage_prop_timeline::Movement>(movement);
+                            cue.bone = static_cast<int>(bone);
+                            cue.blendFrames = static_cast<int>(blend);
+                            cue.arcHeight = static_cast<float>(arc);
+                        }
+                        else if (index < static_cast<int64_t>(cues.size()))
+                        {
+                            const auto& saved = cues[index];
+                            cue.anchor = saved.anchor; cue.movement = saved.movement;
+                            cue.bone = saved.bone; cue.blendFrames = saved.blendFrames;
+                            cue.endPosition = saved.endPosition; cue.endRotation = saved.endRotation;
+                            cue.arcHeight = saved.arcHeight; cue.hideAfter = saved.hideAfter;
+                        }
                         if (!stage_prop_timeline::Valid(cue))
                             return CmdResult::Err("invalid_params", "握持位移上限 2 米，旋转上限 360 度");
                         for (size_t i = 0; i < cues.size(); ++i)

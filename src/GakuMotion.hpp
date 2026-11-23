@@ -469,6 +469,8 @@ namespace GakuMotion
 		std::string localRoot;
 		std::string motionsRoot;
 		std::string configRoot;
+		struct StagePropSample { int frame{}; Vector3 position{}; };
+		std::array<std::optional<StagePropSample>, 11> stagePropSamples{};
 		std::vector<stage_prop_timeline::Cue> stagePropCues = stage_prop_timeline::meniDefaults;
 		std::optional<std::vector<stage_prop_timeline::Cue>> stagePropPreview;
 		std::string logsRoot, diagnosticsRoot, transactionRoot;
