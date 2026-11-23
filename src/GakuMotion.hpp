@@ -4100,8 +4100,7 @@ namespace GakuMotion
 				for (const auto& follower : ensemble.Followers())
 					if (follower.player && follower.actorToken == item.token) bound = true;
 				ctx.sceneArmCalibrations.push_back({item.token, arm.share, arm.degrees, arm.locked, bound, primary});
-				const std::string name = !item.displayName.empty() ? item.displayName : item.character.empty() ? "未识别角色" : FormatIdolDisplayName(item.character.c_str());
-				ctx.sceneActors.push_back({item.token, name + " · " + std::to_string(ctx.sceneActors.size() + 1),
+				ctx.sceneActors.push_back({item.token, FormatSceneActorLabel(item, ctx.sceneActors.size() + 1),
 					item.actor == player.controller.targetActor,
                     actorModelHidden.find(item.token) != actorModelHidden.end()});
 			}

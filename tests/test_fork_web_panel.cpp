@@ -23,7 +23,7 @@ int main()
 	core.motions.push_back(track);
 	int primary{}, secondary{};
 	core.player.controller.targetActor = &primary;
-	core.sceneActorRegistry.Publish({{&primary, 41, "fktn", {}}, {&secondary, 42, "ssmk", {}}});
+	core.sceneActorRegistry.Publish({{&primary, 41, "fktn", "Custom preset"}, {&secondary, 42, "ssmk", {}}});
 	Bridge bridge(core, {});
 	bridge.OnShow();
 
@@ -64,8 +64,14 @@ int main()
 	core.player.state = PlaybackState::Stopped;
 	check(request("fork.get").StringPath("result.primaryPhysics", "") == "暂无当前数据",
 		"Primary physics stops reporting a sample when playback stops");
-	check(request("state.get").StringPath("result.library.notice", "") == core.playlistNotice,
+	core.player.controller.currentBinding.actor = &primary;
+	const auto state = request("state.get");
+	check(state.StringPath("result.library.notice", "") == core.playlistNotice,
 		"Upstream state snapshot remains available with the fork bridge");
+	check(state.StringPath("result.actors.targetLabel", "") == "Custom preset · 1" &&
+		request("telemetry.get").StringPath("result.actor.actorLabel", "") == "Custom preset · 1",
+		"Actor roster and playback status use the same preset label");
+	core.player.controller.currentBinding.actor = nullptr;
 	check(!ok(request("fork.command", R"({"action":"live.takeover","session":12,"owner":18,"value":true})")) &&
 		!core.liveTakeoverRequest, "A previous Live owner cannot start takeover");
 	check(ok(request("fork.command", R"({"action":"live.takeover","session":12,"owner":19,"value":true})")) &&
