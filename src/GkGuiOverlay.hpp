@@ -303,6 +303,7 @@ namespace GakuMotion
     inline std::atomic<int> externalStageHeldProp{0};
     inline std::atomic<bool> externalStageGrade{true};
     inline std::atomic<bool> externalStageContactShadows{true};
+    inline std::atomic<bool> externalStageGroundOverlay{true};
     inline std::atomic<float> externalStageShadowSize{1.0f};
     inline std::atomic<bool> externalStageActorAmbient{true};
     inline std::atomic<bool> externalStageLocate{}, externalStageMeasure{};

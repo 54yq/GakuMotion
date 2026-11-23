@@ -101,6 +101,11 @@ function ActivePage({ fork, command }: { fork: ReturnType<typeof useForkWorkspac
           {fork?.externalStageStatus === 1 && (
             <div className="space-y-2">
               <p role="status">独立舞台已载入</p>
+              {fork.externalStageGroundOverlay !== undefined && <label className="flex items-center gap-2">
+                <input type="checkbox" checked={fork.externalStageGroundOverlay}
+                  onChange={(e) => void command('externalStage.groundOverlay', { value: e.target.checked })} />
+                舞台贴地暗纹（material_08）
+              </label>}
               {fork.externalStageContactShadows !== undefined && <label className="flex items-center gap-2">
                 <input type="checkbox" checked={fork.externalStageContactShadows}
                   onChange={(e) => void command('externalStage.contactShadows', { value: e.target.checked })} />

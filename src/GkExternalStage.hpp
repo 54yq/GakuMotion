@@ -708,6 +708,102 @@ namespace ExternalStage
         return aligned;
     }
 
+    struct GroundOverlayMaterial { Handle material; float originalCutoff; };
+    inline std::vector<GroundOverlayMaterial> groundOverlays;
+    inline const void* getOverlayCutoff{};
+    inline const void* setOverlayCutoff{};
+    inline bool groundOverlayVisible = true;
+
+    inline float ReadOverlayCutoff(void* material, void* name)
+    {
+        void* args[]{name};
+        void* boxed = StageLoader::Invoke(getOverlayCutoff, material, args);
+        const void* data = boxed && g_safeBones.unbox ? g_safeBones.unbox(boxed) : nullptr;
+        return data ? *static_cast<const float*>(data) : std::numeric_limits<float>::quiet_NaN();
+    }
+
+    inline void BindGroundOverlays(void** renderers, uintptr_t count)
+    {
+        const auto unityClass = [](const char* name) {
+            return FindClass("UnityEngine.CoreModule.dll", "UnityEngine", name);
+        };
+        auto& api = StageLoader::metadata;
+        void* material = unityClass("Material");
+        void* shader = unityClass("Shader");
+        const auto arrayClass = reinterpret_cast<void* (*)(void*, uint32_t)>(
+            GetProcAddress(g_gameAssembly, "il2cpp_array_class_get"));
+        void* materials = arrayClass && material ? arrayClass(material, 1) : nullptr;
+        if (!materials || !shader) return;
+        const void* getMaterials = api.Find(rendererClass, "get_sharedMaterials", false, {0x1d, materials}, {});
+        const void* getShader = api.Find(material, "get_shader", false, {0x12, shader}, {});
+        getOverlayCutoff = api.Find(material, "GetFloat", false, {0x0c}, {{0x0e}});
+        setOverlayCutoff = api.Find(material, "SetFloat", false, {0x01}, {{0x0e}, {0x0c}});
+        if (!getMaterials || !getShader || !getOverlayCutoff || !setOverlayCutoff || !StageLoader::stringNew)
+        {
+            GakuMotion::host::Warn("[GakuMotion][GroundOverlay] material API unavailable");
+            return;
+        }
+        void* name = StageLoader::stringNew("_Cutoff");
+        if (!name) return;
+        for (uintptr_t i = 0; i < count; ++i)
+        {
+            void* renderer = renderers[i];
+            void* go = StageLoader::Invoke(StageLoader::componentGo, renderer);
+            if (!go || StageLoader::SceneOfFreshGo(go) != mountedScene) continue;
+            void* array = StageLoader::Invoke(getMaterials, renderer);
+            const Handle pin = array ? StageLoader::newHandle(array, false) : nullptr;
+            if (!pin) continue;
+            const auto length = StageLoader::arrayLength(array);
+            for (uintptr_t slot = 0; slot < length; ++slot)
+            {
+                void* pinnedArray = SceneOwnerRuntime::handleTarget(pin);
+                if (!pinnedArray) break;
+                void* mat = reinterpret_cast<void**>(static_cast<char*>(pinnedArray) + 32)[slot];
+                if (!mat || std::any_of(groundOverlays.begin(), groundOverlays.end(),
+                    [mat](const auto& found) { return SceneOwnerRuntime::handleTarget(found.material) == mat; }))
+                    continue;
+                if (Il2CppStringToUtf8(StageLoader::Invoke(StageLoader::objectName, mat)) != "material_08") continue;
+                void* assigned = StageLoader::Invoke(getShader, mat);
+                if (!assigned || Il2CppStringToUtf8(StageLoader::Invoke(StageLoader::objectName, assigned)) !=
+                    "GakuMotion/ExternalStageGroundOverlay") continue;
+                const float cutoff = ReadOverlayCutoff(mat, name);
+                if (std::isfinite(cutoff))
+                    if (Handle handle = StageLoader::newHandle(mat, false)) groundOverlays.push_back({handle, cutoff});
+            }
+            StageLoader::freeHandle(pin);
+        }
+        GakuMotion::host::Info("[GakuMotion][GroundOverlay] stage=%d material_08 bound=%zu",
+            mountedScene, groundOverlays.size());
+    }
+
+    inline void ApplyGroundOverlay(bool visible)
+    {
+        if (groundOverlayVisible == visible || !StageLoader::stringNew) return;
+        void* name = StageLoader::stringNew("_Cutoff");
+        if (!name) return;
+        size_t verified = 0;
+        for (const auto& overlay : groundOverlays)
+        {
+            void* mat = SceneOwnerRuntime::handleTarget(overlay.material);
+            if (!mat) continue;
+            // Texture alpha is in [0, 1]. A cutoff of 2 discards the entire pass.
+            float cutoff = visible ? overlay.originalCutoff : 2.f;
+            void* args[]{name, &cutoff};
+            StageLoader::Invoke(setOverlayCutoff, mat, args);
+            if (ReadOverlayCutoff(mat, name) == cutoff) ++verified;
+        }
+        groundOverlayVisible = visible;
+        GakuMotion::host::Info("[GakuMotion][GroundOverlay] stage=%d material_08 visible=%d verified=%zu/%zu",
+            mountedScene, visible, verified, groundOverlays.size());
+    }
+
+    inline void ReleaseGroundOverlays()
+    {
+        ApplyGroundOverlay(true);
+        for (const auto& overlay : groundOverlays) StageLoader::freeHandle(overlay.material);
+        groundOverlays.clear();
+    }
+
     inline bool HideBackground(int background)
     {
         void* type = il2cpp_type_get_object(il2cpp_class_get_type(rendererClass));
@@ -753,6 +849,7 @@ namespace ExternalStage
                 break;
             }
         }
+        if (complete && found) BindGroundOverlays(renderers, count);
         StageLoader::freeHandle(pin);
         if (!complete || !found)
         {
@@ -777,6 +874,7 @@ namespace ExternalStage
 
     inline void ReleaseBundle()
     {
+        ReleaseGroundOverlays();
         if (!bundle) return;
         if (void* object = SceneOwnerRuntime::handleTarget(bundle))
         {
@@ -853,6 +951,7 @@ namespace ExternalStage
         {
             if (mountedScene)
             {
+                ReleaseGroundOverlays();
                 void* args[]{&mountedScene};
                 if (Start(Pending::Unload, StageLoader::Invoke(unloadScene, nullptr, args)))
                 {
@@ -917,6 +1016,7 @@ namespace ExternalStage
                     GakuMotion::host::Info("[GakuMotion][ExternalStage] post-render visible=%u/%u scene=%d", visible, total, mountedScene);
                 }
             }
+            ApplyGroundOverlay(GakuMotion::externalStageGroundOverlay.load());
             status.store(1);
             return;
         }

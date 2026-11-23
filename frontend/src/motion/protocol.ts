@@ -549,6 +549,7 @@ export interface ForkState {
   externalStageActorHeight?: number
   externalStageLocateResult?: number
   externalStageActorAmbient?: boolean
+  externalStageGroundOverlay?: boolean
   externalStageContactShadows?: boolean
   externalStageShadowSize?: number
   externalStageGrade?: boolean
