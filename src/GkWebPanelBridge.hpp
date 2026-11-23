@@ -1986,6 +1986,8 @@ namespace GakuMotion::webpanel
 				!intField("followBehavior", followBehavior, 0, 1) ||
 				!intField("followTarget", followTarget, 0, 2) ||
 				!boolField("followActor", settings.followActor) ||
+				!boolField("followGroupCenter", settings.followGroupCenter) ||
+				!boolField("vmdScaleAroundActor", settings.vmdScaleAroundActor) ||
 				!boolField("limitToScene", settings.limitToScene) ||
 				!vecField("boundsMin", settings.boundsMin) ||
 				!vecField("boundsMax", settings.boundsMax) ||
@@ -2183,6 +2185,7 @@ namespace GakuMotion::webpanel
 				if (i) actors += ",";
 				actors += "{\"token\":" + JNum(static_cast<double>(item.token)) +
 					",\"label\":" + JString(label) +
+					",\"portraitKey\":" + JString(item.displayName.empty() ? item.character : item.character + ":" + item.displayName) +
 					",\"selected\":" + JBool(item.actor == core_.player.controller.targetActor) +
 					",\"modelHidden\":" + JBool(core_.actorModelHidden.contains(item.token)) + "}";
 			}
@@ -2217,6 +2220,8 @@ namespace GakuMotion::webpanel
 				",\"targetOffset\":" + JVec(settings.targetOffset) +
 				",\"vmdOffset\":" + JVec(settings.vmdOffset) +
 				",\"vmdRangeScale\":" + JNum(settings.vmdRangeScale) +
+				",\"followGroupCenter\":" + JBool(settings.followGroupCenter) +
+				",\"vmdScaleAroundActor\":" + JBool(settings.vmdScaleAroundActor) +
 				",\"followFactor\":" + JVec(settings.followFactor) +
 				",\"followRate\":" + JVec(settings.followRate) +
 				",\"followFov\":" + JNum(settings.followFov) +

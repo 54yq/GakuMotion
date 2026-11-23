@@ -24,9 +24,10 @@ export function setCameraControlMode(settings: CameraSettings, selection: number
 // Legacy offsets are mirrored into per-mode transforms until the user edits one,
 // then the settings upgrade to usePerModeTransforms (same as the ImGui page).
 export function syncLegacyTransforms(settings: CameraSettings): CameraSettings {
-  if (settings.usePerModeTransforms) return settings
+  const normalized = { vmdScaleAroundActor: false, followGroupCenter: false, ...settings }
+  if (settings.usePerModeTransforms) return normalized
   return {
-    ...settings,
+    ...normalized,
     transformTrack: { ...settings.transformTrack, position: { ...settings.vmdOffset } },
     transformFollowMove: { ...settings.transformFollowMove, position: { ...settings.followOffset } },
     transformLookAt: { ...settings.transformLookAt, position: { ...settings.followOffset } },

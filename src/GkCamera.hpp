@@ -209,7 +209,9 @@ namespace GakuMotion
 		Vector3 boundsMin{-5, 0.05f, -5}, boundsMax{5, 5, 5}; // world-space AABB, opt-in
 		Vector3 followOffset{0, 0.6f, 3}, targetOffset{0, 0.4f, 0}; // captured hips camera offset / selected part aim offset
 		Vector3 vmdOffset{0, 0, 0}; // initial offset in actor coordinate frame (e.g. height adjustment for shorter idols)
-		float vmdRangeScale{1.0f}; // zoom around the authored frame center
+		float vmdRangeScale{1.0f};
+		bool vmdScaleAroundActor{false};
+		bool followGroupCenter{false};
 		Vector3 followFactor{1.0f, 1.0f, 1.0f}; // captured camera-local X/Y/Z displacement fractions
 		Vector3 followRate{0.1f, 0.1f, 0.1f}; // per-axis response at 60 Hz: 0 freezes, 1 tracks immediately
 		float followFov{45};
@@ -276,6 +278,7 @@ namespace GakuMotion
 				limitToScene == b.limitToScene && same(boundsMin, b.boundsMin) && same(boundsMax, b.boundsMax) &&
 				same(followOffset, b.followOffset) && same(targetOffset, b.targetOffset) &&
 				same(vmdOffset, b.vmdOffset) && vmdRangeScale == b.vmdRangeScale &&
+				vmdScaleAroundActor == b.vmdScaleAroundActor && followGroupCenter == b.followGroupCenter &&
 				same(followFactor, b.followFactor) && same(followRate, b.followRate) && followFov == b.followFov &&
 				srpFinalOverwriteFallback == b.srpFinalOverwriteFallback &&
 				actorShadowExperimentMode == b.actorShadowExperimentMode &&
@@ -463,7 +466,7 @@ namespace GakuMotion
 		}
 
 		void Tick(bool active, float time, float dt, void* targetActor, uint64_t physicalFrame = 0,
-		          float placementYawDegrees = 0.0f, Vector3 trackAnchorLocal = {})
+		          float placementYawDegrees = 0.0f, Vector3 trackAnchorLocal = {}, const Vector3* groupCenter = nullptr)
 		{
 			if (!active || !settings.enabled || !settings.IsValid() || !targetActor)
 			{
@@ -486,7 +489,8 @@ namespace GakuMotion
 				return;
 			}
 			Vector3 followTarget = hips;
-			if (settings.mode == CameraMode::Follow && settings.followTarget != CameraFollowTarget::Hips &&
+			if (settings.followGroupCenter) followTarget = groupCenter && CameraFinite(*groupCenter) ? *groupCenter : hips;
+			else if (settings.mode == CameraMode::Follow && settings.followTarget != CameraFollowTarget::Hips &&
 				(!fnFollowTarget || !fnFollowTarget(targetActor, settings.followTarget, followTarget) || !CameraFinite(followTarget)))
 			{
 				followTargetError_ = std::string("跟随部位（") + CameraFollowTargetLabel(settings.followTarget) +
@@ -507,7 +511,7 @@ namespace GakuMotion
 				saved = desired = initial;
 				origin = actorOrigin;
 				originRotation = actorRotation;
-				followOrigin = hips;
+				followOrigin = settings.mode == CameraMode::Follow && settings.followGroupCenter ? followTarget : hips;
 				followCaptured = true;
 				owned = true;
 			}
@@ -526,7 +530,15 @@ namespace GakuMotion
 				// in that mode to avoid applying placement twice.
 				const CameraModeTransform tf = settings.EffectiveTrackTransform();
 				const Quaternion qRot = Quaternion::FromEulerDegreesXYZ(tf.rotation.x, tf.rotation.y, tf.rotation.z);
-				if (settings.vmdRangeScale != 1.0f)
+				if (settings.vmdScaleAroundActor)
+				{
+					const Vector3 pivot{0.0f, 1.0f, 0.0f};
+					const Vector3 delta = frame.position - pivot;
+					const float scale = settings.vmdRangeScale;
+					frame.position = pivot + Vector3{delta.x * scale, delta.y * scale, delta.z * scale};
+					frame.orthographicSize *= scale;
+				}
+				else if (settings.vmdRangeScale != 1.0f)
 				{
 					// Optical zoom preserves the authored center ray and camera position.
 					constexpr float halfRadians = 0.00872664626f;

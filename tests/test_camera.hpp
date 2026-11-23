@@ -295,6 +295,11 @@ static void TestCameraController(const std::string& repoRoot)
 		      "disabling facing sync restores the original composition");
 		anchored.settings.vmdRangeScale = 0.5f;
 		anchored.Tick(true, 0, .016f, actor);
+		Check(Near(actual.position.x, beforeYawPosition.x) && Near(actual.position.y, beforeYawPosition.y) &&
+		      Near(actual.position.z, beforeYawPosition.z) && actual.fov < local.fov,
+		      "default optical zoom preserves the authored position and reduces FOV");
+		anchored.settings.vmdScaleAroundActor = true;
+		anchored.Tick(true, 0, .016f, actor);
 		Check(std::fabs(actual.position.x - 10.4f) < 1e-5f &&
 		      std::fabs(actual.position.y - 1.73f) < 1e-5f && std::fabs(actual.position.z - 17.38f) < 1e-5f &&
 		      std::fabs(actual.orthographicSize - local.orthographicSize * 0.5f) < 1e-5f &&
@@ -407,6 +412,21 @@ static void TestCameraController(const std::string& repoRoot)
 		Check(response.desired.position.x > 9.999f && response.desired.position.x <= 10.0f,
 		      "0.1 response keeps converging to the whole displacement rather than a fixed tenth");
 		response.Release();
+
+		CameraController group;
+		prepare(group, {1, 1, 1});
+		group.Release();
+		group.settings.followGroupCenter = true;
+		group.settings.followBehavior = FollowBehavior::FollowMove;
+		Vector3 center{4, 0, 0};
+		group.Tick(true, 0, step, actor, 1, 0.0f, {}, &center);
+		const auto initialGroupPosition = group.desired.position;
+		center.x = 7.0f;
+		hips = {100, 0, 0};
+		group.Tick(true, 0, step, actor, 2, 0.0f, {}, &center);
+		Check(nearPosition(group.desired.position, initialGroupPosition + Vector3{3, 0, 0}),
+		      "group follow moves with the group center instead of the primary actor");
+		group.Release();
 
 		CameraController freeze;
 		prepare(freeze, defaults.followRate);

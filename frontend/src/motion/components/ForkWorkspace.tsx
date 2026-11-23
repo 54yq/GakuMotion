@@ -1,3 +1,4 @@
+import { ArtworkEditor } from './ArtworkEditor'
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -271,6 +272,7 @@ function Follower({ slot, follower, followers, command, remove }: {
   return (
     <section className="min-w-0 space-y-2 rounded-lg border bg-background/70 p-3">
       <div className="flex items-center justify-between gap-2">
+        {boundActor && <ActorPortrait actor={boundActor} />}
         <h3 className="text-sm font-medium">副角色 {slot + 1}</h3>
         <span className="text-xs text-muted-foreground">
           {follower?.actorToken ? `已绑定 ${boundActor?.label ?? '角色'}` : '尚未绑定'}
@@ -326,6 +328,13 @@ function ModelVisibility({ actor, command }: { actor: { token: number; modelHidd
   </label>
 }
 
+function ActorPortrait({ actor }: { actor: { label: string; portraitKey?: string } }) {
+  const name = actor.label.replace(/ · \d+$/, '')
+  const key = actor.portraitKey || name
+  return <ArtworkEditor key={key} artworkKey={`portrait:${key}`} label={`编辑 ${name} 头像`}
+    fallback={<span aria-hidden="true" className="text-xs">{Array.from(name)[0]}</span>} />
+}
+
 export function ForkEnsembleControls({ state, command }: { state: ForkState; command: ForkCommand }) {
   const primary = useMotionStore(model => model.actors.actors.find(actor => actor.selected))
   const playback = useMotionStore(model => model.player.state)
@@ -350,6 +359,7 @@ export function ForkEnsembleControls({ state, command }: { state: ForkState; com
       <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
       <section aria-label="主角色" className="min-w-0 space-y-2 rounded-lg border border-primary/40 bg-background/70 p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
+          {primary && <ActorPortrait actor={primary} />}
           <h3 className="text-sm font-medium">主角色{primary ? ` · ${primary.label}` : ''}</h3>
           <span className="text-xs text-muted-foreground">物理：{state.primaryPhysics || '暂无当前数据'}</span>
         </div>

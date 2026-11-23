@@ -189,6 +189,11 @@ export function CameraPage({ fork, forkCommand }: { fork?: ForkState | null; for
                     {draft.vmdRangeScale.toFixed(2)} 倍
                   </span>
                 </div>
+                <label className="flex items-center gap-2 text-xs">
+                  <Checkbox checked={draft.vmdScaleAroundActor ?? false} disabled={disabled}
+                    onCheckedChange={(checked) => patch({ vmdScaleAroundActor: checked === true })} />
+                  按角色中心缩放轨迹
+                </label>
                 <Slider
                   aria-label="VMD 运镜范围"
                   min={0.3}
@@ -199,7 +204,7 @@ export function CameraPage({ fork, forkCommand }: { fork?: ForkState | null; for
                   onValueChange={([value]) => patch({ vmdRangeScale: value })}
                 />
                 <p className="text-[11px] leading-relaxed text-muted-foreground">
-                  以角色附近为中心缩小轨迹；会改变构图，不能保证避免穿模。点击下方保存镜头设置可保留。
+                  {draft.vmdScaleAroundActor ? '以角色为中心缩放运镜轨迹，保留镜头视角。' : '沿原镜头光轴缩放，保留机位。'}
                 </p>
               </div>
             )}
@@ -316,6 +321,13 @@ export function CameraPage({ fork, forkCommand }: { fork?: ForkState | null; for
           </div>
         )}
 
+        {(userMode === 1 || userMode === 2) && (
+          <label className="flex items-center gap-2 px-3.5 py-2 text-xs">
+            <Checkbox checked={draft.followGroupCenter ?? false} disabled={disabled}
+              onCheckedChange={(checked) => patch({ followGroupCenter: checked === true })} />
+            跟随全员中心
+          </label>
+        )}
         {(userMode === 1 || userMode === 2 || draft.followActor) && (
           <div className="space-y-2 px-3.5 py-3">
             <div className="flex flex-wrap items-center justify-between gap-2">

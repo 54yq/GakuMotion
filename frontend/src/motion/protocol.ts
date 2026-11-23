@@ -68,6 +68,7 @@ export interface SceneActor {
   label: string
   selected: boolean
   modelHidden?: boolean
+  portraitKey?: string
 }
 
 export interface ActorsState {
@@ -95,6 +96,8 @@ export interface CameraSettings {
   targetOffset: Vector3
   vmdOffset: Vector3
   vmdRangeScale: number
+  vmdScaleAroundActor?: boolean
+  followGroupCenter?: boolean
   followFactor: Vector3
   followRate: Vector3
   followFov: number
@@ -771,6 +774,8 @@ export const DEFAULT_CAMERA_SETTINGS: CameraSettings = {
   targetOffset: { x: 0, y: 0.4, z: 0 },
   vmdOffset: { x: 0, y: 0, z: 0 },
   vmdRangeScale: 1,
+  vmdScaleAroundActor: false,
+  followGroupCenter: false,
   followFactor: { x: 1, y: 1, z: 1 },
   followRate: { x: 0.1, y: 0.1, z: 0.1 },
   followFov: 45,

@@ -119,6 +119,7 @@ namespace GakuMotion
 			if (userMode == 0)
 			{
 				ImGui::SetNextItemWidth((std::min)(240.0f, ImGui::GetContentRegionAvail().x));
+				if (ImGui::Checkbox("按角色中心缩放轨迹", &settings.vmdScaleAroundActor)) changed = true;
 				if (ImGui::SliderFloat("VMD 运镜范围", &settings.vmdRangeScale, 0.3f, 1.0f, "%.2f 倍")) changed = true;
 				ImGui::TextWrapped("以角色附近为中心缩小轨迹；会改变构图，不能保证避免穿模。点击下方保存镜头设置可保留。");
 			}
@@ -214,6 +215,7 @@ namespace GakuMotion
 		{
 			if (settings.mode == CameraMode::Follow)
 			{
+				if (ImGui::Checkbox("跟随全员中心", &settings.followGroupCenter)) changed = true;
 				int target = static_cast<int>(settings.followTarget);
 				ImGui::SetNextItemWidth((std::min)(260.0f, ImGui::GetContentRegionAvail().x));
 				if (ImGui::Combo("跟随部位", &target, "髋部\0胸部\0头部\0"))

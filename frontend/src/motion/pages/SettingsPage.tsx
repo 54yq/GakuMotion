@@ -7,6 +7,7 @@ import { PHYSICS_BACKENDS } from '../protocol'
 import { motionStore, useMotionStore } from '../store'
 import { CollapsiblePropertySection, PropertyRow, PropertySection } from '../components/PropertyGroup'
 import { PendingBadge } from '../components/Unsupported'
+import { setTransportLayout, useTransportLayout } from '../panelMedia'
 
 const HOTKEY_ROWS: Array<[string, string, string]> = [
   ['Ctrl + M', '唤出控制面板', '打开或唤回 GakuMotion 控制窗口'],
@@ -26,6 +27,7 @@ const PANEL_SHORTCUTS: Array<[string, string]> = [
 ]
 
 export function SettingsPage() {
+  const transportLayout = useTransportLayout()
   const physicsBackend = useMotionStore((state) => state.physicsBackend)
   const developerMode = useMotionStore((state) => state.developerMode)
   const motionsRoot = useMotionStore((state) => state.motionsRoot)
@@ -37,6 +39,17 @@ export function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-4" data-testid="settings-page">
+      <PropertySection title="播放条">
+        <PropertyRow label="布局">
+          <Select value={transportLayout} onValueChange={(value) => setTransportLayout(value === 'stacked' ? 'stacked' : 'classic')}>
+            <SelectTrigger aria-label="播放条布局" className="h-8 w-28"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="classic">经典</SelectItem>
+              <SelectItem value="stacked">双行</SelectItem>
+            </SelectContent>
+          </Select>
+        </PropertyRow>
+      </PropertySection>
       {/* Physics & Runtime */}
       <PropertySection
         title={

@@ -807,6 +807,8 @@ namespace GakuMotion
 				int mode = c->IntPath("mode", static_cast<int>(next.mode));
 				int followBehavior = c->IntPath("follow_behavior", static_cast<int>(next.followBehavior));
 				next.followActor = c->BoolPath("follow_actor", next.followActor);
+				next.followGroupCenter = c->BoolPath("follow_group_center", next.followGroupCenter);
+				next.vmdScaleAroundActor = c->BoolPath("vmd_scale_around_actor", next.vmdScaleAroundActor);
 				next.followPlacementYaw = c->BoolPath("follow_placement_yaw", next.followPlacementYaw);
 				next.limitToScene = c->BoolPath("limit_to_scene", next.limitToScene);
 				next.followFov = c->FloatPath("follow_fov", next.followFov);

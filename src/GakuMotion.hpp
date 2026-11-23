@@ -956,6 +956,7 @@ namespace GakuMotion
 						const auto prevMode = camera.settings.mode;
 						const auto prevBehavior = camera.settings.followBehavior;
 						const bool prevEnabled = camera.settings.enabled;
+						if (camera.settings.followGroupCenter != cmd.cameraSettings.followGroupCenter) camera.Release();
 						camera.settings = cmd.cameraSettings;
 						if (!camera.settings.enabled) camera.Release();
 						camera.Publish();
@@ -1521,9 +1522,30 @@ namespace GakuMotion
 				player.cameraSourceDuration = camera.track.frames.empty() ? 0.0f :
 					static_cast<float>(camera.track.frames.size()) / camera.track.fps;
 				const Vector3 liveTrackAnchor = LiveCameraTrackAnchor(actor);
+				Vector3 groupCenter{};
+				unsigned groupCount = 0;
+				if (camera.settings.followGroupCenter && camera.settings.mode == CameraMode::Follow && camera.fnActorPose)
+				{
+					for (const auto& entry : sceneActorRegistry.Entries())
+					{
+						if (actorModelHidden.contains(entry.token) || (camera.fnAlive && !camera.fnAlive(entry.actor))) continue;
+						Vector3 root, hips;
+						Quaternion rotation;
+						if (camera.fnActorPose(entry.actor, root, rotation, hips) && CameraFinite(hips))
+						{
+							groupCenter = groupCenter + hips;
+							++groupCount;
+						}
+					}
+					if (groupCount)
+					{
+						const float count = static_cast<float>(groupCount);
+						groupCenter = {groupCenter.x / count, groupCenter.y / count, groupCenter.z / count};
+					}
+				}
 				camera.Tick(player.state == PlaybackState::Playing || player.state == PlaybackState::Paused || player.state == PlaybackState::Preview,
 				            player.CameraSourceTime(), cameraDeltaTime >= 0.0f ? cameraDeltaTime : deltaTime,
-				            actor, physicalFrame, player.controller.initialYawDegrees, liveTrackAnchor);
+				            actor, physicalFrame, player.controller.initialYawDegrees, liveTrackAnchor, groupCount ? &groupCenter : nullptr);
 				const bool paused = player.state == PlaybackState::Paused;
 				const bool justPaused = paused && !cameraTracePaused;
 				cameraTracePaused = paused;
@@ -2235,6 +2257,8 @@ namespace GakuMotion
 			out << ",\n    \"follow_rate\": ";
 			vector(s.followRate);
 			out << ",\n    \"follow_fov\": " << jsonlite::FormatNumber(s.followFov, 6)
+				<< ",\n    \"follow_group_center\": " << (s.followGroupCenter ? "true" : "false")
+				<< ",\n    \"vmd_scale_around_actor\": " << (s.vmdScaleAroundActor ? "true" : "false")
 				<< ",\n    \"vmd_range_scale\": " << jsonlite::FormatNumber(s.vmdRangeScale, 6)
 				<< ",\n    \"actor_shadow_experiment_mode\": " << s.actorShadowExperimentMode
 				<< ",\n    \"use_per_mode_transforms\": " << (s.usePerModeTransforms ? "true" : "false");
