@@ -68,7 +68,7 @@ namespace ExternalStage
         previous.swap(centers);
         centers.clear();
         const auto add = [&](void* actor) {
-            if (!actor || count + 3 > measurements.size()) return;
+            if (!actor || count >= measurements.size()) return;
             void* object = StageLoader::Invoke(StageLoader::componentGo, actor);
             if (!object || StageLoader::SceneOfFreshGo(object) != owner.sceneHandle) return;
             if (void* hips = controller.fnGetBoneTransform(actor, 0))
@@ -84,17 +84,10 @@ namespace ExternalStage
                             center = {std::lerp(prior.x, p.x, blend), std::lerp(prior.z, p.z, blend)};
                     }
                     centers.emplace(actor, center);
+                    // One fixed-strength shadow per actor. Foot motion cannot modulate opacity.
                     measurements[count++] = {center.x, alignedFloor, center.z, -0.72f};
                 }
             }
-            for (const int bone : {5, 6})
-                if (void* foot = controller.fnGetBoneTransform(actor, bone))
-                {
-                    const auto p = g_getWorldPosNative(foot);
-                    if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) continue;
-                    const float strength = std::clamp(1.f - (p.y - alignedFloor) / 0.55f, 0.f, 1.f);
-                    measurements[count++] = {p.x, alignedFloor, p.z, strength * strength * 0.30f};
-                }
         };
         add(controller.targetActor);
         for (const auto& entry : core.sceneActorRegistry.Entries())
