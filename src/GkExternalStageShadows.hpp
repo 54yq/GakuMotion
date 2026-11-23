@@ -31,7 +31,15 @@ namespace ExternalStage
                 error ? error : "recovered", mountedScene);
             shaderFailure = error;
         };
-        const bool eligible = status.load() == 1 && alignedBackground && controller.fnGetBoneTransform &&
+        const bool enabled = GakuMotion::externalStageContactShadows.load();
+        static bool previouslyEnabled = true;
+        if (previouslyEnabled != enabled)
+        {
+            GakuMotion::host::Info("[GakuMotion][ContactShadow] test enabled=%d stage=%d",
+                enabled, mountedScene);
+            previouslyEnabled = enabled;
+        }
+        const bool eligible = enabled && status.load() == 1 && alignedBackground && controller.fnGetBoneTransform &&
             g_getWorldPosNative;
         if (!eligible)
         {
@@ -146,8 +154,10 @@ namespace ExternalStage
         const bool arrayWritten = StageLoader::TryInvokeStaticVoid(setter, args);
         const bool sizeWritten = SetStageShaderFloat("_GakuExternalStageContactSize",
             GakuMotion::externalStageShadowSize.load(), sizeId);
-        const bool countWritten = SetStageShaderFloat("_GakuExternalStageContactCount",
-            arrayWritten ? static_cast<float>(count) : 0.0f, countId);
+        // The previous vector array remains valid when Unity rejects an update.
+        // Keep its count too, so a rejected frame cannot blank all contacts.
+        const bool countWritten = arrayWritten && SetStageShaderFloat("_GakuExternalStageContactCount",
+            static_cast<float>(count), countId);
         reportShader(!arrayWritten ? "write-array" : !countWritten ? "write-count" :
             !sizeWritten ? "write-size" : nullptr);
         static int lastScene{};

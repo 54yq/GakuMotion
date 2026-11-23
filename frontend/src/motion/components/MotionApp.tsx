@@ -101,6 +101,11 @@ function ActivePage({ fork, command }: { fork: ReturnType<typeof useForkWorkspac
           {fork?.externalStageStatus === 1 && (
             <div className="space-y-2">
               <p role="status">独立舞台已载入</p>
+              {fork.externalStageContactShadows !== undefined && <label className="flex items-center gap-2">
+                <input type="checkbox" checked={fork.externalStageContactShadows}
+                  onChange={(e) => void command('externalStage.contactShadows', { value: e.target.checked })} />
+                人物脚下接触阴影
+              </label>}
               <label className="block">
                 接触阴影大小 {(fork.externalStageShadowSize ?? 1).toFixed(2)} 倍
                 <input aria-label="接触阴影大小" type="range" min={0.25} max={3} step={0.05}

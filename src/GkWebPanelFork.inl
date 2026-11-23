@@ -74,6 +74,7 @@
                 ",\"externalStageActorHeight\":" + JNum(externalStageActorHeight.load()) +
                 ",\"externalStageLocateResult\":" + JNum(externalStageLocateResult.load()) +
                 ",\"externalStageActorAmbient\":" + JBool(externalStageActorAmbient.load()) +
+                ",\"externalStageContactShadows\":" + JBool(externalStageContactShadows.load()) +
                 ",\"externalStageShadowSize\":" + JNum(externalStageShadowSize.load()) +
                 ",\"externalStageGrade\":" + JBool(externalStageGrade.load()) +
                 ",\"externalStagePropStart\":" + JNum(externalStagePropStart.load()) +
@@ -161,6 +162,14 @@
                 bool value = false;
                 if (!BoolParam(params, "value", value)) return CmdResult::Err("invalid_params", "缺少角色调光状态");
                 externalStageActorAmbient.store(value);
+                return CmdResult::Ok();
+            }
+            if (action == "externalStage.contactShadows")
+            {
+                bool enabled{};
+                if (!BoolParam(params, "value", enabled))
+                    return CmdResult::Err("invalid_params", "缺少接触阴影开关状态");
+                externalStageContactShadows.store(enabled);
                 return CmdResult::Ok();
             }
             if (action == "externalStage.shadowSize")
