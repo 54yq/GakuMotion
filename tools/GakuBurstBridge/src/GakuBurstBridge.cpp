@@ -468,6 +468,7 @@ class Bridge {
     };
 
     static inline thread_local StateWork* propertyCapture_{};
+    std::atomic<uint64_t> sceneForcesFilteredGeneration_{0};
 
     static GbbSwingStep ReadSwingStep(const StateWork& work,unsigned phase,int index,
                                      const unsigned char* row,const void* nativeFrame,
@@ -571,10 +572,11 @@ class Bridge {
         auto* result = self->originalPropertyReader_(table,output,stream);
         if (caller==self->propertyReaderReturn_ && propertyCapture_) {
             auto& work = *propertyCapture_;
-            const auto* owner = work.filterOwner;
+            auto* owner = work.filterOwner;
             const bool filtered = result==output && owner && owner->Observing() &&
                 owner->generation_.load(std::memory_order_acquire)==work.filterGeneration &&
                 ClearSceneForceFields(output);
+            if (filtered) owner->sceneForcesFilteredGeneration_.store(work.filterGeneration,std::memory_order_release);
             for (auto& sample:work.inputs) {
                 if (!sample.size) continue;
                 ReadNativePropertyOutput(table,output,sample);
@@ -1298,6 +1300,10 @@ class Bridge {
         if (start < s.ticks || start - s.ticks >= frequency_ / 2) {
             expired_.fetch_add(1, std::memory_order_relaxed);
         } else {
+            if (s.noSceneForces) {
+                stateWork.filterOwner=this;
+                stateWork.filterGeneration=s.generation;
+            }
             Diagnostic d; d.actor = s.actor; d.frame = s.frame; d.time = s.time;
             const bool ok = NativePass(s, stream, d);
             std::lock_guard<std::mutex> lock(mutex_);
@@ -1305,10 +1311,6 @@ class Bridge {
                 generation_.load(std::memory_order_relaxed) == s.generation) {
                 if (ok) { d.sequence = matches_.fetch_add(1, std::memory_order_relaxed) + 1; diagnostic_ = d;
                     if (d.injected) {
-                        if (s.noSceneForces) {
-                            stateWork.filterOwner=this;
-                            stateWork.filterGeneration=s.generation;
-                        }
                         NoteSwingVisit(s,job,swing,stream,caller,d.dt);
                         if (requestedOutput_.generation == s.generation && requestedOutput_.frame == s.frame) {
                             outputProbe = requestedOutput_;
@@ -1787,7 +1789,9 @@ public:
         if (next.noSceneForces) {
             InstallPropertyReader();
             const auto* reader = owner_ ? owner_ : this;
-            forces = reader->propertyReaderStatus_.load(std::memory_order_acquire);
+            forces = sceneForcesFilteredGeneration_.load(std::memory_order_acquire)==next.generation
+                ? "Native Swing scene forces cleared (17 fields)"
+                : reader->propertyReaderStatus_.load(std::memory_order_acquire);
         }
         if (next.beforeQuartz || next.sleeveDiagnostics) {
             if (!EnableQuartzExperiment()) return Reject(GBB_E_UNAVAILABLE,"BeforeQuartz experiment rejected: verified entry unavailable; OFF path remains available");

@@ -346,7 +346,7 @@ namespace
 		return clean;
 	}
 
-	void DispatchFollowerPhysics(GakuMotion::Core& core, void* actor, int frame, bool hasUnityFrame, bool filterSceneForces)
+	void DispatchFollowerPhysics(GakuMotion::Core& core, void* actor, int frame, bool hasUnityFrame, bool filterSceneForces, bool photography)
 	{
 		const auto& followers = core.ensemble.Followers();
 		for (size_t i = 0; i < followers.size(); ++i)
@@ -363,12 +363,15 @@ namespace
 			if (core.followerPhysicsStatus.size() <= i) core.followerPhysicsStatus.resize(i + 1);
 			auto& slot = g_followerPhysics[i];
 			if (slot.frame == frame && slot.actor == actor) return;
-			const bool paused = GakuMotion::live_physics_clock::IsTransportPaused(
+            const bool paused = GakuMotion::live_physics_clock::IsTransportPaused(
                 core.liveTakeoverActive, core.player.state == GakuMotion::PlaybackState::Paused);
-            const int requested = paused ? 0 : core.config.secondaryPhysicsBackend;
+            const int requested = paused ? 0 : photography ? 2 : core.config.secondaryPhysicsBackend;
+            const bool quartz = !photography && core.config.beforeQuartzExperiment;
+            const bool diagnostics = !photography && core.config.sleeveMuscleDiagnostics;
 			if (slot.actor != actor || slot.bindingGeneration != follower.bindingGeneration || slot.backend != requested ||
-			    slot.quartz != core.config.beforeQuartzExperiment || slot.diagnostics != core.config.sleeveMuscleDiagnostics ||
-			    (!paused && (slot.seeks != core.player.SeekCount() || core.player.scrubbing || player.currentTime + .001f < slot.time)))
+			    slot.quartz != quartz || slot.diagnostics != diagnostics ||
+			    (!paused && (!photography || !core.player.scrubbing) &&
+                    (slot.seeks != core.player.SeekCount() || core.player.scrubbing || player.currentTime + .001f < slot.time)))
 			{
 				if (!ClearFollowerPhysics(i, &player))
 				{
@@ -379,18 +382,19 @@ namespace
 					return;
 				}
 				slot.actor = actor; slot.bindingGeneration = follower.bindingGeneration; slot.backend = requested;
-				slot.quartz = core.config.beforeQuartzExperiment; slot.diagnostics = core.config.sleeveMuscleDiagnostics;
+				slot.quartz = quartz; slot.diagnostics = diagnostics;
 			}
 			slot.frame = frame; slot.seeks = core.player.SeekCount(); slot.time = player.currentTime;
 			const auto now = std::chrono::steady_clock::now();
 			const float dt = slot.lastTick.time_since_epoch().count() ? std::chrono::duration<float>(now - slot.lastTick).count() : 0.f;
 			slot.lastTick = now;
-			const bool started = core.player.state == GakuMotion::PlaybackState::Playing || g_followerBridge.State(i).outstanding;
+			const bool started = photography || core.player.state == GakuMotion::PlaybackState::Playing || g_followerBridge.State(i).outstanding;
 			const bool native = requested == 2 && started && g_followerBridge.Publish(i, binding->second, ctrl, player.currentTime, frame, slot.quartz, slot.diagnostics,
                 hasUnityFrame && core.liveTakeoverActive && core.player.state == GakuMotion::PlaybackState::Playing, filterSceneForces);
 			const std::string reason = paused ? "transport_paused" : requested == 0 ? "off" : requested == 1 ? "fallback" :
 				!started ? "native_waiting_for_playback" : g_followerBridge.State(i).reason == "not_requested" ? g_followerBridge.reason : g_followerBridge.State(i).reason;
-			const int actual = GakuMotion::SelectSecondaryPhysicsBackend(requested, native, core.liveTakeoverActive, reason);
+			const int actual = photography && !native ? 0 :
+                GakuMotion::SelectSecondaryPhysicsBackend(requested, native, core.liveTakeoverActive, reason);
 			if (requested == 2 && actual != 1 && slot.actual == 1)
 				ReleaseFallbackToNative(slot.fallback, binding->second, ctrl, static_cast<unsigned>(i + 2));
 			slot.actual = actual;
@@ -1086,7 +1090,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.51-web";
+	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.88-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -1647,7 +1651,11 @@ static void ResetPlacementDynamicBone(void* actor)
 
 #include "GkSceneOwnerRuntime.hpp"
 #include "GkFixedActorLighting.hpp"
+#include "GkExternalStageProfile.hpp"
 #include "GkExternalStage.hpp"
+#include "GkExternalStageLighting.hpp"
+#include "GkExternalStageProps.hpp"
+#include "GkExternalStageShadows.hpp"
 #include "GkPhotographyBgm.hpp"
 #include "GkStageLoadOverride.hpp"
 #include "GkPageObservation.hpp"
@@ -3629,10 +3637,13 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
     if(GakuMotion::camera_handoff::Requested()&&!GakuMotion::camera_handoff::IsReleased()&&visualHandoffNow>=nextCameraHandoffAttempt) {
         nextCameraHandoffAttempt=visualHandoffNow+std::chrono::milliseconds(500);
         const bool wasOwned=core.camera.owned;
-        const auto restored=core.camera.ReleaseForCapture();
-        const bool ready=restored.confirmed&&!core.camera.owned&&!core.camera.captureRestorePending;
+        // A new camera owner inherits the live pose. Restore the borrowed
+        // virtual-camera settings, then stop all Motion pose and lens writes.
+        const auto lensRestore=CameraBridge::ReleaseVirtualCamerasForCapture();
+        core.camera.Release(false);
+        const bool ready=!core.camera.owned&&!core.camera.captureRestorePending;
         if(ready)GakuMotion::camera_handoff::released.store(true,std::memory_order_release);
-        if(g_hostContext.logInfo)g_hostContext.logInfo("[GakuMotion][CameraHandoff] requested=1 owned_before=%d modified=%d confirmed=%d released=%d",int(wasOwned),int(restored.modified),int(restored.confirmed),int(ready));
+        if(g_hostContext.logInfo)g_hostContext.logInfo("[GakuMotion][CameraHandoff] requested=1 owned_before=%d lens_restored=%d released=%d",int(wasOwned),int(lensRestore.confirmed),int(ready));
     }
     if (GakuMotion::visual_handoff::Requested() && !GakuMotion::visual_handoff::IsReleased() && visualHandoffNow>=nextVisualHandoffAttempt) {
         nextVisualHandoffAttempt=visualHandoffNow+std::chrono::milliseconds(500);
@@ -4058,6 +4069,8 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
     };
     recordMainActorPose("before_plugin_pose", false);
 	EyeGazeProbe::Before(activeActor);
+	core.traceExternalStageCamera = ExternalStage::status.load() == 1 &&
+		g_sceneOwner.AllowedContext() == GakuMotion::injection::Context::Photography;
 	if (player.controller.targetActor)
 		GakuMotion::OnLateUpdate(activeActor, anim, nullptr, dtToPass, isNewPhysicalFrame,
 		                        s_cameraFrameDelta, s_cameraPhysicalFrame,
@@ -4095,7 +4108,8 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 		g_sceneOwner.AllowedContext() == GakuMotion::injection::Context::Photography;
 	if (player.state != GakuMotion::PlaybackState::Stopped)
 		DispatchFollowerPhysics(core, activeActor, unityFrame >= 0 ? unityFrame : s_fallbackFrame,
-			unityFrame >= 0, filterSceneForces);
+			unityFrame >= 0, filterSceneForces,
+            g_sceneOwner.AllowedContext() == GakuMotion::injection::Context::Photography);
 	if (isNewPhysicalFrame && !GakuMotion::visual_handoff::IsReleased())
 	{
 		void* mainCam = HelperCameraGetMain();
@@ -4124,13 +4138,17 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 		}
 		else if (frame != g_physicsFrame || g_physicsActor != activeActor)
 		{
-			const bool paused = GakuMotion::live_physics_clock::IsTransportPaused(
+            const bool photography = g_sceneOwner.AllowedContext() == GakuMotion::injection::Context::Photography;
+            const bool paused = GakuMotion::live_physics_clock::IsTransportPaused(
                 core.liveTakeoverActive, player.state == GakuMotion::PlaybackState::Paused);
-            const int requested = paused ? 0 : core.config.secondaryPhysicsBackend;
-			if (requested != g_physicsBackend || core.config.beforeQuartzExperiment != g_physicsBeforeQuartz ||
-				core.config.sleeveMuscleDiagnostics != g_physicsSleeveDiagnostics ||
+            const int requested = paused ? 0 : photography ? 2 : core.config.secondaryPhysicsBackend;
+            const bool quartz = !photography && core.config.beforeQuartzExperiment;
+            const bool diagnostics = !photography && core.config.sleeveMuscleDiagnostics;
+			if (requested != g_physicsBackend || quartz != g_physicsBeforeQuartz ||
+				diagnostics != g_physicsSleeveDiagnostics ||
 				activeActor != g_physicsActor || core.loadedMotionGeneration != g_physicsMotionGeneration ||
-				(!paused && (player.SeekCount() != g_physicsSeeks || player.scrubbing || player.currentTime + .001f < g_physicsTime)))
+				(!paused && (!photography || !player.scrubbing) &&
+                    (player.SeekCount() != g_physicsSeeks || player.scrubbing || player.currentTime + .001f < g_physicsTime)))
 			{
 				if (g_physicsActor == activeActor)
 				{
@@ -4141,8 +4159,8 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 				ClearSecondaryPhysics();
 				g_burstBridge.RetryUnavailable();
 				g_physicsBackend = requested;
-				g_physicsBeforeQuartz = core.config.beforeQuartzExperiment;
-				g_physicsSleeveDiagnostics = core.config.sleeveMuscleDiagnostics;
+				g_physicsBeforeQuartz = quartz;
+				g_physicsSleeveDiagnostics = diagnostics;
 				g_physicsMotionGeneration = core.loadedMotionGeneration;
 				g_physicsActor = activeActor;
 			}
@@ -4160,18 +4178,20 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 			g_physicsLastTick = dispatchBegin;
 			// A seek or track change invalidates the packet. The same role clock
 			// can receive the replacement pose in track preview.
-			const bool nativeReadyToStart = GakuMotion::live_physics_clock::CanPublish(
+			const bool nativeReadyToStart = photography || GakuMotion::live_physics_clock::CanPublish(
 				player.state == GakuMotion::PlaybackState::Playing,
 				player.state == GakuMotion::PlaybackState::Paused, g_burstBridge.HasCaptureInput(),
 				core.liveTakeoverActive && !core.liveTakeoverFault && OwnsPrimaryMmdClock(activeActor),
 				player.state == GakuMotion::PlaybackState::Preview && player.clip.total_frames > 0);
 			bool native = requested == 2 && nativeReadyToStart && g_burstBridge.Publish(binding->second, player.controller,
 			                                                      player.AppliedPoseTime(), frame,
-			                                                      core.config.beforeQuartzExperiment,
-			                                                      core.config.sleeveMuscleDiagnostics,
-                                                          unityFrame >= 0 && core.liveTakeoverActive && player.state == GakuMotion::PlaybackState::Playing, filterSceneForces);
+			                                                      quartz,
+			                                                      diagnostics,
+                                                          unityFrame >= 0 && core.liveTakeoverActive &&
+                                                          player.state == GakuMotion::PlaybackState::Playing, filterSceneForces);
 			const std::string reason = paused ? "transport_paused" : requested == 2 ? (nativeReadyToStart ? g_burstBridge.reason : "native_waiting_for_playback") : requested == 1 ? "fallback" : "off";
-			const int actual = GakuMotion::SelectSecondaryPhysicsBackend(requested, native, core.liveTakeoverActive, reason);
+			const int actual = photography && !native ? 0 :
+                GakuMotion::SelectSecondaryPhysicsBackend(requested, native, core.liveTakeoverActive, reason);
 			if (requested == 2 && actual != 1 && g_physicsActual == 1)
 			{
 				ReleaseFallbackToNative(g_fallbackPhysics, binding->second, player.controller, 1);
@@ -4269,6 +4289,8 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 			if (reason != g_physicsReason)
 			{
 				g_physicsReason = reason;
+                if (photography && native)
+                    GakuMotion::host::Info("[GakuMotion][Photography] native-only Swing actor=%p; scene force filter requested", activeActor);
 				// Transient by design: native_pending resolves to native within a
 				// frame or two, so this is a trace, not a warning.
 				GM_DEBUG("[GakuMotion][Physics] requested=%d actual=%d reason=%s", requested, g_physicsActual,
@@ -4298,6 +4320,7 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	}
 	// Native foot AO may have been derived before the post-actor callback.
 	// Consume the completed body + secondary pose in the same tick.
+    ExternalStage::UpdateHeldProps(core, activeActor);
 	ActorGroundShadow::RefreshAfterPose(activeActor, poseSerialBefore);
 	GroundShadowProbe::AfterPose(activeActor, poseSerialBefore);
     recordMainActorPose("after_plugin_pose", true);
@@ -4469,7 +4492,8 @@ void MotionShutdown(void*)
 	GakuMotion::capture::Shutdown();
 	StageLoadOverride::Shutdown();
 	PhotographyBgm::Release();
-	ExternalStage::Tick(false, 0);
+	ExternalStage::ResetTimeline();
+	ExternalStage::Tick(false, 0, {}, nullptr);
 	SceneOwnerRuntime::Shutdown();
 	ReleasePendingFileDialog();
 	core.gui.browsePendingKind = -1;
@@ -4617,10 +4641,62 @@ void MotionTick(void*, float)
         {
             const bool externalStageAdmitted = GakuMotion::externalStageEnabled.load() &&
                 !GakuMotion::visual_handoff::Requested() && g_activeSceneVerified &&
-                SceneOwnerRuntime::cachedActiveScene == ExternalStage::placeholder &&
-                GakuMotion::stage_load::receipt.Context(SceneOwnerRuntime::cachedActiveScene,
-                    g_verifiedOwnerSceneName, g_sceneOwner) == GakuMotion::injection::Context::Photography;
-            ExternalStage::Tick(externalStageAdmitted, g_verifiedActiveSceneHandle);
+                g_verifiedOwnerSceneName == "Photography" &&
+                g_sceneOwner.AllowedContext() == GakuMotion::injection::Context::Photography &&
+                (g_verifiedActiveSceneHandle == g_sceneOwner.sceneHandle ||
+                    SceneOwnerRuntime::cachedActiveScene.starts_with("env_3d_"));
+            const int nativeBackground = externalStageAdmitted &&
+                SceneOwnerRuntime::cachedActiveScene.starts_with("env_3d_") &&
+                g_verifiedActiveSceneHandle != g_sceneOwner.sceneHandle ? g_verifiedActiveSceneHandle : 0;
+            void* stageActor = core.player.controller.targetActor;
+            if (!stageActor && !core.sceneActorRegistry.Entries().empty()) stageActor = core.sceneActorRegistry.Entries().front().actor;
+            ExternalStage::Tick(externalStageAdmitted, nativeBackground, g_sceneOwner, stageActor,
+                core.player.state == GakuMotion::PlaybackState::Stopped ? &core.player.controller : nullptr);
+            if (ExternalStage::status.load() == 1)
+            {
+                if (GakuMotion::externalStageLocate.exchange(false))
+                {
+                    GakuMotion::Core::ActorStart start{};
+                    const bool ready = GakuMotion::Core::ReadActorStart(core.player, start);
+                    if (ready)
+                    {
+                        const auto& anchor = ExternalStage::stageAnchor;
+                        auto offset = core.player.controller.initialPositionOffset;
+                        offset.x += anchor.x - start.world.x;
+                        offset.z += anchor.z - start.world.z;
+                        // The stage keeps the MMD X/Z basis, while GKClip negates both axes.
+                        // Rotate the character travel into the stage basis around its first frame.
+                        constexpr float radiansToDegrees = 57.2957795131f;
+                        const float yaw = std::remainder(
+                            ExternalStage::stageYaw * radiansToDegrees + 180.0f - start.heading, 360.0f);
+                        core.QueueInitialPosition(offset);
+                        core.QueueInitialYaw(yaw);
+                        core.QueuePause();
+                        core.QueueSeek(0);
+                        GakuMotion::externalStageSeek.store(0);
+                        GakuMotion::host::Info("[GakuMotion][ExternalStage] Place01 anchor=(%g,%g,%g) actor_start=(%g,%g,%g) offset=(%g,%g,%g) yaw=%g",
+                            anchor.x, anchor.y, anchor.z, start.world.x, start.world.y, start.world.z,
+                            offset.x, offset.y, offset.z, yaw);
+                    }
+                    GakuMotion::externalStageLocateResult.store(ready ? 1 : -1);
+                }
+                if (GakuMotion::externalStageMeasure.exchange(false))
+                {
+                    const auto height = ExternalStage::MeasureActorHeight(stageActor);
+                    GakuMotion::externalStageActorHeight.store(height);
+                    GakuMotion::host::Info("[GakuMotion][ExternalStage] actor bounds height=%g door=2.52 bench=0.885", height);
+                }
+            }
+            else
+            {
+                GakuMotion::externalStageLocate.store(false);
+                GakuMotion::externalStageMeasure.store(false);
+                GakuMotion::externalStageLocateResult.store(0);
+                GakuMotion::externalStageActorHeight.store(0);
+            }
+            ExternalStage::TickTimeline(core.player.currentTime, core.player.clip.total_frames != 0);
+            ExternalStage::UpdateHeldProps(core);
+            ExternalStage::UpdateContactShadows(core);
             GakuMotion::externalStageStatus.store(ExternalStage::status.load());
             NativeAudio::Sync();
             bool mutePhotographyBgm = false;
@@ -4633,7 +4709,7 @@ void MotionTick(void*, float)
                 GakuMotion::stage_load::receipt.Context(SceneOwnerRuntime::cachedActiveScene,
                     g_verifiedOwnerSceneName, g_sceneOwner) == GakuMotion::injection::Context::Photography);
         }
-		FixedActorLighting::Tick(core);
+		ExternalStage::TickActorAmbient(core);
 		PollCostumeCapture(core);
         const bool frameLog = core.liveFrameMonitor.Update(tickStarted,
             core.liveViewingConfirmed && core.liveObservation.confirmed, core.liveOwnerToken, core.liveOwnerScene);

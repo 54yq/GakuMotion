@@ -8,7 +8,7 @@
 
 GakuMotion 是《学园偶像大师》的 GakuLoader 演出插件，用游戏原有角色、服装和渲染环境播放外部 MMD 动作、表情、镜头与音乐。此分支由[野生的空白（54yq）](https://github.com/54yq)维护，基于 [crested-ezios/GakuMotion](https://github.com/crested-ezios/GakuMotion)。
 
-**当前分支为 v4.3.51-web，加载器显示 `v0.2.0+fork.4.3.51-web`。** Live 接管、原生物理与风场仍属于实验功能，表现取决于游戏版本、人物和服装。[分支更新记录](docs/CHANGELOG.md) · [Web 看板说明](docs/WEB_PANEL_BRIDGE.md)
+**当前分支为 v4.3.88-web，加载器显示 `v0.2.0+fork.4.3.88-web`。** Live 接管、原生物理与风场仍属于实验功能，表现取决于游戏版本、人物和服装。[分支更新记录](docs/CHANGELOG.md) · [Web 看板说明](docs/WEB_PANEL_BRIDGE.md)
 
 [上游安装指南](https://github.com/crested-ezios/GakuMotion/blob/main/docs/INSTALLATION.md) · [上游使用指南](https://github.com/crested-ezios/GakuMotion/blob/main/docs/USAGE.md) · [上游常见问题](https://github.com/crested-ezios/GakuMotion/blob/main/docs/TROUBLESHOOTING.md)
 
@@ -66,6 +66,7 @@ GakuMotion 是《学园偶像大师》的 GakuLoader 演出插件，用游戏原
 
 ### 镜头、音效与骨骼校正
 
+- **外部摄影舞台**支持独立场景、演员起点对齐、灯光和接触阴影，以及逐道具时间轴。Web 看板支持实时预览、保存和取消道具位置调整。
 - **原生物理**在摄影和 Live 接管时过滤插件驱动角色的场景外力，同时保留原生 Swing 求解、碰撞与骨链限制。
 - **镜头与舞台**支持镜头随主角朝向、Live VMD 相机对齐及自由视角交接。景深和风场调整为实验选项。
 - **游戏音效**可单独屏蔽 Se（含界面音效）。开关默认关闭，离开支持场景或进入受保护的拍照流程时尝试恢复原状。来源为 huvz04 的上游 [PR #13](https://github.com/crested-ezios/GakuMotion/pull/13)，该 PR 已关闭，本分支保留实现。

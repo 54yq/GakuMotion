@@ -539,6 +539,20 @@ export interface ForkFollower {
 export interface ForkState {
   externalStageEnabled?: boolean
   externalStageStatus?: number
+  externalStageTime?: number
+  externalStageDuration?: number
+  externalStagePlaying?: boolean
+  externalStageFollow?: boolean
+  externalStageActorHeight?: number
+  externalStageLocateResult?: number
+  externalStageActorAmbient?: boolean
+  externalStageShadowSize?: number
+  externalStageGrade?: boolean
+  externalStageCues?: StagePropCue[]
+  externalStagePropStart?: number
+  externalStagePropEnd?: number
+  externalStageHeldProp?: number
+  externalStageLeftHand?: boolean
   session: number
   owner: number
   epoch: number
@@ -1078,4 +1092,14 @@ export function symmetricalHid(hid: number): number {
   if (hid >= 24 && hid <= 38) return hid + 15
   if (hid >= 39 && hid <= 53) return hid - 15
   return -1
+}
+
+export type StagePropCue = {
+  prop: number
+  place: number
+  left: boolean
+  first: number
+  last: number
+  position: { x: number; y: number; z: number }
+  rotation: { x: number; y: number; z: number }
 }

@@ -297,14 +297,62 @@ namespace GakuMotion
 	void DrawStagePage(GuiOverlay& overlay, const GuiContext& ctx);
     inline std::atomic<bool> externalStageEnabled{false};
     inline std::atomic<int> externalStageStatus{0};
+    inline constexpr float externalStageDuration = 4805.0f / 30.0f;
+    inline std::atomic<float> externalStageTime{0}, externalStageSeek{-1};
+    inline std::atomic<bool> externalStagePlaying{false}, externalStageFollow{true};
+    inline std::atomic<int> externalStageHeldProp{0};
+    inline std::atomic<bool> externalStageGrade{true};
+    inline std::atomic<float> externalStageShadowSize{1.0f};
+    inline std::atomic<bool> externalStageActorAmbient{true};
+    inline std::atomic<bool> externalStageLocate{}, externalStageMeasure{};
+    inline std::atomic<float> externalStageActorHeight{0};
+    inline std::atomic<int> externalStageLocateResult{0};
+    inline std::atomic<float> externalStagePropStart{0}, externalStagePropEnd{externalStageDuration};
+    inline std::atomic<bool> externalStageLeftHand{false};
 #if defined(GKMOTION_ENABLE_IMGUI) || defined(HAS_IMGUI)
     inline void DrawExternalStageControl()
     {
         bool enabled = externalStageEnabled.load();
         if (ImGui::Checkbox("启用外部舞台", &enabled)) externalStageEnabled.store(enabled);
-        ImGui::TextWrapped("Meni Shuki Rush｜摄影占位：中庭（日中）。切换摄影背景或重新进入摄影后生效。");
+        ImGui::TextWrapped("Meni Shuki Rush｜摄影独立场景。关闭开关可恢复原背景。");
+        bool grade = externalStageGrade.load();
+        if (ImGui::Checkbox("粉色调色", &grade)) externalStageGrade.store(grade);
+        bool ambient = externalStageActorAmbient.load();
+        if (ImGui::Checkbox("角色跟随舞台调光", &ambient)) externalStageActorAmbient.store(ambient);
+        float shadowSize = externalStageShadowSize.load();
+        if (ImGui::SliderFloat("接触阴影大小", &shadowSize, 0.25f, 3.0f, "%.2f 倍")) externalStageShadowSize.store(shadowSize);
         const int status = externalStageStatus.load();
-        if (status == 1) ImGui::TextUnformatted("舞台模型已实例化");
+        if (status == 1)
+        {
+            ImGui::TextUnformatted("独立舞台已载入");
+            if (ImGui::Button("定位到 1 号起始站位")) externalStageLocate.store(true);
+            ImGui::SameLine();
+            if (ImGui::Button("测量当前角色高度")) externalStageMeasure.store(true);
+            const auto result = externalStageLocateResult.load();
+            if (result > 0) ImGui::TextUnformatted("已定位到 1 号位");
+            if (result < 0) ImGui::TextUnformatted("请先载入并预览主角色动作");
+            const float height = externalStageActorHeight.load();
+            if (height > 0) ImGui::Text("角色 %.2f m | 铁门 2.52 m | 长椅 0.89 m", height);
+            if (height < 0) ImGui::TextUnformatted("当前角色尺寸不可读");
+            bool follow = externalStageFollow.load();
+            if (ImGui::Checkbox("跟随曲目", &follow)) externalStageFollow.store(follow);
+            ImGui::BeginDisabled(follow);
+            float time = externalStageTime.load();
+            if (ImGui::SliderFloat("舞台进度", &time, 0, externalStageDuration, "%.1f 秒"))
+                externalStageSeek.store(time);
+            const bool playing = externalStagePlaying.load();
+            if (ImGui::Button(playing ? "暂停舞台" : "播放舞台")) externalStagePlaying.store(!playing);
+            ImGui::SameLine();
+            if (ImGui::Button("回到开头")) externalStageSeek.store(0);
+            ImGui::EndDisabled();
+            int prop = externalStageHeldProp.load();
+            if (ImGui::SliderInt("时间轴手持道具（0 为随曲目使用预设）", &prop, 0, 10)) externalStageHeldProp.store(prop);
+            float start = externalStagePropStart.load(), end = externalStagePropEnd.load();
+            if (ImGui::SliderFloat("拿起时间", &start, 0, end, "%.2f 秒")) externalStagePropStart.store(start);
+            if (ImGui::SliderFloat("放下时间", &end, start, externalStageDuration, "%.2f 秒")) externalStagePropEnd.store(end);
+            bool left = externalStageLeftHand.load();
+            if (ImGui::Checkbox("使用左手", &left)) externalStageLeftHand.store(left);
+        }
         if (status == -1) ImGui::TextUnformatted("舞台载入失败，请查看 GakuLoader 日志");
     }
 #endif

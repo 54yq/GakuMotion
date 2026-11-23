@@ -18,6 +18,7 @@
 #include "GkLiveObservation.hpp"
 #include "GkCaptureSafety.hpp"
 #include "GkStageLoadSettings.hpp"
+#include "GkStagePropTimeline.hpp"
 #include "GkDataLayout.hpp"
 #include "GkVisualHandoff.hpp"
 #include "GkCameraHandoff.hpp"
@@ -396,6 +397,10 @@ namespace GakuMotion
 		int (*fnPollCameraImport)(std::string&){nullptr};
 		// Fresh active actors in the admitted owner scene; managed reads stay on Unity thread.
 		std::vector<void*> sceneActors;
+		bool traceExternalStageCamera{false};
+		uint64_t cameraTraceMotion{0};
+		int cameraTraceSeek{-1};
+		bool cameraTracePaused{};
 		SceneActorRegistry sceneActorRegistry;
 		std::unordered_set<std::string> actorPropHidden;
 		bool CanControlActorProps() const
@@ -464,6 +469,8 @@ namespace GakuMotion
 		std::string localRoot;
 		std::string motionsRoot;
 		std::string configRoot;
+		std::vector<stage_prop_timeline::Cue> stagePropCues = stage_prop_timeline::meniDefaults;
+		std::optional<std::vector<stage_prop_timeline::Cue>> stagePropPreview;
 		std::string logsRoot, diagnosticsRoot, transactionRoot;
 		DataLayout dataLayout;
 		std::string globalOverridePath;
@@ -1287,6 +1294,7 @@ namespace GakuMotion
 			gui.motionsRoot = motionsRoot;
 
 			// 1. 控制文件：首次运行生成模板，随后立即读取一次
+			stagePropCues = stage_prop_timeline::Load(MotionPathFromUtf8(configRoot + "/meni_stage_props.txt"));
 			config.rootDir = configRoot;
 			config.path = configRoot + "/control.json";
 			const bool createdConfig = config.EnsureFileExists();
@@ -1516,6 +1524,31 @@ namespace GakuMotion
 				camera.Tick(player.state == PlaybackState::Playing || player.state == PlaybackState::Paused || player.state == PlaybackState::Preview,
 				            player.CameraSourceTime(), cameraDeltaTime >= 0.0f ? cameraDeltaTime : deltaTime,
 				            actor, physicalFrame, player.controller.initialYawDegrees, liveTrackAnchor);
+				const bool paused = player.state == PlaybackState::Paused;
+				const bool justPaused = paused && !cameraTracePaused;
+				cameraTracePaused = paused;
+				if (traceExternalStageCamera && camera.owned && camera.settings.mode == CameraMode::Track &&
+					camera.fnFollowTarget &&
+					(cameraTraceMotion != loadedMotionGeneration || cameraTraceSeek != player.SeekCount() || justPaused))
+				{
+					CameraFrame trackFrame;
+					if (camera.track.Sample(player.CameraSourceTime(), trackFrame))
+					{
+						cameraTraceMotion = loadedMotionGeneration;
+						cameraTraceSeek = player.SeekCount();
+						const auto& pos = camera.desired.position;
+						LogInfo(detail::FormatMsg("[GakuMotion][ExternalStageCamera] t=%.3f track=(%.3f,%.3f,%.3f) world=(%.3f,%.3f,%.3f) placement_yaw=%.2f scale=%.3f fov=%.2f",
+							player.CameraSourceTime(), trackFrame.position.x, trackFrame.position.y, trackFrame.position.z,
+							pos.x, pos.y, pos.z, player.controller.initialYawDegrees, camera.settings.vmdRangeScale, camera.desired.fov));
+						for (void* candidate : sceneActors)
+						{
+							Vector3 head;
+							if (camera.fnFollowTarget(candidate, CameraFollowTarget::Head, head))
+								LogInfo(detail::FormatMsg("[GakuMotion][ExternalStageCamera] actor=%p head=(%.3f,%.3f,%.3f) camera_distance=%.3f",
+									candidate, head.x, head.y, head.z, std::hypot(head.x - pos.x, head.y - pos.y, head.z - pos.z)));
+						}
+					}
+				}
 				// One local diagnostic per session/clip/actor. These values let us
 				// distinguish a bad baseline from a mismatched imported camera.
 				if (liveTakeoverActive && player.controller.currentBinding.actor == actor &&
@@ -3466,12 +3499,12 @@ namespace GakuMotion
 				if (!ReadActorStart(*follower.player, start)) { ensembleNotice = "对齐失败：请先播放或预览，等待所有角色骨架就绪"; return; }
 				if (!fnReadFormationOrigin(follower.player->currentMotionDir, origin))
 				{ ensembleNotice = "对齐失败：副角色曲目缺少可验证的原始 VMD"; return; }
-				const Vector3 relative = basis.Rotate({origin.x - mainOrigin.x, 0, origin.z - mainOrigin.z});
+				const Vector3 relative = basis.Rotate(origin - mainOrigin);
 				const Vector3 target = main.world + relative;
 				const auto& old = follower.player->controller.initialPositionOffset;
-				updates[i] = {true, {old.x + target.x - start.world.x, old.y, old.z + target.z - start.world.z},
+				updates[i] = {true, {old.x + target.x - start.world.x, old.y + target.y - start.world.y, old.z + target.z - start.world.z},
 				              std::remainder(main.heading + player.controller.initialYawDegrees - start.heading, 360.0f)};
-				if (!std::isfinite(updates[i].position.x) || !std::isfinite(updates[i].position.z) || !std::isfinite(updates[i].yaw))
+				if (!std::isfinite(updates[i].position.x) || !std::isfinite(updates[i].position.y) || !std::isfinite(updates[i].position.z) || !std::isfinite(updates[i].yaw))
 				{ ensembleNotice = "对齐失败：站位计算结果无效"; return; }
 				++count;
 			}

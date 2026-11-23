@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { StagePropTimeline } from './StagePropTimeline'
 import {
   RiFlaskFill,
   RiLoader4Fill,
@@ -85,9 +86,105 @@ function ActivePage({ fork, command }: { fork: ReturnType<typeof useForkWorkspac
               onChange={(event) => void command('externalStage.enable', { value: event.target.checked })} />
             启用外部舞台
           </label>
-          <p className="text-sm text-muted-foreground">Meni Shuki Rush · 摄影占位：中庭（日中）</p>
-          <p className="text-sm text-muted-foreground">切换摄影背景或重新进入摄影后生效。</p>
-          {fork?.externalStageStatus === 1 && <p role="status">舞台模型已实例化</p>}
+          <p className="text-sm text-muted-foreground">Meni Shuki Rush · 摄影独立场景</p>
+          <p className="text-sm text-muted-foreground">开启后在摄影中加载，关闭时恢复原背景。</p>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={fork?.externalStageGrade ?? true}
+              onChange={(e) => void command('externalStage.grade', { value: e.target.checked })} />
+            粉色调色
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={fork?.externalStageActorAmbient ?? true}
+              onChange={(e) => void command('externalStage.actorAmbient', { value: e.target.checked })} />
+            角色跟随舞台调光
+          </label>
+          {fork?.externalStageStatus === 1 && (
+            <div className="space-y-2">
+              <p role="status">独立舞台已载入</p>
+              <label className="block">
+                接触阴影大小 {(fork.externalStageShadowSize ?? 1).toFixed(2)} 倍
+                <input aria-label="接触阴影大小" type="range" min={0.25} max={3} step={0.05}
+                  value={fork.externalStageShadowSize ?? 1}
+                  onChange={(e) => void command('externalStage.shadowSize', { value: e.target.valueAsNumber })} />
+              </label>
+              <div className="flex flex-wrap gap-4">
+                <button type="button" onClick={() => void command('externalStage.locate', {})}>定位到 1 号起始站位</button>
+                <button type="button" onClick={() => void command('externalStage.measure', {})}>测量当前角色高度</button>
+              </div>
+              {fork.externalStageLocateResult === 1 && <p role="status">已定位到 1 号位</p>}
+              {fork.externalStageLocateResult === -1 && <p role="status">请先载入并预览主角色动作</p>}
+              {(fork.externalStageActorHeight ?? 0) > 0 && (
+                <p role="status">角色 {fork.externalStageActorHeight?.toFixed(2)} m · 铁门 2.52 m · 长椅 0.89 m</p>
+              )}
+              {fork.externalStageActorHeight === -1 && <p role="status">当前角色尺寸不可读</p>}
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={fork.externalStageFollow ?? false}
+                  onChange={(e) => void command('externalStage.follow', { value: e.target.checked })} />
+                跟随曲目
+              </label>
+              <label className="block">
+                舞台进度 {(fork.externalStageTime ?? 0).toFixed(1)} / {(fork.externalStageDuration ?? 0).toFixed(1)} 秒
+                <input aria-label="舞台进度" className="block w-full" type="range" min={0}
+                  max={fork.externalStageDuration ?? 0} step={0.033333}
+                  disabled={fork.externalStageFollow} value={fork.externalStageTime ?? 0}
+                  onChange={(e) => void command('externalStage.seek', { value: e.target.valueAsNumber })} />
+              </label>
+              <button type="button" disabled={fork.externalStageFollow}
+                onClick={() => void command('externalStage.play', { value: !fork.externalStagePlaying })}>
+                {fork.externalStagePlaying ? '暂停舞台' : '播放舞台'}
+              </button>
+              <button className="ml-4" type="button" disabled={fork.externalStageFollow}
+                onClick={() => void command('externalStage.seek', { value: 0 })}>回到开头</button>
+              {fork.externalStageCues && <StagePropTimeline cues={fork.externalStageCues} time={fork.externalStageTime ?? 0} command={command} />}
+              <label className="flex items-center gap-2">
+                单道具临时预览
+                <select value={fork.externalStageHeldProp ?? 0}
+                  onChange={(e) => void command('externalStage.handProp', {
+                    prop: Number(e.target.value), left: fork.externalStageLeftHand ?? false,
+                  })}>
+                  {['跟随曲目时使用舞台预设', '1205-00', '1205-01', '1205-02', '1205-03', '1500-00',
+                    '1500-01', '1500-02', '1548-00', '1548-01', '1108-00'].map((name, index) => (
+                    <option key={name} value={index}>{name}</option>
+                  ))}
+                </select>
+                <select aria-label="持物手" value={fork.externalStageLeftHand ? 'left' : 'right'}
+                  onChange={(e) => void command('externalStage.handProp', {
+                    prop: fork.externalStageHeldProp ?? 0, left: e.target.value === 'left',
+                  })}>
+                  <option value="right">右手</option>
+                  <option value="left">左手</option>
+                </select>
+              </label>
+              <div className="flex gap-4">
+                <button type="button" onClick={() => void command('externalStage.propRange', {
+                  start: fork.externalStageTime ?? 0, end: fork.externalStagePropEnd ?? 0,
+                })} disabled={(fork.externalStageTime ?? 0) >= (fork.externalStagePropEnd ?? 0)}>在当前进度拿起</button>
+                <button type="button" onClick={() => void command('externalStage.propRange', {
+                  start: fork.externalStagePropStart ?? 0, end: fork.externalStageTime ?? 0,
+                })} disabled={(fork.externalStageTime ?? 0) <= (fork.externalStagePropStart ?? 0)}>在当前进度放下</button>
+              </div>
+              <div className="flex gap-4">
+                <label>拿起时间
+                  <input aria-label="拿起时间" type="range" min={0} max={fork.externalStageDuration}
+                    step="any" value={fork.externalStagePropStart ?? 0}
+                    onChange={(e) => void command('externalStage.propRange', {
+                      start: Math.min(e.target.valueAsNumber, (fork.externalStagePropEnd ?? 0) - 0.001),
+                      end: fork.externalStagePropEnd ?? 0,
+                    })} />
+                  {(fork.externalStagePropStart ?? 0).toFixed(2)} 秒
+                </label>
+                <label>放下时间
+                  <input aria-label="放下时间" type="range" min={0} max={fork.externalStageDuration}
+                    step="any" value={fork.externalStagePropEnd ?? 0}
+                    onChange={(e) => void command('externalStage.propRange', {
+                      start: fork.externalStagePropStart ?? 0,
+                      end: Math.max(e.target.valueAsNumber, (fork.externalStagePropStart ?? 0) + 0.001),
+                    })} />
+                  {(fork.externalStagePropEnd ?? 0).toFixed(2)} 秒
+                </label>
+              </div>
+            </div>
+          )}
           {fork?.externalStageStatus === -1 && <p role="alert">舞台载入失败，请查看 GakuLoader 日志。</p>}
         </section>
       )

@@ -209,7 +209,7 @@ namespace GakuMotion
 		Vector3 boundsMin{-5, 0.05f, -5}, boundsMax{5, 5, 5}; // world-space AABB, opt-in
 		Vector3 followOffset{0, 0.6f, 3}, targetOffset{0, 0.4f, 0}; // captured hips camera offset / selected part aim offset
 		Vector3 vmdOffset{0, 0, 0}; // initial offset in actor coordinate frame (e.g. height adjustment for shorter idols)
-		float vmdRangeScale{1.0f}; // scale the VMD camera path around an actor-local chest-height anchor
+		float vmdRangeScale{1.0f}; // zoom around the authored frame center
 		Vector3 followFactor{1.0f, 1.0f, 1.0f}; // captured camera-local X/Y/Z displacement fractions
 		Vector3 followRate{0.1f, 0.1f, 0.1f}; // per-axis response at 60 Hz: 0 freezes, 1 tracks immediately
 		float followFov{45};
@@ -528,13 +528,11 @@ namespace GakuMotion
 				const Quaternion qRot = Quaternion::FromEulerDegreesXYZ(tf.rotation.x, tf.rotation.y, tf.rotation.z);
 				if (settings.vmdRangeScale != 1.0f)
 				{
-					// A fixed actor-local anchor avoids scaling the track towards the floor.
-					// Preserve orientation and scale the implied focus distance with the pose.
-					const Vector3 pivot{0.0f, 1.0f, 0.0f};
-					const Vector3 delta = frame.position - pivot;
-					frame.position = pivot + Vector3{delta.x * settings.vmdRangeScale,
-						delta.y * settings.vmdRangeScale, delta.z * settings.vmdRangeScale};
-					frame.orthographicSize *= settings.vmdRangeScale;
+					// Optical zoom preserves the authored center ray and camera position.
+					constexpr float halfRadians = 0.00872664626f;
+					frame.fov = std::max(1.f, std::atan(std::tan(frame.fov * halfRadians) *
+						settings.vmdRangeScale) / halfRadians);
+					frame.orthographicSize = std::max(0.001f, frame.orthographicSize * settings.vmdRangeScale);
 				}
 				// The Live baseline follows the actor transform, while the authored
 				// track follows the optional placement yaw around that baseline.
