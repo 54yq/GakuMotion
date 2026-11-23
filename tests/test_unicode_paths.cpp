@@ -4,6 +4,7 @@
 #endif
 #include "GkWindowsPaths.hpp"
 #include "GkBoneOverride.hpp"
+#include "GkJsonLite.hpp"
 #include <filesystem>
 #include <fstream>
 #include <cstdio>
@@ -53,6 +54,18 @@ int wmain(int argc, wchar_t** argv)
     GakuMotion::BoneOverrideSet loaded;
     Check(loaded.LoadFromFile(GakuMotion::MotionPathToUtf8(config)) && loaded.enabled,
         "read override under Unicode root");
+
+    const HANDLE replacementHandle = CreateFileW(config.c_str(), DELETE, FILE_SHARE_READ | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    Check(replacementHandle != INVALID_HANDLE_VALUE, "open Unicode JSON with rename access");
+    if (replacementHandle != INVALID_HANDLE_VALUE)
+    {
+        GakuMotion::jsonlite::Value json;
+        std::string error;
+        Check(GakuMotion::jsonlite::ParseFile(GakuMotion::MotionPathToUtf8(config), json, error) && json.IsObject(),
+            "read a complete Unicode JSON document while a replacement handle is open");
+        CloseHandle(replacementHandle);
+    }
 
     const auto wav = directory / L"\u97F3\u6E90 \U0001F60A.wav";
     {
