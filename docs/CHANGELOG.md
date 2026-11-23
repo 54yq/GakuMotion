@@ -2,6 +2,11 @@
 
 插件显示 `v<基础版本>+fork.<分支版本>`，Git 标签使用 `fork-v<分支版本>`。分支版本按自己的节奏递增。
 
+## 分支 v4.3.98-web
+
+- 接入 VideoExporter 逐帧录制时钟、ScreenshotManager 绿幕状态和 GakuAudio 音效服务。
+- 保留现有播放、曲库与导入流程。音效预设由 GakuMotion 配置目录中的 audio_effects.json 选择，例如 { "activeEffectId": "live" }。原声为 off。
+
 ## 分支 v4.3.97-web
 
 - Meni 外部舞台的真实地面复用原生道路接影材质，保留源贴图，移除实验地板。修正遮阳棚下部的贴图色带选择。需配套新版舞台包。
