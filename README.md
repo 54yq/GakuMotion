@@ -44,6 +44,7 @@ Live 接管、原生物理和风场也属于实验功能，实际表现取决于
 | 导入帧率 | 将源 VMD 的自动、30 或 60 fps 与输出采样率分开设置。已有曲目可重新导入。 | [#9](https://github.com/crested-ezios/GakuMotion/pull/9) |
 | 烘焙腿部 | 识别特征明确的 D 腿骨及空 IK 配合逐帧烘焙的腿部轨道。重导曲目后应用。 | [#10](https://github.com/crested-ezios/GakuMotion/pull/10) |
 | 场上角色名称 | 校正角色显示名，并读取 GakuActors 提供的自定义预设名。 | [#11](https://github.com/crested-ezios/GakuMotion/pull/11) |
+| 接管时的自然眨眼 | Animator 接管期间，缺少眼部轨道的动作可使用自然眨眼回退。 | [#15](https://github.com/crested-ezios/GakuMotion/pull/15) |
 
 ## 分支扩展
 
