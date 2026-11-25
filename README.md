@@ -8,9 +8,19 @@
 
 GakuMotion 是《学园偶像大师》的 GakuLoader 演出插件，用游戏原有角色、服装和渲染环境播放外部 MMD 动作、表情、镜头与音乐。此分支由[野生的空白（54yq）](https://github.com/54yq)维护，基于 [crested-ezios/GakuMotion](https://github.com/crested-ezios/GakuMotion)。
 
-**当前分支为 v4.5.4-web，加载器显示 `v0.2.2+fork.4.5.4-web`。** Live 接管、原生物理与风场仍属于实验功能，表现取决于游戏版本、人物和服装。[分支更新记录](docs/CHANGELOG.md) · [Web 看板说明](docs/WEB_PANEL_BRIDGE.md)
+**本分支的 `main` 当前为 v4.5.4-web 源码。** 本次更新仅同步源码。外部摄影舞台仍是实验功能，完整演出和多人操作尚未完成游戏内验证，暂缓发布对应的预编译实例。[分支更新记录](docs/CHANGELOG.md) · [Web 看板说明](docs/WEB_PANEL_BRIDGE.md)
 
 [上游安装指南](https://github.com/crested-ezios/GakuMotion/blob/main/docs/INSTALLATION.md) · [上游使用指南](https://github.com/crested-ezios/GakuMotion/blob/main/docs/USAGE.md) · [上游常见问题](https://github.com/crested-ezios/GakuMotion/blob/main/docs/TROUBLESHOOTING.md)
+
+## 当前源码与已有演示
+
+| 项目 | 版本与范围 |
+| --- | --- |
+| 当前源码 | `main` 上的 v4.5.4-web 包含录制、截图和音频服务接入，以及摄影多人编排和外部舞台的后续开发。Meni 舞台支持按原动作分两段控制 07、08、10 号位显隐。摄影多人支持清理离场演员残留槽位，以及播放中按名称重新分配后从原进度续播。 |
+| 已有发布记录 | GitHub 上最近的记录是 [v4.3.88-web](https://github.com/54yq/GakuMotion/releases/tag/fork-v4.3.88-web)，该记录未附带二进制资产。查阅该版本时，以对应标签下的源码和更新记录为准。 |
+| 已有演示 | 下方视频展示各自录制时的多人演出和舞台接管。外部摄影舞台和多人重绑等近期改动的验证进度以本页及更新记录为准。 |
+
+Live 接管、原生物理和风场也属于实验功能，实际表现取决于游戏版本、角色和服装。
 
 ## 基础功能
 
