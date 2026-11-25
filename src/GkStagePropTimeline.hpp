@@ -3,11 +3,12 @@
 #include "GkMotionData.hpp"
 #include <filesystem>
 #include <fstream>
+#include <optional>
 
 namespace GakuMotion::stage_prop_timeline
 {
     enum class Anchor { Grip, Camera, Stage, Hidden, CameraToStage };
-    enum class Movement { Hold, Linear, Smooth, Throw, Handoff };
+    enum class Movement { Hold, Linear, Smooth, Throw, Handoff, GripThrow, SourceAttachment };
 
     struct Cue
     {
@@ -41,6 +42,21 @@ namespace GakuMotion::stage_prop_timeline
     inline constexpr size_t maxCues = 128;
     inline constexpr int lastFrame = 4806;
 
+    inline Vector3 StageEuler(const Quaternion& q)
+    {
+        // Invert FromEulerDegreesXYZ (Rx * Ry * Rz).
+        const auto right = q.Rotate({1, 0, 0});
+        const auto up = q.Rotate({0, 1, 0});
+        const auto forward = q.Rotate({0, 0, 1});
+        const float cosY = std::hypot(forward.y, forward.z);
+        constexpr float degrees = 57.295779513f;
+        return {
+            degrees * (cosY > 1e-6f ? std::atan2(-forward.y, forward.z) : std::atan2(up.z, up.y)),
+            degrees * std::atan2(forward.x, cosY),
+            degrees * (cosY > 1e-6f ? std::atan2(-up.x, right.x) : 0.f),
+        };
+    }
+
     inline void UpgradeLegacy(std::vector<Cue>& cues)
     {
         // Preserve authored v1 offsets. Convert the stock camera shot only when
@@ -63,11 +79,10 @@ namespace GakuMotion::stage_prop_timeline
             hold.position = {-0.42f, -0.45f, 0.86f};
             hold.rotation = {-90.f, 0, 0};
             *exit = hold;
-            exit->first = 1690;
-            exit->last = 1710;
-            exit->movement = Movement::Smooth;
-            exit->endPosition = {-5.42f, -0.45f, 0.86f};
-            exit->endRotation = hold.rotation;
+            hold.last = 1665;
+            exit->first = hold.last;
+            exit->last = 1741;
+            exit->anchor = Anchor::CameraToStage;
             exit->hideAfter = true;
             cues.push_back(hold);
         }
@@ -89,20 +104,14 @@ namespace GakuMotion::stage_prop_timeline
     inline const std::vector<Cue> meniDefaults = [] {
         auto cues = legacyDefaults;
         UpgradeLegacy(cues);
-        // The authored camera advances through the gate after frame 1828.
-        // Release before that move, and hide after the prop is behind the camera.
-        for (auto& cue : cues)
-        {
-            if (cue.prop != 11 || cue.anchor != Anchor::Camera) continue;
-            if (cue.movement == Movement::Hold) cue.last = 1800;
-            else
-            {
-                cue.first = 1800;
-                cue.last = 1840;
-                cue.anchor = Anchor::CameraToStage;
-                cue.movement = Movement::Hold;
-            }
-        }
+        auto& heldDog = cues.front();
+        auto launch = heldDog;
+        heldDog.last = 1305;
+        launch.first = heldDog.last;
+        launch.last = 1353;
+        launch.movement = Movement::GripThrow;
+        launch.hideAfter = true;
+        cues.push_back(launch);
         return cues;
     }();
 
@@ -135,8 +144,11 @@ namespace GakuMotion::stage_prop_timeline
             cue.first >= 0 && cue.first < cue.last && cue.last <= lastFrame &&
             cue.anchor >= Anchor::Grip && cue.anchor <= Anchor::CameraToStage &&
             (cue.anchor != Anchor::CameraToStage || cue.movement == Movement::Hold) &&
-            cue.movement >= Movement::Hold && cue.movement <= Movement::Handoff &&
+            cue.movement >= Movement::Hold && cue.movement <= Movement::SourceAttachment &&
+            (cue.movement != Movement::SourceAttachment || (cue.anchor == Anchor::Grip && cue.bone == -1)) &&
             (cue.movement != Movement::Handoff || cue.anchor == Anchor::Grip) &&
+            (cue.movement != Movement::GripThrow ||
+                (cue.prop == 1 && cue.place == 1 && !cue.left && cue.bone == -1 && cue.anchor == Anchor::Grip)) &&
             cue.bone >= -1 && cue.bone <= 54 && cue.blendFrames >= 1 && cue.blendFrames <= lastFrame &&
             cue.arcHeight >= 0 && cue.arcHeight <= 20 &&
             within(cue.position, cue.anchor == Anchor::Grip ? 2.f : 200.f) &&
@@ -149,36 +161,58 @@ namespace GakuMotion::stage_prop_timeline
         return a.prop == b.prop && a.first < b.last && b.first < a.last;
     }
 
-    inline std::vector<Cue> Load(const std::filesystem::path& path)
+    inline bool ContainsFrame(const Cue& cue, float frame)
     {
-        std::ifstream file(path);
+        return frame >= cue.first && frame < cue.last;
+    }
+
+    inline std::optional<std::vector<Cue>> Read(std::istream& file)
+    {
         file.imbue(std::locale::classic());
         std::string version;
         size_t count{};
-        if (!(file >> version >> count) || (version != "MeniPropTimeline1" && version != "MeniPropTimeline2" && version != "MeniPropTimeline3") || count > maxCues) return meniDefaults;
+        if (!(file >> version >> count) || (version != "MeniPropTimeline1" && version != "MeniPropTimeline2" && version != "MeniPropTimeline3") || count > maxCues) return std::nullopt;
         std::vector<Cue> cues;
         for (size_t index = 0; index < count; ++index)
         {
             Cue cue;
             if (!(file >> cue.prop >> cue.place >> cue.left >> cue.first >> cue.last
                 >> cue.position.x >> cue.position.y >> cue.position.z >> cue.rotation.x >> cue.rotation.y >> cue.rotation.z))
-                return meniDefaults;
+                return std::nullopt;
             if (version != "MeniPropTimeline1")
             {
                 int anchor{}, movement{};
                 if (!(file >> anchor >> movement >> cue.bone >> cue.blendFrames
                     >> cue.endPosition.x >> cue.endPosition.y >> cue.endPosition.z
                     >> cue.endRotation.x >> cue.endRotation.y >> cue.endRotation.z >> cue.arcHeight >> cue.hideAfter))
-                    return meniDefaults;
+                    return std::nullopt;
                 cue.anchor = static_cast<Anchor>(anchor);
                 cue.movement = static_cast<Movement>(movement);
             }
             if (!Valid(cue) || std::any_of(cues.begin(), cues.end(), [&](const Cue& other) { return Overlap(cue, other); }))
-                return meniDefaults;
+                return std::nullopt;
             cues.push_back(cue);
         }
         if (version == "MeniPropTimeline1") UpgradeLegacy(cues);
         return cues;
+    }
+
+    inline std::vector<Cue> Load(const std::filesystem::path& path)
+    {
+        std::ifstream file(path);
+        if (auto cues = Read(file)) return std::move(*cues);
+        return meniDefaults;
+    }
+
+    inline std::vector<Cue> LoadSourceTrial(const std::filesystem::path& path)
+    {
+        std::ifstream file(path);
+        auto cues = Read(file);
+        if (!cues || (file >> std::ws).peek() != std::char_traits<char>::eof() ||
+            std::any_of(cues->begin(), cues->end(), [](const Cue& cue) {
+                return cue.movement != Movement::SourceAttachment;
+            })) return {};
+        return std::move(*cues);
     }
 
     inline bool Save(const std::filesystem::path& path, const std::vector<Cue>& cues)

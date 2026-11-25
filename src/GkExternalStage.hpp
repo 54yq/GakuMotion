@@ -1,4 +1,5 @@
 #pragma once
+#include "GkMeniStageSource.hpp"
 
 namespace ExternalStage
 {
@@ -29,6 +30,9 @@ namespace ExternalStage
     inline GakuMotion::injection::OwnerSnapshot owner;
     inline std::atomic<int> status{0};
     inline std::array<Handle, 2> doorTransforms{};
+    constexpr std::array<std::string_view, 3> animatedMeshNames{
+        "StageAnimated_st_light_l_001", "StageAnimated_moon", "StageAnimated_star"};
+    inline std::array<Handle, animatedMeshNames.size()> animatedMeshTransforms{};
     inline const void* setDoorRotation{};
     inline int doorScene{};
     inline float lastDoorTime = -1;
@@ -89,9 +93,9 @@ namespace ExternalStage
 
     inline UnityVector3 StageTravelAtFrame(float frame)
     {
-        const float fraction = std::clamp((frame - profile.travelStart) / (profile.travelEnd - profile.travelStart), 0.0f, 1.0f);
-        // Stage VMD root Z uses the destination key’s Bezier (0, 0, 0, 0).
-        return RotateStageOffset({0, 0, profile.travelZ * fraction});
+        const auto key = GakuMotion::source_vmd::Sample(ExternalStageProfiles::meniRoot, frame);
+        return RotateStageOffset({-key.position.x * profile.sourceScale,
+            key.position.y * profile.sourceScale, key.position.z * profile.sourceScale});
     }
 
     inline void ApplyStageTravel(float frame)
@@ -102,6 +106,7 @@ namespace ExternalStage
         stageTravel = StageTravelAtFrame(frame);
         auto position = stageOrigin;
         position.x += stageTravel.x;
+        position.y += stageTravel.y;
         position.z += stageTravel.z;
         g_setWorldPosNative(transform, position);
     }
@@ -127,11 +132,15 @@ namespace ExternalStage
             foregroundMaskActive = false;
         }
         if (!doorScene) return;
-        for (auto& handle : doorTransforms)
-        {
-            if (handle) StageLoader::freeHandle(handle);
-            handle = {};
-        }
+        const auto clear = [](auto& handles) {
+            for (auto& handle : handles)
+            {
+                if (handle) StageLoader::freeHandle(handle);
+                handle = {};
+            }
+        };
+        clear(doorTransforms);
+        clear(animatedMeshTransforms);
         doorScene = 0;
         SetStageLightFrame(0);
         lastDoorTime = -1;
@@ -164,16 +173,21 @@ namespace ExternalStage
             void* object = objects[i];
             if (!object || StageLoader::SceneOfFreshGo(object) != mountedScene) continue;
             const auto name = Il2CppStringToUtf8(StageLoader::Invoke(StageLoader::objectName, object));
-            for (size_t j = 0; j < names.size(); ++j)
-            {
-                if (doorTransforms[j] || name != names[j]) continue;
-                if (void* transform = StageLoader::Invoke(StageLoader::goTransform, object))
-                    doorTransforms[j] = StageLoader::newHandle(transform, false);
-            }
+            const auto bind = [&](const auto& names, auto& handles) {
+                for (size_t j = 0; j < names.size(); ++j)
+                {
+                    if (handles[j] || name != names[j]) continue;
+                    if (void* transform = StageLoader::Invoke(StageLoader::goTransform, object))
+                        handles[j] = StageLoader::newHandle(transform, false);
+                }
+            };
+            bind(names, doorTransforms);
+            bind(animatedMeshNames, animatedMeshTransforms);
         }
         StageLoader::freeHandle(pin);
-        GakuMotion::host::Info("[GakuMotion][ExternalStage] timeline doors=%d/%d scene=%d",
-            !!doorTransforms[0], !!doorTransforms[1], mountedScene);
+        GakuMotion::host::Info("[GakuMotion][ExternalStage] source timeline doors=%d/%d movingMesh=%d/%d/%d scene=%d",
+            !!doorTransforms[0], !!doorTransforms[1], !!animatedMeshTransforms[0],
+            !!animatedMeshTransforms[1], !!animatedMeshTransforms[2], mountedScene);
     }
 
     inline void TickTimeline(float motionTime, bool hasMotion)
@@ -210,28 +224,33 @@ namespace ExternalStage
         SetStageShaderFloat("_GakuExternalStageGradeEnabled", externalStageGrade.load() ? 1.0f : 0.0f, gradeId);
         if (time == lastDoorTime) return;
         lastDoorTime = time;
-        SetStageLightFrame(time * 30.0f);
-        ApplyStageTravel(time * 30.0f);
+        const float frame = time * 30.0f;
+        SetStageLightFrame(frame);
+        ApplyStageTravel(frame);
+        if (g_setPosNative)
+        {
+            const std::array<std::span<const GakuMotion::source_vmd::BoneKey>, animatedMeshNames.size()> tracks{
+                ExternalStageProfiles::st_light_l_001, ExternalStageProfiles::moon, ExternalStageProfiles::star};
+            for (size_t i = 0; i < tracks.size(); ++i)
+            {
+                void* object = animatedMeshTransforms[i] ? SceneOwnerRuntime::handleTarget(animatedMeshTransforms[i]) : nullptr;
+                if (!object) continue;
+                const auto p = GakuMotion::source_vmd::Sample(tracks[i], frame).position;
+                // The geometry parent already supplies the MMD-to-Unity scale.
+                g_setPosNative(object, {-p.x, p.y, p.z});
+            }
+        }
         if (!setDoorRotation) return;
 
-        const float fraction = std::clamp((time * 30.0f - 2933.0f) / 61.0f, 0.0f, 1.0f);
-        // VMD rotation interpolation uses the ending key's control points.
-        float lower = 0.0f, upper = 1.0f;
-        for (int step = 0; step < 16; ++step)
-        {
-            const float t = (lower + upper) * 0.5f;
-            const float u = 1.0f - t;
-            const float x = (3.0f * u * u * t * 42.0f + 3.0f * u * t * t * 85.0f) / 127.0f + t * t * t;
-            if (x < fraction) lower = t; else upper = t;
-        }
-        const float t = fraction == 0.0f || fraction == 1.0f ? fraction : (lower + upper) * 0.5f;
-        const float angle = std::atan2(0.537299633f, 0.843391418f) * t * t * (3.0f - 2.0f * t);
         for (size_t i = 0; i < doorTransforms.size(); ++i)
         {
             void* door = doorTransforms[i] ? SceneOwnerRuntime::handleTarget(doorTransforms[i]) : nullptr;
             if (!door) continue;
-            // OBJ import mirrors X, reversing the source PMX/VMD Y rotations.
-            UnityQuaternion rotation{0, std::sin(i == 0 ? angle : -angle), 0, std::cos(angle)};
+            const auto keys = i == 0 ? std::span{ExternalStageProfiles::meniLeftDoor}
+                                     : std::span{ExternalStageProfiles::meniRightDoor};
+            const auto q = GakuMotion::source_vmd::Sample(keys, frame).rotation;
+            // Mirror the original X axis to match the imported stage mesh.
+            UnityQuaternion rotation{q.x, -q.y, -q.z, q.w};
             void* args[]{&rotation};
             StageLoader::Invoke(setDoorRotation, door, args);
         }

@@ -11,7 +11,7 @@ GakuMotion 是运行在 GakuLoader 插件宿主之上的游戏原生演出扩展
 
 它利用《学园偶像大师》原生角色、服装、材质、动画与渲染环境，为玩家提供外部动作回放、面部表现、摄像机运镜及舞台控制能力。
 
-当前 Web 看板基于分支 **v4.3.97-web**。GakuLoader 显示 `v0.2.2+fork.4.3.106-web`。 [分支更新记录](docs/CHANGELOG.md) · [Web 看板说明](docs/WEB_PANEL_BRIDGE.md)
+当前 Web 看板基于分支 **v4.5.4-web**。GakuLoader 显示 `v0.2.2+fork.4.5.4-web`。 [分支更新记录](docs/CHANGELOG.md) · [Web 看板说明](docs/WEB_PANEL_BRIDGE.md)
 
 [安装指南](docs/INSTALLATION.md) · [使用指南](docs/USAGE.md) · [常见问题排查](docs/TROUBLESHOOTING.md) · [源码构建](BUILD_NOTES.md) · [全部文档索引](docs/README.md) · [学马仕模组索引](https://github.com/Gaku-Mod-Tools/Mod-Directory)
 
@@ -85,7 +85,7 @@ GakuMotion 目前处于 Developer Preview 阶段。
    - 播放进度：支持时间轴拖动、帧定位与逐帧查看。
    - 速度与时差：支持全局播放倍速调节，以及单独微调音频和动作的秒级时间偏移。
    - 运镜模式：镜头页与播放器统一提供“游戏 / VMD / 跟随 / 注视”。选择“游戏”释放 Motion 镜头接管并保留参数，恢复游戏手动取景；选择 VMD 播放曲目运镜，无可用轨道时保持机位。旧固定模式配置会在载入时迁移为 VMD。
-   - 摄影舞台道具：选择已保存的镜头固定片段，在交接帧点击「在当前帧留在舞台」。随后可在舞台片段上调整结束帧和隐藏。
+   - 摄影舞台道具：选择已保存的镜头固定片段，在交接帧点击「在当前帧留在舞台」。随后可在舞台片段上调整结束帧和隐藏。黄白狗可使用源动作的抛出轨迹，并调整轨迹起止帧。
 
 详细的功能说明与进阶设置请查阅 [使用指南](docs/USAGE.md)。 Live 接管页面内置可折叠的帧数监测，显示 Unity 更新频率并在长帧时记录排查线索，无需独立插件。 升级时如已安装旧版 GakuFrameMonitor.dll，请退出游戏后移除该独立插件，避免重复监测和日志。
 

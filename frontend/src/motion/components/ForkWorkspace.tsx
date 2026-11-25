@@ -1,11 +1,13 @@
 import { ArtworkEditor } from './ArtworkEditor'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, type PointerEvent } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { formatMmSs } from '../time'
 import { Vector3Field } from './NumberField'
 import { getMotionBridge } from '../bridge'
 import { useMotionStore } from '../store'
+import { useArtwork } from '../panelMedia'
+import { cn } from '@/lib/utils'
 import type { ForkFollower, ForkState, Vector3 } from '../protocol'
 
 const zero = { x: 0, y: 0, z: 0 }
@@ -36,8 +38,8 @@ const mockState: ForkState = {
   liveFps: 59.8, liveStalls: 0, swingReportLoaded: false,
   folders: [], folderNotice: '',
   followers: [
-    { slot: 0, actorToken: 102, generation: 1, motionKey: '', position: { x: -1.2, y: 0, z: 0.4 }, yaw: 12, offsetSeconds: 0, physics: '原生物理' },
-    { slot: 1, actorToken: 103, generation: 1, motionKey: '', position: { x: 1.2, y: 0, z: 0.4 }, yaw: -12, offsetSeconds: 0, physics: '原生物理' },
+    { slot: 0, actorToken: 102, generation: 1, motionKey: 'starlight-step', position: { x: -1.2, y: 0, z: 0.4 }, yaw: 12, offsetSeconds: 0, physics: '原生物理' },
+    { slot: 1, actorToken: 103, generation: 1, motionKey: 'aoi-haru', position: { x: 1.2, y: 0, z: 0.4 }, yaw: -12, offsetSeconds: 0.25, physics: '原生物理' },
   ],
 }
 
@@ -137,6 +139,21 @@ export function useForkWorkspace(preview = false) {
         setState(fields.slot === -1 ? { ...current, ...patch } : {
           ...current, followers: current.followers.map(item => item.slot === fields.slot ? { ...item, ...patch } : item),
         })
+      }
+      if (action === 'formation.reorder') {
+        const source = current.followers.find(item => item.slot === fields.fromSlot)
+        const target = current.followers.find(item => item.slot === fields.toSlot)
+        if (!source || source.generation !== fields.fromGeneration ||
+            (target?.generation ?? 0) !== fields.toGeneration) return false
+        const swapActor = (slot: ForkFollower, actor: ForkFollower) => ({
+          ...actor, slot: slot.slot, motionKey: slot.motionKey, offsetSeconds: slot.offsetSeconds,
+          generation: actor.generation + 1,
+        })
+        setState({ ...current, followers: target
+          ? current.followers.map(item => item === source ? swapActor(item, target) : item === target ? swapActor(item, source) : item)
+          : current.followers.map(item => item === source ? { ...item, slot: Number(fields.toSlot), generation: item.generation + 1 } : item),
+        })
+        return true
       }
       return
     }
@@ -276,12 +293,13 @@ function Follower({ slot, follower, followers, command, remove }: {
   return (
     <section className="min-w-0 space-y-2 rounded-lg border bg-background/70 p-3">
       <div className="flex items-center justify-between gap-2">
-        {boundActor && <ActorPortrait actor={boundActor} />}
         <h3 className="text-sm font-medium">副角色 {slot + 1}</h3>
         <span className="text-xs text-muted-foreground">
-          {follower?.actorToken ? `已绑定 ${boundActor?.label ?? '角色'}` : '尚未绑定'}
+          {follower?.actorToken ? `已绑定 ${boundActor?.label ?? '角色已离场'}` : '尚未绑定'}
         </span>
-        <Button size="sm" variant="ghost" disabled={!!follower?.actorToken && bindingLocked}
+        {follower?.physics && <span className="text-xs text-muted-foreground">物理：{follower.physics}</span>}
+        {boundActor && <ActorPortrait actor={boundActor} />}
+        <Button size="sm" variant="ghost" disabled={!!boundActor && bindingLocked}
           aria-label={`删除副角色 ${slot + 1}`} onClick={remove}>删除</Button>
       </div>
       <div className="mt-3 flex flex-wrap items-end gap-2">
@@ -339,29 +357,135 @@ function ActorPortrait({ actor }: { actor: { label: string; portraitKey?: string
     fallback={<span aria-hidden="true" className="text-xs">{Array.from(name)[0]}</span>} />
 }
 
+function SlotPortrait({ actor }: { actor?: { label: string; portraitKey?: string } }) {
+  const name = actor?.label.replace(/ · \d+$/, '') ?? ''
+  const url = useArtwork(actor?.portraitKey || name)
+  return <span className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted" aria-hidden="true">
+    {url ? <img src={url} alt="" draggable={false} className="size-full object-cover" /> : Array.from(name)[0] ?? '+'}
+  </span>
+}
+
 export function ForkEnsembleControls({ state, command }: { state: ForkState; command: ForkCommand }) {
-  const primary = useMotionStore(model => model.actors.actors.find(actor => actor.selected))
+  return <EnsembleSlots key={`${state.owner}:${state.epoch}`} state={state} command={command} />
+}
+
+function EnsembleSlots({ state, command }: { state: ForkState; command: ForkCommand }) {
+  const actors = useMotionStore(model => model.actors.actors)
+  const primary = actors.find(actor => actor.selected)
   const playback = useMotionStore(model => model.player.state)
   const bindingLocked = playback === 'playing' || playback === 'paused'
   const [draftSlots, setDraftSlots] = useState<number[]>([])
+  const [selected, setSelected] = useState(-1)
+  const [dragTarget, setDragTarget] = useState<number>()
+  const strip = useRef<HTMLDivElement>(null)
+  const drag = useRef<{ from: ForkFollower; x: number; y: number; pointerId: number; moved: boolean;
+    bindings: ForkFollower[]; epoch: number; session: number } | null>(null)
+  const suppressClick = useRef(false)
   const bound = state.followers.filter(follower => follower.actorToken)
   const slots = [...new Set([...draftSlots, ...bound.map(follower => follower.slot)])].sort((a, b) => a - b)
   const addSlot = Array.from({ length: 64 }, (_, slot) => slot).find(slot => !slots.includes(slot))
+  const activeSlot = slots.includes(selected) ? selected : -1
+  useEffect(() => {
+    const row = strip.current
+    const card = row?.querySelector('[aria-pressed="true"]')
+    if (!row || !card) return
+    const rowRect = row.getBoundingClientRect()
+    const cardRect = card.getBoundingClientRect()
+    if (cardRect.left < rowRect.left) row.scrollLeft -= rowRect.left - cardRect.left + 4
+    if (cardRect.right > rowRect.right) row.scrollLeft += cardRect.right - rowRect.right + 4
+  }, [activeSlot])
+
+  const startDrag = (event: PointerEvent<HTMLButtonElement>, follower?: ForkFollower) => {
+    suppressClick.current = false
+    if (bindingLocked || !follower?.generation || event.button !== 0 || !event.isPrimary) return
+    drag.current = { from: follower, x: event.clientX, y: event.clientY, pointerId: event.pointerId,
+      moved: false, bindings: bound, epoch: state.epoch, session: state.session }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  const hitSlot = (event: PointerEvent<HTMLButtonElement>) => {
+    const card = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLButtonElement>('[data-follower-slot]')
+    if (!card || card.parentElement !== event.currentTarget.parentElement) return undefined
+    return Number(card.dataset.followerSlot)
+  }
+
+  const moveDrag = (event: PointerEvent<HTMLButtonElement>) => {
+    const current = drag.current
+    if (!current || current.pointerId !== event.pointerId) return
+    if (!current.moved && Math.hypot(event.clientX - current.x, event.clientY - current.y) < 6) return
+    current.moved = true
+    setDragTarget(hitSlot(event))
+  }
+
+  const cancelDrag = () => {
+    if (drag.current?.moved) suppressClick.current = true
+    drag.current = null
+    setDragTarget(undefined)
+  }
+
+  const finishDrag = async (event: PointerEvent<HTMLButtonElement>) => {
+    const current = drag.current
+    if (!current || current.pointerId !== event.pointerId) return
+    const target = current.moved ? hitSlot(event) : undefined
+    cancelDrag()
+    if (bindingLocked || target === undefined || target === current.from.slot ||
+        current.epoch !== state.epoch || current.session !== state.session) return
+    const toGeneration = current.bindings.find(follower => follower.slot === target)?.generation ?? 0
+    const sent = await command('formation.reorder', {
+      fromSlot: current.from.slot, fromGeneration: current.from.generation, toSlot: target, toGeneration,
+    })
+    if (!sent) return
+    if (!toGeneration) setDraftSlots(previous => [...new Set([...previous, current.from.slot])])
+    setSelected(target)
+  }
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <span className="text-xs text-muted-foreground">主角色提供播放时钟和镜头</span>
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" disabled={bindingLocked} onClick={() => void command('formation.auto')}>按名称自动分配</Button>
+          <Button size="sm" variant="outline" onClick={() => void command('formation.auto')}>按名称自动分配</Button>
           <Button size="sm" variant="outline" onClick={() => void command('formation.align')}>对齐原曲队形</Button>
           <Button size="sm" disabled={addSlot === undefined} onClick={() => {
-            if (addSlot !== undefined) setDraftSlots(current => [...current, addSlot])
+            if (addSlot !== undefined) {
+              setDraftSlots(current => [...current, addSlot])
+              setSelected(addSlot)
+            }
           }}>添加副角色</Button>
         </div>
       </div>
-      {bindingLocked && <p className="text-xs text-muted-foreground">停止播放后可新增或解除动作绑定；当前仍可调整已绑定角色的站位。</p>}
-      <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
-      <section aria-label="主角色" className="min-w-0 space-y-2 rounded-lg border border-primary/40 bg-background/70 p-3">
+      {bindingLocked && <p className="text-xs text-muted-foreground">手动换绑需停止播放；按名称自动分配后会回到当前进度。</p>}
+      {!bindingLocked && bound.length > 0 && <p className="text-xs text-muted-foreground">
+        拖拽交换副角色时，动作和时间偏移留在号位，手调站位和朝向随角色。拖到空位时，动作随角色移动。
+      </p>}
+      <div ref={strip} role="group" aria-label="演出角色槽位" className="flex gap-2 overflow-x-auto rounded-md p-1 pb-2">
+        <button type="button" aria-pressed={activeSlot === -1} onClick={() => setSelected(-1)}
+          className={cn('flex min-w-28 shrink-0 items-center gap-2 rounded-md border p-2 text-left text-xs',
+            activeSlot === -1 && 'border-primary bg-primary/10')}>
+          <SlotPortrait actor={primary} />
+          <span><strong className="block">主角色</strong>{primary?.label ?? '尚未选择'}</span>
+        </button>
+        {slots.map(slot => {
+          const follower = bound.find(item => item.slot === slot)
+          const actor = actors.find(item => item.token === follower?.actorToken)
+          return <button key={slot} type="button" aria-pressed={activeSlot === slot} data-follower-slot={slot}
+            onClick={event => {
+              if (!suppressClick.current || event.detail === 0) setSelected(slot)
+              suppressClick.current = false
+            }}
+            onPointerDown={event => startDrag(event, follower)}
+            onPointerMove={moveDrag} onPointerUp={finishDrag}
+            onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag}
+            className={cn('flex min-w-28 shrink-0 items-center gap-2 rounded-md border p-2 text-left text-xs',
+              !follower && 'border-dashed', activeSlot === slot && 'border-primary bg-primary/10',
+              dragTarget === slot && 'ring-2 ring-primary',
+              !bindingLocked && follower && 'cursor-grab touch-none select-none')}>
+            <SlotPortrait actor={actor} />
+            <span><strong className="block">副角色 {slot + 1}</strong>{actor?.label ?? (follower ? '已绑定' : '空位')}</span>
+          </button>
+        })}
+      </div>
+      <section aria-label="主角色" hidden={activeSlot !== -1} className="min-w-0 space-y-2 rounded-lg border border-primary/40 bg-background/70 p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           {primary && <ActorPortrait actor={primary} />}
           <h3 className="text-sm font-medium">主角色{primary ? ` · ${primary.label}` : ''}</h3>
@@ -383,13 +507,13 @@ export function ForkEnsembleControls({ state, command }: { state: ForkState; com
       </section>
       {slots.map(slot => {
         const follower = bound.find(item => item.slot === slot)
-        return <Follower key={`${state.epoch}:${slot}:${follower?.generation ?? 0}`} slot={slot} follower={follower} followers={bound} command={command}
+        return <div key={slot} hidden={activeSlot !== slot}><Follower key={follower?.generation ?? 0}
+          slot={slot} follower={follower} followers={bound} command={command}
           remove={() => {
             setDraftSlots(current => current.filter(item => item !== slot))
             if (follower) void command('formation.clear', { slot })
-          }} />
+          }} /></div>
       })}
-      </div>
       {state.formationNotice && <p className="text-xs text-muted-foreground">{state.formationNotice}</p>}
     </div>
   )

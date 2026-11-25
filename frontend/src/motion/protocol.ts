@@ -551,10 +551,17 @@ export interface ForkState {
   externalStageActorAmbient?: boolean
   externalStageGroundOverlay?: boolean
   externalStageContactShadows?: boolean
+  externalStageVisibilityFirst?: boolean
+  externalStageVisibilitySecond?: boolean
   externalStageShadowSize?: number
   externalStageGrade?: boolean
   externalStageCues?: StagePropCue[]
-  externalStagePropSamples?: ({ frame: number; position: Vector3 } | null)[]
+  sourcePropTrial?: {
+    active: boolean
+    frame: number
+    cues: { prop: number; place: number; left: boolean; first: number; last: number; current: boolean; applied: boolean }[]
+  }
+  externalStagePropSamples?: ({ frame: number; position: Vector3; rotation?: Vector3 } | null)[]
   externalStagePropStart?: number
   externalStagePropEnd?: number
   externalStageHeldProp?: number

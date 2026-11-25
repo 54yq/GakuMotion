@@ -6,6 +6,8 @@
 #include "GkIdolController.hpp"
 #include "GkRuntimeConfig.hpp"   // MotionEntry：曲目库索引与「上一曲/下一曲」
 #include "GkTransportTime.hpp"
+#include "GkSourceVmdTracks.hpp"
+#include "GkStagePropTimeline.hpp"
 #include "GkLivePhysicsClockPolicy.hpp"
 #include <chrono>
 #include <string>
@@ -113,6 +115,10 @@ namespace GakuMotion
 		bool audioWaitingForTiming{false};
 
 		float AppliedPoseTime() const { return poseClock_.actor ? poseClock_.pose : currentTime; }
+        std::array<std::vector<source_vmd::BoneKey>, 2> sourceHandAttachments;
+        std::vector<stage_prop_timeline::Cue> sourcePropTrialCues;
+        bool meniSourceMotion{};
+        float AppliedMotionSourceTime() const { return TrackSourceTime(AppliedPoseTime(), timing.motion); }
 		float MotionSourceTime() const { return TrackSourceTime(currentTime, timing.motion); }
 		float FacialSourceTime() const { return TrackSourceTime(currentTime, timing.facial); }
 		float CameraSourceTime() const { return TrackSourceTime(currentTime, timing.camera); }
@@ -289,8 +295,15 @@ namespace GakuMotion
             const auto slash = directory.find_last_of("/\\");
             const auto name = slash == std::string_view::npos ? directory : directory.substr(slash + 1);
             constexpr std::string_view meniPlace = "cutt_son1156_Place";
-            if (name.starts_with(meniPlace) && name.size() == meniPlace.size() + 2 &&
-                name.substr(meniPlace.size()) >= "01" && name.substr(meniPlace.size()) <= "10")
+            meniSourceMotion = name.starts_with(meniPlace) && name.size() == meniPlace.size() + 2 &&
+                name.substr(meniPlace.size()) >= "01" && name.substr(meniPlace.size()) <= "10";
+            sourceHandAttachments = meniSourceMotion
+                ? source_vmd::LoadHandAttachments(MotionPathFromUtf8(motionDirectory) / "source.vmd")
+                : decltype(sourceHandAttachments){};
+            sourcePropTrialCues = meniSourceMotion
+                ? stage_prop_timeline::LoadSourceTrial(MotionPathFromUtf8(motionDirectory) / "source-prop-trial.txt")
+                : decltype(sourcePropTrialCues){};
+            if (meniSourceMotion)
             {
                 // The current Gakumas eyelid channel pair closes the opposite eye for these source takes.
                 for (auto& channel : nextClip.blendshape_names)

@@ -18,6 +18,9 @@ namespace ExternalStage
             uint64_t token{};
             const char* failure{};
             bool held{};
+            float pendingX{}, pendingZ{};
+            int pendingFrame{-1};
+            Clock::time_point pendingAt{};
         };
         static std::unordered_map<void*, ShadowCenter> centers, previous;
         static auto lastSample = std::chrono::steady_clock::time_point{};
@@ -41,11 +44,29 @@ namespace ExternalStage
         }
         const bool eligible = enabled && status.load() == 1 && alignedBackground && controller.fnGetBoneTransform &&
             g_getWorldPosNative;
+        const auto now = Clock::now();
+        const auto qpc100ns = std::chrono::duration_cast<
+            std::chrono::duration<int64_t, std::ratio<1, 10000000>>>(now.time_since_epoch()).count();
+        static auto traceStart = Clock::time_point{};
+        bool trace = GakuMotion::externalStageContactTrace.load();
+        if (!trace) traceStart = {};
+        else if (traceStart == Clock::time_point{}) traceStart = now;
+        else if (now - traceStart > std::chrono::seconds(8))
+        {
+            GakuMotion::externalStageContactTrace.store(false);
+            traceStart = {};
+            trace = false;
+        }
         if (!eligible)
         {
             centers.clear();
             previous.clear();
             lastSample = {};
+            if (trace)
+                GakuMotion::host::Info("[GakuMotion][ContactTrace] qpc100ns=%lld frame=%.4f path=ineligible enabled=%d status=%d stage=%d background=%d bones=%d transform=%d",
+                    static_cast<long long>(qpc100ns), core.player.AppliedMotionSourceTime() * 30.f,
+                    enabled, status.load(), mountedScene, alignedBackground,
+                    controller.fnGetBoneTransform != nullptr, g_getWorldPosNative != nullptr);
             if (contacts || shaderFailure)
             {
                 const bool cleared = SetStageShaderFloat("_GakuExternalStageContactCount", 0, countId);
@@ -84,17 +105,32 @@ namespace ExternalStage
         if (!contacts) { reportShader("allocate-array"); return; }
         std::array<std::array<float, 4>, maxShadowContacts> measurements{};
         size_t count = 0;
-        const auto now = std::chrono::steady_clock::now();
         const int seek = core.player.SeekCount();
         const bool scrubbing = core.player.scrubbing;
-        if (sampleScene != mountedScene || sampleOwner != owner.sceneHandle ||
-            samplePresenter != owner.presenterIdentity || sampleSeek != seek || scrubbing || wasScrubbing)
+        const unsigned resetMask = (sampleScene != mountedScene ? 1u : 0u) |
+            (sampleOwner != owner.sceneHandle ? 2u : 0u) |
+            (samplePresenter != owner.presenterIdentity ? 4u : 0u) |
+            (sampleSeek != seek ? 8u : 0u) | (scrubbing || wasScrubbing ? 16u : 0u);
+        std::optional<std::ostringstream> traceRow;
+        if (trace)
+        {
+            traceRow.emplace();
+            traceRow->imbue(std::locale::classic());
+            *traceRow << std::fixed << std::setprecision(4)
+                << "qpc100ns=" << qpc100ns
+                << " frame=" << core.player.AppliedMotionSourceTime() * 30.f
+                << " stage=" << mountedScene << " owner=" << owner.sceneHandle
+                << " background=" << alignedBackground << " seek=" << seek << " reset=" << resetMask
+                << " stageTravel=(" << stageTravel.x << ',' << stageTravel.y << ',' << stageTravel.z << ')';
+        }
+        if (resetMask)
         {
             centers.clear();
             previous.clear();
         }
         const float dt = std::chrono::duration<float>(now - lastSample).count();
         const float blend = 1.0f - std::exp(-std::max(0.0f, dt) / 0.045f);
+        const int unityFrame = g_faceUnityFrame ? g_faceUnityFrame() : -1;
         lastSample = now;
         sampleScene = mountedScene;
         sampleOwner = owner.sceneHandle;
@@ -104,7 +140,7 @@ namespace ExternalStage
         previous.swap(centers);
         centers.clear();
         const auto add = [&](void* actor, uint64_t token) {
-            if (!actor || count >= measurements.size() || core.actorModelHidden.contains(token)) return;
+            if (!actor || count >= measurements.size() || core.IsActorModelHidden(token)) return;
             ShadowCenter center{};
             if (const auto prior = previous.find(actor); prior != previous.end() && prior->second.token == token)
                 center = prior->second;
@@ -113,18 +149,45 @@ namespace ExternalStage
             void* object = StageLoader::Invoke(StageLoader::componentGo, actor);
             const int actorScene = object ? StageLoader::SceneOfFreshGo(object) : 0;
             const char* failure = nullptr;
+            UnityVector3 rawHips{};
+            bool rejectedJump = false;
             if (!object) failure = "game-object-unavailable";
             else if (actorScene != owner.sceneHandle) failure = "actor-scene-mismatch";
             else if (void* hips = controller.fnGetBoneTransform(actor, 0))
             {
                 const auto p = g_getWorldPosNative(hips);
+                rawHips = p;
                 if (!std::isfinite(p.x) || !std::isfinite(p.z)) failure = "nonfinite-hips";
                 else
                 {
-                    const bool smooth = recent && std::hypot(p.x - center.x, p.z - center.z) < 0.8f;
-                    center.x = smooth ? std::lerp(center.x, p.x, blend) : p.x;
-                    center.z = smooth ? std::lerp(center.z, p.z, blend) : p.z;
-                    center.measured = now;
+                    constexpr float jumpDistance = 0.8f;
+                    const bool smooth = recent && std::hypot(p.x - center.x, p.z - center.z) < jumpDistance;
+                    if (recent && !smooth)
+                    {
+                        // The native animation pose can briefly expose the actor's original
+                        // position between motion updates. Preserve the last rendered contact
+                        // until a coherent destination persists across physical frames.
+                        const bool sameDestination = center.pendingAt != Clock::time_point{} &&
+                            now - center.pendingAt < maxAge &&
+                            std::hypot(p.x - center.pendingX, p.z - center.pendingZ) < jumpDistance;
+                        const bool laterFrame = unityFrame >= 0 ? unityFrame > center.pendingFrame :
+                            now - center.pendingAt >= std::chrono::milliseconds(16);
+                        rejectedJump = !sameDestination || !laterFrame;
+                        if (!sameDestination)
+                        {
+                            center.pendingX = p.x;
+                            center.pendingZ = p.z;
+                            center.pendingFrame = unityFrame;
+                            center.pendingAt = now;
+                        }
+                    }
+                    if (!rejectedJump)
+                    {
+                        center.x = smooth ? std::lerp(center.x, p.x, blend) : p.x;
+                        center.z = smooth ? std::lerp(center.z, p.z, blend) : p.z;
+                        center.measured = now;
+                        center.pendingAt = {};
+                    }
                 }
             }
             else failure = "hips-unavailable";
@@ -142,6 +205,11 @@ namespace ExternalStage
             centers.emplace(actor, center);
             if (!failure || held)
                 measurements[count++] = {center.x, alignedFloor, center.z, -0.72f};
+            if (traceRow)
+                *traceRow << " | actor=" << actor << " token=" << token
+                    << " raw=(" << rawHips.x << ',' << rawHips.y << ',' << rawHips.z << ')'
+                    << " center=(" << center.x << ',' << alignedFloor << ',' << center.z << ')'
+                    << " state=" << (rejectedJump ? "held-jump" : held ? "held" : failure ? failure : "sampled");
         };
         const auto* targetEntry = core.sceneActorRegistry.Find(controller.targetActor);
         add(controller.targetActor, targetEntry ? targetEntry->token : 0);
@@ -158,6 +226,9 @@ namespace ExternalStage
         // Keep its count too, so a rejected frame cannot blank all contacts.
         const bool countWritten = arrayWritten && SetStageShaderFloat("_GakuExternalStageContactCount",
             static_cast<float>(count), countId);
+        if (traceRow)
+            GakuMotion::host::Info("[GakuMotion][ContactTrace] %s | count=%zu array=%d size=%d countApplied=%d",
+                traceRow->str().c_str(), count, arrayWritten, sizeWritten, countWritten);
         reportShader(!arrayWritten ? "write-array" : !countWritten ? "write-count" :
             !sizeWritten ? "write-size" : nullptr);
         static int lastScene{};

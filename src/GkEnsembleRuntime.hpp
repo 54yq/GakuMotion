@@ -35,6 +35,7 @@ namespace GakuMotion
 		// The runtime releases secondary-physics ownership before a controller
 		// can be restored or destroyed. A failed release retains the follower.
 		bool (*fnBeforeRestore)(size_t, MotionPlayer&){nullptr};
+		bool (*fnReleaseDetached)(size_t){nullptr};
 		bool RestoreUnconfirmed() const { return restoreUnconfirmed_; }
 		bool HasFollowers() const
 		{
@@ -124,6 +125,33 @@ namespace GakuMotion
 			if (!RestoreSlot(index, registry)) return false;
 			followers_[index] = {};
 			return true;
+		}
+
+		bool HasMissingActor(size_t index, const SceneActorRegistry& registry) const
+		{
+			return index < followers_.size() && followers_[index].player &&
+			    !registry.Resolve(followers_[index].actorToken, registry.Epoch());
+		}
+
+		bool ClearMissingActor(size_t index, const SceneActorRegistry& registry)
+		{
+			if (!HasMissingActor(index, registry) || !fnReleaseDetached || !fnReleaseDetached(index))
+				return false;
+			// The actor is absent from the authoritative roster. Release only
+			// the plugin's ownership; never restore through cached Unity pointers.
+			followers_[index] = {};
+			return true;
+		}
+
+		bool RetryRestoreAfterMissingActor(const SceneActorRegistry& registry)
+		{
+			restoreUnconfirmed_ = false;
+			for (size_t i = 0; i < followers_.size(); ++i)
+			{
+				if (HasMissingActor(i, registry) || !RestoreSlot(i, registry))
+					restoreUnconfirmed_ = true;
+			}
+			return !restoreUnconfirmed_;
 		}
 
 		bool ClearAll(const SceneActorRegistry& registry)
@@ -260,6 +288,19 @@ namespace GakuMotion
 				return false;
 			if (!follower.player->controller.SetInitialPositionOffset(position)) return false;
 			RememberPlacement(actorToken, position, follower.player->controller.initialYawDegrees);
+			return true;
+		}
+
+		bool MoveToEmptySlot(size_t from, size_t to, uint64_t epoch, const SceneActorRegistry& registry)
+		{
+			if (from >= followers_.size() || to >= 64 || from == to || restoreUnconfirmed_ ||
+			    !followers_[from].player || !registry.Resolve(followers_[from].actorToken, epoch) ||
+			    (to < followers_.size() && followers_[to].player)) return false;
+			if (!RestoreSlot(from, registry)) return false;
+			EnsureSlots(to + 1);
+			Follower moved = std::move(followers_[from]);
+			followers_[from] = {};
+			InstallFollower(to, std::move(moved));
 			return true;
 		}
 		bool SetYaw(size_t index, uint64_t actorToken, uint64_t epoch, uint64_t generation,

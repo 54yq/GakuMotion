@@ -303,7 +303,9 @@ namespace GakuMotion
     inline std::atomic<int> externalStageHeldProp{0};
     inline std::atomic<bool> externalStageGrade{true};
     inline std::atomic<bool> externalStageContactShadows{true};
-    inline std::atomic<bool> externalStageGroundOverlay{true};
+    inline std::atomic<bool> externalStageVisibilityFirst{true}, externalStageVisibilitySecond{true};
+    inline std::atomic<bool> externalStageContactTrace{false};
+    inline std::atomic<bool> externalStageGroundOverlay{false};
     inline std::atomic<float> externalStageShadowSize{1.0f};
     inline std::atomic<bool> externalStageActorAmbient{true};
     inline std::atomic<bool> externalStageLocate{}, externalStageMeasure{};
@@ -327,6 +329,12 @@ namespace GakuMotion
         if (status == 1)
         {
             ImGui::TextUnformatted("独立舞台已载入");
+            bool first = externalStageVisibilityFirst.load();
+            if (ImGui::Checkbox("角色显隐轴 · 前段（07 / 08 / 10）", &first))
+                externalStageVisibilityFirst.store(first);
+            bool second = externalStageVisibilitySecond.load();
+            if (ImGui::Checkbox("角色显隐轴 · 后段（07 / 08 / 10）", &second))
+                externalStageVisibilitySecond.store(second);
             if (ImGui::Button("定位到 1 号起始站位")) externalStageLocate.store(true);
             ImGui::SameLine();
             if (ImGui::Button("测量当前角色高度")) externalStageMeasure.store(true);

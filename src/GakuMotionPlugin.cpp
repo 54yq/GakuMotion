@@ -1095,7 +1095,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.2+fork.4.3.106-web";
+	constexpr char kPluginVersion[] = "0.2.2+fork.4.5.4-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -2980,6 +2980,12 @@ void MotionRuntimeReady(void*)
 		ClearSecondaryPhysics();
 		return true;
 	};
+	GakuMotion::Core::Instance().ensemble.fnReleaseDetached = [](size_t slot)
+	{
+		if (!ClearFollowerPhysics(slot, nullptr, true)) return false;
+		if (slot < g_followerClocks.size()) g_followerClocks[slot] = {};
+		return true;
+	};
 	GakuMotion::Core::Instance().ensemble.fnBeforeRestore = [](size_t index, GakuMotion::MotionPlayer& player)
 	{
 		return RestoreFollowerClock(index) && ClearFollowerPhysics(index, &player);
@@ -3406,6 +3412,29 @@ static bool RefreshSceneActors(GakuMotion::Core& core, bool force, bool refreshP
 		core.liveOwnerToken == g_liveTakeoverOwner && core.liveOwnerScene == g_liveTakeoverScene &&
 		core.injectionPolicy.Read().captureDepth == 0 && GakuMotion::capture::LiveAutoPhotoIdle();
 	const bool addedLiveActors = liveRosterChanged && !previousActorMissing && observations.size() > oldCount;
+	const bool preservePhotographyActors = oldCount && actorSetChanged &&
+		g_sceneOwner.AllowedContext() == GakuMotion::injection::Context::Photography;
+	if (preservePhotographyActors && previousActorMissing)
+	{
+		// Actors may be deactivated before Unity destroys them. Keep the last
+		// roster until the full census confirms the departure.
+		std::vector<GakuMotion::SceneActorObservation> loaded;
+		if (!ReadSceneActors(loaded, true) ||
+		    !std::all_of(observations.begin(), observations.end(), [&](const auto& actor) {
+			    return GakuMotion::ObservedSceneActor(loaded, actor);
+		    }) ||
+		    std::any_of(oldEntries.begin(), oldEntries.end(), [&](const auto& actor) {
+			    return !GakuMotion::ObservedSceneActor(observations, actor) &&
+				    GakuMotion::ObservedSceneActor(loaded, actor);
+		    }))
+			return true;
+		for (const auto& actor : oldEntries)
+		{
+			if (GakuMotion::ObservedSceneActor(observations, actor)) continue;
+			LiveActorProps::AbandonActor(actor.token);
+			ActorModelVisibility::AbandonActor(actor.token);
+		}
+	}
 	if (liveRosterChanged && !addedLiveActors)
 	{
 		if (const char* reason = RestoreForLiveRosterChange(core, observations)) {
@@ -3425,7 +3454,34 @@ static bool RefreshSceneActors(GakuMotion::Core& core, bool force, bool refreshP
 		core.ensembleNotice="角色道具恢复未确认，已暂停注入；请重新进入场景";
 		core.player.Pause(); g_motionSceneAllowed=false; return false;
 	}
-	if (core.PublishSceneActors(observations, addedLiveActors))
+	const bool lostTarget = core.PublishSceneActors(observations, addedLiveActors || preservePhotographyActors);
+	if (preservePhotographyActors)
+	{
+		bool removed = false;
+		for (size_t slot = 0; slot < core.ensemble.Followers().size(); ++slot)
+		{
+			if (!core.ensemble.HasMissingActor(slot, core.sceneActorRegistry)) continue;
+			if (!core.ensemble.ClearMissingActor(slot, core.sceneActorRegistry))
+			{
+				core.ensembleRestoreUnconfirmed = true;
+				core.ensembleNotice = "离场角色的物理绑定未能释放；已暂停动作注入";
+				core.player.Pause();
+				if (core.fnNotifyMotionPlaying) core.fnNotifyMotionPlaying(false);
+				g_motionSceneAllowed = false;
+				return false;
+			}
+			removed = true;
+		}
+		if (removed)
+		{
+			core.ensembleNotice = "已解除离场角色绑定";
+			if (g_hostContext.logInfo)
+				g_hostContext.logInfo("[GakuMotion][PhotographyRoster] removed departed bindings; remaining actors kept");
+		}
+		if (core.ensembleAutoAlignPending && core.ensembleAutoAlignEpoch == oldEpoch && !lostTarget)
+			core.ensembleAutoAlignEpoch = core.sceneActorRegistry.Epoch();
+	}
+	if (lostTarget)
 	{
 		ClearSecondaryPhysics(true);
 		HelperClearActorAnimatorCache();
@@ -4757,7 +4813,12 @@ void MotionTick(void*, float)
                 GakuMotion::externalStageLocateResult.store(0);
                 GakuMotion::externalStageActorHeight.store(0);
             }
-            ExternalStage::TickTimeline(core.player.currentTime, core.player.clip.total_frames != 0);
+            ExternalStage::TickTimeline(core.player.meniSourceMotion ? core.player.AppliedMotionSourceTime() : core.player.currentTime,
+                                        core.player.clip.total_frames != 0);
+            ActorModelVisibility::UpdateMeniStage(core,
+                externalStageAdmitted && ExternalStage::status.load() == 1 &&
+                !GakuMotion::visual_handoff::Requested() && core.injectionPolicy.Read().captureDepth == 0,
+                GakuMotion::externalStageVisibilityFirst.load(), GakuMotion::externalStageVisibilitySecond.load());
             ExternalStage::UpdateHeldProps(core);
             ExternalStage::UpdateContactShadows(core);
             ExternalStage::UpdateForegroundMask(core.camera);

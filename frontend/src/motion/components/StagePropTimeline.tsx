@@ -5,7 +5,7 @@ import { Vector3Field } from './NumberField'
 
 const props = ['黄白狗', '黑白狗', '1205-02', '1205-03', '白兔', '棕兔', '粉兔', '斑点狗', '1548-01', '可莉饼 A', '可莉饼 B']
 const anchors = ['角色骨骼', '镜头前', '舞台坐标', '隐藏', '镜头交接 → 舞台固定']
-const movements = ['固定 / 瞬切', '直线移动', '缓入缓出', '抛物线', '角色交接']
+const movements = ['固定 / 瞬切', '直线移动', '缓入缓出', '抛物线', '角色交接', '原曲抛出（黄白狗）', '原 VMD 手部挂点']
 const bones = [[-1, '自动握持'], [17, '左手'], [18, '右手'], [0, '髋部'], [7, '脊柱'], [8, '胸部'], [10, '头部'], [27, '左手手指'], [42, '右手手指']] as const
 const duration = 4806
 const zero = { x: 0, y: 0, z: 0 }
@@ -23,7 +23,7 @@ const normalize = (cue: StagePropCue) => ({
 export function StagePropTimeline({ cues, time, samples, command }: {
   cues: StagePropCue[]
   time: number
-  samples?: ({ frame: number; position: Vector3 } | null)[]
+  samples?: ({ frame: number; position: Vector3; rotation?: Vector3 } | null)[]
   command: ForkCommand
 }) {
   const [draft, setDraft] = useState<Draft>()
@@ -41,7 +41,7 @@ export function StagePropTimeline({ cues, time, samples, command }: {
   const frame = clamp(scrubFrame ?? pendingFrame ?? Math.round(time * 30))
   const cue = draft && normalize(draft.cue)
   const sample = cue && samples?.[cue.prop - 1]
-  const sampleReady = sample && Math.abs(sample.frame - frame) <= 1
+  const sampleReady = sample && sample.frame === frame
   const positionLimit = cue?.anchor === 0 ? 2 : 200
   const invalid = cue && (cue.first < 0 || cue.first >= cue.last || cue.last > duration)
     ? '结束帧必须晚于开始帧。'
@@ -138,11 +138,18 @@ export function StagePropTimeline({ cues, time, samples, command }: {
     if (active && !active.moved) seek(active.edge === 'last' ? active.draft.cue.last - 1 : active.draft.cue.first)
   }
 
+  function fixOnStage() {
+    if (!sampleReady || !sample.rotation) return
+    update({
+      anchor: 2, movement: 0, position: sample.position, endPosition: sample.position,
+      rotation: sample.rotation, endRotation: sample.rotation,
+    })
+  }
+
   function capturePosition(endpoint: 'position' | 'endPosition') {
     if (!sampleReady || !cue) return
-    update({ anchor: 2, [endpoint]: sample.position, ...(cue.anchor !== 2 ? {
-      position: sample.position, endPosition: sample.position, movement: cue.movement === 4 ? 0 : cue.movement,
-    } : {}) })
+    if (cue.anchor !== 2) fixOnStage()
+    else update({ [endpoint]: sample.position })
   }
 
   const clips = cues.map((item, index) => ({ index, cue: draft?.index === index ? draft.cue : item }))
@@ -254,13 +261,20 @@ export function StagePropTimeline({ cues, time, samples, command }: {
             <label className="grid gap-1">固定位置
               <select className={field} value={cue.anchor} onChange={(event) => {
                 const anchor = Number(event.target.value)
+                if (anchor === 2 && cue.anchor !== 3) {
+                  fixOnStage()
+                  return
+                }
                 const position = anchor === 1 || anchor === 4 ? { x: -0.4, y: -0.45, z: 0.86 } : zero
                 if ((cue.anchor === 1 || cue.anchor === 4) && (anchor === 1 || anchor === 4)) {
                   update({ anchor, movement: 0 })
                 } else {
                   update({ anchor, movement: 0, position, endPosition: position, rotation: zero, endRotation: zero })
                 }
-              }}>{anchors.map((label, index) => <option key={label} value={index}>{label}</option>)}</select>
+              }}>{anchors.map((label, index) => <option key={label} value={index}
+                disabled={index === 2 && cue.anchor !== 2 && cue.anchor !== 3 && (!sampleReady || !sample.rotation)}>
+                {label}
+              </option>)}</select>
             </label>
             {cue.anchor !== 3 && cue.anchor !== 4 && <label className="grid gap-1">移动方式
               <select className={field} value={cue.movement} onChange={(event) => {
@@ -271,7 +285,7 @@ export function StagePropTimeline({ cues, time, samples, command }: {
                   { movement, ...(cue.movement === 0 && movement !== 4 ?
                     { endPosition: cue.position, endRotation: cue.rotation } : {}) })
               }}>
-                {movements.map((label, index) => (index !== 4 || cue.anchor === 0) && <option key={label} value={index}>{label}</option>)}
+                {movements.map((label, index) => (index !== 4 || cue.anchor === 0) && (index !== 6 || cue.anchor === 0 && cue.bone === -1) && (index !== 5 || cue.anchor === 0 && cue.prop === 1 && cue.place === 1 && !cue.left && cue.bone === -1) && <option key={label} value={index}>{label}</option>)}
               </select>
             </label>}
             {cue.anchor === 0 && <>
@@ -318,16 +332,17 @@ export function StagePropTimeline({ cues, time, samples, command }: {
               {(['position', 'rotation', ...(moving ? ['endPosition', 'endRotation'] as const : [])] as const).map((key) => {
                 const position = key === 'position' || key === 'endPosition'
                 const label = (key.startsWith('end') ? '终点' : '起点') + (position ? '位置' : '旋转')
+                const limit = position ? positionLimit : 360
                 return <fieldset key={key} className="rounded border border-border p-2">
                   <legend className="px-1 text-xs">{label}{position ? cue.anchor === 4 ? '（交接时的画面 X/Y、距离 Z）' : cue.anchor === 1 ? '（画面 X/Y、距离 Z）' : '（米）' : '（度）'}</legend>
-                  <Vector3Field value={cue[key]} labelPrefix={label} min={position ? -positionLimit : -360} max={position ? positionLimit : 360}
+                  <Vector3Field value={cue[key]} labelPrefix={label} min={-limit} max={limit}
                     step={position ? 0.01 : 1} dragSpeed={position ? 0.005 : 0.5} decimals={position ? 2 : 0}
                     onChange={(next) => update({ [key]: next })} onCommit={(next) => update({ [key]: next })} />
                 </fieldset>
               })}
             </div>
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              <button type="button" className={button} disabled={!sampleReady} onClick={() => capturePosition('position')}>使用当前道具位置作为起点</button>
+              <button type="button" className={button} disabled={!sampleReady || (cue.anchor !== 2 && !sample.rotation)} onClick={() => capturePosition('position')}>使用当前道具位置作为起点</button>
               {moving && <button type="button" className={button} disabled={!sampleReady || cue.anchor !== 2}
                 onClick={() => capturePosition('endPosition')}>取当前位置为终点</button>}
               <label className="flex items-center gap-1"><input type="checkbox" checked={cue.hideAfter}

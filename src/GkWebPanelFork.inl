@@ -59,11 +59,28 @@
             {
                 if (propSamples.size() > 1) propSamples += ",";
                 propSamples += sample ? "{\"frame\":" + JNum(sample->frame) +
-                    ",\"position\":" + JVec(sample->position) + "}" : "null";
+                    ",\"position\":" + JVec(sample->position) + ",\"rotation\":" + JVec(sample->rotation) + "}" : "null";
             }
             propSamples += "]";
+            const bool sourceTrial = core_.SourcePropTrialActive();
+            const float sourceFrame = stage_prop_timeline::FrameAtTime(core_.player.AppliedMotionSourceTime());
+            std::string sourceTrialCues = "[";
+            for (const auto& cue : core_.player.sourcePropTrialCues)
+            {
+                if (sourceTrialCues.size() > 1) sourceTrialCues += ",";
+                const bool current = sourceTrial && stage_prop_timeline::ContainsFrame(cue, sourceFrame);
+                const auto& sample = core_.stagePropSamples[cue.prop - 1];
+                const bool applied = current && sample && sample->frame == std::lround(sourceFrame);
+                sourceTrialCues += "{\"prop\":" + JNum(cue.prop) + ",\"place\":" + JNum(cue.place) +
+                    ",\"left\":" + JBool(cue.left) + ",\"first\":" + JNum(cue.first) +
+                    ",\"last\":" + JNum(cue.last) + ",\"current\":" + JBool(current) +
+                    ",\"applied\":" + JBool(applied) + "}";
+            }
+            sourceTrialCues += "]";
 			return "{\"session\":" + JNum(core_.injectionSession) + ",\"owner\":" + JNum(core_.liveOwnerToken) +
                 ",\"externalStageCues\":" + stageCues +
+                ",\"sourcePropTrial\":{\"active\":" + JBool(sourceTrial) + ",\"frame\":" + JNum(sourceFrame) +
+                    ",\"cues\":" + sourceTrialCues + "}" +
                 ",\"externalStagePropSamples\":" + propSamples +
                 ",\"externalStageEnabled\":" + JBool(externalStageEnabled.load()) +
                 ",\"externalStageStatus\":" + JNum(externalStageStatus.load()) +
@@ -76,6 +93,8 @@
                 ",\"externalStageActorAmbient\":" + JBool(externalStageActorAmbient.load()) +
                 ",\"externalStageGroundOverlay\":" + JBool(externalStageGroundOverlay.load()) +
                 ",\"externalStageContactShadows\":" + JBool(externalStageContactShadows.load()) +
+                ",\"externalStageVisibilityFirst\":" + JBool(externalStageVisibilityFirst.load()) +
+                ",\"externalStageVisibilitySecond\":" + JBool(externalStageVisibilitySecond.load()) +
                 ",\"externalStageShadowSize\":" + JNum(externalStageShadowSize.load()) +
                 ",\"externalStageGrade\":" + JBool(externalStageGrade.load()) +
                 ",\"externalStagePropStart\":" + JNum(externalStagePropStart.load()) +
@@ -147,7 +166,11 @@
                 bool enable = false;
                 if (!BoolParam(params, "value", enable)) return CmdResult::Err("invalid_params", "缺少舞台开关状态");
                 externalStageEnabled.store(enable);
-                if (!enable) core_.stagePropPreview.reset();
+                if (!enable)
+                {
+                    core_.stagePropPreview.reset();
+                    core_.sourcePropTrialGeneration.reset();
+                }
                 return CmdResult::Ok();
             }
             if (action == "externalStage.locate" || action == "externalStage.measure")
@@ -173,6 +196,16 @@
                 externalStageGroundOverlay.store(enabled);
                 return CmdResult::Ok();
             }
+            if (action == "externalStage.visibilityFirst" || action == "externalStage.visibilitySecond")
+            {
+                bool enabled{};
+                if (!BoolParam(params, "value", enabled))
+                    return CmdResult::Err("invalid_params", "缺少角色显隐轴开关状态");
+                auto& setting = action == "externalStage.visibilityFirst"
+                    ? externalStageVisibilityFirst : externalStageVisibilitySecond;
+                setting.store(enabled);
+                return CmdResult::Ok();
+            }
             if (action == "externalStage.contactShadows")
             {
                 bool enabled{};
@@ -194,6 +227,41 @@
                 bool value = false;
                 if (!BoolParam(params, "value", value)) return CmdResult::Err("invalid_params", "缺少调色开关状态");
                 externalStageGrade.store(value);
+                return CmdResult::Ok();
+            }
+            if (action == "externalStage.sourcePropTrial")
+            {
+                bool enable = false;
+                if (!BoolParam(params, "value", enable))
+                    return CmdResult::Err("invalid_params", "缺少原挂点试播状态");
+                if (!enable)
+                {
+                    core_.sourcePropTrialGeneration.reset();
+                    return CmdResult::Ok();
+                }
+                if (const auto guard = MutationGuardLocked(); !guard.ok) return guard;
+                if (externalStageStatus.load() != 1 || !externalStageFollow.load() ||
+                    core_.player.state == PlaybackState::Stopped || core_.player.sourcePropTrialCues.empty())
+                    return CmdResult::Err("not_ready", "请载入带原挂点试播文件的曲目，开启外部舞台并跟随曲目");
+                core_.stagePropPreview.reset();
+                core_.stagePropSamples = {};
+                core_.sourcePropTrialGeneration = core_.loadedMotionGeneration;
+                return CmdResult::Ok();
+            }
+            if (action == "externalStage.sourcePropTrialSeek")
+            {
+                if (const auto guard = MutationGuardLocked(); !guard.ok) return guard;
+                int64_t frame{};
+                if (!core_.SourcePropTrialActive() || externalStageStatus.load() != 1 ||
+                    !IntParam(params, "frame", frame) || frame < 0 || frame > stage_prop_timeline::lastFrame)
+                    return CmdResult::Err("invalid_params", "原挂点试播尚未开启或源帧无效");
+                const auto& timing = core_.player.timing.motion;
+                const double time = timing.speed > 0.f ? frame / (30.0 * timing.speed) + timing.offsetSeconds : -1.0;
+                if (!std::isfinite(time) || time < 0.0 || time > core_.player.TimelineDuration() ||
+                    frame / 30.0 > core_.player.clip.duration_seconds)
+                    return CmdResult::Err("out_of_range", "当前动作时间设置无法到达此源帧");
+                core_.QueuePause();
+                core_.QueueSeek(static_cast<float>(time));
                 return CmdResult::Ok();
             }
             if (action == "externalStage.cueSeek")
@@ -252,7 +320,17 @@
                         next.first = static_cast<int>(frame);
                         if (leaveOnStage)
                         {
-                            next.anchor = stage_prop_timeline::Anchor::CameraToStage;
+                            const auto& sample = core_.stagePropSamples[source.prop - 1];
+                            if (sample && sample->frame == frame && frame < source.last)
+                            {
+                                next.anchor = stage_prop_timeline::Anchor::Stage;
+                                next.position = next.endPosition = sample->position;
+                                next.rotation = next.endRotation = sample->rotation;
+                                if (!stage_prop_timeline::Valid(next))
+                                    return CmdResult::Err("invalid_params", "当前道具位置超出舞台坐标范围");
+                            }
+                            else
+                                next.anchor = stage_prop_timeline::Anchor::CameraToStage;
                             next.hideAfter = true;
                             if (next.first == next.last)
                             {
@@ -293,7 +371,7 @@
                             int64_t anchor{}, movement{}, bone{}, blend{};
                             double arc{};
                             if (!IntParam(params, "anchor", anchor) || anchor < 0 || anchor > 4 ||
-                                !IntParam(params, "movement", movement) || movement < 0 || movement > 4 ||
+                                !IntParam(params, "movement", movement) || movement < 0 || movement > 6 ||
                                 !IntParam(params, "bone", bone) || bone < -1 || bone > 54 ||
                                 !IntParam(params, "blendFrames", blend) || blend < 1 || blend > stage_prop_timeline::lastFrame ||
                                 !NumberParam(params, "arcHeight", arc) || arc < 0 || arc > 20 ||
@@ -368,7 +446,11 @@
                     if (!BoolParam(params, "value", value) ||
                         (action == "externalStage.play" && externalStageFollow.load()))
                         return CmdResult::Err("invalid_params", "舞台播放状态无效");
-                    if (action == "externalStage.follow") externalStageFollow.store(value);
+                    if (action == "externalStage.follow")
+                    {
+                        externalStageFollow.store(value);
+                        if (!value) core_.sourcePropTrialGeneration.reset();
+                    }
                     else externalStagePlaying.store(value);
                 }
                 else
@@ -644,6 +726,39 @@
 					if (setPosition) ctx.fnSetEnsemblePosition(ctx.self, static_cast<int>(slot), follower.actorToken, ctx.actorRosterEpoch, follower.bindingGeneration, position);
 					if (setYaw) ctx.fnSetEnsembleYaw(ctx.self, static_cast<int>(slot), follower.actorToken, ctx.actorRosterEpoch, follower.bindingGeneration, static_cast<float>(yaw));
 				}
+			}
+			else if (action == "formation.reorder")
+			{
+				int64_t from = -1, to = -1, fromGeneration = 0, toGeneration = -1, revision = -1;
+				if (!IntParam(params, "fromSlot", from) || from < 0 || from >= 64 ||
+				    !IntParam(params, "toSlot", to) || to < 0 || to >= 64 || from == to ||
+				    !IntParam(params, "fromGeneration", fromGeneration) || fromGeneration <= 0 ||
+				    !IntParam(params, "toGeneration", toGeneration) || toGeneration < 0 ||
+				    !IntParam(params, "revision", revision) || revision < 0 ||
+				    static_cast<uint64_t>(revision) != core_.libraryRevision)
+					return CmdResult::Err("invalid_params", "角色槽或曲库版本无效");
+				const auto& followers = ctx.ensembleFollowers;
+				const auto toIndex = static_cast<size_t>(to);
+				const auto fromIndex = static_cast<size_t>(from);
+				const bool hasTarget = toIndex < followers.size() && followers[toIndex].bindingGeneration != 0;
+				if (fromIndex >= followers.size() ||
+				    followers[fromIndex].bindingGeneration != static_cast<uint64_t>(fromGeneration) ||
+				    (hasTarget ? followers[toIndex].bindingGeneration : 0) != static_cast<uint64_t>(toGeneration))
+					return CmdResult::Err("stale_token", "副角色绑定已变化");
+				const auto& source = followers[fromIndex];
+				const auto& motionSlot = hasTarget ? followers[toIndex] : source;
+				GuiCommand cmd{GuiAction::ReorderEnsembleFollowers};
+				cmd.stagePresetIndex = static_cast<int>(from);
+				cmd.candidateIndex = static_cast<int>(to);
+				cmd.actorToken = source.actorToken;
+				cmd.actorEpoch = ctx.actorRosterEpoch;
+				cmd.sceneSession = core_.injectionSession;
+				cmd.libraryRevision = core_.libraryRevision;
+				cmd.formationGenerations = {static_cast<uint64_t>(fromGeneration), static_cast<uint64_t>(toGeneration)};
+				cmd.key = motionSlot.motionKey;
+				cmd.value = motionSlot.offsetSeconds;
+				cmd.flag = hasTarget;
+				core_.QueueGui(std::move(cmd));
 			}
 			else if (action == "formation.bind" || action == "formation.swap" || action == "formation.clear")
 			{
