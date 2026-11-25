@@ -51,11 +51,19 @@ namespace ActorModelVisibility
             if (Restore(core,it->second)) { Release(it->second); it=saved.erase(it); }
             else {ok=false; ++it;}
         }
-        if (ok) core.actorModelHidden.clear();
+        if (ok) {
+            core.actorModelHidden.clear();
+            core.stageHiddenActorModels.clear();
+        }
         return ok;
     }
-    inline void Abandon() { for (auto& item:saved) Release(item.second); saved.clear(); }
+    inline void Abandon() {
+        for (auto& item : saved) Release(item.second);
+        saved.clear();
+        GakuMotion::Core::Instance().stageHiddenActorModels.clear();
+    }
     inline void AbandonActor(uint64_t token) {
+        GakuMotion::Core::Instance().stageHiddenActorModels.erase(token);
         const auto it = saved.find(token);
         if (it == saved.end()) return;
         Release(it->second);
@@ -104,5 +112,52 @@ namespace ActorModelVisibility
         }
         if(g_hostContext.logInfo)g_hostContext.logInfo("[GakuMotion][ActorModelVisibility] hidden actor_token=%llu renderer_count=%zu",static_cast<unsigned long long>(token),inserted->second.renderers.size());
         return true;
+    }
+
+    inline void UpdateMeniStage(GakuMotion::Core& core, bool active, bool firstEnabled, bool secondEnabled)
+    {
+        const float frame = GakuMotion::stage_prop_timeline::FrameAtTime(core.player.AppliedMotionSourceTime());
+        const bool playingMeni = active && core.player.meniSourceMotion &&
+            core.player.state != GakuMotion::PlaybackState::Stopped;
+        const auto epoch = core.sceneActorRegistry.Epoch();
+        const auto& followers = core.ensemble.Followers();
+        const auto matches = [&](const auto& follower) {
+            if (!playingMeni || !follower.player || !follower.player->controller.targetActor ||
+                core.sceneActorRegistry.Resolve(follower.actorToken, epoch) != follower.player->controller.targetActor)
+                return false;
+
+            // These are the model display keys from the corresponding Meni source VMDs.
+            const bool place07Or08 = follower.motionKey == "cutt_son1156_Place07" ||
+                follower.motionKey == "cutt_son1156_Place08";
+            const bool place10 = follower.motionKey == "cutt_son1156_Place10";
+            const bool first = firstEnabled && ((place07Or08 && frame >= 1353.f && frame < 1700.f) ||
+                (place10 && frame >= 1000.f && frame < 1730.f));
+            const bool second = secondEnabled && (place07Or08 || place10) && frame >= 3368.f && frame < 3451.f;
+            return first || second;
+        };
+
+        auto& hidden = core.stageHiddenActorModels;
+        for (auto it = hidden.begin(); it != hidden.end();) {
+            const auto token = *it;
+            const auto stillHidden = std::any_of(followers.begin(), followers.end(), [&](const auto& follower) {
+                return follower.actorToken == token && matches(follower);
+            });
+            if (stillHidden) { ++it; continue; }
+            if (!core.sceneActorRegistry.Resolve(token, epoch)) {
+                AbandonActor(token);
+                it = hidden.begin();
+            } else if (core.actorModelHidden.contains(token) || Apply(token, epoch, false)) {
+                it = hidden.erase(it);
+            } else {
+                ++it;
+            }
+        }
+
+        if (!playingMeni) return;
+        for (const auto& follower : followers) {
+            if (matches(follower) && !hidden.contains(follower.actorToken) &&
+                Apply(follower.actorToken, epoch, true))
+                hidden.insert(follower.actorToken);
+        }
     }
 }

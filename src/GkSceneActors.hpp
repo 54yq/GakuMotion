@@ -1,4 +1,5 @@
 #pragma once
+#include "GkCharacterNames.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <string>
@@ -26,6 +27,12 @@ namespace GakuMotion
 		if(label.empty()||label.size()>160)return {};
 		for(unsigned char c:label)if(c<32)return {};
 		return label;
+	}
+	inline std::string FormatSceneActorLabel(const SceneActorObservation& actor, size_t oneBasedIndex)
+	{
+		const auto label = !actor.displayName.empty() ? actor.displayName
+			: actor.character.empty() ? std::string("未识别角色") : FormatIdolDisplayName(actor.character.c_str());
+		return label + " · " + std::to_string(oneBasedIndex);
 	}
 	struct SceneActorEntry : SceneActorObservation { uint64_t token{0}; };
 	inline bool ObservedSceneActor(const std::vector<SceneActorObservation>& observations,

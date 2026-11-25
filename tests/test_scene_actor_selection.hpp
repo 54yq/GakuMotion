@@ -15,6 +15,21 @@ static void TestSceneActorSelection()
 			"taller Live target preserves the old content scale, width, lens shift and depth");
 		Check(!live_aspect::PreserveHorizontalFraming(p, 16.0f / 9.0f, 16.0f / 9.0f),
 			"unchanged aspect is not expanded");
+		const float wide = 2.35f, target = 16.0f / 9.0f;
+		auto wideNative = original;
+		wideNative[0] = wideNative[5] / wide;
+		auto resized = wideNative;
+		resized[5] = resized[0] * target;
+		const float scale = live_aspect::HorizontalScaleAfterSwitch(wideNative, resized, wide, target);
+		Check(std::abs(scale - 1.f) < 0.0001f &&
+			live_aspect::PreserveHorizontalFraming(resized, wide, target, scale) &&
+			std::abs(resized[0] - wideNative[0]) < 0.0001f,
+			"native 16:9 lens already preserving width does not receive a second zoom correction");
+		auto explicitWide = wideNative;
+		Check(live_aspect::PreserveHorizontalFraming(explicitWide, wide, target) &&
+			explicitWide[0] == wideNative[0] &&
+			std::abs(explicitWide[5] / explicitWide[0] - target) < 0.0001f,
+			"wide projection surviving the native switch is adapted without changing horizontal magnification");
 	}
 	Check(live_actor_props::IsSupportedPair("Root_Microphone","Prop_Microphone") &&
 		live_actor_props::IsSupportedPair("Root_Penlightklljduo","Prop_Penlightklljduo") &&

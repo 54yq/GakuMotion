@@ -35,6 +35,13 @@
 #include <fstream>
 #include <sstream>
 #include <filesystem>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <memory>
+#endif
 
 namespace GakuMotion::jsonlite
 {
@@ -649,7 +656,34 @@ namespace GakuMotion::jsonlite
 
 	inline bool ParseFile(const std::string& path, Value& out, std::string& error)
 	{
-		std::ifstream file(std::filesystem::path(std::u8string(path.begin(), path.end())), std::ios::binary);
+		const std::filesystem::path filePath(std::u8string(path.begin(), path.end()));
+#ifdef _WIN32
+		std::string text;
+		{
+			// Keep the opened file readable if another process atomically replaces its path.
+			// Continue to exclude in-place writers while the document is being read.
+			const HANDLE handle = CreateFileW(filePath.c_str(), GENERIC_READ,
+				FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+			if (handle == INVALID_HANDLE_VALUE)
+			{
+				error = "cannot open file: " + path;
+				return false;
+			}
+			const std::unique_ptr<void, decltype(&CloseHandle)> file(handle, &CloseHandle);
+			char buffer[8192];
+			DWORD count{};
+			do
+			{
+				if (!ReadFile(file.get(), buffer, sizeof(buffer), &count, nullptr))
+				{
+					error = "cannot read file: " + path;
+					return false;
+				}
+				text.append(buffer, count);
+			} while (count != 0);
+		}
+#else
+		std::ifstream file(filePath, std::ios::binary);
 		if (!file.is_open())
 		{
 			error = "cannot open file: " + path;
@@ -658,6 +692,7 @@ namespace GakuMotion::jsonlite
 		std::ostringstream buffer;
 		buffer << file.rdbuf();
 		std::string text = buffer.str();
+#endif
 		if (text.empty())
 		{
 			error = "empty file: " + path;

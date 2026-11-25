@@ -54,6 +54,9 @@
 #include <cstring>
 #include <cstdio>
 #include <atomic>
+#include "../include/GakuMotionClock.h"
+#include "../include/GakuMotionStageState.h"
+#include "GkAudioPluginClient.hpp"
 #include <mutex>
 #include <limits>
 #include <sstream>
@@ -150,6 +153,8 @@ namespace
 
 	MotionHostContext g_hostContext{};
 	std::mutex g_lifecycleMutex;
+	GakuMotion::audio::AudioPluginClient g_audioPlugin;
+	bool g_usingPluginAudio = false;
 	bool g_pluginInitialized = false;
 	std::atomic<bool> g_runtimeReady{false};
 	bool g_cameraAttempted = false;
@@ -1090,7 +1095,7 @@ namespace
 	std::string g_importPendingLine;
 	uint64_t g_fileDialogTicket{0};
 
-	constexpr char kPluginVersion[] = "0.2.0+fork.4.3.88-web";
+	constexpr char kPluginVersion[] = "0.2.2+fork.4.5.4-web";
 	GakuMotion::webpanel::Bridge* g_webPanelBridge = nullptr;
 	void ReleasePendingFileDialog()
 	{
@@ -1351,6 +1356,12 @@ namespace
 
 	bool HelperAudioSetVolume(float volume)
 	{
+		if (g_usingPluginAudio)
+		{
+			if (!std::isfinite(volume)) return false;
+			g_musicVolume = std::clamp(volume, 0.0f, 1.0f);
+			return g_audioPlugin.SetVolume(g_musicVolume);
+		}
 		if (!std::isfinite(volume)) return false;
 		g_musicVolume = std::clamp(volume, 0.0f, 1.0f);
 		if (!g_audioObservation.sourceOpen) { g_musicVolumeSupport = 0; return true; }
@@ -1363,10 +1374,16 @@ namespace
 		// A volume failure must not poison transport observation or synchronization.
 		return result == 0;
 	}
-	int HelperAudioVolumeSupport() { return g_musicVolumeSupport; }
+	int HelperAudioVolumeSupport() { return g_usingPluginAudio ? 1 : g_musicVolumeSupport; }
 
 	GakuMotion::audio::Observation HelperAudioObserve()
 	{
+		if (g_usingPluginAudio)
+		{
+			GakuMotion::audio::Observation observation{};
+			g_audioPlugin.Observe(observation);
+			return observation;
+		}
 		auto observed = g_audioObservation;
 		if (!observed.sourceOpen) return observed;
 		char mode[32]{};
@@ -1416,6 +1433,21 @@ namespace
 	// 打开并以 startMs 为起点播放
 	void HelperAudioOpenAndPlay(const std::string& path, int startMs)
 	{
+		if (g_usingPluginAudio)
+		{
+			if (!g_audioPlugin.Stop()) return;
+			g_usingPluginAudio = false;
+		}
+		if (g_audioPlugin.Available() && g_audioPlugin.ActivePresetId() != "off")
+		{
+			const auto close = g_sendMciAudio("close mmd_song", nullptr, 0, nullptr);
+			if (!close || HelperAudioMissingAlias(close))
+			{
+				g_audioPlugin.SetVolume(g_musicVolume);
+				g_usingPluginAudio = g_audioPlugin.OpenAndPlay(path, startMs / 1000.0);
+				if (g_usingPluginAudio) return;
+			}
+		}
 		const MCIERROR closeError = g_sendMciAudio("close mmd_song", NULL, 0, NULL);
 		if (closeError && !HelperAudioMissingAlias(closeError))
 		{
@@ -1475,12 +1507,14 @@ namespace
 
 	void HelperAudioPause()
 	{
+		if (g_usingPluginAudio) { g_audioPlugin.Pause(); return; }
 		HelperAudioRecordCommand(g_sendMciAudio("pause mmd_song", NULL, 0, NULL));
 	}
 
 	// Always use the requested absolute timeline position, including zero.
 	void HelperAudioResumeAt(float seconds)
 	{
+		if (g_usingPluginAudio) { g_audioPlugin.ResumeAt(seconds); return; }
 		const int ms = HelperAudioMsFromSeconds(seconds);
 		if (HelperAudioIsOpen())
 		{
@@ -1498,6 +1532,7 @@ namespace
 	// 进度跳转：仅在音频已打开时生效；未打开时由播放器下一次 Play() 负责对齐
 	void HelperAudioSeekTo(float seconds, bool playing)
 	{
+		if (g_usingPluginAudio) { g_audioPlugin.Seek(seconds, playing); return; }
 		if (!HelperAudioIsOpen()) return;
 		const int ms = HelperAudioMsFromSeconds(seconds);
 		char cmd[128]{};
@@ -1512,6 +1547,11 @@ namespace
 
 	void HelperAudioStop()
 	{
+		if (g_usingPluginAudio)
+		{
+			if (g_audioPlugin.Stop()) g_usingPluginAudio = false;
+			return;
+		}
 		MCIERROR stopError = g_sendMciAudio("stop mmd_song", NULL, 0, NULL);
 		const MCIERROR closeError = g_sendMciAudio("close mmd_song", NULL, 0, NULL);
 		if (HelperAudioMissingAlias(stopError)) stopError = 0;
@@ -1527,6 +1567,13 @@ namespace
 
 	float HelperAudioGetTime()
 	{
+		if (g_usingPluginAudio)
+		{
+			GakuMotion::audio::Observation observation{};
+			double position = 0;
+			return g_audioPlugin.Observe(observation, &position) && observation.EffectivePlaying()
+				? static_cast<float>(position) : -1.0f;
+		}
 		// A failed seek/resume cannot pull the motion back to an old alias clock.
 		if (!HelperAudioObserve().EffectivePlaying()) return -1.0f;
 		char buf[64]{};
@@ -2579,6 +2626,7 @@ bool InitializeMotion()
 	{
 		GM_INFO("[GakuMotion][MouthSource] track=%s status=%s", directory, status);
 	};
+	g_audioPlugin.SetConfigRoot(GakuMotion::MotionPathFromUtf8(selected.configs));
 	core.Initialize(localRoot, &selected);
 	HelperAudioSetVolume(player.musicVolume);
 	if (g_hostContext.logInfo) g_hostContext.logInfo("[GakuMotion][Paths] layout=%s configs=%s motions=%s",
@@ -2930,6 +2978,12 @@ void MotionRuntimeReady(void*)
 			return false; // Preserve failed ownership snapshots for the capture gate.
 		}
 		ClearSecondaryPhysics();
+		return true;
+	};
+	GakuMotion::Core::Instance().ensemble.fnReleaseDetached = [](size_t slot)
+	{
+		if (!ClearFollowerPhysics(slot, nullptr, true)) return false;
+		if (slot < g_followerClocks.size()) g_followerClocks[slot] = {};
 		return true;
 	};
 	GakuMotion::Core::Instance().ensemble.fnBeforeRestore = [](size_t index, GakuMotion::MotionPlayer& player)
@@ -3358,6 +3412,29 @@ static bool RefreshSceneActors(GakuMotion::Core& core, bool force, bool refreshP
 		core.liveOwnerToken == g_liveTakeoverOwner && core.liveOwnerScene == g_liveTakeoverScene &&
 		core.injectionPolicy.Read().captureDepth == 0 && GakuMotion::capture::LiveAutoPhotoIdle();
 	const bool addedLiveActors = liveRosterChanged && !previousActorMissing && observations.size() > oldCount;
+	const bool preservePhotographyActors = oldCount && actorSetChanged &&
+		g_sceneOwner.AllowedContext() == GakuMotion::injection::Context::Photography;
+	if (preservePhotographyActors && previousActorMissing)
+	{
+		// Actors may be deactivated before Unity destroys them. Keep the last
+		// roster until the full census confirms the departure.
+		std::vector<GakuMotion::SceneActorObservation> loaded;
+		if (!ReadSceneActors(loaded, true) ||
+		    !std::all_of(observations.begin(), observations.end(), [&](const auto& actor) {
+			    return GakuMotion::ObservedSceneActor(loaded, actor);
+		    }) ||
+		    std::any_of(oldEntries.begin(), oldEntries.end(), [&](const auto& actor) {
+			    return !GakuMotion::ObservedSceneActor(observations, actor) &&
+				    GakuMotion::ObservedSceneActor(loaded, actor);
+		    }))
+			return true;
+		for (const auto& actor : oldEntries)
+		{
+			if (GakuMotion::ObservedSceneActor(observations, actor)) continue;
+			LiveActorProps::AbandonActor(actor.token);
+			ActorModelVisibility::AbandonActor(actor.token);
+		}
+	}
 	if (liveRosterChanged && !addedLiveActors)
 	{
 		if (const char* reason = RestoreForLiveRosterChange(core, observations)) {
@@ -3377,7 +3454,34 @@ static bool RefreshSceneActors(GakuMotion::Core& core, bool force, bool refreshP
 		core.ensembleNotice="角色道具恢复未确认，已暂停注入；请重新进入场景";
 		core.player.Pause(); g_motionSceneAllowed=false; return false;
 	}
-	if (core.PublishSceneActors(observations, addedLiveActors))
+	const bool lostTarget = core.PublishSceneActors(observations, addedLiveActors || preservePhotographyActors);
+	if (preservePhotographyActors)
+	{
+		bool removed = false;
+		for (size_t slot = 0; slot < core.ensemble.Followers().size(); ++slot)
+		{
+			if (!core.ensemble.HasMissingActor(slot, core.sceneActorRegistry)) continue;
+			if (!core.ensemble.ClearMissingActor(slot, core.sceneActorRegistry))
+			{
+				core.ensembleRestoreUnconfirmed = true;
+				core.ensembleNotice = "离场角色的物理绑定未能释放；已暂停动作注入";
+				core.player.Pause();
+				if (core.fnNotifyMotionPlaying) core.fnNotifyMotionPlaying(false);
+				g_motionSceneAllowed = false;
+				return false;
+			}
+			removed = true;
+		}
+		if (removed)
+		{
+			core.ensembleNotice = "已解除离场角色绑定";
+			if (g_hostContext.logInfo)
+				g_hostContext.logInfo("[GakuMotion][PhotographyRoster] removed departed bindings; remaining actors kept");
+		}
+		if (core.ensembleAutoAlignPending && core.ensembleAutoAlignEpoch == oldEpoch && !lostTarget)
+			core.ensembleAutoAlignEpoch = core.sceneActorRegistry.Epoch();
+	}
+	if (lostTarget)
 	{
 		ClearSecondaryPhysics(true);
 		HelperClearActorAnimatorCache();
@@ -3422,6 +3526,8 @@ namespace {
         ~PluginTickTimer() { total += PluginTickClock::now() - begin; }
     };
 }
+
+#include "GkRecordingService.inl"
 
 void MotionActorTick(void*, void* activeActor, float deltaTime)
 {
@@ -4071,11 +4177,14 @@ void MotionActorTick(void*, void* activeActor, float deltaTime)
 	EyeGazeProbe::Before(activeActor);
 	core.traceExternalStageCamera = ExternalStage::status.load() == 1 &&
 		g_sceneOwner.AllowedContext() == GakuMotion::injection::Context::Photography;
+	const bool recordingPose = PrepareRecordingPose(core, isNewPhysicalFrame, dtToPass);
 	if (player.controller.targetActor)
-		GakuMotion::OnLateUpdate(activeActor, anim, nullptr, dtToPass, isNewPhysicalFrame,
+		GakuMotion::OnLateUpdate(activeActor, anim, nullptr, dtToPass, isNewPhysicalFrame && !recordingPose,
 		                        s_cameraFrameDelta, s_cameraPhysicalFrame,
-                                ThreeActorNativeTakeover(core) && !core.ensemble.HasActiveFollowers() &&
+                                !recordingPose && ThreeActorNativeTakeover(core) && !core.ensemble.HasActiveFollowers() &&
                                 activeActor == player.controller.targetActor);
+	if (recordingPose && player.controller.targetActor == activeActor)
+		FinishRecordingPose(core);
 	EyeGazeProbe::After(activeActor);
     // Only observed Motion-owned actors can trigger this. Each role has its own
     // identity, scene epoch and follower generation; never retain managed rigs.
@@ -4530,10 +4639,13 @@ void MotionShutdown(void*)
 	{
 		g_hostContext.logInfo("[GakuMotion] Plugin shut down.");
 	}
+	ResetRecording();
+	g_audioPlugin.BindHost(nullptr);
 	g_pluginInitialized = false;
 }
 
 namespace {
+
 // Native activation: connect the loader services, publish the playback contract,
 // fill the host adapter and initialize config/audio/import. Runs before Unity
 // exists, so it must not call managed code.
@@ -4571,7 +4683,14 @@ GakuStatus MotionActivate(const GakuHostApi* host, void** pluginState)
 	g_hostContext.setMotionPlaying = MotionSetMotionPlaying;
 	g_hostContext.isMotionPlaying = MotionIsMotionPlaying;
 
+	g_audioPlugin.BindHost(&GakuMotion::host::api);
 	if (!InitializeMotion()) return GAKU_E_INTERNAL;
+	const auto clockStatus = PublishRecordingClock();
+	const auto stageStatus = PublishCaptureStageState();
+	if (stageStatus != GAKU_OK)
+		MotionLogWarn("[GakuMotion] Capture stage state unavailable (%d)", stageStatus);
+	if (clockStatus != GAKU_OK)
+		MotionLogWarn("[GakuMotion] Recording clock unavailable (%d)", clockStatus);
 	*pluginState = &GakuMotion::Core::Instance();
 
 	if (g_webPanelBridge) g_webPanelBridge->Invalidate("plugin-reactivation");
@@ -4694,9 +4813,15 @@ void MotionTick(void*, float)
                 GakuMotion::externalStageLocateResult.store(0);
                 GakuMotion::externalStageActorHeight.store(0);
             }
-            ExternalStage::TickTimeline(core.player.currentTime, core.player.clip.total_frames != 0);
+            ExternalStage::TickTimeline(core.player.meniSourceMotion ? core.player.AppliedMotionSourceTime() : core.player.currentTime,
+                                        core.player.clip.total_frames != 0);
+            ActorModelVisibility::UpdateMeniStage(core,
+                externalStageAdmitted && ExternalStage::status.load() == 1 &&
+                !GakuMotion::visual_handoff::Requested() && core.injectionPolicy.Read().captureDepth == 0,
+                GakuMotion::externalStageVisibilityFirst.load(), GakuMotion::externalStageVisibilitySecond.load());
             ExternalStage::UpdateHeldProps(core);
             ExternalStage::UpdateContactShadows(core);
+            ExternalStage::UpdateForegroundMask(core.camera);
             GakuMotion::externalStageStatus.store(ExternalStage::status.load());
             NativeAudio::Sync();
             bool mutePhotographyBgm = false;

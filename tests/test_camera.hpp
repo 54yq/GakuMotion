@@ -295,6 +295,11 @@ static void TestCameraController(const std::string& repoRoot)
 		      "disabling facing sync restores the original composition");
 		anchored.settings.vmdRangeScale = 0.5f;
 		anchored.Tick(true, 0, .016f, actor);
+		Check(Near(actual.position.x, beforeYawPosition.x) && Near(actual.position.y, beforeYawPosition.y) &&
+		      Near(actual.position.z, beforeYawPosition.z) && actual.fov < local.fov,
+		      "default optical zoom preserves the authored position and reduces FOV");
+		anchored.settings.vmdScaleAroundActor = true;
+		anchored.Tick(true, 0, .016f, actor);
 		Check(std::fabs(actual.position.x - 10.4f) < 1e-5f &&
 		      std::fabs(actual.position.y - 1.73f) < 1e-5f && std::fabs(actual.position.z - 17.38f) < 1e-5f &&
 		      std::fabs(actual.orthographicSize - local.orthographicSize * 0.5f) < 1e-5f &&
@@ -407,6 +412,21 @@ static void TestCameraController(const std::string& repoRoot)
 		Check(response.desired.position.x > 9.999f && response.desired.position.x <= 10.0f,
 		      "0.1 response keeps converging to the whole displacement rather than a fixed tenth");
 		response.Release();
+
+		CameraController group;
+		prepare(group, {1, 1, 1});
+		group.Release();
+		group.settings.followGroupCenter = true;
+		group.settings.followBehavior = FollowBehavior::FollowMove;
+		Vector3 center{4, 0, 0};
+		group.Tick(true, 0, step, actor, 1, 0.0f, {}, &center);
+		const auto initialGroupPosition = group.desired.position;
+		center.x = 7.0f;
+		hips = {100, 0, 0};
+		group.Tick(true, 0, step, actor, 2, 0.0f, {}, &center);
+		Check(nearPosition(group.desired.position, initialGroupPosition + Vector3{3, 0, 0}),
+		      "group follow moves with the group center instead of the primary actor");
+		group.Release();
 
 		CameraController freeze;
 		prepare(freeze, defaults.followRate);
@@ -1071,6 +1091,33 @@ static void TestCameraController(const std::string& repoRoot)
 			h = mockHips;
 			return true;
 		};
+
+		cam.settings.mode = CameraMode::Track;
+		cam.settings.vmdRangeScale = 0.8f;
+		cam.settings.vmdOffset = {0.25f, 0.f, 0.f};
+		cam.track.fps = 1;
+		cam.track.frames = {
+			{{1.f, 2.f, 3.f}, Quaternion::Identity(), 49.f},
+			{{4.f, 5.f, 6.f}, Quaternion::FromEulerDegreesXYZ(0, 45, 0), 60.f},
+		};
+		auto* cameraActor = reinterpret_cast<void*>(0x70);
+		cam.Tick(true, 0.f, 0.f, cameraActor);
+		const CameraFrame releaseFrame = cam.desired;
+		cam.Tick(true, 1.f, 0.f, cameraActor);
+		CameraFrame sampled;
+		Check(cam.SampleStaticTrack(0.f, sampled) &&
+		      std::abs(sampled.position.x - releaseFrame.position.x) < 1e-5f &&
+		      std::abs(sampled.fov - releaseFrame.fov) < 1e-5f &&
+		      std::abs(Quaternion::Dot(sampled.rotation, releaseFrame.rotation)) > 0.9999f &&
+		      std::abs(mockActual.position.x - cam.desired.position.x) < 1e-5f &&
+		      std::abs(sampled.position.x - cam.desired.position.x) > 1.f,
+		      "historical track pose matches the release frame without changing the current camera");
+		cam.settings.followActor = true;
+		Check(!cam.SampleStaticTrack(0.f, sampled), "historical track pose rejects stateful actor pursuit");
+		cam.Release();
+		cam.settings.followActor = false;
+		cam.settings.vmdRangeScale = 1.f;
+		cam.settings.vmdOffset = {};
 
 		cam.settings.mode = CameraMode::Follow;
 		cam.settings.followBehavior = FollowBehavior::FollowMove;

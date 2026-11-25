@@ -166,7 +166,7 @@ namespace GakuMotion
 			ImGui::Separator();
 
 
-            ImGui::BeginDisabled(!ctx.fnAutoAssignEnsemble || player.state == PlaybackState::Playing || player.state == PlaybackState::Paused);
+            ImGui::BeginDisabled(!ctx.fnAutoAssignEnsemble);
             if (ImGui::Button("按名称自动分配")) ctx.fnAutoAssignEnsemble(ctx.self);
             ImGui::EndDisabled();
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
@@ -238,7 +238,10 @@ namespace GakuMotion
 					physics.physicsStatus.empty() ? (player.state == PlaybackState::Stopped ? "等待播放" : "等待角色骨架") : physics.physicsStatus.c_str();
 				ImGui::SameLine(); ImGui::TextDisabled("物理：%s", physicsLabel);
                 ImGui::SameLine();
-                ImGui::BeginDisabled(player.state == PlaybackState::Playing || player.state == PlaybackState::Paused || overlay.ensembleRemovePending[i]);
+                const bool hasActor = std::any_of(ctx.sceneActors.begin(), ctx.sceneActors.end(),
+                    [&](const auto& candidate) { return candidate.token == currentFollower.actorToken; });
+                const bool playingOrPaused = player.state == PlaybackState::Playing || player.state == PlaybackState::Paused;
+                ImGui::BeginDisabled((hasActor && playingOrPaused) || overlay.ensembleRemovePending[i]);
                 if (ImGui::SmallButton("删除角色")) {
                     if (currentFollower.actorToken && ctx.fnClearEnsembleFollower) {
                         overlay.ensembleRemovePending[i] = true;

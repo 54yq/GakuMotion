@@ -101,6 +101,26 @@ function ActivePage({ fork, command }: { fork: ReturnType<typeof useForkWorkspac
           {fork?.externalStageStatus === 1 && (
             <div className="space-y-2">
               <p role="status">独立舞台已载入</p>
+              {fork.externalStageVisibilityFirst !== undefined && <label className="flex items-center gap-2">
+                <input type="checkbox" checked={fork.externalStageVisibilityFirst}
+                  onChange={(e) => void command('externalStage.visibilityFirst', { value: e.target.checked })} />
+                角色显隐轴 · 前段（07 / 08 / 10）
+              </label>}
+              {fork.externalStageVisibilitySecond !== undefined && <label className="flex items-center gap-2">
+                <input type="checkbox" checked={fork.externalStageVisibilitySecond}
+                  onChange={(e) => void command('externalStage.visibilitySecond', { value: e.target.checked })} />
+                角色显隐轴 · 后段（07 / 08 / 10）
+              </label>}
+              {fork.externalStageGroundOverlay !== undefined && <label className="flex items-center gap-2">
+                <input type="checkbox" checked={fork.externalStageGroundOverlay}
+                  onChange={(e) => void command('externalStage.groundOverlay', { value: e.target.checked })} />
+                舞台贴地暗纹（material_08）
+              </label>}
+              {fork.externalStageContactShadows !== undefined && <label className="flex items-center gap-2">
+                <input type="checkbox" checked={fork.externalStageContactShadows}
+                  onChange={(e) => void command('externalStage.contactShadows', { value: e.target.checked })} />
+                人物脚下接触阴影
+              </label>}
               <label className="block">
                 接触阴影大小 {(fork.externalStageShadowSize ?? 1).toFixed(2)} 倍
                 <input aria-label="接触阴影大小" type="range" min={0.25} max={3} step={0.05}
@@ -135,8 +155,32 @@ function ActivePage({ fork, command }: { fork: ReturnType<typeof useForkWorkspac
               </button>
               <button className="ml-4" type="button" disabled={fork.externalStageFollow}
                 onClick={() => void command('externalStage.seek', { value: 0 })}>回到开头</button>
-              {fork.externalStageCues && <StagePropTimeline cues={fork.externalStageCues} time={fork.externalStageTime ?? 0} command={command} />}
-              <label className="flex items-center gap-2">
+              {fork.sourcePropTrial && fork.sourcePropTrial.cues.length > 0 && (
+                <section aria-label="原挂点试播" className="space-y-2 rounded-md border p-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Button size="sm" type="button" disabled={!fork.externalStageFollow}
+                      onClick={() => void command('externalStage.sourcePropTrial', { value: !fork.sourcePropTrial?.active })}>
+                      {fork.sourcePropTrial.active ? '结束原挂点试播' : '开启原挂点试播'}
+                    </Button>
+                    {fork.sourcePropTrial.active && <span>当前源帧 {Math.floor(fork.sourcePropTrial.frame)}</span>}
+                  </div>
+                  <p className="text-muted-foreground">两段仅用于验证原 VMD 手部挂点。播放“跟随曲目”时生效，结束帧不含在试播区间内。</p>
+                  <ul className="space-y-2">
+                    {fork.sourcePropTrial.cues.map(cue => (
+                      <li key={`${cue.prop}:${cue.first}`} className="flex flex-wrap items-center gap-2">
+                        <span>{cue.prop === 1 ? '黄白熊' : cue.prop === 11 ? '可丽饼 B' : `道具 ${cue.prop}`} · {cue.place} 号位{cue.left ? '左手' : '右手'} · {cue.first}–{cue.last} 帧</span>
+                        {cue.current && <span>{cue.applied ? '已应用挂点' : '等待角色与挂点'}</span>}
+                        <Button size="sm" variant="outline" type="button" disabled={!fork.sourcePropTrial?.active}
+                          onClick={() => void command('externalStage.sourcePropTrialSeek', { frame: cue.first })}>跳到起始帧</Button>
+                        <Button size="sm" variant="ghost" type="button" disabled={!fork.sourcePropTrial?.active}
+                          onClick={() => void command('externalStage.sourcePropTrialSeek', { frame: cue.last })}>跳到结束帧</Button>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+              {fork.externalStageCues && !fork.sourcePropTrial?.active && <StagePropTimeline cues={fork.externalStageCues} time={fork.externalStageTime ?? 0} samples={fork.externalStagePropSamples} command={command} />}
+              {!fork.sourcePropTrial?.active && <><label className="flex items-center gap-2">
                 单道具临时预览
                 <select value={fork.externalStageHeldProp ?? 0}
                   onChange={(e) => void command('externalStage.handProp', {
@@ -182,7 +226,7 @@ function ActivePage({ fork, command }: { fork: ReturnType<typeof useForkWorkspac
                     })} />
                   {(fork.externalStagePropEnd ?? 0).toFixed(2)} 秒
                 </label>
-              </div>
+              </div></>}
             </div>
           )}
           {fork?.externalStageStatus === -1 && <p role="alert">舞台载入失败，请查看 GakuLoader 日志。</p>}

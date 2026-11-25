@@ -23,7 +23,7 @@ int main()
 	core.motions.push_back(track);
 	int primary{}, secondary{};
 	core.player.controller.targetActor = &primary;
-	core.sceneActorRegistry.Publish({{&primary, 41, "fktn", {}}, {&secondary, 42, "ssmk", {}}});
+	core.sceneActorRegistry.Publish({{&primary, 41, "fktn", "Custom preset"}, {&secondary, 42, "ssmk", {}}});
 	Bridge bridge(core, {});
 	bridge.OnShow();
 
@@ -64,8 +64,14 @@ int main()
 	core.player.state = PlaybackState::Stopped;
 	check(request("fork.get").StringPath("result.primaryPhysics", "") == "暂无当前数据",
 		"Primary physics stops reporting a sample when playback stops");
-	check(request("state.get").StringPath("result.library.notice", "") == core.playlistNotice,
+	core.player.controller.currentBinding.actor = &primary;
+	const auto state = request("state.get");
+	check(state.StringPath("result.library.notice", "") == core.playlistNotice,
 		"Upstream state snapshot remains available with the fork bridge");
+	check(state.StringPath("result.actors.targetLabel", "") == "Custom preset · 1" &&
+		request("telemetry.get").StringPath("result.actor.actorLabel", "") == "Custom preset · 1",
+		"Actor roster and playback status use the same preset label");
+	core.player.controller.currentBinding.actor = nullptr;
 	check(!ok(request("fork.command", R"({"action":"live.takeover","session":12,"owner":18,"value":true})")) &&
 		!core.liveTakeoverRequest, "A previous Live owner cannot start takeover");
 	check(ok(request("fork.command", R"({"action":"live.takeover","session":12,"owner":19,"value":true})")) &&
@@ -202,10 +208,52 @@ int main()
 		std::any_of(core.guiCommands.begin(), core.guiCommands.end(), [](const auto& command) {
 			return command.action == Core::GuiAction::SetEnsembleFollower && command.candidateIndex == 3;
 		}), "The fourth follower is queued without an upstream three-slot limit");
+	EnsembleRuntime::Follower bound;
+	bound.actorToken = core.sceneActorRegistry.Find(&secondary)->token;
+	bound.motionKey = "fixture";
+	bound.offsetSeconds = .5f;
+	bound.player = std::make_unique<MotionPlayer>();
+	core.ensemble.InstallFollower(0, std::move(bound));
+	const auto reorder = R"({"action":"formation.reorder","session":12,"epoch":)" + epoch +
+		R"(,"fromSlot":0,"toSlot":3,"toGeneration":0,"revision":)" + libraryRevision + R"(,"fromGeneration":)";
+	check(!ok(request("fork.command", reorder + "999}")) && !queued(Core::GuiAction::ReorderEnsembleFollowers),
+		"drag rejects a stale bound role before entering the queue");
+	check(ok(request("fork.command", reorder + std::to_string(core.ensemble.Followers()[0].bindingGeneration) + "}")) &&
+		core.guiCommands.back().action == Core::GuiAction::ReorderEnsembleFollowers &&
+		core.guiCommands.back().key == "fixture" && core.guiCommands.back().value == .5f,
+		"drag to an empty role derives the motion and offset from the live binding");
 	check(ok(request("library.select", R"({"key":"fixture","autoplay":false,"revision":)" + libraryRevision + "}")),
 		"The upstream Web library can select a track from an external folder");
 	check(!ok(request("library.delete", R"({"key":"fixture","revision":)" + libraryRevision + "}")) &&
 		!queued(Core::GuiAction::DeleteFiles), "The Web library cannot delete an imported external track");
+	externalStageStatus.store(1);
+	externalStageFollow.store(true);
+	core.player.state = PlaybackState::Preview;
+	core.player.clip.duration_seconds = 120;
+	core.player.timing.motion = {2.0f, 0.5f};
+	const auto enableTrial = R"({"action":"externalStage.sourcePropTrial","session":12,"value":true})";
+	check(!ok(request("fork.command", enableTrial)), "A missing curve file cannot activate the trial");
+	stage_prop_timeline::Cue trial{1, 1, false, 1293, 1353};
+	trial.movement = stage_prop_timeline::Movement::SourceAttachment;
+	core.player.sourcePropTrialCues = {trial};
+	core.stagePropCues.clear();
+	check(ok(request("fork.command", enableTrial)) && core.SourcePropTrialActive() && core.stagePropCues.empty(),
+		"Source trial starts independently of the saved stage cue list");
+	check(ok(request("fork.command", R"({"action":"externalStage.sourcePropTrialSeek","session":12,"frame":1293})")) &&
+		core.guiCommands.back().action == Core::GuiAction::Seek &&
+		std::abs(core.guiCommands.back().value - (1293.f / 60.f + .5f)) < .0001f,
+		"Jumping to an original source frame respects the motion speed and offset");
+	const float firstTime = core.guiCommands.back().value;
+	core.player.currentTime = firstTime;
+	check(request("fork.get").BoolPath("result.sourcePropTrial.active", false) &&
+		request("fork.get").IntPath("result.sourcePropTrial.frame", -1) == 1293,
+		"The bridge reports the current source frame");
+	++core.loadedMotionGeneration;
+	check(!core.SourcePropTrialActive(), "A new clip invalidates the old trial");
+	check(ok(request("fork.command", enableTrial)) &&
+		ok(request("fork.command", R"({"action":"externalStage.sourcePropTrial","session":12,"value":false})")) &&
+		!core.SourcePropTrialActive() && core.stagePropCues.empty(),
+		"Ending the trial leaves saved stage cues empty");
 	std::printf("Web/fork bridge: %d checks, %d failures\n", cases, failures);
 	return failures ? 1 : 0;
 }

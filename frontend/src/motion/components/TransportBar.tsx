@@ -31,6 +31,8 @@ import { motionStore, useMotionStore } from '../store'
 import { durationMismatch, formatTransportTime, framePosition, validTimeline } from '../time'
 import { PrecisionControlPanel } from './PrecisionControlPanel'
 import { PendingBadge } from './Unsupported'
+import { ArtworkEditor } from './ArtworkEditor'
+import { useTransportLayout } from '../panelMedia'
 
 function IconTooltip({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -52,6 +54,7 @@ function playModeIcon(mode: number, ensembleActive: boolean) {
 }
 
 export function TransportBar() {
+  const stacked = useTransportLayout() === 'stacked'
   const player = useMotionStore((state) => state.player)
   const scrub = useMotionStore((state) => state.scrub)
   const loaded = useMotionStore((state) => state.loaded)
@@ -220,10 +223,15 @@ export function TransportBar() {
       )}
 
       {/* Main 3-Zone Player Bar */}
-      <div className="flex items-center justify-between gap-3 px-4 py-2">
+      <div className={cn('gap-3 px-4 py-2', stacked
+        ? 'grid grid-cols-[minmax(0,1fr)_auto] items-center [&>*:first-child]:col-span-2 [&>*:last-child]:justify-self-end'
+        : 'flex items-center justify-between')}>
         {/* Left: Calm neutral icon + Title + Status + Time + Actor */}
         <div className="flex min-w-0 flex-1 items-center gap-2.5">
-          <div
+          {currentEntry ? (
+            <ArtworkEditor key={currentEntry.id} artworkKey={`cover:${currentEntry.id}`}
+              label={`编辑 ${currentEntry.title} 封面`} fallback={<RiDiscFill className="size-4" />} />
+          ) : <div
             aria-hidden="true"
             className={cn(
               'flex size-9 shrink-0 items-center justify-center rounded-md border',
@@ -233,7 +241,7 @@ export function TransportBar() {
             )}
           >
             <RiDiscFill className="size-4" />
-          </div>
+          </div>}
           <div className="min-w-0 flex-1 space-y-0.5">
             <div className="flex items-center gap-2">
               <div

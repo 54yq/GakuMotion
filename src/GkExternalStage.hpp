@@ -1,4 +1,5 @@
 #pragma once
+#include "GkMeniStageSource.hpp"
 
 namespace ExternalStage
 {
@@ -29,17 +30,20 @@ namespace ExternalStage
     inline GakuMotion::injection::OwnerSnapshot owner;
     inline std::atomic<int> status{0};
     inline std::array<Handle, 2> doorTransforms{};
+    constexpr std::array<std::string_view, 3> animatedMeshNames{
+        "StageAnimated_st_light_l_001", "StageAnimated_moon", "StageAnimated_star"};
+    inline std::array<Handle, animatedMeshNames.size()> animatedMeshTransforms{};
     inline const void* setDoorRotation{};
     inline int doorScene{};
     inline float lastDoorTime = -1;
     inline std::chrono::steady_clock::time_point lastTimelineTick{};
 
-    inline void SetStageShaderFloat(const char* property, float frame, int& id)
+    inline bool SetStageShaderFloat(const char* property, float frame, int& id)
     {
         static const void* setter = StageLoader::metadata.Find(
             FindClass("UnityEngine.CoreModule.dll", "UnityEngine", "Shader"), "SetGlobalFloat",
             true, {0x01}, {{0x0e}, {0x0c}});
-        if (!setter) return;
+        if (!setter || !StageLoader::stringNew) return false;
         // Reuse the property ID to avoid an allocation every stage frame.
         static const void* nameToId = StageLoader::metadata.Find(
             FindClass("UnityEngine.CoreModule.dll", "UnityEngine", "Shader"), "PropertyToID",
@@ -55,16 +59,18 @@ namespace ExternalStage
         if (setterById && id)
         {
             void* args[]{&id, &frame};
-            StageLoader::Invoke(setterById, nullptr, args);
+            return StageLoader::TryInvokeStaticVoid(setterById, args);
         }
         else if (void* name = StageLoader::stringNew(property))
         {
             void* args[]{name, &frame};
-            StageLoader::Invoke(setter, nullptr, args);
+            return StageLoader::TryInvokeStaticVoid(setter, args);
         }
+        return false;
     }
 
-    inline int lightFrameId{}, gradeId{};
+    inline int lightFrameId{}, gradeId{}, foregroundMaskId{};
+    inline bool foregroundMaskActive{};
     inline Handle stageRoot{};
     inline UnityVector3 stageOrigin{};
     inline UnityVector3 stageAnchor{}, stageTravel{};
@@ -85,29 +91,56 @@ namespace ExternalStage
         g_setWorldPosNative(transform, stageOrigin);
     }
 
+    inline UnityVector3 StageTravelAtFrame(float frame)
+    {
+        const auto key = GakuMotion::source_vmd::Sample(ExternalStageProfiles::meniRoot, frame);
+        return RotateStageOffset({-key.position.x * profile.sourceScale,
+            key.position.y * profile.sourceScale, key.position.z * profile.sourceScale});
+    }
+
     inline void ApplyStageTravel(float frame)
     {
         if (!stageRoot || !g_setWorldPosNative) return;
         void* transform = SceneOwnerRuntime::handleTarget(stageRoot);
         if (!transform) return;
-        const float fraction = std::clamp((frame - profile.travelStart) / (profile.travelEnd - profile.travelStart), 0.0f, 1.0f);
-        // Stage VMD root Z uses the destination key’s Bezier (0, 0, 0, 0).
-        stageTravel = RotateStageOffset({0, 0, profile.travelZ * fraction});
+        stageTravel = StageTravelAtFrame(frame);
         auto position = stageOrigin;
         position.x += stageTravel.x;
+        position.y += stageTravel.y;
         position.z += stageTravel.z;
         g_setWorldPosNative(transform, position);
     }
     inline void SetStageLightFrame(float frame) { SetStageShaderFloat(profile.lightFrameProperty, frame, lightFrameId); }
 
+    inline void UpdateForegroundMask(const GakuMotion::CameraController& camera)
+    {
+        const float f = GakuMotion::externalStageTime.load() * 30.f;
+        const bool crossing = (f >= 1775.f && f < 1830.f) || (f >= 1960.f && f < 2055.f) ||
+            (f >= 2330.f && f < 2445.f);
+        const bool active = status.load() == 1 && mountedScene && GakuMotion::externalStageFollow.load() &&
+            camera.owned && camera.settings.mode == GakuMotion::CameraMode::Track && crossing;
+        if (active == foregroundMaskActive) return;
+        foregroundMaskActive = active;
+        SetStageShaderFloat("_GakuExternalStageForegroundMask", active ? 1.f : 0.f, foregroundMaskId);
+    }
+
     inline void ResetTimeline()
     {
-        if (!doorScene) return;
-        for (auto& handle : doorTransforms)
+        if (foregroundMaskActive)
         {
-            if (handle) StageLoader::freeHandle(handle);
-            handle = {};
+            SetStageShaderFloat("_GakuExternalStageForegroundMask", 0.f, foregroundMaskId);
+            foregroundMaskActive = false;
         }
+        if (!doorScene) return;
+        const auto clear = [](auto& handles) {
+            for (auto& handle : handles)
+            {
+                if (handle) StageLoader::freeHandle(handle);
+                handle = {};
+            }
+        };
+        clear(doorTransforms);
+        clear(animatedMeshTransforms);
         doorScene = 0;
         SetStageLightFrame(0);
         lastDoorTime = -1;
@@ -140,16 +173,21 @@ namespace ExternalStage
             void* object = objects[i];
             if (!object || StageLoader::SceneOfFreshGo(object) != mountedScene) continue;
             const auto name = Il2CppStringToUtf8(StageLoader::Invoke(StageLoader::objectName, object));
-            for (size_t j = 0; j < names.size(); ++j)
-            {
-                if (doorTransforms[j] || name != names[j]) continue;
-                if (void* transform = StageLoader::Invoke(StageLoader::goTransform, object))
-                    doorTransforms[j] = StageLoader::newHandle(transform, false);
-            }
+            const auto bind = [&](const auto& names, auto& handles) {
+                for (size_t j = 0; j < names.size(); ++j)
+                {
+                    if (handles[j] || name != names[j]) continue;
+                    if (void* transform = StageLoader::Invoke(StageLoader::goTransform, object))
+                        handles[j] = StageLoader::newHandle(transform, false);
+                }
+            };
+            bind(names, doorTransforms);
+            bind(animatedMeshNames, animatedMeshTransforms);
         }
         StageLoader::freeHandle(pin);
-        GakuMotion::host::Info("[GakuMotion][ExternalStage] timeline doors=%d/%d scene=%d",
-            !!doorTransforms[0], !!doorTransforms[1], mountedScene);
+        GakuMotion::host::Info("[GakuMotion][ExternalStage] source timeline doors=%d/%d movingMesh=%d/%d/%d scene=%d",
+            !!doorTransforms[0], !!doorTransforms[1], !!animatedMeshTransforms[0],
+            !!animatedMeshTransforms[1], !!animatedMeshTransforms[2], mountedScene);
     }
 
     inline void TickTimeline(float motionTime, bool hasMotion)
@@ -186,28 +224,33 @@ namespace ExternalStage
         SetStageShaderFloat("_GakuExternalStageGradeEnabled", externalStageGrade.load() ? 1.0f : 0.0f, gradeId);
         if (time == lastDoorTime) return;
         lastDoorTime = time;
-        SetStageLightFrame(time * 30.0f);
-        ApplyStageTravel(time * 30.0f);
+        const float frame = time * 30.0f;
+        SetStageLightFrame(frame);
+        ApplyStageTravel(frame);
+        if (g_setPosNative)
+        {
+            const std::array<std::span<const GakuMotion::source_vmd::BoneKey>, animatedMeshNames.size()> tracks{
+                ExternalStageProfiles::st_light_l_001, ExternalStageProfiles::moon, ExternalStageProfiles::star};
+            for (size_t i = 0; i < tracks.size(); ++i)
+            {
+                void* object = animatedMeshTransforms[i] ? SceneOwnerRuntime::handleTarget(animatedMeshTransforms[i]) : nullptr;
+                if (!object) continue;
+                const auto p = GakuMotion::source_vmd::Sample(tracks[i], frame).position;
+                // The geometry parent already supplies the MMD-to-Unity scale.
+                g_setPosNative(object, {-p.x, p.y, p.z});
+            }
+        }
         if (!setDoorRotation) return;
 
-        const float fraction = std::clamp((time * 30.0f - 2933.0f) / 61.0f, 0.0f, 1.0f);
-        // VMD rotation interpolation uses the ending key's control points.
-        float lower = 0.0f, upper = 1.0f;
-        for (int step = 0; step < 16; ++step)
-        {
-            const float t = (lower + upper) * 0.5f;
-            const float u = 1.0f - t;
-            const float x = (3.0f * u * u * t * 42.0f + 3.0f * u * t * t * 85.0f) / 127.0f + t * t * t;
-            if (x < fraction) lower = t; else upper = t;
-        }
-        const float t = fraction == 0.0f || fraction == 1.0f ? fraction : (lower + upper) * 0.5f;
-        const float angle = std::atan2(0.537299633f, 0.843391418f) * t * t * (3.0f - 2.0f * t);
         for (size_t i = 0; i < doorTransforms.size(); ++i)
         {
             void* door = doorTransforms[i] ? SceneOwnerRuntime::handleTarget(doorTransforms[i]) : nullptr;
             if (!door) continue;
-            // OBJ import mirrors X, reversing the source PMX/VMD Y rotations.
-            UnityQuaternion rotation{0, std::sin(i == 0 ? angle : -angle), 0, std::cos(angle)};
+            const auto keys = i == 0 ? std::span{ExternalStageProfiles::meniLeftDoor}
+                                     : std::span{ExternalStageProfiles::meniRightDoor};
+            const auto q = GakuMotion::source_vmd::Sample(keys, frame).rotation;
+            // Mirror the original X axis to match the imported stage mesh.
+            UnityQuaternion rotation{q.x, -q.y, -q.z, q.w};
             void* args[]{&rotation};
             StageLoader::Invoke(setDoorRotation, door, args);
         }
@@ -689,6 +732,102 @@ namespace ExternalStage
         return aligned;
     }
 
+    struct GroundOverlayMaterial { Handle material; float originalCutoff; };
+    inline std::vector<GroundOverlayMaterial> groundOverlays;
+    inline const void* getOverlayCutoff{};
+    inline const void* setOverlayCutoff{};
+    inline bool groundOverlayVisible = true;
+
+    inline float ReadOverlayCutoff(void* material, void* name)
+    {
+        void* args[]{name};
+        void* boxed = StageLoader::Invoke(getOverlayCutoff, material, args);
+        const void* data = boxed && g_safeBones.unbox ? g_safeBones.unbox(boxed) : nullptr;
+        return data ? *static_cast<const float*>(data) : std::numeric_limits<float>::quiet_NaN();
+    }
+
+    inline void BindGroundOverlays(void** renderers, uintptr_t count)
+    {
+        const auto unityClass = [](const char* name) {
+            return FindClass("UnityEngine.CoreModule.dll", "UnityEngine", name);
+        };
+        auto& api = StageLoader::metadata;
+        void* material = unityClass("Material");
+        void* shader = unityClass("Shader");
+        const auto arrayClass = reinterpret_cast<void* (*)(void*, uint32_t)>(
+            GetProcAddress(g_gameAssembly, "il2cpp_array_class_get"));
+        void* materials = arrayClass && material ? arrayClass(material, 1) : nullptr;
+        if (!materials || !shader) return;
+        const void* getMaterials = api.Find(rendererClass, "get_sharedMaterials", false, {0x1d, materials}, {});
+        const void* getShader = api.Find(material, "get_shader", false, {0x12, shader}, {});
+        getOverlayCutoff = api.Find(material, "GetFloat", false, {0x0c}, {{0x0e}});
+        setOverlayCutoff = api.Find(material, "SetFloat", false, {0x01}, {{0x0e}, {0x0c}});
+        if (!getMaterials || !getShader || !getOverlayCutoff || !setOverlayCutoff || !StageLoader::stringNew)
+        {
+            GakuMotion::host::Warn("[GakuMotion][GroundOverlay] material API unavailable");
+            return;
+        }
+        void* name = StageLoader::stringNew("_Cutoff");
+        if (!name) return;
+        for (uintptr_t i = 0; i < count; ++i)
+        {
+            void* renderer = renderers[i];
+            void* go = StageLoader::Invoke(StageLoader::componentGo, renderer);
+            if (!go || StageLoader::SceneOfFreshGo(go) != mountedScene) continue;
+            void* array = StageLoader::Invoke(getMaterials, renderer);
+            const Handle pin = array ? StageLoader::newHandle(array, false) : nullptr;
+            if (!pin) continue;
+            const auto length = StageLoader::arrayLength(array);
+            for (uintptr_t slot = 0; slot < length; ++slot)
+            {
+                void* pinnedArray = SceneOwnerRuntime::handleTarget(pin);
+                if (!pinnedArray) break;
+                void* mat = reinterpret_cast<void**>(static_cast<char*>(pinnedArray) + 32)[slot];
+                if (!mat || std::any_of(groundOverlays.begin(), groundOverlays.end(),
+                    [mat](const auto& found) { return SceneOwnerRuntime::handleTarget(found.material) == mat; }))
+                    continue;
+                if (Il2CppStringToUtf8(StageLoader::Invoke(StageLoader::objectName, mat)) != "material_08") continue;
+                void* assigned = StageLoader::Invoke(getShader, mat);
+                if (!assigned || Il2CppStringToUtf8(StageLoader::Invoke(StageLoader::objectName, assigned)) !=
+                    "GakuMotion/ExternalStageGroundOverlay") continue;
+                const float cutoff = ReadOverlayCutoff(mat, name);
+                if (std::isfinite(cutoff))
+                    if (Handle handle = StageLoader::newHandle(mat, false)) groundOverlays.push_back({handle, cutoff});
+            }
+            StageLoader::freeHandle(pin);
+        }
+        GakuMotion::host::Info("[GakuMotion][GroundOverlay] stage=%d material_08 bound=%zu",
+            mountedScene, groundOverlays.size());
+    }
+
+    inline void ApplyGroundOverlay(bool visible)
+    {
+        if (groundOverlayVisible == visible || !StageLoader::stringNew) return;
+        void* name = StageLoader::stringNew("_Cutoff");
+        if (!name) return;
+        size_t verified = 0;
+        for (const auto& overlay : groundOverlays)
+        {
+            void* mat = SceneOwnerRuntime::handleTarget(overlay.material);
+            if (!mat) continue;
+            // Texture alpha is in [0, 1]. A cutoff of 2 discards the entire pass.
+            float cutoff = visible ? overlay.originalCutoff : 2.f;
+            void* args[]{name, &cutoff};
+            StageLoader::Invoke(setOverlayCutoff, mat, args);
+            if (ReadOverlayCutoff(mat, name) == cutoff) ++verified;
+        }
+        groundOverlayVisible = visible;
+        GakuMotion::host::Info("[GakuMotion][GroundOverlay] stage=%d material_08 visible=%d verified=%zu/%zu",
+            mountedScene, visible, verified, groundOverlays.size());
+    }
+
+    inline void ReleaseGroundOverlays()
+    {
+        ApplyGroundOverlay(true);
+        for (const auto& overlay : groundOverlays) StageLoader::freeHandle(overlay.material);
+        groundOverlays.clear();
+    }
+
     inline bool HideBackground(int background)
     {
         void* type = il2cpp_type_get_object(il2cpp_class_get_type(rendererClass));
@@ -734,6 +873,7 @@ namespace ExternalStage
                 break;
             }
         }
+        if (complete && found) BindGroundOverlays(renderers, count);
         StageLoader::freeHandle(pin);
         if (!complete || !found)
         {
@@ -758,6 +898,7 @@ namespace ExternalStage
 
     inline void ReleaseBundle()
     {
+        ReleaseGroundOverlays();
         if (!bundle) return;
         if (void* object = SceneOwnerRuntime::handleTarget(bundle))
         {
@@ -834,6 +975,7 @@ namespace ExternalStage
         {
             if (mountedScene)
             {
+                ReleaseGroundOverlays();
                 void* args[]{&mountedScene};
                 if (Start(Pending::Unload, StageLoader::Invoke(unloadScene, nullptr, args)))
                 {
@@ -898,6 +1040,7 @@ namespace ExternalStage
                     GakuMotion::host::Info("[GakuMotion][ExternalStage] post-render visible=%u/%u scene=%d", visible, total, mountedScene);
                 }
             }
+            ApplyGroundOverlay(GakuMotion::externalStageGroundOverlay.load());
             status.store(1);
             return;
         }

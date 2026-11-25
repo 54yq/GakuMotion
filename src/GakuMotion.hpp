@@ -409,6 +409,12 @@ namespace GakuMotion
 				!visual_handoff::Requested() && !captureSuspended && !ensembleRestoreUnconfirmed;
 		}
 		std::unordered_map<uint64_t, bool> actorModelHidden;
+		std::unordered_set<uint64_t> stageHiddenActorModels;
+
+		bool IsActorModelHidden(uint64_t token) const
+		{
+			return actorModelHidden.contains(token) || stageHiddenActorModels.contains(token);
+		}
 		bool (*fnApplyActorModelHidden)(uint64_t, uint64_t, bool){nullptr};
 		std::vector<GuiActorProp> actorProps;
 		static bool IsMovingStageProp(const GuiActorProp& prop)
@@ -469,8 +475,18 @@ namespace GakuMotion
 		std::string localRoot;
 		std::string motionsRoot;
 		std::string configRoot;
+		struct StagePropSample { int frame{}; Vector3 position{}, rotation{}; };
+		std::array<std::optional<StagePropSample>, 11> stagePropSamples{};
+		std::chrono::steady_clock::time_point localMeniPollAt{};
+		std::string localMeniLastRequest;
 		std::vector<stage_prop_timeline::Cue> stagePropCues = stage_prop_timeline::meniDefaults;
 		std::optional<std::vector<stage_prop_timeline::Cue>> stagePropPreview;
+		std::optional<uint64_t> sourcePropTrialGeneration;
+		bool SourcePropTrialActive() const noexcept
+		{
+			return sourcePropTrialGeneration == loadedMotionGeneration && !player.sourcePropTrialCues.empty() &&
+				player.state != PlaybackState::Stopped && externalStageFollow.load();
+		}
 		std::string logsRoot, diagnosticsRoot, transactionRoot;
 		DataLayout dataLayout;
 		std::string globalOverridePath;
@@ -532,7 +548,7 @@ namespace GakuMotion
 			StageSettings, StagePreset, ToggleStageCandidate, ScanStageCandidates,
 			MountCustomStage, UnloadCustomStage, RestoreCameraSkybox,
 			SeekFrame, StepFrame, ReloadMotion, DeleteFiles, StageLoadReplacement, SelectTarget, SetActorPropHidden, SetActorModelHidden, InitializeBeforeMotion,
-			AddLibraryFolder, RemoveLibraryFolder, SetEnsembleFollower, ClearEnsembleFollower, EnsemblePosition, EnsembleYaw, FollowerArm, SceneArm, AlignEnsemble, AutoAssignEnsemble, SaveEnsemblePreset, ApplyEnsemblePreset
+			AddLibraryFolder, RemoveLibraryFolder, SetEnsembleFollower, ReorderEnsembleFollowers, ClearEnsembleFollower, EnsemblePosition, EnsembleYaw, FollowerArm, SceneArm, AlignEnsemble, AutoAssignEnsemble, SaveEnsemblePreset, ApplyEnsemblePreset
 		};
 
 		std::atomic<int> guiPhysicsBackend{2};
@@ -802,6 +818,7 @@ namespace GakuMotion
 			const bool activeFollowers = ensemble.HasActiveFollowers();
 			return std::any_of(guiCommands.begin(), guiCommands.end(), [activeFollowers](const auto& command)
 				{ return command.action == GuiAction::SelectTarget || command.action == GuiAction::SetEnsembleFollower ||
+				         command.action == GuiAction::ReorderEnsembleFollowers ||
 				         command.action == GuiAction::ClearEnsembleFollower ||
 				         (activeFollowers && (command.action == GuiAction::Stop || command.action == GuiAction::Select ||
 				                              command.action == GuiAction::Cycle || command.action == GuiAction::ReloadMotion ||
@@ -956,6 +973,7 @@ namespace GakuMotion
 						const auto prevMode = camera.settings.mode;
 						const auto prevBehavior = camera.settings.followBehavior;
 						const bool prevEnabled = camera.settings.enabled;
+						if (camera.settings.followGroupCenter != cmd.cameraSettings.followGroupCenter) camera.Release();
 						camera.settings = cmd.cameraSettings;
 						if (!camera.settings.enabled) camera.Release();
 						camera.Publish();
@@ -1023,7 +1041,8 @@ namespace GakuMotion
                 case GuiAction::SetActorModelHidden:
                     if (InjectionAllowed() && injectionPolicy.Read().captureDepth == 0 &&
                         sceneActorRegistry.Resolve(cmd.actorToken, cmd.actorEpoch) && fnApplyActorModelHidden &&
-                        fnApplyActorModelHidden(cmd.actorToken, cmd.actorEpoch, cmd.flag)) {
+                        fnApplyActorModelHidden(cmd.actorToken, cmd.actorEpoch,
+                            cmd.flag || stageHiddenActorModels.contains(cmd.actorToken))) {
                         if (cmd.flag) actorModelHidden[cmd.actorToken] = true;
                         else actorModelHidden.erase(cmd.actorToken);
                         ensembleNotice = cmd.flag ? "角色模型已隐藏" : "角色模型已恢复";
@@ -1042,6 +1061,7 @@ namespace GakuMotion
 					}
 					break;
 				case GuiAction::SetEnsembleFollower:
+				case GuiAction::ReorderEnsembleFollowers:
 				{
 					if (ensemble.HasActiveFollowers() && !PrepareInjection())
 					{ ensembleNotice = "当前场景无法安全调整多角色绑定"; break; }
@@ -1053,6 +1073,27 @@ namespace GakuMotion
 					{ ensembleNotice = "绑定失败：请停止播放并确认角色和曲库未变化"; break; }
 					const MotionEntry* swapMotion = nullptr;
 					const auto slot = static_cast<size_t>(cmd.candidateIndex);
+					const bool reorder = cmd.action == GuiAction::ReorderEnsembleFollowers;
+					if (reorder)
+					{
+						const auto& followers = ensemble.Followers();
+						const auto from = static_cast<size_t>(cmd.stagePresetIndex);
+						const auto targetGeneration = slot < followers.size() ? followers[slot].bindingGeneration : 0;
+						if (cmd.actorEpoch != sceneActorRegistry.Epoch() || from >= followers.size() ||
+						    followers[from].actorToken != cmd.actorToken ||
+						    followers[from].bindingGeneration != cmd.formationGenerations[0] ||
+						    targetGeneration != cmd.formationGenerations[1])
+						{ ensembleNotice = "换位失败：角色绑定已变化"; break; }
+						if (!targetGeneration)
+						{
+							if (ensemble.MoveToEmptySlot(from, slot, cmd.actorEpoch, sceneActorRegistry))
+							{ ++injectionSession; ensembleNotice = "已移动副角色及其动作"; }
+							else if (ensemble.RestoreUnconfirmed())
+							{ ensembleRestoreUnconfirmed = true; ensembleNotice = "角色恢复未确认，已停止动作注入"; }
+							else ensembleNotice = "移动失败：请确认副角色仍可用";
+							break;
+						}
+					}
 					if (cmd.flag) {
 						const auto& followers = ensemble.Followers();
 						const auto occupied = std::find_if(followers.begin(), followers.end(), [&](const auto& follower) {
@@ -1072,15 +1113,33 @@ namespace GakuMotion
 					break;
 				}
 				case GuiAction::ClearEnsembleFollower:
+				{
+					if (cmd.actorEpoch != sceneActorRegistry.Epoch() || cmd.candidateIndex < 0 ||
+					    static_cast<size_t>(cmd.candidateIndex) >= ensemble.Followers().size())
+					{ ensembleNotice = "角色槽已变化，请重试"; break; }
+					const auto slot = static_cast<size_t>(cmd.candidateIndex);
+					if (ensemble.Followers()[slot].bindingGeneration != cmd.loadedGeneration)
+					{ ensembleNotice = "角色槽已换绑，请重试"; break; }
+					if (ensemble.HasMissingActor(slot, sceneActorRegistry))
+					{
+						if (!ensemble.ClearMissingActor(slot, sceneActorRegistry))
+						{ ensembleNotice = "残留槽位清理失败：物理绑定未能释放"; break; }
+						++injectionSession;
+						if (ensembleRestoreUnconfirmed || ensemble.RestoreUnconfirmed())
+							ensembleRestoreUnconfirmed = !ensemble.RetryRestoreAfterMissingActor(sceneActorRegistry);
+						ensembleNotice = ensembleRestoreUnconfirmed
+							? "已删除残留槽位；其他角色的状态仍未确认" : "已删除残留角色槽位";
+						break;
+					}
 					if (ensemble.HasActiveFollowers() && !PrepareInjection())
 					{ ensembleNotice = "当前场景无法安全解除多角色绑定"; break; }
-					if (cmd.actorEpoch != sceneActorRegistry.Epoch() || cmd.candidateIndex < 0 || static_cast<size_t>(cmd.candidateIndex) >= ensemble.Followers().size() ||
-					    player.state == PlaybackState::Playing || player.state == PlaybackState::Paused)
+					if (player.state == PlaybackState::Playing || player.state == PlaybackState::Paused)
 					{ ensembleNotice = "请停止播放后解除绑定"; break; }
-					if (ensemble.Clear(static_cast<size_t>(cmd.candidateIndex), sceneActorRegistry))
+					if (ensemble.Clear(slot, sceneActorRegistry))
 					{ ++injectionSession; ensembleNotice = "已解除角色动作"; }
 					else { ensembleRestoreUnconfirmed = true; ensembleNotice = "角色恢复未确认，已停止动作注入"; }
 					break;
+				}
 				case GuiAction::SceneArm:
 				{
 					void* actor = sceneActorRegistry.Resolve(cmd.actorToken, cmd.actorEpoch);
@@ -1414,6 +1473,8 @@ namespace GakuMotion
 		// =========================================================================
 		// 每帧驱动入口（由插件在 OnLateUpdate 中调用）
 		// =========================================================================
+#include "GkLocalMeniControl.inl"
+
 		void OnLateUpdate(void* actor, void* animator = nullptr,
 		                  void* playableDirector = nullptr, float deltaTime = 0.0333f,
 		                  bool advanceClock = true, float cameraDeltaTime = -1.0f,
@@ -1425,6 +1486,7 @@ namespace GakuMotion
 			if (advanceClock)
 			{
 				ProcessPendingGuiCommands();
+				PollLocalMeniControl();
 			}
 
 			// 1. 配置轮询（低频，内部自带时间累加；无变化时几乎零开销）
@@ -1521,9 +1583,32 @@ namespace GakuMotion
 				player.cameraSourceDuration = camera.track.frames.empty() ? 0.0f :
 					static_cast<float>(camera.track.frames.size()) / camera.track.fps;
 				const Vector3 liveTrackAnchor = LiveCameraTrackAnchor(actor);
+				Vector3 groupCenter{};
+				unsigned groupCount = 0;
+				if (camera.settings.followGroupCenter && camera.settings.mode == CameraMode::Follow && camera.fnActorPose)
+				{
+					for (const auto& entry : sceneActorRegistry.Entries())
+					{
+						if (IsActorModelHidden(entry.token) || (camera.fnAlive && !camera.fnAlive(entry.actor))) continue;
+						Vector3 root, hips;
+						Quaternion rotation;
+						if (camera.fnActorPose(entry.actor, root, rotation, hips) && CameraFinite(hips))
+						{
+							groupCenter = groupCenter + hips;
+							++groupCount;
+						}
+					}
+					if (groupCount)
+					{
+						const float count = static_cast<float>(groupCount);
+						groupCenter = {groupCenter.x / count, groupCenter.y / count, groupCenter.z / count};
+					}
+				}
+                const float cameraTime = player.meniSourceMotion && externalStageEnabled.load() && externalStageFollow.load()
+                    ? player.AppliedMotionSourceTime() : player.CameraSourceTime();
 				camera.Tick(player.state == PlaybackState::Playing || player.state == PlaybackState::Paused || player.state == PlaybackState::Preview,
-				            player.CameraSourceTime(), cameraDeltaTime >= 0.0f ? cameraDeltaTime : deltaTime,
-				            actor, physicalFrame, player.controller.initialYawDegrees, liveTrackAnchor);
+				            cameraTime, cameraDeltaTime >= 0.0f ? cameraDeltaTime : deltaTime,
+				            actor, physicalFrame, player.controller.initialYawDegrees, liveTrackAnchor, groupCount ? &groupCenter : nullptr);
 				const bool paused = player.state == PlaybackState::Paused;
 				const bool justPaused = paused && !cameraTracePaused;
 				cameraTracePaused = paused;
@@ -2235,6 +2320,8 @@ namespace GakuMotion
 			out << ",\n    \"follow_rate\": ";
 			vector(s.followRate);
 			out << ",\n    \"follow_fov\": " << jsonlite::FormatNumber(s.followFov, 6)
+				<< ",\n    \"follow_group_center\": " << (s.followGroupCenter ? "true" : "false")
+				<< ",\n    \"vmd_scale_around_actor\": " << (s.vmdScaleAroundActor ? "true" : "false")
 				<< ",\n    \"vmd_range_scale\": " << jsonlite::FormatNumber(s.vmdRangeScale, 6)
 				<< ",\n    \"actor_shadow_experiment_mode\": " << s.actorShadowExperimentMode
 				<< ",\n    \"use_per_mode_transforms\": " << (s.usePerModeTransforms ? "true" : "false");
@@ -2762,36 +2849,76 @@ namespace GakuMotion
 
         void AutoAssignEnsemble()
         {
-            if (player.state == PlaybackState::Playing || player.state == PlaybackState::Paused) {
-                ensembleNotice="请先停止播放再自动分配"; return;
+            const auto previousState = player.state;
+            const bool restoreProgress = previousState == PlaybackState::Playing || previousState == PlaybackState::Paused;
+            const float previousTime = player.currentTime;
+            if (ensembleRestoreUnconfirmed || ensemble.RestoreUnconfirmed()) {
+                ensembleNotice = "自动分配失败：请先清理残留槽位或重新进入摄影"; return;
             }
-            if (ensembleRestoreUnconfirmed || !player.controller.targetActor ||
-                !sceneActorRegistry.Find(player.controller.targetActor)) {
-                ensembleNotice="自动分配失败：请先选择场上主角色"; return;
+            if (!player.controller.targetActor || !sceneActorRegistry.Find(player.controller.targetActor)) {
+                ensembleNotice = "自动分配失败：请先选择场上主角色"; return;
             }
-            const auto ordered=MatchSortedMotions(motions,currentMotionIndex);
-            if (ordered.empty()) { ensembleNotice="自动分配失败：当前动作没有可用的原始 VMD 路径"; return; }
-            if (!PrepareInjection()) { ensembleNotice="自动分配失败：当前场景尚未就绪"; return; }
+            const auto ordered = MatchSortedMotions(motions, currentMotionIndex);
+            if (ordered.empty()) { ensembleNotice = "自动分配失败：当前动作没有可用的原始 VMD 路径"; return; }
+            if (!PrepareInjection()) { ensembleNotice = "自动分配失败：当前场景尚未就绪"; return; }
+
+            // Prepare each follower before stopping so unreadable clips leave
+            // the currently playing formation intact.
+            std::vector<uint64_t> actors;
+            std::vector<EnsembleRuntime::Follower> prepared;
+            for (const auto& actor : sceneActorRegistry.Entries()) {
+                if (actor.actor == player.controller.targetActor) continue;
+                if (actors.size() >= 63) break;
+                actors.push_back(actor.token);
+                if (actors.size() >= ordered.size()) continue;
+                const auto& motion = motions[ordered[actors.size()]];
+                if (!ensemble.PrepareFollower(prepared.emplace_back(), actor.token, actor.actor, motion,
+                    0.0f, player, globalOverrides, masterOverridesEnabled)) {
+                    ensembleNotice = "自动分配失败：无法载入 " + motion.name; return;
+                }
+            }
+            if (currentMotionIndex != ordered.front()) {
+                MotionPlayer candidate;
+                if (!candidate.LoadMotion(motions[ordered.front()].dir)) {
+                    ensembleNotice = "自动分配失败：首个动作无法载入"; return;
+                }
+            }
+            if (restoreProgress) player.Pause();
             if (!ensemble.ClearAll(sceneActorRegistry)) {
-                ensembleRestoreUnconfirmed=true; ensembleNotice="自动分配失败：角色状态未能安全恢复"; return;
+                ensembleRestoreUnconfirmed = true;
+                NotifyMotionPlaying(false);
+                ensembleNotice = "自动分配失败：角色状态未能安全恢复"; return;
             }
-            if (currentMotionIndex != ordered.front() && !SelectMotionByIndex(ordered.front(),false,true)) {
-                ensembleNotice="自动分配失败：首个动作无法载入"; return;
+            if (restoreProgress) {
+                player.Stop();
+                NotifyMotionPlaying(false);
             }
-            size_t role=1, matched=0;
-            ensembleAutoActors.clear(); ensembleAutoEpoch=sceneActorRegistry.Epoch();
-            for (const auto& actor:sceneActorRegistry.Entries()) {
-                if (actor.actor==player.controller.targetActor) continue;
-                if (role>=64) break;
-                ensembleAutoActors.push_back(actor.token);
-                if (role<ordered.size() && ensemble.Set(role-1,actor.token,sceneActorRegistry.Epoch(),
-                    motions[ordered[role]],0.0f,sceneActorRegistry,player,globalOverrides,masterOverridesEnabled)) ++matched;
-                ++role;
+            if (currentMotionIndex != ordered.front() && !SelectMotionByIndex(ordered.front(), false, true)) {
+                ensembleNotice = "自动分配失败：首个动作无法载入"; return;
             }
-            ensemble.EnsureSlots(role-1); ++ensembleAutoGeneration;
-            ensembleNotice=detail::FormatMsg("已按名称顺序分配：主角色 1 个，附加角色 %zu 个；不足的角色留空",matched);
-            ++injectionSession; ensembleAutoAlignPending=matched>0;
-            ensembleAutoAlignSession=injectionSession; ensembleAutoAlignEpoch=sceneActorRegistry.Epoch();
+            ensemble.EnsureSlots(actors.size());
+            for (size_t i = 0; i < prepared.size(); ++i)
+                ensemble.InstallFollower(i, std::move(prepared[i]));
+            ensembleAutoActors = std::move(actors);
+            ensembleAutoEpoch = sceneActorRegistry.Epoch();
+            ++ensembleAutoGeneration;
+            ++injectionSession;
+            ensembleAutoAlignPending = !prepared.empty();
+            ensembleAutoAlignSession = injectionSession;
+            ensembleAutoAlignEpoch = sceneActorRegistry.Epoch();
+
+            ensembleNotice = detail::FormatMsg("已按名称顺序分配：主角色 1 个，附加角色 %zu 个；不足的角色留空", prepared.size());
+            if (restoreProgress) {
+                player.Seek(previousTime);
+                if (previousState == PlaybackState::Paused) player.state = PlaybackState::Paused;
+                else {
+                    stageStoppedByTransport = false;
+                    player.Play();
+                    const bool resumed = player.state == PlaybackState::Playing;
+                    NotifyMotionPlaying(resumed);
+                    if (!resumed) ensembleNotice += "；未能自动续播，已保留原进度";
+                }
+            }
         }
 
 		bool SelectMotionByIndex(int index, bool autoPlay = false, bool forcePreview = false)
@@ -4065,8 +4192,11 @@ namespace GakuMotion
 			ctx.fnClearEnsembleFollower = [](void* self, int slot, uint64_t epoch)
 			{
 				GuiCommand cmd{GuiAction::ClearEnsembleFollower};
+				auto& core = *static_cast<Core*>(self);
+				if (slot < 0 || static_cast<size_t>(slot) >= core.ensemble.Followers().size()) return;
 				cmd.candidateIndex = slot; cmd.actorEpoch = epoch;
-				static_cast<Core*>(self)->QueueGui(std::move(cmd));
+				cmd.loadedGeneration = core.ensemble.Followers()[static_cast<size_t>(slot)].bindingGeneration;
+				core.QueueGui(std::move(cmd));
 			};
 			ctx.fnSetEnsemblePosition = [](void* self, int slot, uint64_t token, uint64_t epoch,
 			                               uint64_t generation, const Vector3& offset)
@@ -4100,8 +4230,7 @@ namespace GakuMotion
 				for (const auto& follower : ensemble.Followers())
 					if (follower.player && follower.actorToken == item.token) bound = true;
 				ctx.sceneArmCalibrations.push_back({item.token, arm.share, arm.degrees, arm.locked, bound, primary});
-				const std::string name = !item.displayName.empty() ? item.displayName : item.character.empty() ? "未识别角色" : FormatIdolDisplayName(item.character.c_str());
-				ctx.sceneActors.push_back({item.token, name + " · " + std::to_string(ctx.sceneActors.size() + 1),
+				ctx.sceneActors.push_back({item.token, FormatSceneActorLabel(item, ctx.sceneActors.size() + 1),
 					item.actor == player.controller.targetActor,
                     actorModelHidden.find(item.token) != actorModelHidden.end()});
 			}

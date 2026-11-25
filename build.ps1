@@ -220,6 +220,12 @@ try {
     New-Item -ItemType Directory -Path (Join-Path $OutputRoot $fixture) -Force | Out-Null
     & $coreExe $fixture
     if ($LASTEXITCODE -ne 0) { throw ('Synthetic core tests failed: ' + $LASTEXITCODE) }
+    $propTimelineExe = Join-Path $OutputRoot 'stage_prop_timeline_contracts.exe'
+    & $compiler /nologo /std:c++20 /utf-8 /EHsc /MT "/I$repo/src" "/I$repo/deps/KineTexture/src" `
+        (Join-Path $repo 'tests/test_stage_prop_timeline.cpp') "/Fe:$propTimelineExe" "/Fo:$(Join-Path $OutputRoot 'stage_prop_timeline_contracts.obj')"
+    if ($LASTEXITCODE -ne 0) { throw 'Stage prop timeline contract compile failed.' }
+    & $propTimelineExe $OutputRoot
+    if ($LASTEXITCODE -ne 0) { throw 'Stage prop timeline contract failed.' }
     $webForkExe = Join-Path $OutputRoot 'fork_web_panel_contracts.exe'
     & $compiler /nologo /std:c++20 /utf-8 /EHsc /MT /W3 `
         "/I$(Join-Path $repo 'src')" "/I$(Join-Path $repo 'include')" "/I$(Join-Path $repo 'deps/KineTexture/src')" `

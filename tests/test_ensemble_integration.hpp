@@ -132,6 +132,40 @@ static void TestEnsembleIntegration(const std::string& repoRoot)
 		core.ensemble.Followers()[0].bindingGeneration != firstGeneration,
 		"one swap rebinds both actors and preserves each slot's motion and offset");
 	queueSwap(tokenB);
+	const auto queueReorder = [&](int from, int to, uint64_t sourceGeneration, uint64_t targetGeneration) {
+		const auto& source = core.ensemble.Followers()[static_cast<size_t>(from)];
+		const auto& motionSlot = targetGeneration ? core.ensemble.Followers()[static_cast<size_t>(to)] : source;
+		Core::GuiCommand command{Core::GuiAction::ReorderEnsembleFollowers};
+		command.stagePresetIndex = from;
+		command.candidateIndex = to;
+		command.actorToken = source.actorToken;
+		command.actorEpoch = core.sceneActorRegistry.Epoch();
+		command.sceneSession = core.injectionSession;
+		command.libraryRevision = core.libraryRevision;
+		command.formationGenerations = {sourceGeneration, targetGeneration};
+		command.key = motionSlot.motionKey;
+		command.value = motionSlot.offsetSeconds;
+		command.flag = targetGeneration != 0;
+		core.QueueGui(std::move(command));
+		core.ProcessPendingGuiCommands();
+	};
+	const auto generationB = core.ensemble.Followers()[0].bindingGeneration;
+	const auto generationC = core.ensemble.Followers()[1].bindingGeneration;
+	queueReorder(0, 1, generationB, generationC);
+	Check(core.ensemble.Followers()[0].actorToken == tokenC && core.ensemble.Followers()[1].actorToken == tokenB &&
+		core.ensemble.Followers()[0].motionKey == "B" && core.ensemble.Followers()[1].offsetSeconds == -.01f,
+		"drag to a bound slot exchanges only actors and keeps both slot tracks");
+	queueReorder(1, 3, generationB, 0);
+	Check(core.ensemble.Followers()[1].actorToken == tokenB && core.ensemble.Followers().size() == 2,
+		"a drag started before a rebind cannot move the replacement binding");
+	queueSwap(tokenB);
+	const auto beforeMove = core.ensemble.Followers()[0].bindingGeneration;
+	queueReorder(0, 3, beforeMove, 0);
+	Check(core.ensemble.Followers().size() == 4 && !core.ensemble.Followers()[0].player &&
+		core.ensemble.Followers()[3].actorToken == tokenB && core.ensemble.Followers()[3].motionKey == "B" &&
+		core.ensemble.Followers()[3].offsetSeconds == .01f && core.ensemble.Followers()[3].bindingGeneration != beforeMove,
+		"drag to an empty slot moves the actor and track together with a fresh binding");
+	queueReorder(3, 0, core.ensemble.Followers()[3].bindingGeneration, 0);
 	core.player.state = PlaybackState::Paused; core.player.currentTime = .04f;
 	EnsembleFixture::faces[b].weight = 12; EnsembleFixture::faces[c].weight = 17;
 	const auto noAnimatorWrites = EnsembleFixture::writes;

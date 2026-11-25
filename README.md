@@ -8,7 +8,7 @@
 
 GakuMotion 是《学园偶像大师》的 GakuLoader 演出插件，用游戏原有角色、服装和渲染环境播放外部 MMD 动作、表情、镜头与音乐。此分支由[野生的空白（54yq）](https://github.com/54yq)维护，基于 [crested-ezios/GakuMotion](https://github.com/crested-ezios/GakuMotion)。
 
-**当前分支为 v4.3.88-web，加载器显示 `v0.2.0+fork.4.3.88-web`。** Live 接管、原生物理与风场仍属于实验功能，表现取决于游戏版本、人物和服装。[分支更新记录](docs/CHANGELOG.md) · [Web 看板说明](docs/WEB_PANEL_BRIDGE.md)
+**当前分支为 v4.5.4-web，加载器显示 `v0.2.2+fork.4.5.4-web`。** Live 接管、原生物理与风场仍属于实验功能，表现取决于游戏版本、人物和服装。[分支更新记录](docs/CHANGELOG.md) · [Web 看板说明](docs/WEB_PANEL_BRIDGE.md)
 
 [上游安装指南](https://github.com/crested-ezios/GakuMotion/blob/main/docs/INSTALLATION.md) · [上游使用指南](https://github.com/crested-ezios/GakuMotion/blob/main/docs/USAGE.md) · [上游常见问题](https://github.com/crested-ezios/GakuMotion/blob/main/docs/TROUBLESHOOTING.md)
 
@@ -46,7 +46,7 @@ GakuMotion 是《学园偶像大师》的 GakuLoader 演出插件，用游戏原
 ### 文件夹曲库与多人同步
 
 1. 在 **曲库 → 添加文件夹** 选择动作目录。Motion 会扫描子目录，读取已有转换产物，并将待转换的身体 VMD 放入管理缓存。可按来源文件夹筛选。移除文件夹来源后，外部源文件和转换缓存仍可使用。
-2. 在 **多人同步播放** 中按需添加槽位，为场上角色各自绑定动作。停止播放后也可使用 **按名称自动分配**，按同目录编号或字母后缀分配分轨。新增场上人物可以使用 GakuActors。
+2. 在 **多人同步播放** 中按需添加槽位，为场上角色各自绑定动作。可使用 **按名称自动分配**，按同目录编号或字母后缀分配分轨。播放中会先停播，重绑后从原进度继续。新增场上人物可以使用 GakuActors。
 3. 在 **站位与朝向** 调整各角色的世界位置和朝向。原曲队形可以按主角色朝向对齐，需要校验匹配的原始 VMD。手动调整过的站位可继续微调；多人站位预设界面暂时隐藏。
 4. 音乐、镜头和进度以主角色为准。附加角色各自拥有动作、延迟及骨骼覆盖。配合支持 V3 的 GakuBurstBridge 可使用独立原生物理上下文，具体后端可在界面确认。
 
@@ -66,7 +66,7 @@ GakuMotion 是《学园偶像大师》的 GakuLoader 演出插件，用游戏原
 
 ### 镜头、音效与骨骼校正
 
-- **外部摄影舞台**支持独立场景、演员起点对齐、灯光和接触阴影，以及逐道具时间轴。Web 看板支持实时预览、保存和取消道具位置调整。
+- **外部摄影舞台**支持独立场景、演员起点对齐、灯光和接触阴影，以及逐道具时间轴。Web 看板支持实时预览、保存和取消道具位置调整。Meni 舞台提供前、后两段角色显隐开关，按原动作控制 07、08、10 号位。
 - **原生物理**在摄影和 Live 接管时过滤插件驱动角色的场景外力，同时保留原生 Swing 求解、碰撞与骨链限制。
 - **镜头与舞台**支持镜头随主角朝向、Live VMD 相机对齐及自由视角交接。景深和风场调整为实验选项。
 - **游戏音效**可单独屏蔽 Se（含界面音效）。开关默认关闭，离开支持场景或进入受保护的拍照流程时尝试恢复原状。来源为 huvz04 的上游 [PR #13](https://github.com/crested-ezios/GakuMotion/pull/13)，该 PR 已关闭，本分支保留实现。
@@ -84,7 +84,7 @@ GakuMotion 是《学园偶像大师》的 GakuLoader 演出插件，用游戏原
 
 ## 上游 PR 说明
 
-状态核对于 2026-11-20。动态多人槽位 [#8](https://github.com/crested-ezios/GakuMotion/pull/8) 仍向上游 `dev` 开放。早期综合提交 [#6](https://github.com/crested-ezios/GakuMotion/pull/6) 和首版腿骨修复 [#7](https://github.com/crested-ezios/GakuMotion/pull/7) 均已关闭且未合并，腿骨修复后续以 [#10](https://github.com/crested-ezios/GakuMotion/pull/10) 合入。各 PR 的改动范围以其页面为准。
+状态核对于 2026-11-26。动态多人槽位 [#8](https://github.com/crested-ezios/GakuMotion/pull/8) 已关闭，第一帧预览 [#16](https://github.com/crested-ezios/GakuMotion/pull/16) 仍开放。早期综合提交 [#6](https://github.com/crested-ezios/GakuMotion/pull/6) 和首版腿骨修复 [#7](https://github.com/crested-ezios/GakuMotion/pull/7) 均已关闭且未合并，腿骨修复后续以 [#10](https://github.com/crested-ezios/GakuMotion/pull/10) 合入。各 PR 的改动范围以其页面为准。
 
 ## 文档与反馈
 

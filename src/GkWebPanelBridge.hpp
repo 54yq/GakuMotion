@@ -1986,6 +1986,8 @@ namespace GakuMotion::webpanel
 				!intField("followBehavior", followBehavior, 0, 1) ||
 				!intField("followTarget", followTarget, 0, 2) ||
 				!boolField("followActor", settings.followActor) ||
+				!boolField("followGroupCenter", settings.followGroupCenter) ||
+				!boolField("vmdScaleAroundActor", settings.vmdScaleAroundActor) ||
 				!boolField("limitToScene", settings.limitToScene) ||
 				!vecField("boundsMin", settings.boundsMin) ||
 				!vecField("boundsMax", settings.boundsMax) ||
@@ -2175,26 +2177,22 @@ namespace GakuMotion::webpanel
 		std::string ActorsJsonLocked() const
 		{
 			const auto& entries = core_.sceneActorRegistry.Entries();
-			const auto actorLabel = [](const SceneActorEntry& actor, size_t index) {
-				const auto label = !actor.displayName.empty() ? actor.displayName
-					: actor.character.empty() ? std::string("未识别角色") : FormatIdolDisplayName(actor.character.c_str());
-				return label + " · " + std::to_string(index);
-			};
 			std::string actors = "[";
 			for (size_t i = 0; i < entries.size(); ++i)
 			{
 				const auto& item = entries[i];
-				const std::string label = actorLabel(item, i + 1);
+				const std::string label = FormatSceneActorLabel(item, i + 1);
 				if (i) actors += ",";
 				actors += "{\"token\":" + JNum(static_cast<double>(item.token)) +
 					",\"label\":" + JString(label) +
+					",\"portraitKey\":" + JString(item.displayName.empty() ? item.character : item.character + ":" + item.displayName) +
 					",\"selected\":" + JBool(item.actor == core_.player.controller.targetActor) +
 					",\"modelHidden\":" + JBool(core_.actorModelHidden.contains(item.token)) + "}";
 			}
 			actors += "]";
 			const auto labelFor = [&](void* actor) -> std::string {
 				for (size_t i = 0; i < entries.size(); ++i)
-					if (entries[i].actor == actor) return actorLabel(entries[i], i + 1);
+					if (entries[i].actor == actor) return FormatSceneActorLabel(entries[i], i + 1);
 				return "尚未绑定角色";
 			};
 			return "{\"epoch\":" + JNum(static_cast<double>(core_.sceneActorRegistry.Epoch())) +
@@ -2222,6 +2220,8 @@ namespace GakuMotion::webpanel
 				",\"targetOffset\":" + JVec(settings.targetOffset) +
 				",\"vmdOffset\":" + JVec(settings.vmdOffset) +
 				",\"vmdRangeScale\":" + JNum(settings.vmdRangeScale) +
+				",\"followGroupCenter\":" + JBool(settings.followGroupCenter) +
+				",\"vmdScaleAroundActor\":" + JBool(settings.vmdScaleAroundActor) +
 				",\"followFactor\":" + JVec(settings.followFactor) +
 				",\"followRate\":" + JVec(settings.followRate) +
 				",\"followFov\":" + JNum(settings.followFov) +
@@ -2590,11 +2590,7 @@ namespace GakuMotion::webpanel
 			{
 				if (entries[i].actor == controller.currentBinding.actor)
 				{
-					const auto& item = entries[i];
-					const std::string name = !item.displayName.empty()
-						? item.displayName + " (" + item.character + ")"
-						: item.character.empty() ? "未识别角色" : FormatIdolDisplayName(item.character.c_str());
-					actorLabel = name + " · " + std::to_string(i + 1);
+					actorLabel = FormatSceneActorLabel(entries[i], i + 1);
 					break;
 				}
 			}

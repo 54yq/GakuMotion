@@ -1,3 +1,4 @@
+import { ArtworkEditor } from '../components/ArtworkEditor'
 import * as React from 'react'
 import {
   RiAddFill,
@@ -155,6 +156,10 @@ function LibraryRow({
           : 'hover:bg-card hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)] dark:hover:shadow-[0_2px_10px_rgba(0,0,0,0.28)]',
       )}
     >
+      <div role="cell" onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
+        <ArtworkEditor key={entry.id} artworkKey={`cover:${entry.id}`} label={`编辑 ${entry.title} 封面`}
+          fallback={<span aria-hidden="true" className="text-xs">♪</span>} />
+      </div>
       {/* 状态 / 序号：仅响应 Hover（click 后主动 blur，避免鼠标移开后停留在暂停按钮） */}
       <div
         role="cell"
@@ -708,6 +713,7 @@ export function LibraryPage({ fork, forkCommand }: { fork?: ForkState | null; fo
             onClick={(event) => event.stopPropagation()}
             className="sticky top-0 z-10 flex items-center gap-3 bg-background/95 px-3 py-1.5 text-[11px] font-medium text-muted-foreground backdrop-blur-sm"
           >
+            <div role="columnheader" className="w-9 shrink-0 text-center">封面</div>
             <div role="columnheader" className="w-8 shrink-0 text-center">
               #
             </div>

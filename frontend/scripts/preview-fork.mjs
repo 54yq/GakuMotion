@@ -64,7 +64,10 @@ try {
   await primary.getByText('物理：原生物理运行中', { exact: true }).waitFor()
   const primaryHeading = primary.locator('dd').last()
   if (await primaryHeading.textContent() !== `${(initialHeading + 1).toFixed(1)}°`) throw new Error('Primary card did not reflect the heading edit.')
-  if (await primary.getByRole('textbox').count() || await primary.getByRole('button').count()) throw new Error('Primary card still exposes placement editing.')
+  if (await primary.locator('input:not([type="checkbox"])').count() ||
+      await primary.locator('button:not([aria-label^="编辑 "])').count()) {
+    throw new Error('Primary card still exposes placement editing.')
+  }
   const primaryX = page.getByLabel('初始位置 X', { exact: true })
   const initialX = parseFloat(await primaryX.inputValue())
   await primaryX.press('ArrowRight')
@@ -82,12 +85,15 @@ try {
     throw new Error('Primary X did not reach the shared snapshot before pointer release.')
   }
   await page.mouse.up()
+  const roleStrip = ensemble.getByRole('group', { name: '演出角色槽位' })
+  await roleStrip.getByRole('button', { name: /^副角色 2/ }).click()
   await ensemble.getByRole('heading', { name: '副角色 2', exact: true }).waitFor()
   await ensemble.getByRole('button', { name: '添加副角色' }).click()
   await ensemble.getByRole('button', { name: '添加副角色' }).click()
   await ensemble.getByRole('heading', { name: '副角色 4', exact: true }).waitFor()
   await ensemble.getByRole('button', { name: '删除副角色 4', exact: true }).click()
   await ensemble.getByRole('heading', { name: '副角色 4', exact: true }).waitFor({ state: 'detached' })
+  await roleStrip.getByRole('button', { name: /^副角色 1/ }).click()
   await ensemble.getByRole('option', { name: '新模型 B' }).first().waitFor({ state: 'attached' })
   await ensemble.getByLabel('副角色 1 站位 朝向', { exact: true }).waitFor()
   const lateral = ensemble.getByLabel('副角色 1 站位 X', { exact: true })

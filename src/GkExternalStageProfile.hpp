@@ -52,7 +52,7 @@ namespace ExternalStageProfiles
         const char* rootName;
         const char* lightFrameProperty;
         UnityVector3 rootOffset;
-        float travelStart, travelEnd, travelZ;
+        float sourceScale;
         float visibilityRadius;
         const AmbientKey* ambientBegin;
         const AmbientKey* ambientEnd;
@@ -113,24 +113,11 @@ namespace ExternalStageProfiles
         {1352, {-1.6134977f, 5.4937742f, 2.8224329f}},
     };
 
-    struct CameraPropHold
-    {
-        int place;
-        float releaseStart, releaseEnd, exitStart, exitEnd;
-        UnityVector3 cameraOffset;
-    };
-
-    // Place01 right dummy departs from its hand offset after frame 1484 and
-    // The original video shows the prop leaving the shot after the bite.
-    inline constexpr CameraPropHold meniRightCrepeHold{
-        1, 1484.f, 1496.f, 1567.f, 1580.f, {-0.42f, -0.45f, 0.86f}
-    };
-
     inline constexpr Profile meniShukiRush{
         "Assets/MeniShukiRushStage.unity", "MeniShukiRushStage", "meni-shuki-rush-scene.bundle",
         "Meni Shuki Rush Stage", "_GakuExternalStageLightFrame",
         {-31.2703667f * 0.07795f, 0.0f, 87.4059677f * 0.07795f},
-        3024.0f, 3367.0f, -116.1299973f * 0.07795f,
+        0.07795f,
         116.0f, // 106 m from Place01 to the outer mesh, plus 9.1 m of stage travel.
         std::begin(meniAmbient), std::end(meniAmbient),
         {"StageDoor_iron_grate_l", "StageDoor_iron_grate_r"},
